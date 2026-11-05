@@ -400,6 +400,21 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             "off": str(exc),
         }.get(exc.kind, f"The cards could not be looked up: {exc}")
 
+    def card_sort(request: Request, sub: str) -> tuple[str, str]:
+        """The sort and direction: the address's, else the one remembered on the account (a pick
+        from this site is remembered: prefs.sort_choice), else the default."""
+        return prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "cards",
+            sorts=[v for v, _ in cq.ORDERS],
+            default=cq.DEFAULT_ORDER,
+            name="order",
+            dirs=[v for v, _ in cq.DIRECTIONS],
+            default_dir="auto",
+        )
+
     async def run_search(f: cq.Filters, page_no: int, sub: str) -> dict[str, Any]:
         scan = state.scan
         if scan is None:
@@ -441,6 +456,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         if not prefs.from_this_site(request):  # it asks Scryfall on the member's own allowance
             return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers=NO_STORE)
         f = cq.parse(request.query_params)
+        f.order, f.dir = card_sort(request, sub)
         view, remember = view_of(request, sub)
         try:
             page_no = max(1, min(int(request.query_params.get("page") or 1), SEARCH_PAGES))
@@ -537,6 +553,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             # the pickers' lists start loading now, so they are ready when a picker is opened
             state.scan.ensure_search_options()
         f = cq.parse(request.query_params)
+        f.order, f.dir = card_sort(request, sub)  # as last left (audit F-10)
         view, remember = view_of(request, sub)
         linked, reason = add_reason(sub)
         results = ""

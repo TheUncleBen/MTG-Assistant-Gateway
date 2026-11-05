@@ -740,14 +740,16 @@ def load_more(
     a page's script may fetch it and append the rows). ``shown`` of ``total`` gives the line under
     it ("25 of 112"); ``done`` is the line shown instead when there is no more ("That is every
     card."). ``into``: the selector of the table whose rows the next page adds to, for the shared
-    static/loadmore.js (a page with its own script leaves it out)."""
+    static/loadmore.js (a page with its own script leaves it out). The script comes with every
+    button: it keeps the pages added on the history entry and says when one could not be read
+    (MtgLoadMore), for the page's own script too."""
     if done:
         return f"<div class='loadmore'><p class='muted'>{esc(done)}</p></div>"
     line = ""
     if shown is not None and total is not None:
         line = f"<p class='muted'>{shown:,} of {total:,}</p>"
     target = f" data-into='{esc(into)}'" if into else ""
-    script = "<script src='/static/loadmore.js' defer></script>" if into else ""
+    script = "<script src='/static/loadmore.js' defer></script>"
     return (
         f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' "
         f"data-load-more{target}>{esc(text)}</a>{line}</div>{script}"

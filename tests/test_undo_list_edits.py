@@ -6,7 +6,9 @@ quantity change answers the page's script with the token too."""
 
 from __future__ import annotations
 
+import html
 import re
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -102,3 +104,23 @@ async def test_a_pin_quantity_change_answers_the_script_with_its_undo(member, st
     assert r.status_code == 200 and r.json()["ok"], r.text
     pin = next(p for p in stack.ark.account.pins[WHO] if p["id"] == 31)
     assert pin["quantity"] == 1
+
+
+async def test_undo_keeps_the_search_the_list_was_looked_at_with(member, stack: Stack) -> None:  # noqa: ANN001
+    """Audit F-9 (eccfa3d9): the notice's Undo on My lists went to the bare tab. It keeps the
+    search the list was filtered by: the Undo form posts to the tab's address with ``q``, and the
+    undone page comes back with it."""
+    r = await _post(member, "templates", action="edit", was_name="Ramp", name="Mana ramp", in_deck="1")
+    assert r.status_code == 303, r.text
+    where = r.headers["location"]
+    page = (await member.http.get(where + "&q=ramp")).text
+    m = re.search(r"<form method='post' action='([^']*)' class='inline'>", page)
+    assert m, page
+    action = html.unescape(m.group(1))
+    assert action == "/lists/templates?q=ramp", action
+    csrf = await member.csrf("/lists/templates")
+    r = await member.http.post(action, data={"csrf": csrf, "action": "undo", "token": _undo_token(where)})
+    assert r.status_code == 303, r.text
+    q = parse_qs(urlparse(r.headers["location"]).query)
+    assert q["q"] == ["ramp"] and q["ok"] == ["list_undone"], r.headers["location"]
+    assert stack.ark.account.templates[WHO][0]["name"] == "Ramp"

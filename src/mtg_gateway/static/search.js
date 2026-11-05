@@ -70,6 +70,11 @@
     function draw(url, push) {
       var mine = ++seq, results = $("#s-results");
       if (!results) { location.href = url; return; }
+      // a search asked from the open sheet goes onto the sheet's entry, decided as it is asked,
+      // not as it lands (audit F-12: one that landed after the sheet had closed pushed an entry
+      // of its own); one asked once the sheet has closed (Show) is its own entry, as a Search
+      // press is, even when asked in the task the sheet's back() lands in
+      var P0 = window.MtgSearchPanel, inPlace = !!(push && P0 && P0.isSheetOpen());
       if (inflight) { try { inflight.abort(); } catch (e) { /* an older browser */ } }
       var ctl = typeof AbortController === "function" ? new AbortController() : null;
       inflight = ctl;
@@ -91,8 +96,9 @@
           // (audit L5: a search landing while the sheet's own back() is on its way, or in its
           // popstate, goes the same way, onto the entry the back lands on; pushed, it was lost)
           var P = window.MtgSearchPanel;
-          if (push && P && (P.isSheetOpen() || P.backPending())) P.address(url);
+          if (push && P && (inPlace || P.isSheetOpen() || P.backPending())) P.address(url);
           else if (push) { history.pushState({ search: true }, "", url); if (P && P.showing) P.showing(); }
+          if (window.MtgLoadMore) window.MtgLoadMore.reset();  // a new list: no Load more pages yet
           document.dispatchEvent(new CustomEvent("decks:loaded", { bubbles: true }));  // the tiles' ⋮
         })
         .catch(function (err) {
@@ -158,7 +164,7 @@
     fetch("/search/api/decks?" + next.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (!d || !d.ok) throw new Error((d && d.error) || "failed");
+        if (!d || !d.ok) throw (d && typeof d === "object" ? d : new Error("failed"));  // the answer says why (signed out)
         list.insertAdjacentHTML("beforeend", d.html || "");
         more.setAttribute("data-page", String(d.page || page));
         var text = countText(d, shownQuery, list.children.length);
@@ -167,9 +173,12 @@
         if (note) note.hidden = !d.at_cap;
         more.hidden = !d.has_more && !d.at_cap;
         document.dispatchEvent(new CustomEvent("decks:loaded", { bubbles: true }));
+        if (window.MtgLoadMore) window.MtgLoadMore.loaded();
       })
-      .catch(function () {
-        if (note) { note.hidden = false; note.textContent = "The next decks could not be loaded. Try again."; }
+      .catch(function (err) {
+        // the one wording every Load more uses (static/loadmore.js), as a toast
+        if (window.MtgLoadMore) window.MtgLoadMore.failed(err instanceof TypeError && window.MtgFetch ? window.MtgFetch.noConnectionError("nothing more could be loaded") : err && !(err instanceof Error) ? err : null);
+        else if (note) { note.hidden = false; note.textContent = "No connection; nothing more could be loaded. Try again."; }
       })
       .then(function () { busy = false; btn.disabled = false; btn.textContent = saved; });
   });

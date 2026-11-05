@@ -669,7 +669,8 @@ def compare_box_html(deck: Deck, *, open: bool = False) -> str:
     own decks as a list to pick from."""
     did = esc(deck.id)
     body = (
-        f"<form id='cmpf' method='get' action='/decks/{did}/compare' class='stack'>"
+        f"<form id='cmpf' method='get' action='/decks/{did}/compare' class='stack' "
+        f"data-draft='compare:{did}'>"
         "<div class='field'><label for='cmp-with'>Other deck</label>"
         "<input id='cmp-with' type='text' name='with' placeholder='Link or ID' "
         "autocomplete='off'></div>"
@@ -2310,7 +2311,8 @@ def compare_page_html(
     form = (
         f"<a class='cmp-back ui-cap' href='/decks/{did}'>← {name}</a>"
         + ui.page_head("Compare decks", f"What “{name}” took out of another deck, put in and changed.")
-        + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form'>"
+        + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form' "
+        f"data-draft='compare:{did}'>"
         "<div class='row'><div class='field fld'><label for='cmp-with'>Other deck</label>"
         f"<input id='cmp-with' type='text' name='with' data-suggest='static' data-options='{options}' "
         f"value='{esc('' if is_snap else other_ref)}' placeholder='Link or ID' "

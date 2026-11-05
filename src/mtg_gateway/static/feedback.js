@@ -100,78 +100,36 @@
     closeMenus(inside);
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenus(null); });
-  // On phones (and in the app) one history entry stands for "a menu is open", so Back closes the
-  // menu instead of leaving the page. This block is the entry's only owner: `pushed` says the
-  // entry exists, `popping` that the page itself asked for it back. Opening the first menu
-  // pushes it; the last menu closing gives it back; and when that back lands late, after the
-  // person has already opened another menu, the entry is pushed again for that menu (never
-  // before it lands, so two entries or two backs can never be in flight), so Back never leaves
-  // the page while a menu is open and never goes back twice.
-  var pushed = false, popping = false, wantsEntry = false, landing = false;
-  // the shared menu (static/cardmenu.js) owns an entry of its own: while its back() is still
-  // landing, a drop-down opened meanwhile takes the entry once it has landed (the popstate,
-  // which the shared menu's own handler has seen first)
-  function sharedBackPending() {
-    var M = window.MtgMenu;
-    return !!(M && M.backPending && M.backPending());
-  }
-  function sharedBackLanding() {
-    var M = window.MtgMenu;
-    return !!(M && M.backLanding && M.backLanding());
-  }
-  // a phone, a touch screen in the rail range (to 1279.98 px, as theme.py draws the rail) or the app
-  function phoneLike() {
-    return window.matchMedia("(max-width: 599.98px)").matches ||
-      window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches ||
-      document.body.classList.contains("app");
-  }
-  function takeEntry(landed) {
-    // while the page's own back() is still landing, the popstate handler takes the entry instead
-    if (pushed || popping || !phoneLike()) return;
-    // the same for the shared menu's, unless that is the back() that just landed
-    if (!landed && sharedBackPending()) { wantsEntry = true; return; }
-    history.pushState({ menu: 1 }, "");
-    pushed = true;
-  }
-  function giveEntryBack() {
-    if (!pushed || popping) return;
-    pushed = false;
-    popping = true;
-    history.back();
-  }
+  // a menu stays open only while the focus is in it: Tab out of it (or a focus put anywhere
+  // else) closes it, as the shared menu does (static/cardmenu.js; audit F-13)
+  document.addEventListener("focusin", function (e) {
+    var open = openMenus();
+    for (var i = 0; i < open.length; i++) if (!open[i].contains(e.target)) open[i].removeAttribute("open");
+  });
+  // An open drop-down is a layer (static/layers.js): on a phone (and in the app) Back closes the
+  // menu instead of leaving the page, over the one history entry every layer shares where the
+  // browser needs one. The menus open one at a time, so one layer stands for "a menu is open".
+  var Layers = window.MtgLayers, layer = null;
   document.addEventListener("toggle", function (e) {
     var d = e.target;
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("dd")) return;
     if (d.open) {
       closeMenus(d);
       keepOnScreen(d);
-      takeEntry();
+      if (!layer && Layers) layer = Layers.open({ name: "dropdown", close: function () { layer = null; closeMenus(null); } });
     } else {
       var m = d.querySelector(":scope > .menu");
       if (m) { m.style.left = ""; m.style.right = ""; }
-      if (!openMenus().length) { wantsEntry = false; giveEntryBack(); }
+      if (!openMenus().length && layer) { var l = layer; layer = null; Layers.release(l); }
     }
   }, true);
-  window.addEventListener("popstate", function () {
-    if (popping) {
-      // the page's own back() landed; a menu opened meanwhile needs the entry again. A box
-      // opened from a menu item (static/box.js) may hear this popstate after this handler:
-      // "landing" tells it the popstate was this back(), not a Back press on the box.
-      popping = false;
-      landing = true;
-      setTimeout(function () { landing = false; }, 0);
-      if (openMenus().length) takeEntry();
-      return;
-    }
-    if (sharedBackLanding()) {
-      // the shared menu's back() landed (its handler ran first): a drop-down opened meanwhile
-      // takes the entry now
-      if (wantsEntry && openMenus().length) { wantsEntry = false; takeEntry(true); }
-      return;
-    }
-    // the person pressed Back: the entry is gone, close what is open without going back again
-    pushed = false;
-    if (openMenus().length) closeMenus(null);
+  // the window grown (or shrunk) past the width a menu is drawn at, its button hidden now: the
+  // menu closes, so its layer and history entry never outlive what the screen shows
+  window.addEventListener("resize", function () {
+    openMenus().forEach(function (d) {
+      var sm = d.querySelector(":scope > summary");
+      if (sm && !sm.getClientRects().length) d.removeAttribute("open");
+    });
   });
   // A menu panel hangs from one edge of its button: the right edge usually, the left edge for
   // the deck page's More menu (.menu.left). Near the matching edge of the window (the first
@@ -400,16 +358,16 @@
     navStart.timer = setTimeout(navEnd, 20000); // a download or a stopped load: never stuck on
   }
   function navEnd() { document.documentElement.classList.remove("navigating"); }
-  // true while a drop-down's own history.back() has not landed yet (static/cardmenu.js asks)
   window.MtgDropdowns = {
-    backPending: function () { return popping; },
-    backLanding: function () { return landing; },
-    // a menu item that opens a box (static/box.js) closes its menu first, at once: the menu's
-    // history entry goes back now, so the box knows to wait for that before taking its own
+    // true while the layers' own history.back() has not landed yet (static/layers.js)
+    backPending: function () { return !!(Layers && Layers.inFlight()); },
+    backLanding: function () { return !!(Layers && Layers.landing()); },
+    // a menu item that opens a box (static/box.js) closes its menu first, at once (the toggle
+    // event, which gives the layer back, comes a task later)
     close: function (d) {
       if (!d || !d.open) return;
       d.removeAttribute("open");
-      if (!openMenus().length) { wantsEntry = false; giveEntryBack(); }
+      if (!openMenus().length && layer) { var l = layer; layer = null; Layers.release(l); }
     }
   };
   window.MtgNavStart = navStart;  // a menu link that waits for the menu's Back (static/cardmenu.js)

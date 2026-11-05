@@ -2098,7 +2098,7 @@ BOX_CSS = """
 /* what a box hides (a note, a field) stays hidden whatever display rule the page gives it */
 .mtgbox [hidden]{display:none!important}
 html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
-.mtgbox-scrim{position:fixed;inset:0;z-index:70;background:var(--scrim);display:flex;align-items:center;
+.mtgbox-scrim{position:fixed;inset:0;z-index:95;background:var(--scrim);display:flex;align-items:center;
   justify-content:center;padding:1rem;opacity:0;transition:opacity .18s ease-out}
 .mtgbox-scrim.in{opacity:1}
 .mtgbox-scrim.out{pointer-events:none}
@@ -3191,6 +3191,9 @@ def render(
         + ("<script src='/static/draft.js' defer></script>" if signed_in else "")
         # static/topbar.js: the scroll room above a focused element follows the bar's height
         + "<script src='/static/topbar.js' defer></script>"
+        # static/layers.js: the history and the Back key every layer over a page shares (the
+        # boxes, menus, sheets, the card viewer), on every page, before any script that opens one
+        + "<script src='/static/layers.js' defer></script>"
         # static/box.js: the box (dialog) every pop-up shares, on every page, before the menus
         # and the page scripts that open one
         + "<script src='/static/box.js' defer></script>"

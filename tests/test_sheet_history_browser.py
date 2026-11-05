@@ -30,7 +30,7 @@ import pytest
 
 from .test_cardsearch_browser import _chromium, _page
 from .test_overflow_sweep_browser import _seed, server  # noqa: F401
-from .test_sheet_focus_browser import FREE, SHEETS, WHERE, _open_sheet
+from .test_sheet_focus_browser import FREE, SHEETS, _open_sheet
 from .test_suggest_browser import Server
 
 pytest.importorskip("playwright")
@@ -90,7 +90,21 @@ SIG = """() => [...document.querySelectorAll(
 # the form's drop-downs alone
 FORM = """() => [...document.querySelectorAll('.spanel select')].filter(s => s.name && !s.closest('.sortcw'))
   .map(s => s.name + '=' + s.value).sort().join('&')"""
-PLAIN = "() => !(history.state && history.state.spsheet)"
+PLAIN = "() => !(history.state && history.state.mtglayer)"
+# nothing holds the page: no inert part, no sheet role, no sheet or pick-list backdrop (FREE's
+# checks, on a page with or without a filter sheet)
+CLEAR = """() => { const s = document.getElementById('sp-filters');
+  return {inert: document.querySelectorAll('[inert]').length, role: s ? s.getAttribute('role') : null,
+    scrim: document.querySelectorAll('.sp-scrim, .pickm-scrim').length}; }"""
+# nothing open over the page: no layer of static/layers.js, and none of their markup shown
+WHAT_OPEN = """() => (window.MtgLayers.top() || {}).name + ' ' + [...document.querySelectorAll(
+  '#sp-filters.open, details.pickm[open], .mtgbox[role=dialog], .ctxmenu[role=menu], details.dd[open],'
+  + ' .cardview.open, .printpick.open, .msel-list, body.search-open, .addsheet.open, .edhplay-dialog')]
+  .filter(e => e.getClientRects().length).map(e => e.className).join(',')"""
+NO_LAYER = """() => !(window.MtgLayers && window.MtgLayers.top()) && ![...document.querySelectorAll(
+  '#sp-filters.open, details.pickm[open], .mtgbox[role=dialog], .ctxmenu[role=menu], details.dd[open],'
+  + ' .cardview.open, .printpick.open, .msel-list, body.search-open, .addsheet.open, .edhplay-dialog')]
+  .some(e => e.getClientRects().length)"""
 
 
 def _settle(page) -> None:  # noqa: ANN001
@@ -166,6 +180,19 @@ def _closed_on(page, here: str, name: str, way: str) -> None:  # noqa: ANN001
     got = page.evaluate(FREE)
     assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (name, way, got)
     page.wait_for_function(PLAIN)
+
+
+def _forward_shows_nothing(page, here: str, where: object) -> None:  # noqa: ANN001
+    """Forward after a layer closed: the page as it was, no layer, on a plain entry with the
+    same address (an entry a layer gave back is stepped back over at once, so Playwright's own
+    go_forward, which waits for a landing, is not used)."""
+    page.evaluate("() => history.forward()")
+    page.wait_for_timeout(400)
+    page.wait_for_function(PLAIN)
+    assert page.url == here, (where, page.url)
+    got = page.evaluate(CLEAR)
+    assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (where, got)
+    assert page.evaluate(NO_LAYER), (where, "Forward brought a layer back")
 
 
 @pytest.mark.parametrize("way", WAYS)
@@ -287,21 +314,19 @@ def test_back_after_a_drop_down_sent_the_form_shows_the_choice_the_list_was_draw
 
 @pytest.mark.parametrize("way", WAYS)
 @pytest.mark.parametrize("name,path,tags", SHEETS)
-def test_forward_brings_the_sheet_back_only_after_a_back_closed_it(
+def test_forward_after_the_sheet_closed_shows_nothing_new_whichever_way_it_closed(
     server: Server,  # noqa: F811
     name: str,
     path: str,
     tags: bool,
     way: str,
 ) -> None:
-    """N3 and L2: Forward after a Back closed the sheet shows it again (its entry is what Back
-    took), so the next Back closes it and the one after leaves the page. Forward after the sheet
-    closed by ×, Escape, the backdrop or the window widening lands on a plain entry of the page,
-    without the sheet (L2: the sheet's entry was given back as it was, and Forward reopened the
-    sheet), the page as it was, and Back from there is one press to the page and one more to
-    leave. Audit L3: that Forward and that Back show nothing new. The given-back entry stays as
-    a forward entry whatever its state (no API removes one; a pushState would only move the dead
-    press to Back), and the one thing it could show, the sheet again, is L2."""
+    """Audit F-1 on eccfa3d9 (N3, L2 and L3 before it): Forward after the sheet closed, by Back
+    or by ×, Escape, the backdrop or the window widening, shows nothing new: the page as it was,
+    without the sheet, on its own plain entry (the one entry that stands for "a layer is open",
+    static/layers.js, steps straight back when Forward lands on it, as there is nothing to show),
+    and Back from there is one press to leave. Before: Forward after a Back brought the sheet
+    back, and after the other ways landed on a dead duplicate of the page."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -319,25 +344,8 @@ def test_forward_brings_the_sheet_back_only_after_a_back_closed_it(
         if way == "widen":
             page.set_viewport_size({"width": 360, "height": 860})
             page.wait_for_timeout(100)
-        page.go_forward()
-        if way == "back":
-            page.locator("#sp-filters.open").wait_for()
-            assert page.evaluate(WHERE) == "sheet", (name, page.evaluate(WHERE))
-            assert not page.evaluate(PLAIN)
-            page.go_back()
-            _closed_on(page, here, name, "back again")
-        else:
-            page.wait_for_url(here)
-            page.wait_for_timeout(150)
-            assert page.locator("#sp-filters.open").count() == 0, (name, way, "Forward reopened the sheet")
-            got = page.evaluate(FREE)
-            assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (name, way, got)
-            assert page.evaluate(PLAIN), (name, way)
-            assert page.evaluate(SIG) == before, (name, way, page.evaluate(SIG), before)
-            page.go_back()
-            page.wait_for_url(here)
-            assert page.locator("#sp-filters.open").count() == 0, (name, way)
-            assert page.evaluate(SIG) == before, (name, way, page.evaluate(SIG), before)
+        _forward_shows_nothing(page, here, (name, way))
+        assert page.evaluate(SIG) == before, (name, way, page.evaluate(SIG), before)
         page.go_back()
         page.wait_for_url(f"{server.base}{PREV}")
         assert errors == []
@@ -563,4 +571,265 @@ def test_a_search_landing_while_the_sheets_back_is_on_its_way_keeps_its_address(
         page.go_back()
         page.wait_for_url(f"{server.base}{PREV}")
         assert errors == []
+        browser.close()
+
+
+# -- every layer over a page (audit F-1 and F-2 on eccfa3d9): the one pre-push check ----------------
+# Each kind of layer static/layers.js knows, on a page of the sweep server: how it opens, what
+# shows it open, the layer it sits in (closed after it), and whether Escape closes it (the top
+# search folds on Escape only while its box is empty; a drop-down menu closes on Escape; the
+# shortcuts box as every box).
+LAYERS: list[tuple[str, str, str, str, str, str]] = [
+    # name, page, how it opens, shown by, its name as a layer, the layer under it ("" when none)
+    ("filter sheet", "/cards?q=sol", "sheet", "#sp-filters.open", "sheet", ""),
+    ("pick-several list", "/cards?q=sol", "pickm", "details.pickm[open]", "pickm", "#sp-filters.open"),
+    ("pop-up box", "/decks/42", "key:?", ".mtgbox[role=dialog]:not([hidden])", "box", ""),
+    ("card menu", "/cards?q=sol", "click:.cardgrid .nm .kebab", ".ctxmenu[role=menu]", "menu", ""),
+    ("deck card menu", "/decks/42", "contextmenu:[data-card]", ".ctxmenu[role=menu]", "menu", ""),
+    ("drop-down menu", "/decks/42", "click:details.dd.more > summary", "details.dd[open]", "dropdown", ""),
+    ("card viewer", "/decks/42", "click:[data-card]", ".cardview.open", "cardview", ""),
+    ("printing picker", "/decks/42", "printpick", ".printpick.open", "printpick", ""),
+    ("themed drop-down", "/cards?q=sol", "select", ".msel-list", "select", "#sp-filters.open"),
+    ("top search", "/decks/42", "click:.topbar .searchbtn", "body.search-open", "topsearch", ""),
+    ("Add sheet", "/cards?q=sol", "addsheet", ".addsheet.open", "addsheet", ""),
+    ("EDHPlay box", "/decks/42", "edhplay", ".edhplay-dialog", "box", ""),
+]
+LAYER_WAYS = ["back", "escape"]
+
+
+def _open_layer(page, how: str) -> None:  # noqa: ANN001
+    kind, _, sel = how.partition(":")
+    if kind == "sheet":
+        _open_sheet(page)
+    elif kind == "pickm":
+        _open_sheet(page)
+        page.locator("#sp-filters details.pickm > summary").first.click()
+    elif kind == "select":
+        _open_sheet(page)
+        page.locator("#sp-filters .msel-btn").first.click()
+    elif kind == "key":
+        page.locator("body").click(position={"x": 5, "y": 300})
+        page.keyboard.press(sel)
+    elif kind == "click":
+        page.locator(sel).first.click()
+    elif kind == "contextmenu":
+        card = page.locator(sel).first
+        card.scroll_into_view_if_needed()
+        card.evaluate(
+            "c => c.dispatchEvent(new MouseEvent('contextmenu',"
+            " {bubbles: true, cancelable: true, clientX: 40, clientY: 40}))"
+        )
+    elif kind == "printpick":
+        _open_layer(page, "contextmenu:[data-card]")
+        page.locator(".ctxmenu[role=menu]").wait_for()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
+    elif kind == "edhplay":
+        page.locator(".banner .decktestbtn").click()
+        page.locator(".ctxmenu[role=menu]").wait_for()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Play on EDHPlay").click()
+    elif kind == "addsheet":
+        page.locator(".cc .pic").nth(1).click()
+        page.locator(".cardview.open").wait_for()
+        page.locator(".cardview.open button", has_text="Add to deck").click()
+    else:
+        raise AssertionError(how)
+
+
+def _shown(page, sel: str) -> bool:  # noqa: ANN001
+    return page.evaluate(
+        "(sel) => [...document.querySelectorAll(sel)]"
+        ".some(e => e === document.body || e.getClientRects().length)",
+        sel,
+    )
+
+
+def _wait_shown(page, sel: str, shown: bool, where: object, layer: str = "") -> None:  # noqa: ANN001
+    """The layer's markup shown (or gone), and, for an opening, the layer on the stack under its
+    name (a details' toggle event is queued, so its layer registers a moment after it shows)."""
+    for _ in range(50):
+        if _shown(page, sel) == shown and (
+            not shown
+            or not layer
+            or page.evaluate("() => window.MtgLayers.top() && window.MtgLayers.top().name") == layer
+        ):
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError((where, sel, "shown" if shown else "closed"))
+
+
+def _close_layer(page, way: str) -> None:  # noqa: ANN001
+    if way == "back":
+        page.go_back()
+    else:
+        page.keyboard.press("Escape")
+
+
+def _nothing_open_on(page, here: str, where: object) -> None:  # noqa: ANN001
+    for _ in range(50):
+        if page.evaluate(NO_LAYER) and page.evaluate(PLAIN):
+            break
+        page.wait_for_timeout(100)
+    assert page.evaluate(NO_LAYER), (where, "a layer is still open", page.evaluate(WHAT_OPEN))
+    assert page.evaluate(PLAIN), (
+        where,
+        "the layer's entry is still there",
+        page.evaluate("() => history.state"),
+    )
+    assert page.url == here, (where, page.url)
+    got = page.evaluate(CLEAR)
+    assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (where, got)
+
+
+def test_every_layer_leaves_the_history_as_it_was_for_back_forward_reload_show_and_resize(
+    server: Server,  # noqa: F811
+) -> None:
+    """Audit F-1 and F-2 on eccfa3d9, the pre-push check for every layer over a page (the filter
+    sheet, its pick-several list and themed drop-down, a pop-up box, the card and deck card
+    menus, a drop-down menu, the card viewer, the printing picker, the top search, the card
+    search's Add sheet and the EDHPlay box), on a phone with touch, where one history entry
+    stands for "a layer is open" (static/layers.js):
+    - the address never changes for a layer;
+    - Back closes the layer (one under it stays, and closes on the next Back), never the page;
+    - closing it by Escape leaves the history as before the layer opened, and Forward after
+      either way of closing shows nothing new;
+    - a reload with the layer open shows the page on a plain entry, with one Back to the page's
+      own entry and one more to leave;
+    - the sheet's Show with nothing changed only closes it (no entry, no request);
+    - the window widening past phone width lets the page go: whatever closed, Back leaves."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360, "light", exe)
+        for name, path, how, shown, layer, under in LAYERS:
+            here = _arrive(page, server.base, path)
+            for way in LAYER_WAYS:
+                _open_layer(page, how)
+                _wait_shown(page, shown, True, (name, way), layer)
+                assert page.url == here, (name, way, page.url)
+                _close_layer(page, way)
+                _wait_shown(page, shown, False, (name, way))
+                if under:
+                    # the layer it sat in is still open, and closes the same way
+                    page.wait_for_timeout(200)
+                    assert _shown(page, under), (name, way, "the layer under it closed too")
+                    assert page.url == here, (name, way, page.url)
+                    _close_layer(page, way)
+                    _wait_shown(page, under, False, (name, way))
+                _nothing_open_on(page, here, (name, way))
+                _forward_shows_nothing(page, here, (name, way))
+            # a reload with the layer open
+            _open_layer(page, how)
+            _wait_shown(page, shown, True, (name, "reload"), layer)
+            page.reload(wait_until="networkidle")
+            _settle(page)
+            page.wait_for_function("() => history.state === null")
+            _nothing_open_on(page, here, (name, "reload"))
+            page.go_back()
+            page.wait_for_url(here)
+            _nothing_open_on(page, here, (name, "back after the reload"))
+            page.go_back()
+            page.wait_for_url(f"{server.base}{PREV}")
+            # the window widening past phone width, with the layer open
+            page.goto(f"{server.base}{path}", wait_until="networkidle")
+            _settle(page)
+            _open_layer(page, how)
+            _wait_shown(page, shown, True, (name, "widen"), layer)
+            page.set_viewport_size({"width": 1280, "height": 860})
+            page.wait_for_timeout(300)
+            if _shown(page, shown):
+                page.keyboard.press("Escape")
+                _wait_shown(page, shown, False, (name, "widen"))
+            if under and _shown(page, under):
+                page.keyboard.press("Escape")
+                _wait_shown(page, under, False, (name, "widen"))
+            _nothing_open_on(page, here, (name, "widen"))
+            page.go_back()
+            page.wait_for_url(f"{server.base}{PREV}")
+            page.set_viewport_size({"width": 360, "height": 860})
+        # the sheet's Show with nothing changed: the sheet closes, nothing else happens
+        here = _arrive(page, server.base, "/cards?q=sol")
+        _open_sheet(page)
+        asked: list[str] = []
+        page.on("request", lambda r: asked.append(r.url) if r.resource_type in ("fetch", "xhr") else None)
+        page.locator("#sp-filters .sp-show").click()
+        _nothing_open_on(page, here, ("sheet", "show"))
+        assert asked == [], asked
+        page.go_back()
+        page.wait_for_url(f"{server.base}{PREV}")
+        assert errors == [], errors
+        browser.close()
+
+
+# the Android app (its Back key asks the page first: MainActivity.kt) and Chromium on Android
+# (a CloseWatcher takes the Back gesture): no history entry for a layer at all
+APP_UA = (
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36 MTGAssistant/1.0"
+)
+ANDROID_UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36"
+NATIVE = (
+    "window.MtgNative = { backKey: function () { return true; },"
+    " layer: function (open) { window.__layer = open; } };"
+)
+
+
+@pytest.mark.parametrize("mode", ["key", "watcher"])
+def test_the_app_and_chromium_on_android_keep_no_history_entry_for_a_layer(
+    server: Server,  # noqa: F811
+    mode: str,
+) -> None:
+    """F-1 and F-2, the two ways without an entry: in the app (an app that answers MtgNative.backKey)
+    the Back key asks the page (window.MtgBackKey closes the top layer and says so; nothing open,
+    it says no and the app goes back), and the app is told when a layer is open; in Chromium on
+    Android a CloseWatcher takes the Back gesture (its close request closes the layer). In both,
+    opening and closing every layer leaves the history exactly as it was: the same length, a
+    plain entry, the same address."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(
+            viewport={"width": 360, "height": 860},
+            has_touch=True,
+            user_agent=APP_UA if mode == "key" else ANDROID_UA,
+        )
+        if mode == "key":
+            ctx.add_init_script(NATIVE)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        for name, path, how, shown, layer, under in LAYERS:
+            here = _arrive(page, server.base, path)
+            assert page.evaluate("() => window.MtgLayers.mode") == mode, name
+            length = page.evaluate("() => history.length")
+            _open_layer(page, how)
+            _wait_shown(page, shown, True, (name, mode), layer)
+            assert page.evaluate("() => history.length") == length and page.url == here, (name, mode)
+            assert page.evaluate(PLAIN), (name, mode)
+            if mode == "key":
+                assert page.evaluate("() => window.__layer === true"), (name, "the app was not told")
+                assert page.evaluate("() => window.MtgBackKey()") is True, name
+            else:
+                page.evaluate("() => window.MtgLayers.top().watcher.requestClose()")
+            _wait_shown(page, shown, False, (name, mode))
+            if under:
+                assert _shown(page, under), (name, mode, "the layer under it closed too")
+                if mode == "key":
+                    assert page.evaluate("() => window.MtgBackKey()") is True, name
+                else:
+                    page.evaluate("() => window.MtgLayers.top().watcher.requestClose()")
+                _wait_shown(page, under, False, (name, mode))
+            page.wait_for_function(NO_LAYER)
+            assert page.evaluate("() => history.length") == length and page.url == here, (name, mode)
+            assert page.evaluate(PLAIN), (name, mode)
+            if mode == "key":
+                assert page.evaluate("() => window.__layer === false"), (name, "the app was not told")
+                assert page.evaluate("() => window.MtgBackKey()") is False, name
+            page.go_back()
+            page.wait_for_url(f"{server.base}{PREV}")
+        assert errors == [], errors
         browser.close()

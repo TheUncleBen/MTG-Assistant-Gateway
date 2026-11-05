@@ -164,7 +164,9 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
     assert "<form method='post' action='/theme'>" in hub and "<form method='post' action='/layout'>" in hub
     # Sign out: one real button, centred at the foot
     assert re.search(
-        r"<form class='ysignout' method='post' action='/logout'>.*Sign out</span></button></form></div>$",
+        r"<form class='ysignout' method='post' action='/logout'>.*Sign out</span></button>"
+        r"<p class='muted small'>Unsent drafts, scan drafts and other unsaved work kept on this device are "
+        r"cleared too.</p></form></div>$",
         hub.split("</main>")[0],
     )
     details = h.get("/account/details").text

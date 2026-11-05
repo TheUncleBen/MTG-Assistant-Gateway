@@ -5,8 +5,10 @@ stays theirs). A token is the member's own and is spent once."""
 
 from __future__ import annotations
 
+import html
 import re
 import time
+from urllib.parse import parse_qs, urlparse
 
 from mtg_gateway import prices
 
@@ -78,5 +80,47 @@ async def test_a_single_rows_stop_watching_is_undone_the_same_way(stack: Stack, 
         r = await b.http.post("/watchlist", data={"csrf": csrf, "action": "rewatch", "token": token})
         assert r.status_code == 404 and "That Undo is no longer available." in r.text
         assert svc.watched_cards(SUB) == []
+    finally:
+        await b.aclose()
+
+
+async def test_undo_goes_back_to_the_list_that_was_looked_at(stack: Stack, monkeypatch) -> None:
+    """Audit F-9 (eccfa3d9): the Stop watching notice's Undo keeps the list (and filters) the page
+    showed: its form carries the page's address, as every Watchlist form does, and the rewatch
+    comes back to it."""
+    Clock(monkeypatch)
+    svc = stack.gw.prices
+    b = await _browser(stack, link=True)
+    try:
+        await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")
+        ids = _ids(stack)
+        svc.move_to_list(SUB, [ids["Sol Ring"]], "Trade for")
+        csrf = await b.csrf("/watchlist")
+        r = await b.http.post(
+            "/watchlist",
+            data={
+                "csrf": csrf,
+                "action": "bulk",
+                "do": "remove",
+                "watch_id": [ids["Sol Ring"]],
+                "back": "/watchlist?list=Trade+for",
+            },
+        )
+        assert r.status_code == 303, r.text
+        where = r.headers["location"]
+        assert parse_qs(urlparse(where).query)["list"] == ["Trade for"], where
+        page = (await b.http.get(where)).text
+        form = re.search(r"<form method='post' action='/watchlist' class='inline'>.*?</form>", page, re.S)
+        assert form, page
+        back = html.unescape(re.search(r"name='back' value='([^']*)'", form.group(0)).group(1))
+        assert parse_qs(urlparse(back).query)["list"] == ["Trade for"], back
+        token = re.search(r"name='token' value='([^']*)'", form.group(0)).group(1)
+        r = await b.http.post(
+            "/watchlist", data={"csrf": csrf, "action": "rewatch", "token": token, "back": back}
+        )
+        assert r.status_code == 303, r.text
+        q = parse_qs(urlparse(r.headers["location"]).query)
+        assert q["list"] == ["Trade for"] and q["ok"] == ["rewatched"], r.headers["location"]
+        assert [w["name"] for w in svc.watched_cards(SUB)] == ["Sol Ring"]
     finally:
         await b.aclose()

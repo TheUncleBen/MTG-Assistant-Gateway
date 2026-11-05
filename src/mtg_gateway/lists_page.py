@@ -891,7 +891,7 @@ def defaults_clear_box(csrf: str, st: dict[str, Any]) -> str:
         f"Clear the default categories of “{name}”?",
         body,
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep them", cancel=True),
             ui.box_button(f"Clear “{name}”", kind="danger-solid", form="def-clear-f", icon_name="x"),
         ],
         open=bool(st),
@@ -1124,7 +1124,7 @@ def pin_row(p: dict[str, Any], csrf: str) -> str:
         f"{' disabled' if q >= account_lists.PIN_MAX_COPIES else ''}>{icon('plus')}</button></form>"
     )
     note = (
-        f"<form method='post' action='{PAGE}/pins' class='lp-note'>{csrf_in}"
+        f"<form method='post' action='{PAGE}/pins' class='lp-note' data-draft='pin-note:{pid}'>{csrf_in}"
         f"<input type='hidden' name='action' value='edit'><input type='hidden' name='pin_id' value='{pid}'>"
         f"<textarea name='notes' rows='1' maxlength='{account_lists.PIN_NOTES_MAX}' placeholder='Add a note'"
         f" aria-label='Note on {esc(name)}' data-count='pn-{pid}-c' data-saves>{esc(notes)}</textarea>"
@@ -1210,7 +1210,7 @@ def pin_remove_box(csrf: str, st: dict[str, Any]) -> str:
         f"Remove the pin on “{name}”?",
         body,
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Remove pin", kind="danger-solid", form="pin-rm-f", icon_name="x"),
         ],
         open=bool(st),
@@ -1806,8 +1806,9 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         token = (q.get("undo") or "")[:64]
         button = ""
         if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", token) and token in _UNDOS and _UNDOS[token][0] == sub:
+            # the form posts to the page as looked at (its filter), so Undo comes back to it (F-9)
             button = (
-                f" <form method='post' action='{PAGE}/{esc(_UNDOS[token][1])}' class='inline'>"
+                f" <form method='post' action='{esc(tab_href(_UNDOS[token][1], q=q_of(q)))}' class='inline'>"
                 f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
                 "<input type='hidden' name='action' value='undo'>"
                 f"<input type='hidden' name='token' value='{esc(token)}'>"

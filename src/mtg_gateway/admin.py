@@ -1701,7 +1701,11 @@ def _user_panel(
     if u["archidekt_username"]:
         buttons += "<button name='action' value='unlink' class='btn-plain'>Unlink Archidekt</button>"
     buttons += ui.button_link("Activity", f"/admin/activity?sub={quote(sub, safe='')}")
-    actions = f"<form method='post' action='{action}' class='ui-actions'>{csrf_in}{buttons}</form>"
+    # the name and "this is you" for the scripts' confirm of Revoke and Unlink (static/admin.js)
+    actions = (
+        f"<form method='post' action='{action}' class='ui-actions' data-name='{html.escape(name)}'"
+        f"{' data-you' if you else ''}>{csrf_in}{buttons}</form>"
+    )
     boxes = ""
     delete = ""
     if not you:
@@ -1716,7 +1720,7 @@ def _user_panel(
             "account again. Their tokens and sessions are revoked now. The account at the identity provider "
             "is not changed.</p></form>",
             actions=[
-                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Keep it", cancel=True),
                 ui.box_button("Disable account", kind="danger-solid", form="disf"),
             ],
             open=box == "disable" and not u["disabled"],
@@ -1734,7 +1738,7 @@ def _user_panel(
             "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
             "Delete everything the gateway keeps about this person</label></form>",
             actions=[
-                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Keep it", cancel=True),
                 ui.box_button("Delete data", kind="danger-solid", form="delf", attrs="data-needs-tick"),
             ],
             open=box == "delete",
@@ -2168,7 +2172,7 @@ def _models_body(
                 f"{html.escape(adder_name)}'s solo tests stop using it. "
                 "This can't be undone.</p></form>",
                 actions=[
-                    ui.box_button("Cancel", cancel=True),
+                    ui.box_button("Keep it", cancel=True),
                     ui.box_button(
                         "Remove model",
                         kind="danger-solid",

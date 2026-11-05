@@ -464,10 +464,12 @@ def test_save_anyway_sends_the_backup_box(server: Server) -> None:
         for ticked in (False, True):
             backup.set_checked(ticked)
             page.locator(".editbar button.review").click()
-            bar = page.locator(".confirmbar")
+            # the question is the pop-up box (audit F-7), Keep editing focused, Save anyway red and last
+            bar = page.locator(".mtgbox-scrim .mtgbox[role=dialog]")
             bar.wait_for(timeout=3000)
+            assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep editing"
             bar.locator("button", has_text="Save anyway").click()
-            page.wait_for_function("() => !document.querySelector('.confirmbar')", timeout=3000)
+            page.wait_for_function("() => !document.querySelector('.mtgbox-scrim')", timeout=3000)
             assert sent[-1] == {"version": 3, "archidekt_backup": ticked}, sent
         assert errors == []
         browser.close()

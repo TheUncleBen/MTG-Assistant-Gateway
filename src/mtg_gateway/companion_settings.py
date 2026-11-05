@@ -473,7 +473,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + nav
             + f"<div class='ds'><a class='back ui-cap' href='/decks/{did}'>← {_esc(title)}</a>"
             + ui.page_head("Deck settings", f"“{title}”" + (" · package" if is_package else ""))
-            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main'>"
+            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main' "
+            f"data-draft='settings:{did}'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + "".join(
                 f"<input type='hidden' name='was_{k}' value='{_esc(was)}'>" for k, was in baseline.items()

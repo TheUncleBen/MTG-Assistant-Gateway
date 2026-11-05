@@ -6,7 +6,9 @@ member's is refused by Archidekt and the notice says how many went."""
 
 from __future__ import annotations
 
+import html
 import re
+from urllib.parse import parse_qs, urlparse
 
 from .conftest import COLLECTION, Stack, stack_with
 from .test_collection_page import NAV, _seed, linked
@@ -159,5 +161,45 @@ async def test_a_bulk_change_has_a_limit_and_names_the_rows_that_did_not_go(stac
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert "Finish set on 1 card. 1 could not be changed:" in page
         assert rows[ids[0]]["modifier"] == "Foil"
+    finally:
+        await b.aclose()
+
+
+async def test_undo_from_the_notice_keeps_the_view_and_filters(stack: Stack) -> None:
+    """Audit F-9 (eccfa3d9): the bulk notice's Undo went to the bare Binder. It goes back to the list
+    as it was looked at (view, sort, filters), as the removal's own redirect does: the Undo form
+    carries the page's address without the notice's own parameters."""
+    b = await linked(stack)
+    try:
+        _seed(stack, 3)
+        rows = _rows(stack)
+        ids = list(rows)
+        csrf = await b.csrf("/collection")
+        sel = [f"{rid} {rows[rid]['card']['oracleCard']['name']}" for rid in ids[:1]]
+        here = "/collection?view=list&sort=edition&dir=asc"
+        r = await b.http.post(
+            "/collection", data={"csrf": csrf, "action": "bulk", "do": "remove", "sel": sel, "next": here}
+        )
+        assert r.status_code == 303, r.text
+        where = r.headers["location"]
+        q = parse_qs(urlparse(where).query)
+        assert (q["view"], q["sort"], q["dir"], q["ok"]) == (["list"], ["edition"], ["asc"], ["bulk"]), where
+        page = (await b.http.get(where, headers=NAV)).text
+        form = re.search(
+            r"<form(?:(?!</form>).)*name='action' value='bulk_restore'(?:(?!</form>).)*</form>", page, re.S
+        )
+        assert form, page
+        back = html.unescape(re.search(r"name='next' value='([^']*)'", form.group(0)).group(1))
+        assert parse_qs(urlparse(back).query) == {"view": ["list"], "sort": ["edition"], "dir": ["asc"]}, back
+        token = re.search(r"name='token' value='([A-Za-z0-9_-]+)'", form.group(0)).group(1)
+        r = await b.http.post(
+            "/collection", data={"csrf": csrf, "action": "bulk_restore", "token": token, "next": back}
+        )
+        assert r.status_code == 303, r.text
+        q = parse_qs(urlparse(r.headers["location"]).query)
+        assert (q["view"], q["sort"], q["dir"], q["ok"]) == (["list"], ["edition"], ["asc"], ["bulk"]), (
+            r.headers
+        )
+        assert len(_rows(stack)) == 3
     finally:
         await b.aclose()

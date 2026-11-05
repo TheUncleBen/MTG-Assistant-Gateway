@@ -5,7 +5,8 @@
    page on a wide screen, a sheet from the bottom on a phone; a header with the title and a 44 px
    × close; a calm open and close (none when the system asks for reduced motion); long content
    scrolls inside; Escape, the scrim, the × and any [data-cancel] close it; focus goes into the box
-   and back to the opener; on a phone the Back button closes it instead of leaving the page.
+   and back to the opener; on a phone the Back button closes it instead of leaving the page (the
+   box is a layer of static/layers.js, which owns the history for every layer).
 
    Two ways to a box:
    - MtgBox.open({title, body, actions, wide, label, returnFocus, onClose}) builds one from nodes
@@ -46,29 +47,11 @@
   }
   var MOTION = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
   function reduced() { return !!(MOTION && MOTION.matches); }
-  function phone() { return window.matchMedia && window.matchMedia("(max-width: 599.98px)").matches; }
-  // Where the phone's Back should close the box instead of leaving the page (as static/cardmenu.js
-  // asks for its menus): a phone, a touch screen in the rail range and the Android app
-  function backCloses() {
-    return phone() ||
-      (window.matchMedia && window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches) ||
-      document.body.classList.contains("app");
-  }
-  // The menu that opened this box may have gone back over its own history entry a moment ago
-  // (static/cardmenu.js, or the deck page's own card menu in static/deck.js); that popstate is not
-  // a Back press on the box
-  function menuBackPending() {
-    var M = window.MtgMenu, D = window.MtgDeckCardMenu, Dd = window.MtgDropdowns;
-    return !!((M && M.backPending && M.backPending()) || (D && D.backPending && D.backPending()) ||
-      (Dd && ((Dd.backPending && Dd.backPending()) || (Dd.backLanding && Dd.backLanding()))));
-  }
-  function push() {
-    try { history.pushState({ mtgbox: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
-  }
+  var Layers = window.MtgLayers;  // the history and the Back key for every layer (static/layers.js)
   var FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex='0']";
   var FIRST = "input:not([type=hidden]):not([type=radio]):not([type=checkbox]):not([disabled]), textarea:not([disabled]), select:not([disabled]), input[type=radio]:checked, .acts button:not([disabled]), .acts a[href]";
 
-  var box = null, leaving = null, pushed = false, ignorePop = false;
+  var box = null, leaving = null;
 
   // -- closing: the scrim fades and the panel slides out, then everything is put back ------------
   function finish(b) {
@@ -94,19 +77,14 @@
     if (b.back && b.back.isConnected && b.back.focus) b.back.focus({ preventScroll: true });
   }
   // a box that must stay (a delete job running inside it) refuses Esc and the scrim; the box's
-  // own code closes it with force once the outcome is shown. ``handOn``: the next box takes over
-  // this one's history entry (see mount), so no going back here.
-  function closeBox(force, fromHistory, handOn) {
+  // own code closes it with force once the outcome is shown. ``fromBack``: the Back key took the
+  // box's layer already (static/layers.js), so there is nothing to give back.
+  function closeBox(force, fromBack) {
     if (!box || (box.locked && !force)) return;
     var b = box;
     box = null;
-    if (pushed && !fromHistory && !handOn) {
-      // going back over the box's entry fires popstate later; that one is ours, not a Back press
-      pushed = false;
-      ignorePop = true;
-      try { history.back(); } catch (e) { ignorePop = false; }
-    }
-    if (!handOn) pushed = false;
+    if (b.layer && !fromBack && Layers) Layers.release(b.layer);
+    b.layer = null;
     b.scrim.classList.remove("in");
     b.scrim.classList.add("out");
     if (reduced() || !b.scrim.isConnected) { finish(b); return; }
@@ -117,11 +95,9 @@
 
   // -- opening: the scrim, the keys, focus --------------------------------------------------------
   function mount(b, o) {
-    // A box over an open box (a confirm over a delete box): the open one's history entry passes
-    // to the new one. Going back over it and pushing again in the same breath would leave the
-    // browser one entry behind, and the new box's close would then leave the page.
-    var handOn = !!(box && pushed);
-    closeBox(true, false, handOn);
+    // a box over an open box (a confirm over a delete box): the open one closes first; the
+    // layers' one history entry passes from it to the new one (static/layers.js)
+    closeBox(true, false);
     if (leaving) finish(leaving);
     if (window.MtgMenu && window.MtgMenu.close) window.MtgMenu.close(false);
     var sc = b.scrim, panel = b.panel;
@@ -145,11 +121,9 @@
     if (reduced()) sc.classList.add("in");
     else requestAnimationFrame(function () { sc.classList.add("in"); });
     b.focusFirst();
-    if (handOn) pushed = true;
-    else if (!o.fromAddress && backCloses()) {
-      // the menu's own Back still settling: the box's entry goes on once it has landed
-      if (menuBackPending()) b.wantsPush = true; else push();
-    }
+    // the phone's Back closes the box (static/layers.js); a box the address opened is the page's
+    // own state and takes no history entry of its own
+    if (Layers) b.layer = Layers.open({ name: "box", entry: !o.fromAddress, close: function () { if (box === b) closeBox(true, true); } });
     return b;
   }
   function methods(b, parts) {
@@ -296,14 +270,6 @@
   }
 
   document.addEventListener("keydown", function (e) { if (box && e.key === "Escape" && !box.panel.contains(e.target)) closeBox(); });
-  window.addEventListener("popstate", function () {
-    if (ignorePop) { ignorePop = false; return; }
-    if (menuBackPending()) {
-      if (box && box.wantsPush) { box.wantsPush = false; push(); }
-      return;
-    }
-    if (box && pushed) { pushed = false; closeBox(true, true); }
-  });
   // the way in without a script of the page's own: a link or button with data-box-open
   document.addEventListener("click", function (e) {
     var opener = e.target && e.target.closest ? e.target.closest("[data-box-open]") : null;

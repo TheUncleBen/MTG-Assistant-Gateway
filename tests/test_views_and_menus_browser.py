@@ -211,9 +211,44 @@ def test_short_menu_items_keep_one_line(server: Server, width: int, touch: bool)
                 # closed, and on a phone the menu's history entry given back (feedback.js)
                 page.wait_for_function(
                     "() => !document.querySelector('details.dd[open]')"
-                    " && !(history.state && history.state.menu)"
+                    " && !(history.state && history.state.mtglayer)"
                 )
         assert problems == [], "\n".join(problems)
+        assert errors == []
+    finally:
+        browser.close()
+        p.stop()
+
+
+def test_tab_out_of_a_drop_down_menu_closes_it(server: Server) -> None:
+    """Audit F-13 (eccfa3d9): a drop-down menu (details.dd, static/feedback.js) stayed open when
+    Tab left it. It closes the moment the focus leaves it, forwards or backwards."""
+    p, browser, page, errors = _start(server, 1280)
+    try:
+        page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
+        summaries = page.locator("details.dd > summary")
+        opened = 0
+        for i in range(summaries.count()):
+            s = summaries.nth(i)
+            if not s.is_visible():
+                continue
+            s.click()
+            page.wait_for_selector("details.dd[open]")
+            for _ in range(30):
+                page.keyboard.press("Tab")
+                inside = page.evaluate(
+                    "() => { const d = document.querySelector('details.dd[open]');"
+                    " return !!(d && d.contains(document.activeElement)); }"
+                )
+                if not inside:
+                    break
+            assert page.locator("details.dd[open]").count() == 0, (i, "Tab left the menu open")
+            s.click()
+            page.wait_for_selector("details.dd[open]")
+            page.keyboard.press("Shift+Tab")
+            assert page.locator("details.dd[open]").count() == 0, (i, "Shift+Tab left the menu open")
+            opened += 1
+        assert opened >= 1
         assert errors == []
     finally:
         browser.close()

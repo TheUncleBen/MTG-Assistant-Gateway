@@ -79,7 +79,7 @@ def test_a_page_change_an_item_starts_waits_for_the_menus_back(server: Server) -
         page.goto(f"{server.base}/admin/models", wait_until="networkidle")
         page.locator(".amo .ui-table .tr.model").filter(has_text="Opt").click(button="right")
         assert page.locator(".ctxmenu").is_visible()
-        assert page.evaluate("() => history.state && history.state.mtgmenu") == 1
+        assert page.evaluate("() => history.state && history.state.mtglayer") == 1
         seen = page.evaluate(
             """() => new Promise((done) => {
               MtgMenu.close(false);

@@ -567,7 +567,7 @@ def paste_test_html(csrf: str) -> str:
         return ""
     return (
         "<details class='fold rp-paste'><summary class='fold-btn'>Test a pasted list</summary>"
-        "<form method='post' action='/reports/test' class='rp-paste-f'>"
+        "<form method='post' action='/reports/test' class='rp-paste-f' data-draft='test-list'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<p class='ui-sub'>{PASTE_TEST_LINE}</p>"
         "<textarea name='decklist' rows='6' aria-label='The decklist to test' "

@@ -429,6 +429,7 @@
         if (list) list.removeAttribute("aria-busy");
         if (!d.ok) throw d;
         if (list) { list.innerHTML = d.html; list.hidden = !d.total; }
+        if (window.MtgLoadMore) window.MtgLoadMore.reset();  // a new list: no Load more pages yet
         var c = $("#col-count");
         if (c) c.textContent = d.count_text;
         var more = $(".loadmore");
@@ -554,10 +555,12 @@
       say(d.shown + " of " + d.total + " shown.");
       var focus = first ? $(".thumbbtn, .kebab", first) : null;
       if (focus) focus.focus({ preventScroll: true });
+      if (window.MtgLoadMore) window.MtgLoadMore.loaded();
     }).catch(function (d) {
       a.removeAttribute("aria-busy"); a.removeAttribute("aria-disabled");
-      var pr = Fetch.problem(d, "more rows could not be read");
-      strip(pr.signedOut || pr.noConnection ? pr.text : NOT_ANSWERING, "error", pr.actions);
+      // the one wording every Load more uses (static/loadmore.js), in the page's strip
+      var pr = window.MtgLoadMore ? window.MtgLoadMore.failed(d, { inline: true }) : Fetch.problem(d, "nothing more could be loaded");
+      strip(pr.text, "error", pr.actions);
     });
   });
 

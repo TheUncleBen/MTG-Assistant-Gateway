@@ -450,11 +450,15 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         assert body["changes"] == [
             {"action": "set_category", "card_name": "Sol Ring", "category": "Commander", "zone": "side"}
         ]
-        # filed under Commander, Sol Ring becomes a second commander: a commander change asks first
-        dialog = page.locator(".deck-toast[role='alertdialog']")
+        # filed under Commander, Sol Ring becomes a second commander: a commander change asks first,
+        # in the pop-up box (audit F-7), Keep it focused and the red Save anyway last
+        dialog = page.locator(".mtgbox-scrim .mtgbox[role=dialog]")
         dialog.wait_for(timeout=5000)
-        assert "This changes the deck's commander. Save anyway?" in dialog.inner_text()
-        dialog.locator("button", has_text="Save anyway").click()
+        assert "This changes the deck's commander." in dialog.inner_text()
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
+        last = dialog.locator(".acts button").last
+        assert last.inner_text().strip() == "Save anyway" and "danger" in (last.get_attribute("class") or "")
+        last.click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         page.wait_for_timeout(200)
         assert page.url == url and page.locator(".movebar").count() == 0  # no staging bar
@@ -813,15 +817,16 @@ def test_undo_of_a_remove_restores_every_category_and_a_note_is_warned_about(ser
         sent = _edits(page)
         card = page.locator(".deckview .row[data-card='Cultivate']").first
         assert json.loads(card.get_attribute("data-allcats")) == ["Ramp", "Value"]
-        dialog = page.locator(".deck-toast[role='alertdialog']")
+        dialog = page.locator(".mtgbox-scrim .mtgbox[role=dialog]")
         menu = page.locator(".ctxmenu[role=menu]")
-        # Cancel: nothing is sent and the card stays
+        # Keep it (focused, in the pop-up box: audit F-7): nothing is sent and the card stays
         card.click(button="right")
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Remove from deck").click()
         dialog.wait_for(timeout=5000)
         assert "has a card note" in dialog.inner_text() and "cannot write notes" in dialog.inner_text()
-        dialog.locator("button", has_text="Cancel").click()
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
+        dialog.locator("button", has_text="Keep it").click()
         page.wait_for_timeout(400)
         assert sent == [] and server.quantity("Cultivate") == 1
         page.keyboard.press("Escape")

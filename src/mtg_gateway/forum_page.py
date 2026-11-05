@@ -579,7 +579,8 @@ def enter_box_html(
     v = values or {}
     summary = v.get("summary", "")
     body = (
-        f"<form id='fm-enter-f' method='post' action='{thread_href(tid)}/contest' class='stack' novalidate>"
+        f"<form id='fm-enter-f' method='post' action='{thread_href(tid)}/contest' class='stack' novalidate "
+        f"data-draft='contest:{esc(tid)}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<input type='hidden' name='entry_action' value='enter'>"
         "<div class='field'><label for='fm-ed'>Deck</label><span class='sel'>"
@@ -646,7 +647,7 @@ def withdraw_box_html(
         f"Withdraw “{name}” from this contest?",
         body,
         actions=[
-            ui.box_button("Keep my entry", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Withdraw", kind="danger-solid", form="fm-withdraw-f", icon_name="x"),
         ],
         open=open,

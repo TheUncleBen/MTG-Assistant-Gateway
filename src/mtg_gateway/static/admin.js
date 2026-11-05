@@ -43,12 +43,48 @@
     var items = [];
     if (tr.hasAttribute("data-disabled")) items.push(item("Enable", "check", function () { post(act, { action: "enable" }); }));
     else if (!you) items.push(link("Disable…", "x", tr.getAttribute("data-box-disable"), { danger: true }));
-    items.push(item("Revoke tokens and sessions", "lock", function () { post(act, { action: "revoke" }); }));
-    if (tr.hasAttribute("data-linked")) items.push(item("Unlink Archidekt", "link", function () { post(act, { action: "unlink" }); }));
+    items.push(item("Revoke tokens and sessions…", "lock", function () { ask("revoke", name, you, act); }, { danger: true }));
+    if (tr.hasAttribute("data-linked")) items.push(item("Unlink Archidekt…", "link", function () { ask("unlink", name, you, act); }, { danger: true }));
     items.push(link("Activity", "activity", tr.getAttribute("data-activity")));
     if (!you) { items.push(sep()); items.push(link("Delete data…", "trash", tr.getAttribute("data-box-delete"), { danger: true })); }
     Menu.open({ head: name, label: "Member: " + name, items: items, focusBack: $(".kebab", tr) || tr }, x, y);
   }
+  // Revoke tokens and sessions and Unlink Archidekt ask first, in the pop-up box every
+  // destructive action uses (audit P-20: the menu acted at once, and signed the admin out on
+  // their own row): the safe choice first and focused, the red button last; on the admin's own
+  // row the box says what happens to them
+  function ask(action, name, you, act) {
+    var Box = window.MtgBox;
+    if (!Box) { post(act, { action: action }); return; }
+    var words = action === "revoke" ? {
+      title: you ? "Revoke your own tokens and sessions?" : "Revoke the tokens and sessions of “" + name + "”?",
+      text: you
+        ? "You are signed out of this browser too, and your connected assistants lose access until you connect them again."
+        : "Every browser and app where “" + name + "” is signed in is signed out, and their connected assistants lose access until they connect them again. Their account stays.",
+      ok: "Revoke tokens and sessions", cancel: "Keep them"
+    } : {
+      title: you ? "Unlink your own Archidekt account?" : "Unlink the Archidekt account of “" + name + "”?",
+      text: you
+        ? "The gateway deletes its copy of your Archidekt session. Your decks can't be read until you link it again under Account."
+        : "The gateway deletes its copy of the Archidekt session of “" + name + "”. Their decks can't be read until they link it again.",
+      ok: "Unlink Archidekt", cancel: "Keep it"
+    };
+    Menu.whenClosed(function () {
+      Box.confirm({
+        title: words.title, text: words.text, ok: words.ok, cancel: words.cancel, danger: true, focus: "cancel",
+        onOk: function () { post(act, { action: action }); return true; }
+      });
+    });
+  }
+  // the panel's own Revoke and Unlink buttons ask the same way (without scripts they post at once)
+  document.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest ? e.target.closest(".au form.ui-actions button[name=action]") : null;
+    if (!b || e.defaultPrevented || (b.value !== "revoke" && b.value !== "unlink")) return;
+    var f = b.form;
+    if (!f || !f.hasAttribute("data-name")) return;
+    e.preventDefault();
+    ask(b.value, f.getAttribute("data-name") || "this member", f.hasAttribute("data-you"), f.getAttribute("action"));
+  });
   // the whole row opens the member's panel (the name is the link without scripts)
   document.addEventListener("click", function (e) {
     var tr = userRowOf(e.target);

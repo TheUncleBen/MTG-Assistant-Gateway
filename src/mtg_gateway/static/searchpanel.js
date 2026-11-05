@@ -23,6 +23,7 @@
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
   var panel = $(".spanel");
   if (!panel) return;
+  var Layers = window.MtgLayers;  // the history and the Back key for every layer (static/layers.js)
   var form = panel.tagName === "FORM" ? panel : panel.closest("form") || $("form", panel);
   var sheetQuery = window.matchMedia ? window.matchMedia("(max-width:599.98px),(pointer:coarse)") : null;
   function el(tag, cls, text) {
@@ -33,20 +34,21 @@
   }
 
   // -- pick-several drop-downs --------------------------------------------------------------------
-  var openPick = null, scrim = null;
+  var openPick = null, scrim = null, pickLayer = null;
   function pickLabel(d) {
     var v = $(".v", d);
     if (!v) return;
     var picked = $$("input:checked", d).map(function (i) { return (i.parentNode.textContent || "").trim(); });
     v.textContent = picked.length ? picked.join(", ") : d.getAttribute("data-none") || "";
   }
-  function closePick(focusBack) {
+  function closePick(focusBack, fromBack) {
     if (!openPick) return;
-    var d = openPick;
-    openPick = null;
+    var d = openPick, layer = pickLayer;
+    openPick = null; pickLayer = null;
     d.open = false;
     d.classList.remove("sheet");
     if (scrim) { scrim.remove(); scrim = null; }
+    if (layer && !fromBack && Layers) Layers.release(layer);
     if (focusBack) { var b = $("summary", d); if (b) b.focus(); }
   }
   $$("details.pickm", panel).forEach(function (d) {
@@ -55,6 +57,8 @@
       if (!d.open) { if (openPick === d) closePick(false); return; }
       if (openPick && openPick !== d) closePick(false);
       openPick = d;
+      // the open list is a layer (static/layers.js): on a phone Back closes it, not the sheet or the page
+      if (Layers) pickLayer = Layers.open({ name: "pickm", close: function () { if (openPick === d) closePick(true, true); } });
       if (sheetQuery && sheetQuery.matches) {
         d.classList.add("sheet");
         scrim = el("div", "pickm-scrim");
@@ -89,15 +93,15 @@
   }
   function sheetOpen() { return !!(sheet && sheet.classList.contains("open")); }
   var sheetScrim = null, madeInert = [];
-  // the open sheet holds one history entry, as the boxes (static/box.js) and menus do, so the
-  // phone's Back key closes it instead of leaving the page (audit D4); closing it any other way
-  // gives the entry back, so the next Back leaves the page as it would have. Whichever way it
-  // closes, the history is as it was before the sheet opened, with the page's current address
-  // (audit N1): a filter set in the sheet changes the address in place through address() below,
-  // which keeps the entry's state and remembers the address (sheetHref) for the entry under the
-  // sheet's, which gets it when the sheet's entry goes
-  var pushed = false, ignorePop = false, landing = false, sheetHref = null, carry = null, afterPop = null;
-  function ownEntry() { return !!(history.state && history.state.spsheet); }
+  // the open sheet is a layer (static/layers.js), as the boxes and menus are: the phone's Back
+  // key closes it instead of leaving the page (audit D4). Where the browser needs a history
+  // entry for that, the layers hold one, and closing the sheet any other way gives it back, so
+  // the next Back leaves the page as it would have (audit F-1: no entry is left behind, Forward
+  // or Back). Whichever way it closes, the history is as it was before the sheet opened, with the
+  // page's current address (audit N1): a filter set in the sheet changes the address in place
+  // through address() below, which keeps the entry's state and remembers the address (sheetHref)
+  // for the entry under the layers', which gets it when that entry goes
+  var sheetLayer = null, sheetHref = null, carry = null;
   function here() { return location.pathname + location.search; }
   // what the page shows: the address its list, boxes and badge were drawn for, and the form as
   // drawn (every field, as the browser would send it). Both follow a filter applied in place
@@ -110,12 +114,13 @@
   // While the sheet's own back() is on its way (a Show pressed as a list was still loading),
   // the entry it lands on gets the address
   function address(url) {
-    if (ignorePop) { carry = url; return; }
+    if (Layers && Layers.inFlight() && !landed) { carry = url; return; }
     try { history.replaceState(history.state, "", url); } catch (err) { /* a sandboxed frame */ }
     if (sheetOpen()) sheetHref = location.href;
     shownAddr = here();
     shownForm = formSerial();
   }
+  var landed = false;  // the layers' back() has landed: an address set now goes on the entry it landed on
   // a page script's own entry (static/search.js, decks.js push one): the page shows that address
   function showing() { shownAddr = here(); shownForm = formSerial(); }
   // Back or Forward landed on an entry of this page with another address than the page shows:
@@ -155,32 +160,23 @@
     badge();
     shownForm = formSerial();
   }
-  function setState(state) {
-    try { history.replaceState(state, "", location.href); } catch (err) { /* the entry stays */ }
-  }
-  // the sheet's own back() is on its way, or its popstate is being handled: a page script's
+  // the layers' own back() is on its way, or its popstate is being handled: a page script's
   // popstate handler (static/search.js) is not seeing a Back press
-  function backPending() { return ignorePop || landing; }
-  // give the sheet's entry back: the entry is made a plain one first, so Forward onto it later
-  // shows the page, not the sheet (audit L2); its popstate is ours (ignorePop), puts the sheet's
-  // address on the entry it lands on, and then runs ``then`` (a form sent, a search drawn, a
-  // link followed: audit H1, L1), so what follows is over the page's own entry
-  function giveBack(then) {
-    carry = sheetHref;
-    afterPop = then || null;
-    ignorePop = true;
-    setState(null);
-    try { history.back(); } catch (err) {
-      ignorePop = false; carry = null; afterPop = null;
+  function backPending() { return !!(Layers && Layers.backPending()); }
+  // give the sheet's layer back (its history entry where one is held): once that has landed,
+  // the sheet's address goes on the entry it landed on, with any address a page script set
+  // meanwhile (carry), and then ``then`` runs (a form sent, a search drawn, a link followed:
+  // audit H1, L1, L5), so what follows is over the page's own entry
+  function giveBack(layer, then) {
+    var href = sheetHref;
+    var go = function () {
+      landed = true;
+      if (href) address(href);
+      if (carry) { address(carry); carry = null; }
+      landed = false;
       if (then) then();
-    }
-  }
-  // another script's own back() still on its way (a menu's, the drop-downs'): its popstate is
-  // not a Back press on the sheet
-  function otherBackPending() {
-    var M = window.MtgMenu, D = window.MtgDeckCardMenu, Dd = window.MtgDropdowns;
-    return !!((M && M.backPending && M.backPending()) || (D && D.backPending && D.backPending()) ||
-      (Dd && Dd.backPending && Dd.backPending()));
+    };
+    if (layer && Layers) Layers.release(layer, go); else go();
   }
   // the page behind the open sheet is inert (a Tab, a screen reader and a tap reach only the
   // sheet and its backdrop): everything beside the sheet and its ancestors, put back on close
@@ -229,15 +225,15 @@
     sheet.setAttribute("role", "dialog");
     sheet.setAttribute("aria-modal", "true");
     pageInert(true);
-    // ``pushed`` already: the page came onto the sheet's own entry (a reload, Forward)
-    if (!pushed) { try { history.pushState({ spsheet: 1 }, ""); pushed = true; } catch (err) { pushed = false; } }
+    if (!sheetLayer && Layers) sheetLayer = Layers.open({ name: "sheet", close: function () { closeSheet(true); } });
     sheetHref = location.href;
     var c = $(".sp-sheet-head .close", sheet);
     if (c) c.focus();
   }
-  // ``fromHistory``: a Back press took the sheet's entry already; ``then`` runs once the sheet's
-  // entry has been given back (at once where there is none to give)
-  function closeSheet(fromHistory, then) {
+  // ``fromBack``: a Back press took the sheet's layer already (nothing to give back; the
+  // sheet's address goes on the entry Back landed on); ``then`` runs once the sheet's entry
+  // has been given back (at once where there is none to give)
+  function closeSheet(fromBack, then) {
     if (!sheetOpen()) { if (then) then(); return; }
     sheet.classList.remove("open");
     document.documentElement.classList.remove("sp-sheet-open");
@@ -245,9 +241,11 @@
     sheet.removeAttribute("aria-modal");
     pageInert(false);
     if (sheetScrim) { sheetScrim.remove(); sheetScrim = null; }
-    if (pushed && !fromHistory && ownEntry()) giveBack(then);
-    else if (then) then();
-    pushed = false;
+    if (openPick) closePick(false);
+    var layer = sheetLayer;
+    sheetLayer = null;
+    if (fromBack) { if (sheetHref) address(sheetHref); if (then) then(); }
+    else giveBack(layer, then);
     if (openBtn) openBtn.setAttribute("aria-expanded", "false");
     // the focus goes back to the button; where the button has gone with the sheet (the window
     // grew past phone width: the groups are the page's own now, audit D1) to the groups' first
@@ -255,71 +253,41 @@
     var back = openBtn && openBtn.getClientRects().length ? openBtn : sheetStops()[0] || stopsIn(panel)[0];
     if (back) back.focus();
   }
-  window.addEventListener("popstate", function (e) {
-    if (ignorePop) {
-      ignorePop = false;
-      // the page scripts' handlers run after this one in the same event: still not a Back press
-      landing = true;
-      setTimeout(function () { landing = false; }, 0);
-      if (carry) { address(carry); carry = null; }
-      if (afterPop) { var go = afterPop; afterPop = null; go(); }
-      return;
-    }
-    if (e.state && e.state.spsheet) {
-      // Forward onto the sheet's entry after a Back closed it (audit N3): the entry means the
-      // sheet is open, so it opens again; at a width without a sheet the entry is the page's own.
-      // An entry with another address than the page shows (a filter applied in place since the
-      // Back) redraws the page first; as a fresh load, the page comes back plain, no sheet
-      if (!sheetOpen()) {
-        if (!shownHere()) { redraw(); if (!onAddr) return; }
-        if (phoneQuery && phoneQuery.matches && sheet) { pushed = true; openSheet(); } else setState(null);
-      }
-      return;
-    }
-    if (!sheetOpen() || !pushed || otherBackPending()) {
-      // not the sheet's Back: Back or Forward landed on an entry of this page (the page's own
-      // entry under the one a reload left, a search's), whose address the page then shows
-      if (!otherBackPending() && !shownHere()) redraw();
-      return;
-    }
-    closeSheet(true);
-    if (sheetHref) address(sheetHref);
+  // Back or Forward landed on an entry of this page (the page's own entry under the one a
+  // reload left, a search's) with another address than the page shows: the page redraws from
+  // it. The layers' own back() (the sheet's, a menu's) is not a Back press. The sheet's own Back
+  // is the layers' (static/layers.js), which closes it; Forward never brings a layer back
+  window.addEventListener("popstate", function () {
+    if (backPending()) return;
+    if (!shownHere()) redraw();
   });
-  // the page loaded on the sheet's entry (a reload with the sheet open, the app's pull to
-  // refresh): the sheet stays closed and the entry becomes a plain one, the page's own address.
-  // The sheet could show again, but a Back from a reloaded entry is a fresh page load in Safari
-  // (the iPhone) and Firefox, which would lose a filter set in the reopened sheet; a plain
-  // entry is right in every browser, at the price of one Back that stays on the page
-  if (ownEntry()) setState(null);
   // a filter in the open sheet that sends the form (the Binder's tag, a precons set, Show on
-  // most panels): the sheet's entry goes back first, then the form goes, so the new page is one
+  // most panels): the sheet's layer goes back first, then the form goes, so the new page is one
   // Back from the page the sheet opened on (audit N2: the entry stayed, one dead Back). A page
   // script that takes the submit itself (deck search, card search) has stopped it before this
   document.addEventListener("submit", function (e) {
-    if (e.defaultPrevented || e.target !== form || !sheetOpen() || !pushed || !ownEntry()) return;
+    if (e.defaultPrevented || e.target !== form || !sheetOpen()) return;
     e.preventDefault();
     var submitter = e.submitter && e.submitter.form === form ? e.submitter : null;
     // Show with nothing changed since the page was drawn (the Binder's and precons' only filters
     // send the form by themselves): the sheet closes, the page is not asked for again (audit L4:
     // a page load to the same page, and a dead Back)
     if (submitter && submitter.classList.contains("sp-show") && formSerial() === shownForm) { closeSheet(); return; }
-    pushed = false;
-    giveBack(function () {
+    closeSheet(false, function () {
       if (form.requestSubmit) { if (submitter) form.requestSubmit(submitter); else form.requestSubmit(); } else form.submit();
     });
   });
   // Clear filters in the open sheet, where it is a link to the page without filters (deck
-  // search, precons, My decks, the Binder): the same, the entry goes back first, then the link
+  // search, precons, My decks, the Binder): the same, the layer goes back first, then the link
   // is followed, so the cleared page is one Back from the page the sheet opened on (audit L1:
   // Back brought the sheet back, and leaving took three presses)
   document.addEventListener("click", function (e) {
     var a = e.target.closest ? e.target.closest("a.sp-clear[href]") : null;
-    if (!a || e.defaultPrevented || !sheet || !sheet.contains(a) || !sheetOpen() || !pushed || !ownEntry()) return;
+    if (!a || e.defaultPrevented || !sheet || !sheet.contains(a) || !sheetOpen()) return;
     if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (a.target && a.target !== "_self")) return;
     e.preventDefault();
     var href = a.href;
-    pushed = false;
-    giveBack(function () { location.href = href; });
+    closeSheet(false, function () { location.href = href; });
   });
   // how many filters are in use: a group of boxes counts once, a text box when it has text, a
   // drop-down when it is not on its first choice
