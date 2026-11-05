@@ -193,7 +193,7 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
     ):
         assert text in html, text
     assert "goldfish_" not in html and "run_deck_report" not in html
-    assert "Run id: wjyxinfngo4dg" in html and "(could be annotated)" in html
+    assert "Run ID: wjyxinfngo4dg" in html and "(could be annotated)" in html
     # double-faced names appear as their front face in the panels; the whole name only in the raw text
     panels = html.split("<details class='ui-card rv-det rv-raw")[0]
     assert "Enduring Angel" in panels and "Enduring Angel //" not in panels
@@ -323,7 +323,7 @@ def test_front_face_and_plain_words() -> None:
         and rv.front_face(None) == ""
         and rv.front_face(" // ") == "//"
     )
-    assert rv.plain_words('Full report: goldfish_report("abc")') == "Run id: abc"
+    assert rv.plain_words('Full report: goldfish_report("abc")') == "Run ID: abc"
     assert rv.plain_words("see goldfish_annotate") == "see annotate"
     assert "goldfish_" not in rv.plain_words(GOLDFISH)
 
