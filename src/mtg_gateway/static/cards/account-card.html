@@ -43,9 +43,11 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
     var list = $("facts"); list.replaceChildren();
     var todo = [];
     var who = sc.name;
-    if (who) fact(list, "Signed in as", String(who));
+    // a name folds after its underscores (a zero-width space there), never inside a word
+    var fold = function (s) { return String(s).replace(/_/g, "_\u200b"); };
+    if (who) fact(list, "Signed in as", fold(who));
     if ("linked" in sc) {
-      fact(list, "Archidekt", sc.linked ? ("linked" + (sc.archidekt_username ? " as " + sc.archidekt_username : "")) : "not linked", sc.linked ? "ok" : "warn");
+      fact(list, "Archidekt", sc.linked ? ("linked" + (sc.archidekt_username ? " as " + fold(sc.archidekt_username) : "")) : "not linked", sc.linked ? "ok" : "warn");
       if (!sc.linked) todo.push("link your Archidekt account");
     }
     if ("writes_enabled" in sc) {

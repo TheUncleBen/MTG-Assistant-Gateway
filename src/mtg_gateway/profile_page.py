@@ -150,6 +150,12 @@ CSS = """
 @media (max-width:599.98px){.acc .ui-row{grid-template-columns:minmax(0,1fr)}
   .acc .ui-row.sw{grid-template-columns:minmax(0,1fr) auto}
   .acc .ui-row.sw .ctl{grid-column:2;grid-row:1 / span 2;justify-self:end;align-self:start}}
+/* a page too narrow for the label's words beside the switch (a 320 px phone at 200% text): the
+   switch goes under the label, at the row's end */
+.acc{container-type:inline-size}
+@container (max-width:13em){
+  .acc .ui-row.sw{grid-template-columns:minmax(0,1fr)}
+  .acc .ui-row.sw .ctl{grid-column:1;grid-row:auto;justify-self:end}}
 """
 COLLECTION_CSS = """
 /* one slim row: the words, the button at its end (under them only where the row is too narrow

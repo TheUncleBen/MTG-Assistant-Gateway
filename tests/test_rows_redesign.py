@@ -269,6 +269,6 @@ def test_a_history_line_is_words_only_and_its_links_are_in_the_menu() -> None:
     assert 'tr.getAttribute("data-review")' in js and 'tr.getAttribute("data-backup")' in js
     assert '"Open the review page"' in js and '"The change it was taken before"' in js
     assert '"Backup copy on Archidekt"' in js
-    assert ".hy-table .title .deck{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" in (
-        history_view.HISTORY_CSS
-    )
+    # the deck's name wraps whole (large text) instead of ending in an ellipsis
+    assert ".hy-table .title .deck{overflow-wrap:anywhere;min-width:0}" in history_view.HISTORY_CSS
+    assert "text-overflow:ellipsis" not in history_view.HISTORY_CSS.split(".hy-table .title .deck{")[1][:80]

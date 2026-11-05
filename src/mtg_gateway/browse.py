@@ -96,8 +96,8 @@ FORMAT_OPTIONS = sorted(
 )
 BROWSE_CSS = """
 /* the deck search: the shared panel (theme.SEARCH_PANEL_CSS); its Commander and Owner boxes */
-.spanel .fgrid > .fg.cmd{--gw:220px}
-.spanel .fgrid > .fg.who{--gw:160px}
+.spanel .fgrid > .fg.cmd{--gw:15.714em}
+.spanel .fgrid > .fg.who{--gw:11.429em}
 /* the results while the panel's pick is asked for (static/search.js): dimmed, as My decks' list */
 #s-results[aria-busy=true]{opacity:.6;transition:opacity .15s}
 /* Avatar, name and the social row: the name block takes the room and wraps a long unbroken name;
@@ -131,7 +131,7 @@ BROWSE_CSS = """
   background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
     border:1px solid var(--border)}
 .popular a:hover{border-color:var(--orange);color:var(--orange)}
-.popular a.precons{gap:.4rem;font-weight:700}
+.popular a.precons{gap:.4rem;font-weight:700;flex-wrap:wrap}
 /* the preconstructed decks: a heading per set, the first row of tiles until Show all */
 .precons .pre-grp{margin:0 0 1.25rem}
 .precons .pre-gh{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;

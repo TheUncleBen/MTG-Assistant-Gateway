@@ -20,7 +20,7 @@
   var enc = encodeURIComponent;
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
-  var TOP = "Top level (no folder)";
+  var TOP = "No folder";
   var NO_NET = "No connection; nothing was changed.";
 
   // -- small shared pieces -----------------------------------------------------------------------
@@ -227,8 +227,8 @@
     getJSON("/decks/api/decks/" + enc(d.id) + "/export").then(function (x) {
       if (!x.ok) return failed(box, x);
       box.setTitle("Export “" + (x.name || d.name) + "”");
-      var tabs = [["Archidekt import text", x.archidekt || ""], ["Plain decklist", x.plain || ""]];
-      if (x.side) tabs.push(["Sideboard and maybeboard", x.side]);
+      var tabs = [["Archidekt text", x.archidekt || ""], ["Plain list", x.plain || ""]];
+      if (x.side) tabs.push(["Side and maybe", x.side]);
       tabs.push(["Files", null]);
       var body = el("div", "stack");
       var bar = el("div", "segc");

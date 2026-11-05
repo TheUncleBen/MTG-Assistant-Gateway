@@ -376,7 +376,7 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             # doesn't), not a fixed moment
             box.locator(".tree label", has_text="Precons").wait_for(timeout=5000)
             labels = [t.strip() for t in box.locator(".tree label").all_inner_texts()]
-            assert labels == ["Top level (no folder)", "Archive", "Commander", "Brews", "Precons"]
+            assert labels == ["No folder", "Archive", "Commander", "Brews", "Precons"]
             assert box.locator(".tree input:checked").evaluate("i => i.value") == "503"
             box.locator(".tree label", has_text="Archive").click()
             with page.expect_navigation(wait_until="networkidle"):
@@ -393,7 +393,7 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             assert box.locator("h2").inner_text() == "Export “Renamed deck”"
             tabs = [t.strip() for t in box.locator("[role=tab]").all_inner_texts()]
             # (the sample deck has no sideboard or maybeboard, so that tab is left out)
-            assert tabs == ["Archidekt import text", "Plain decklist", "Files"]
+            assert tabs == ["Archidekt text", "Plain list", "Files"]
             assert "Sol Ring" in box.locator("textarea").input_value()
             box.locator("[role=tab]", has_text="Files").click()
             assert box.locator(".files a[download]").count() == 7
@@ -469,7 +469,7 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
                 state="attached", timeout=5000
             )
             inside = [t.strip() for t in box.locator("select#mb-finside option").all_inner_texts()]
-            assert inside == ["Top level (no folder)", "Archive", "Commander", "Brews", "Precons"]
+            assert inside == ["No folder", "Archive", "Commander", "Brews", "Precons"]
             box.locator("input#mb-fname").fill("Cube")
             box.locator("button", has_text="Next").click()
             page.locator(".mtgbox h2", has_text="Create this folder?").wait_for(timeout=3000)
@@ -515,7 +515,7 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
             assert box.locator("h2").inner_text() == "Move the folder “Commander”"
             box.locator(".tree label", has_text="Old lists").wait_for(timeout=5000)
             labels = [t.strip() for t in box.locator(".tree label").all_inner_texts()]
-            assert labels == ["Top level (no folder)", "Cube", "Old lists"]
+            assert labels == ["No folder", "Cube", "Old lists"]
             assert box.locator(".body .muted").inner_text() == (
                 "Everything inside moves with it. A folder can't go inside itself, so it and its own "
                 "folders are not listed."

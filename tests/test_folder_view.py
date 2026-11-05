@@ -16,7 +16,7 @@ ROOT = 1
 
 
 def _info(*folders: tuple[int, str, int, bool], backup: set[int] = frozenset()) -> dict:  # type: ignore[assignment]
-    out = [{"id": ROOT, "name": "Top level (no folder)", "depth": 0, "parent": None, "private": False}]
+    out = [{"id": ROOT, "name": "No folder", "depth": 0, "parent": None, "private": False}]
     depth = {ROOT: 0}
     for fid, name, parent, private in folders:
         depth[fid] = depth[parent] + 1
@@ -103,7 +103,7 @@ def test_the_filter_searches_every_deck_and_says_where_each_one_is() -> None:
 
 def test_the_backup_folder_and_everything_in_it_never_shows() -> None:
     assert [f["name"] for f in fv.visible_folders(INFO)] == [
-        "Top level (no folder)",
+        "No folder",
         "commander",
         "Precons",
         "Brews",

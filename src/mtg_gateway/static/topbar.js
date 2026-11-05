@@ -84,12 +84,12 @@
   function fits() {
     for (var i = 0; i < tabs.length; i++) {
       var tab = tabs[i], lbl = tab.querySelector(".lbl"), cs = getComputedStyle(lbl);
-      // the rail (an open Fold, a tablet) wraps its labels instead; only a one-line label is measured
-      if (cs.whiteSpace !== "nowrap") continue;
+      // a label wraps between its words; its longest word must fit the tab whole
       if (cs.display === "none") continue;
       ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
-      var room = tab.getBoundingClientRect().width - 4;
-      if (room > 0 && ctx.measureText(lbl.textContent).width > room) return false;
+      var room = tab.getBoundingClientRect().width - 4, words = lbl.textContent.split(/\s+/);
+      for (var j = 0; j < words.length; j++)
+        if (room > 0 && ctx.measureText(words[j]).width > room) return false;
     }
     return true;
   }
