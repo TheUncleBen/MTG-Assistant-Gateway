@@ -370,3 +370,24 @@ def test_the_push_test_gives_up_on_an_emulator_that_never_comes_back(tmp_path: P
     )
     assert "boot=1" in r.stdout, (r.stdout, r.stderr)
     assert time.monotonic() - started < 30
+
+
+def test_every_variable_the_gateway_reads_is_documented() -> None:
+    """0.7.46 sweep B-10: each variable config.py reads is either passed by both stack files (and
+    so listed in their examples, above) or, when only a test stack sets it, named in both example
+    files and in DEPLOY.md, which say what it is for."""
+    src = (ROOT / "src" / "mtg_gateway" / "config.py").read_text(encoding="utf-8")
+    read = set(re.findall(r'_env\w*\(\s*"([A-Z0-9_]+)"', src))
+    assert "MTG_PUBLIC_URL" in read and len(read) > 20  # the pattern still finds them
+    stacks = [(ROOT / f).read_text(encoding="utf-8") for f in STACK_FILES]
+    docs = [(ROOT / f).read_text(encoding="utf-8") for f in (*ENV_FILES, "docs/DEPLOY.md")]
+
+    def named(name: str, text: str) -> bool:
+        return bool(re.search(rf"\b{name}\b", text))
+
+    missing = [
+        name
+        for name in sorted(read)
+        if not all(named(name, t) for t in stacks) and not all(named(name, t) for t in docs)
+    ]
+    assert missing == []
