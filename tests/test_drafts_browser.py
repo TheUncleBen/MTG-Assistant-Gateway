@@ -259,6 +259,8 @@ def _post_reject(page, base: str, csrf: str) -> None:
         [base, csrf],
     )
     page.wait_for_selector("form.rejectconfirm")
+    # the deferred draft script has taken the form (typing before that would keep nothing)
+    page.wait_for_function("() => document.querySelector('form.rejectconfirm').__draft")
 
 
 def test_every_free_text_field_keeps_what_was_typed_through_a_reload(server: Server) -> None:
