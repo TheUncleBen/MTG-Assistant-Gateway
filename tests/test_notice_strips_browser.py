@@ -152,6 +152,10 @@ def _check(where: str, got: dict, *, expect: str, touch: bool) -> None:
         if len(s["lines"]) > 1:
             assert _column(s) >= TEN_EM, (where, _column(s), s)
         if s["x"]:
+            # the strip's frame beside the words (its edges, the × and the gap) is sized in px,
+            # so large text widens the words' column and not the frame (final polish Z6: at 360 px
+            # and 200% text the frame took 101 px and "Bannerkeeper" broke in two)
+            assert s["box"]["width"] - s["nt"] <= 80, (where, s["box"]["width"], s["nt"])
             first = s["lines"][0]
             # the × shares the words' first line: beside it, not on a row of its own above
             assert s["x"]["top"] < first["bottom"] and first["top"] < s["x"]["bottom"], (where, s)
@@ -317,7 +321,11 @@ def test_every_notice_keeps_its_x_its_words_and_its_buttons_in_the_strip(
         page.locator("#col-notes .notice[data-strip] button", has_text="Undo").click()
         page.locator("#col-notes .notice[data-strip]", has_text="back in your binder").wait_for()
         page.context.clear_cookies()
-        page.locator("li[data-id]").first.locator("form.qty button[value=inc]").click()
+        # the strip names the card: the sweep's long name, whose "Bannerkeeper" broke in two at
+        # 360 px and 200% text in a 210 px column (final polish Z6)
+        page.locator("li[data-id]", has_text="Bannerkeeper").first.locator(
+            "form.qty button[value=inc]"
+        ).click()
         page.locator("#col-notes .notice[data-strip]", has_text="signed out").wait_for()
         _check(f"Sign in @{width} {zoom}", page.evaluate(STRIPS), expect="signed out", touch=touch)
         assert errors == []

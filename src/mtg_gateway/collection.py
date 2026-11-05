@@ -2592,10 +2592,14 @@ ul.colllist .cardc .tagrow{margin-top:.25rem}
   min-height:0;margin:0;flex:none;accent-color:var(--orange-ctl)}
 .mtgbox .body label.tagck .sw{width:.75rem;height:.75rem}
 .mtgbox .body label.tagck .t{min-width:0;overflow-wrap:anywhere}
-/* notices are strips at the top of the page with a × to close */
-#col-notes .notice{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .75rem;overflow-wrap:anywhere}
+/* notices are strips at the top of the page with a × to close. The frame beside the words (the
+   strip's side padding, the × and the gap after it) is sized in px, as the × is, so large text
+   widens the words' column and not the frame: at 360 px and 200% text the frame in rem took
+   101 px and "Bannerkeeper" broke in two in a 227 px column (final polish Z6); it takes 70 */
+#col-notes .notice{display:flex;align-items:flex-start;gap:7px;margin:0 0 .75rem;padding-left:12px;
+  padding-right:12px;overflow-wrap:anywhere}
 #col-notes .notice .nx{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
-  width:var(--ctl);height:var(--ctl);margin:-.5rem 0 -.5rem -.4rem;border-radius:50%;color:inherit;flex:none}
+  width:var(--ctl);height:var(--ctl);margin:-.5rem 0 -.5rem -5px;border-radius:50%;color:inherit;flex:none}
 #col-notes .notice .nx:hover{background:rgba(0,0,0,.08)}
 #col-notes .notice .nx:focus-visible{outline:2px solid var(--focus)}
 #col-notes .notice .nx svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;
