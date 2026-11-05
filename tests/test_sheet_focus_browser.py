@@ -157,3 +157,146 @@ def test_an_open_sheet_keeps_the_keyboard_and_escape_closes_it_from_anywhere(
         )
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()
+
+
+# the page once the sheet has gone: what is left inert, the groups' dialog role and backdrop,
+# the scroll lock, and whether a control on the page takes the focus (given back afterwards)
+FREE = """() => {
+  const s = document.getElementById('sp-filters');
+  const c = [...document.querySelectorAll('header a[href], main a[href], main button, main input')]
+    .find(e => !s.contains(e) && e.getClientRects().length && !e.closest('.sp-scrim'));
+  const was = document.activeElement;
+  c.focus();
+  const took = document.activeElement === c;
+  if (was && was !== document.body) was.focus(); else c.blur();
+  return {inert: document.querySelectorAll('[inert]').length, role: s.getAttribute('role'),
+    modal: s.getAttribute('aria-modal'), open: s.classList.contains('open'),
+    scrim: document.querySelectorAll('.sp-scrim').length,
+    lock: document.documentElement.classList.contains('sp-sheet-open'),
+    overflow: getComputedStyle(document.documentElement).overflow, took};
+}"""
+
+
+def _open_sheet(page) -> None:  # noqa: ANN001
+    page.locator(".spanel .sp-open").click()
+    page.locator("#sp-filters.open").wait_for()
+    assert page.evaluate(WHERE) == "sheet"
+
+
+@pytest.mark.parametrize("start", [360, 1280])
+@pytest.mark.parametrize("name,path,tags", SHEETS)
+def test_a_sheet_open_in_a_window_that_grows_past_phone_width_lets_the_page_go(
+    server: Server,  # noqa: F811
+    name: str,
+    path: str,
+    tags: bool,
+    start: int,
+) -> None:
+    """Audit D1 on 099f600a: a sheet opened under 600 px and the window widened past the sheet's
+    media query (a Fold unfolding, a desktop window resized) left the page inert and scroll-locked
+    behind a sheet that no longer showed, on five of the six sheets. Now the sheet closes with the
+    width: nothing stays inert, the groups lose their dialog role and backdrop, the page scrolls
+    and takes the focus, the focus lands on a control of the panel, and narrowing the window again
+    does not bring the sheet back. On a phone (touch) and in a mouse window shrunk to 360 px."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    server.ark.collection_tag_lists["alice"] = (
+        {21: {"id": 21, "name": "trade binder page 12", "color": "#d33"}} if tags else {}
+    )
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, start, "light", exe)
+        page.set_viewport_size({"width": 360, "height": 860})
+        page.goto(f"{server.base}{path}", wait_until="networkidle")
+        _open_sheet(page)
+        page.set_viewport_size({"width": 1280, "height": 860})
+        page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        got = page.evaluate(FREE)
+        assert got == {
+            "inert": 0,
+            "role": None,
+            "modal": None,
+            "open": False,
+            "scrim": 0,
+            "lock": False,
+            "overflow": "visible",
+            "took": True,
+        }, (name, start, got)
+        where = page.evaluate(WHERE)
+        assert where != "body" and not where.startswith("page: a"), (name, start, where)
+        # a click reaches the page: the name box takes it
+        page.locator(".spanel .sp-name input").first.click()
+        assert page.evaluate(WHERE).startswith("page: input"), (name, start, page.evaluate(WHERE))
+        page.set_viewport_size({"width": 360, "height": 860})
+        page.wait_for_timeout(100)
+        got = page.evaluate(FREE)
+        assert got["open"] is False and got["inert"] == 0 and got["lock"] is False, (name, got)
+        assert page.evaluate(MEASURE) == [] and errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("name,path,tags", SHEETS)
+def test_back_closes_an_open_sheet_and_no_way_of_closing_it_leaves_an_entry_behind(
+    server: Server,  # noqa: F811
+    name: str,
+    path: str,
+    tags: bool,
+) -> None:
+    """Audit D4 on 099f600a: the sheet pushed no history entry, so Android's Back key left the
+    page with the sheet open. Now, as the boxes and menus do, an open sheet holds one entry: Back
+    closes it (the page stays, the focus goes back to the button), and closing it by ×, Escape or
+    its backdrop gives the entry back, so the next Back leaves the page. On deck search, where a
+    filter applies at once and pushes an entry of its own, Back undoes the filter first and closes
+    the sheet next."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    server.ark.collection_tag_lists["alice"] = (
+        {21: {"id": 21, "name": "trade binder page 12", "color": "#d33"}} if tags else {}
+    )
+    prev = f"{server.base}/users/alice"
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360, "light", exe)
+        for way in ("back", "escape", "x", "scrim"):
+            page.goto(prev, wait_until="networkidle")
+            page.goto(f"{server.base}{path}", wait_until="networkidle")
+            here = page.url
+            _open_sheet(page)
+            if way == "back":
+                page.go_back()
+            elif way == "escape":
+                page.keyboard.press("Escape")
+            elif way == "x":
+                page.locator("#sp-filters .sp-sheet-head .close").click()
+            else:
+                page.locator(".sp-scrim").dispatch_event("click")
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+            assert page.url == here, (name, way, page.url)
+            got = page.evaluate(FREE)
+            assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (name, way, got)
+            opener = page.locator(".spanel .sp-open")
+            assert opener.evaluate("e => e === document.activeElement"), (name, way, page.evaluate(WHERE))
+            # the sheet's entry is given back: this page's own entry is the one left
+            page.wait_for_function("() => history.state === null")
+            page.go_back()
+            page.wait_for_url(prev)
+        if path == "/search":
+            page.goto(f"{server.base}{path}", wait_until="networkidle")
+            here = page.url
+            _open_sheet(page)
+            page.locator("#sp-filters select").first.select_option(index=1)
+            page.wait_for_url(lambda u: u != here)
+            assert page.locator("#sp-filters.open").count() == 1
+            page.go_back()
+            page.wait_for_url(here)
+            page.wait_for_timeout(100)
+            assert page.locator("#sp-filters.open").count() == 1, (name, "Back undid the filter")
+            page.go_back()
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+            assert page.url == here
+            page.go_back()
+            page.wait_for_url(prev)
+        assert errors == []
+        browser.close()

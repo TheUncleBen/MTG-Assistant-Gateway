@@ -88,6 +88,18 @@
   }
   function sheetOpen() { return !!(sheet && sheet.classList.contains("open")); }
   var sheetScrim = null, madeInert = [];
+  // the open sheet holds one history entry, as the boxes (static/box.js) and menus do, so the
+  // phone's Back key closes it instead of leaving the page (audit D4); closing it any other way
+  // gives the entry back, so the next Back leaves the page as it would have
+  var pushed = false, ignorePop = false;
+  function ownEntry() { return !!(history.state && history.state.spsheet); }
+  // another script's own back() still on its way (a menu's, the drop-downs'): its popstate is
+  // not a Back press on the sheet
+  function otherBackPending() {
+    var M = window.MtgMenu, D = window.MtgDeckCardMenu, Dd = window.MtgDropdowns;
+    return !!((M && M.backPending && M.backPending()) || (D && D.backPending && D.backPending()) ||
+      (Dd && Dd.backPending && Dd.backPending()));
+  }
   // the page behind the open sheet is inert (a Tab, a screen reader and a tap reach only the
   // sheet and its backdrop): everything beside the sheet and its ancestors, put back on close
   function pageInert(on) {
@@ -113,10 +125,11 @@
     }
     return false;
   }
-  function sheetStops() {
-    return $$("a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])", sheet)
+  function stopsIn(root) {
+    return $$("a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])", root)
       .filter(function (f) { return f.getClientRects().length > 0 && !inClosedFold(f); });
   }
+  function sheetStops() { return stopsIn(sheet); }
   function openSheet() {
     if (!sheet) return;
     sheet.classList.add("open");
@@ -134,10 +147,14 @@
     sheet.setAttribute("role", "dialog");
     sheet.setAttribute("aria-modal", "true");
     pageInert(true);
+    if (!pushed) { try { history.pushState({ spsheet: 1 }, ""); pushed = true; } catch (err) { pushed = false; } }
     var c = $(".sp-sheet-head .close", sheet);
     if (c) c.focus();
   }
-  function closeSheet() {
+  // ``fromHistory``: a Back press took the sheet's entry already. A filter that applies at once
+  // (deck search) pushes an entry of its own over the sheet's: then the sheet's entry is not the
+  // one the page is on and stays (Back lands on it with the sheet closed, one press more).
+  function closeSheet(fromHistory) {
     if (!sheetOpen()) return;
     sheet.classList.remove("open");
     document.documentElement.classList.remove("sp-sheet-open");
@@ -145,8 +162,25 @@
     sheet.removeAttribute("aria-modal");
     pageInert(false);
     if (sheetScrim) { sheetScrim.remove(); sheetScrim = null; }
-    if (openBtn) { openBtn.setAttribute("aria-expanded", "false"); openBtn.focus(); }
+    if (pushed && !fromHistory && ownEntry()) {
+      // going back over the sheet's entry fires popstate later; that one is ours, not a Back press
+      ignorePop = true;
+      try { history.back(); } catch (err) { ignorePop = false; }
+    }
+    pushed = false;
+    if (openBtn) openBtn.setAttribute("aria-expanded", "false");
+    // the focus goes back to the button; where the button has gone with the sheet (the window
+    // grew past phone width: the groups are the page's own now, audit D1) to the groups' first
+    // control, or the panel's (a View sheet whose choices the bar shows at that width)
+    var back = openBtn && openBtn.getClientRects().length ? openBtn : sheetStops()[0] || stopsIn(panel)[0];
+    if (back) back.focus();
   }
+  window.addEventListener("popstate", function (e) {
+    if (ignorePop) { ignorePop = false; return; }
+    if (!sheetOpen() || !pushed || otherBackPending()) return;
+    if (e.state && e.state.spsheet) return;  // back onto the sheet's own entry: it stays open
+    closeSheet(true);
+  });
   // how many filters are in use: a group of boxes counts once, a text box when it has text, a
   // drop-down when it is not on its first choice
   function badge() {
@@ -199,13 +233,15 @@
     form.addEventListener("change", badge);
   }
   badge();
-  // a window that grows past phone width while the sheet is open: the sheet goes, the groups
-  // show as the page's own (folded or open as the button says)
+  // a window that grows past phone width while the sheet is open (a Fold unfolding, a desktop
+  // window widened): the sheet goes, with the page's inert and scroll lock, and the groups show
+  // as the page's own (folded or open as the button says); on every panel, not only one with a
+  // fold (audit D1: the page stayed inert behind a sheet the width had hidden)
   // the button says whether the groups show: on a phone that is the sheet, else the fold
-  if (phoneQuery && folds) {
+  if (phoneQuery && sheet && openBtn) {
     var onWidth = function () {
       if (!phoneQuery.matches && sheetOpen()) closeSheet();
-      openBtn.setAttribute("aria-expanded", (phoneQuery.matches ? sheetOpen() : !sheet.classList.contains("folded")) ? "true" : "false");
+      openBtn.setAttribute("aria-expanded", (phoneQuery.matches || !folds ? sheetOpen() : !sheet.classList.contains("folded")) ? "true" : "false");
     };
     onWidth();
     if (phoneQuery.addEventListener) phoneQuery.addEventListener("change", onWidth); else if (phoneQuery.addListener) phoneQuery.addListener(onWidth);
