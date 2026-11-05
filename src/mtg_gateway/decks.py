@@ -5149,8 +5149,10 @@ class DeckService:
         member's folder tree. ``entries`` and ``parsed_package``: the card list and package
         settings as a waiting proposal already stores them (an amend that keeps them)."""
         name = clean_text(name or "")
-        if not name or len(name) > 120:
-            raise DeckError("invalid", "name is required (up to 120 characters)")
+        if not name:
+            raise DeckError("invalid", "Give the new deck a name.")
+        if len(name) > 120:
+            raise DeckError("invalid", f"A deck name is at most 120 characters; this one has {len(name):,}.")
         fmt = str(deck_format or "commander").strip().lower()
         if fmt not in FORMAT_IDS:
             raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
@@ -8375,7 +8377,9 @@ class DeckService:
         deck = await self.get_any_deck(sub, deck_id)
         new_name = clean_text(name or "") or f"Copy of - {deck.name}"
         if len(new_name) > 200:
-            raise DeckError("invalid", "name must be up to 200 characters")
+            raise DeckError(
+                "invalid", f"A deck name is at most 200 characters; this one has {len(new_name):,}."
+            )
         changes: dict[str, Any] = {"name": new_name}
         folder_name = None
         if folder_id is not None:

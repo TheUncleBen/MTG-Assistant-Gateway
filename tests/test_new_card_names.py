@@ -213,3 +213,22 @@ async def test_a_new_deck_of_only_cards_archidekt_does_not_have_is_not_made(stac
     assert got["state"] == "failed", got
     assert "Archidekt doesn't have “Notacard Xyzzyplex”, so nothing was sent." in got["result"]["detail"], got
     assert set(stack.ark.decks) == decks_before
+
+
+async def test_a_new_decks_name_too_long_or_missing_is_told_which(stack: Stack) -> None:
+    """0.7.46 sweep B-8: a 500-character name was told "name is required", as if none was given.
+    A name that is too long says so and how long it may be; a missing one says it is needed."""
+    h = stack.h
+    token = await linked_user(stack)
+
+    async def said(tool: str, name: str) -> str:
+        out = structured(await call(h, token, tool, {"name": name, "cards": _cards("Opt")}))
+        if tool == "check_new_deck":  # a check lists it among the problems
+            return next(p["message"] for p in out["problems"] if p["error"] == "invalid")
+        assert out["ok"] is False, out
+        return out["message"]
+
+    for tool in ("check_new_deck", "propose_new_deck"):
+        assert await said(tool, "x" * 500) == "A deck name is at most 120 characters; this one has 500."
+        assert await said(tool, "  ") == "Give the new deck a name."
+    assert await _pending(h) == 0
