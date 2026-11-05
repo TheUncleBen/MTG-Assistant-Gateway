@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import logging
 import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -64,6 +65,8 @@ from .theme import (
 from .theme import (
     esc as _esc,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -730,7 +733,7 @@ def add_history_routes(
             if task is None or (task.done() and (task.cancelled() or task.exception() is not None)):
                 task = asyncio.ensure_future(decks.read_page_deck(sub, deck_id))
                 _deck_reads[(sub, deck_id)] = task
-                task.add_done_callback(lambda _t, key=(sub, deck_id): _deck_reads.pop(key, None))
+                task.add_done_callback(lambda t, key=(sub, deck_id): _deck_read_ended(key, t))
             if not task.done() and wait <= 0:
                 return changes_placeholder_html(r.get("report_id"))
             try:
@@ -747,6 +750,17 @@ def add_history_routes(
 
     # the deck reads a report page started, so a second look (report.js) waits for the same read
     _deck_reads: dict[tuple[str, str], asyncio.Future[Any]] = {}
+
+    def _deck_read_ended(key: tuple[str, str], task: asyncio.Future[Any]) -> None:
+        """A report page's deck read is over: forget it, and take its error, which nobody may
+        await (the page drew its placeholder and went; report.js asks /changes, which reads
+        again). A deck that can't be read only means no "changed since" line."""
+        _deck_reads.pop(key, None)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None and not isinstance(exc, DeckError):
+            logger.warning("report page: deck %s not read (%s)", key[1], exc.__class__.__name__)
 
     @server.custom_route("/history/reports/{rid}/changes", methods=["GET"], include_in_schema=False)
     async def report_changes(request: Request) -> Response:

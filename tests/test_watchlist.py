@@ -858,7 +858,9 @@ async def test_both_deck_prices_name_their_source(stack: Stack) -> None:
     assert "Scryfall" in deck["price_source"] and "Archidekt" in found["price_source"], (deck, found)
 
 
-async def test_a_watched_deck_with_no_read_date_is_read_and_the_check_goes_on(stack: Stack, monkeypatch) -> None:
+async def test_a_watched_deck_with_no_read_date_is_read_and_the_check_goes_on(
+    stack: Stack, monkeypatch
+) -> None:
     """watch_decks.refreshed_at may be NULL (the column allows it). The daily check took
     day_of(None) and stopped with a TypeError, for every member. A deck with no read date is one
     never read: it is read first, and the check goes on."""

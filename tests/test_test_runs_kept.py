@@ -7,6 +7,8 @@ comparison is kept; a Forge pair is shown head to head and stays out of the deck
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import json
 import re
 
@@ -374,4 +376,44 @@ async def test_the_compare_pages_ab_offers_forge_games_as_compare_decks_does(sta
     finally:
         if reports._forge_task is not None:
             reports._forge_task.cancel()
+        await b.aclose()
+
+
+async def test_a_deck_read_that_fails_after_the_placeholder_leaves_no_unread_error(
+    stack: Stack, monkeypatch
+) -> None:
+    """A report page whose deck read is still under way draws a placeholder and leaves the read
+    running. When that read then failed, nothing ever looked at its error, and asyncio logged
+    "Task exception was never retrieved" with a traceback at error level. The read's own end now
+    takes its error (a deck that can't be read only means no "changed since" line)."""
+    from mtg_gateway.decks import DeckError
+
+    h = stack.h
+    token = await linked_user(stack)
+    first = structured(await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20}))
+    assert first["ok"], first
+    gw = h.app.state.gateway
+    gate = asyncio.Event()
+
+    async def read_page_deck(sub: str, deck_id: str):  # noqa: ANN202
+        await gate.wait()
+        raise DeckError("unavailable", "Archidekt can't be reached right now.")
+
+    monkeypatch.setattr(gw.decks, "kept_page_deck", lambda sub, deck_id: None)
+    monkeypatch.setattr(gw.decks, "read_page_deck", read_page_deck)
+    loop = asyncio.get_running_loop()
+    seen: list[dict] = []
+    before = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, ctx: seen.append(ctx))
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get(f"/history/reports/{first['report_id']}", headers=NAV)).text
+        assert "data-changes-url=" in page  # the placeholder: the read is still under way
+        gate.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        gc.collect()
+        assert [c.get("message") for c in seen] == []
+    finally:
+        loop.set_exception_handler(before)
         await b.aclose()
