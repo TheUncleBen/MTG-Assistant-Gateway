@@ -21,6 +21,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from . import assistants, prefs, ui
+from .busy import outage
 from .companion import DECK_CSP
 from .companion_decks import NEW_DECK_CSS, NEW_DECK_SCRIPTS, new_deck_box_html
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
@@ -244,23 +245,30 @@ def needs_you_html(
 PENDING = "pending"  # recent_decks: the list is being read; the page shows a placeholder meanwhile
 
 
+class Unread(str):
+    """recent_decks: the list couldn't be read; the text is the one sentence that says why, the
+    same the tools and the deck list say for that state (busy.OUTAGE; 0.7.46 sweep B-1)."""
+
+
 async def recent_decks(state: AppState, sub: str, *, wait: float | None) -> list[dict[str, Any]] | str | None:
-    """The member's newest decks; None when they cannot be read right now; PENDING when the list
-    is cold and the read has not answered within ``wait`` seconds (it carries on in the cache)."""
+    """The member's newest decks; an Unread (the reason) when they cannot be read right now;
+    PENDING when the list is cold and the read has not answered within ``wait`` seconds (it
+    carries on in the cache)."""
     try:
         rows = await asyncio.wait_for(state.decks.list_decks_quick(sub, wait=wait), DECKS_TIMEOUT)
     except (DeckError, TimeoutError) as exc:
+        why = Unread(str(exc) if isinstance(exc, DeckError) else outage("timeout"))
         if isinstance(exc, DeckError) and not is_busy(exc):
-            return None
+            return why
         try:  # Archidekt can't be asked: the list as last read (its last_read says how old)
             rows = state.decks.last_deck_list(sub)
         except DeckError:
-            return None
+            return why
         if rows is None:
-            return None
+            return why
     except Exception:  # pragma: no cover - a surprise must not take the home page down
         log.exception("home: listing decks failed")
-        return None
+        return Unread(outage("unavailable"))
     if rows is None:
         return PENDING
     rows.sort(key=lambda d: d.get("updated_at") or "", reverse=True)
@@ -273,12 +281,15 @@ def recent_panel_inner(
     *,
     unreadable: bool = False,
     last_read: float | None = None,
+    why: str | None = None,
 ) -> str:
     """The inside of the home page's My decks panel: the newest covers, or why there are none.
     /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in.
     ``unreadable``: Archidekt left entries of the list unreadable, so the panel says so with the
     /decks notice and Try again, over the covers it did read, never "No decks yet". ``last_read``:
-    the list is as last read (Archidekt can't be asked), and the panel says how old it is."""
+    the list is as last read (Archidekt can't be asked), and the panel says how old it is.
+    ``why``: with no decks, the sentence that says why they couldn't be read (the refusal's own,
+    busy.OUTAGE's for its state)."""
     note = (
         decks_unreadable_html(some_shown=bool(decks), panel=False, again=reread_href("/"))
         if unreadable
@@ -295,7 +306,7 @@ def recent_panel_inner(
         return "<div class='panel-head'><h2>My decks</h2></div>" + note
     if decks is None:
         return (
-            "<h2>My decks</h2><p class='muted'>Archidekt did not answer in time. "
+            f"<h2>My decks</h2><p class='muted'>{html.escape(why or outage('unavailable'))} "
             "<a href='/decks'>Open the deck list</a> to try again.</p>"
         )
     return (
@@ -431,12 +442,13 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                 + "</section>"
             )
         elif link["linked"]:
-            assert not isinstance(decks, str)
-            unreadable = bool(getattr(decks, "unreadable", 0))  # the deck list couldn't be read, as on /decks
+            why = decks if isinstance(decks, Unread) else None
+            shown = None if isinstance(decks, str) else decks
+            unreadable = bool(getattr(shown, "unreadable", 0))  # the deck list couldn't be read, as on /decks
             recent = (
                 "<section class='panel'>"
                 + recent_panel_inner(
-                    decks, covers, unreadable=unreadable, last_read=getattr(decks, "last_read", None)
+                    shown, covers, unreadable=unreadable, last_read=getattr(shown, "last_read", None), why=why
                 )
                 + "</section>"
             )

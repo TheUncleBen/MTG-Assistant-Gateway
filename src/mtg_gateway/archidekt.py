@@ -35,6 +35,7 @@ from urllib.parse import quote
 import httpx
 
 from . import dbwait
+from .busy import outage
 from .timing import add_time, archidekt_failures, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
@@ -1034,15 +1035,14 @@ class Pacer:
         if now < self._open_until:
             return ArchidektError(
                 "unavailable",
-                "Archidekt requests are paused after repeated failures; try later",
+                outage("paused", again=True),
                 sent=False,
             )
         if now < self._retry_until:
             # no number of seconds in the words (no time promises); the wait is in retry_after
             return ArchidektError(
                 "rate_limited",
-                "Archidekt asked the gateway to slow down, so its Archidekt requests are paused for now. "
-                "Try again a little later.",
+                outage("slow_down", again=True),
                 sent=False,
                 retry_after=self._retry_until - now,
             )
@@ -1207,7 +1207,7 @@ RATE_LIMIT_WAITS = 6
 RATE_LIMIT_WAIT_TOTAL = 300.0
 # What an apply that stopped this way says (the apply adds whether anything had changed).
 PATIENCE_SPENT = (
-    "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply stopped."
+    "Archidekt asked the gateway to slow down for longer than an apply may wait, so the apply stopped."
 )
 
 
@@ -1697,11 +1697,7 @@ class ArchidektClient(AccountRequests):
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
                 # plain words for a member's page or card: never an exception's class name
-                words = (
-                    "Archidekt didn't answer in time."
-                    if isinstance(exc, httpx.TimeoutException)
-                    else "Archidekt couldn't be reached."
-                )
+                words = outage("timeout" if isinstance(exc, httpx.TimeoutException) else "unreachable")
                 raise ArchidektError("unavailable", words, retryable=True) from exc
             if resp.status_code == 429:
                 asked = retry_after_seconds(resp.headers.get("Retry-After"))
@@ -1709,7 +1705,7 @@ class ArchidektClient(AccountRequests):
                 self.pacer.record(False, asked, breaker=patient.get() is None)
                 raise ArchidektError(
                     "rate_limited",
-                    "Archidekt asked the gateway to slow down; try again later",
+                    outage("slow_down", again=True),
                     # what Archidekt asked for, or longer when this 429 opened the breaker
                     retry_after=max(asked, self.pacer.pause_left()),
                 )
@@ -1731,7 +1727,7 @@ class ArchidektClient(AccountRequests):
                 raise ArchidektError("not_found", "Archidekt could not find that deck.")
             if resp.status_code >= 500:
                 self.pacer.record(False)
-                raise ArchidektError("unavailable", "Archidekt had a problem answering.", retryable=True)
+                raise ArchidektError("unavailable", outage("failing"), retryable=True)
             if resp.status_code >= 400:
                 self.pacer.record(True)
                 raise ArchidektError(
@@ -2539,11 +2535,7 @@ class ArchidektClient(AccountRequests):
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
                 # plain words for a member's page or card: never an exception's class name
-                words = (
-                    "Archidekt didn't answer in time."
-                    if isinstance(exc, httpx.TimeoutException)
-                    else "Archidekt couldn't be reached."
-                )
+                words = outage("timeout" if isinstance(exc, httpx.TimeoutException) else "unreachable")
                 raise ArchidektError("unavailable", words, retryable=True) from exc
             self.pacer.record(resp.status_code < 500 and resp.status_code != 429)
         if resp.status_code == 404:
@@ -2551,14 +2543,12 @@ class ArchidektClient(AccountRequests):
         if resp.status_code == 429:
             raise ArchidektError(
                 "rate_limited",
-                "Archidekt asked the gateway to slow down; try again later",
+                outage("slow_down", again=True),
                 retry_after=retry_after_seconds(resp.headers.get("Retry-After")),
             )
         if resp.status_code >= 400:
             status = resp.status_code
-            words = (
-                "Archidekt had a problem answering." if status >= 500 else "Archidekt did not show that page."
-            )
+            words = outage("failing") if status >= 500 else "Archidekt did not show that page."
             raise ArchidektError("unavailable", words, retryable=status >= 500)
         if too_big:
             raise ArchidektError("changed", "the forum page is larger than the gateway reads")

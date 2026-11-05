@@ -87,7 +87,7 @@ from .archidekt import (
     written_text,
 )
 from .archidekt_csv import CsvError, parse_export
-from .busy import BUSY_TEXTS
+from .busy import BUSY_TEXTS, outage
 from .config import LiveSettings, Settings
 from .db import (
     MAX_PROPOSAL_VERSIONS,
@@ -10888,8 +10888,8 @@ class DeckService:
                     )
                 else:
                     state["step"] = (
-                        "Archidekt asked the gateway to slow down, so it is pausing the folder delete "
-                        f"for {wait} second{'' if wait == 1 else 's'}."
+                        f"{outage('slow_down')} The folder delete goes on in {wait} "
+                        f"second{'' if wait == 1 else 's'}."
                     )
                 await asyncio.sleep(wait)
                 state["step"] = step
@@ -10965,7 +10965,7 @@ class DeckService:
                     },
                 )
                 which = f"The deck “{item['name']}”" if item["name"] else "An unnamed deck"
-                why = str(exc).rstrip(".") or "Archidekt did not answer"
+                why = str(exc).rstrip(".") or outage("unavailable").removesuffix(".")
                 kept = "; the snapshots already made are kept." if snapshots else "."
                 raise DeckError(
                     "backup_failed", f"{which} could not be saved first ({why}). Nothing was deleted{kept}"
@@ -12335,9 +12335,8 @@ def _sent(progress: dict[str, Any]) -> dict[str, Any]:
 TRY_AGAIN_KINDS = frozenset({"unavailable", "unreachable", "temporarily_unavailable", "busy", "owner_budget"})
 TRY_AGAIN_NOTE = "Nothing was changed on Archidekt. The change is waiting again, so you can press Try again."
 TRY_AGAIN_STEP = (
-    "Applying stopped because Archidekt didn't answer, and nothing was changed there. The change is "
-    "waiting again: tell the user they can press Try again on its card or review page. Don't retry "
-    "it yourself."
+    f"Applying stopped: {outage('stopped')} The change is waiting again: tell the user they can press "
+    "Try again on its card or review page. Don't retry it yourself."
 )
 NOTHING_WRITTEN = frozenset(
     {"invalid", "forbidden", "not_found", "not_linked", "writes_disabled", "rate_limited", "stale"}

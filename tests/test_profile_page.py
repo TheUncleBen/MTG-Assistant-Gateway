@@ -496,7 +496,9 @@ async def test_the_bell_stays_quiet_when_archidekt_cannot_be_asked(member: Brows
     assert (await member.http.get("/")).status_code == 200
     for path in (P, E, D):  # each page says so, with nothing to press
         page = (await member.http.get(path)).text
-        assert _said(page, "Archidekt did not answer, so your profile and settings can't be shown right now.")
+        assert _said(
+            page, "Archidekt can't be reached right now, so your profile and settings can't be shown."
+        )
         assert "id='pr-" not in page, path
     assert (await member.http.get("/collection")).status_code == 200
 
@@ -532,7 +534,7 @@ def test_the_profile_cards_without_a_profile_say_so() -> None:
     cards = profile_page.cards(None, "c")
     assert set(cards) == {"profile", "email", "defaults"}  # each page says so; nothing stays on Archidekt
     for name, card in cards.items():
-        assert "Archidekt did not answer" in card and "id='pr-" not in card, name
+        assert _said(card, "Archidekt can't be reached right now") and "id='pr-" not in card, name
     assert profile_page.account_cards(None, "c") == "".join(cards.values())
     assert profile_page.collection_visibility(None, "c", "sub") == ""
     assert re.search(
@@ -617,7 +619,7 @@ async def test_a_slow_archidekt_never_holds_the_account_page(stack: Stack, monke
         assert page.status_code == 200 and "Archidekt profile" in page.text
         page = await asyncio.wait_for(b.http.get(P), 5)
         assert page.status_code == 200
-        assert "Archidekt did not answer" in page.text
+        assert _said(page.text, "Archidekt can't be reached right now, so your profile")
         gate.set()
         for _ in range(50):  # the read finishes on its own and is kept for the next load
             if "user-1" in profile_page._PROFILE:
@@ -625,7 +627,7 @@ async def test_a_slow_archidekt_never_holds_the_account_page(stack: Stack, monke
             await asyncio.sleep(0.02)
         assert "user-1" in profile_page._PROFILE
         page = await b.http.get(P)
-        assert "Archidekt did not answer" not in page.text
+        assert not _said(page.text, "Archidekt can't be reached right now, so your profile")
     finally:
         gate.set()
         await b.aclose()

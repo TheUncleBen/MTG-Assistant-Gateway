@@ -10,6 +10,7 @@ from mcp.server.mcpserver import Context
 from mcp_types import CallToolResult
 from pydantic import Field
 
+from ..busy import outage
 from ..cards import PICKER_CARD_URI, PRINTINGS_CARD_URI, ask_choices, tool_meta, with_card
 from ..schemas import change_for_assistant
 from . import bulk
@@ -52,8 +53,8 @@ def not_looked_up(name: str, retry_in: int) -> ScanError:
     if retry_in > 0:
         return ScanError(
             "rate_limited",
-            f"Scryfall asked the gateway to wait, so '{name}' was not looked up yet. Try again after "
-            "the wait in retry_in (seconds).",
+            f"{outage('slow_down', 'Scryfall')} “{name}” was not looked up yet. Try again after the "
+            "wait in retry_in (seconds).",
             extra={"retry_in": retry_in},
         )
     return ScanError(

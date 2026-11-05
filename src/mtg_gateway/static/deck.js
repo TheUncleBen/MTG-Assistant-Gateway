@@ -775,7 +775,7 @@
       drawStats(err.answer);
       if (menu && !menuCard.isConnected) closeMenu();
       if (took === null ? lookOf(plan.changes) !== before : took) {
-        toast("Archidekt didn't answer; this is what the deck shows now.", { warn: true, sticky: true });
+        toast("Archidekt didn't answer in time; this is what the deck shows now.", { warn: true, sticky: true });
         return;
       }
     }

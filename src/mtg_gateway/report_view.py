@@ -21,6 +21,7 @@ from collections import OrderedDict
 from typing import Any
 
 from . import card_models, ui
+from .busy import outage
 from .deck_stats import is_basic_land
 from .decklist import LINE as DECK_LINE
 from .theme import ICON_DATA_URL, icon, plural, time_html, time_text
@@ -308,8 +309,8 @@ def _quantities(value: Any) -> dict[str, int]:
 # What a page says for a research part that failed as an error (the service down, a timeout, a crash on
 # its side): its own words name tools and are kept for the assistant only. A gateway note (a restart
 # in the middle, a refusal it caught) is said as it is.
-RESEARCH_FAILED = "The solo test could not run: the research service did not answer."
-CHECK_FAILED = "The legality check could not run: the research service did not answer."
+RESEARCH_FAILED = f"The solo test could not run: {outage('unreachable', 'the research service')}"
+CHECK_FAILED = f"The legality check could not run: {outage('unreachable', 'the research service')}"
 _TOOL_ERROR = re.compile(r"\s*Error executing tool\b", re.IGNORECASE)
 
 

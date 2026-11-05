@@ -458,7 +458,7 @@ def test_status_when_off_gives_the_reason() -> None:
 
 # Every reason a round deletes nothing has its own next step for the admin overview.
 NEXT_STEP_CASES = {
-    "Authentik could not be reached (ConnectError)": "can reach Authentik at the issuer's address",
+    "Authentik couldn't be reached (ConnectError)": "can reach Authentik at the issuer's address",
     "Authentik answered HTTP 403": "Make a new token and Docker secret",
     "Authentik answered HTTP 401": "Make a new token and Docker secret",
     "Authentik answered HTTP 502": "It tries again by itself",

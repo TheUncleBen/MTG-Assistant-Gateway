@@ -29,7 +29,7 @@ from starlette.responses import JSONResponse, Response
 from . import prefs, ui
 from . import searchpanel as sp
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
-from .busy import busy_response, held_html, same_url
+from .busy import busy_response, held_html, outage, same_url
 from .deckpage import (
     WRITES_OFF_FOLLOW,
     WRITES_OFF_TITLE,
@@ -686,7 +686,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
     def problem(exc: DeckError) -> str:
         text = {
             "rate_limited": str(exc),
-            "unavailable": "Archidekt is not answering right now. Try again later.",
+            "unavailable": outage("unavailable", again=True),
         }.get(exc.kind, "The search could not be run: " + str(exc))
         return f"<p class='notice error'>{_esc(text)}</p>"
 

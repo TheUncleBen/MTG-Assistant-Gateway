@@ -241,9 +241,9 @@
       if (!isNaN(t)) {
         // the day in UTC, as the tools' as_of_note gives it: the card and the answer name one day
         var opts = { dateStyle: "medium", timeZone: "UTC" };
-        text = "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached";
+        text = "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached right now";
       } else if (d.as_of_note) text = String(d.as_of_note);
-      else text = "From the gateway's own copy · Scryfall can't be reached";
+      else text = "From the gateway's own copy · Scryfall can't be reached right now";
     }
     p.textContent = text; p.className = text ? "note" : "note hidden";
   }

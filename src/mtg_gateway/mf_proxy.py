@@ -23,6 +23,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
 from . import dbwait, deck_stats
+from .busy import AGAIN, outage
 from .decklist import front_faces
 from .decks import DeckError
 from .report_view import found_not_verified
@@ -456,7 +457,7 @@ CALL_DEADLINE_SECONDS = 120.0
 LIST_DEADLINE_SECONDS = 10.0
 LIST_RETRY_SECONDS = 60.0
 # A call whose shape is unknown because Mystic Forge's tool listing has not succeeded yet.
-NOT_READY_TEXT = "the research service is not ready yet and nothing was sent; try again later"
+NOT_READY_TEXT = f"The research service isn't ready yet, so nothing was sent. {AGAIN}"
 HEALTH_DEADLINE_SECONDS = 3.0  # the health check's own probe: short, so /healthz stays quick
 HEALTH_CACHE_SECONDS = 30.0  # one probe per half minute at most, however often /healthz is asked
 # A failed probe is held for a few seconds only, so a Mystic Forge that was still starting (it
@@ -922,9 +923,7 @@ class MysticForgeProxy:
         except Exception as exc:
             logger.warning("Mystic Forge call %s failed: %s", name, exc)
             return types.CallToolResult(
-                content=[
-                    types.TextContent(type="text", text="the research service is unavailable right now")
-                ],
+                content=[types.TextContent(type="text", text=outage("unavailable", "The research service"))],
                 isError=True,
             )
 

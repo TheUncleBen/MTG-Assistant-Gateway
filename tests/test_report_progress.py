@@ -7,6 +7,7 @@ and a refused one keeps nothing; a gateway restart in the middle leaves a report
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import time
 
@@ -210,7 +211,7 @@ async def test_a_research_failure_reads_in_words_with_run_again(stack: Stack) ->
         main = page.split("<main", 1)[1]
         assert "Error executing tool" not in main and "run_deck_report" not in main
         solo = main.split("id='rv-solo'", 1)[1].split("</section>", 1)[0]
-        assert RESEARCH_FAILED in solo, solo
+        assert html.escape(RESEARCH_FAILED) in solo, solo
         assert "action='/decks/42/report'" in solo and "Run again" in solo, solo
         md = (await b.http.get(f"/history/reports/{out['report_id']}/export.md")).text
         assert "Error executing tool" not in md and RESEARCH_FAILED in md

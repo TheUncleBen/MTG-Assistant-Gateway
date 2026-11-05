@@ -1224,7 +1224,7 @@ def test_the_picker_finds_the_rows_own_printing_and_waits_out_a_busy_answer(serv
         page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         status = page.locator(".printpick .ppstatus.error")
         status.wait_for(timeout=5000)
-        assert "Printings could not be loaded. Scryfall is not answering right now." in status.inner_text()
+        assert "Printings could not be loaded. Scryfall can't be reached right now." in status.inner_text()
         page.unroute(prints)
         status.get_by_role("button", name="Retry").click()
         page.locator(".printpick .pptile").first.wait_for(timeout=5000)
@@ -1489,8 +1489,8 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
         # one short line, the same words as the chat's printings card (audit P8): the old wording,
         # "Printings and prices as of ... (Scryfall can't be reached right now)", took three lines
         # on a phone; the gateway's own line has the same form, its day in English (audit A2)
-        assert AS_OF_NOTE == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
-        said = f"As of {day} \u00b7 Scryfall can't be reached"
+        assert AS_OF_NOTE == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached right now"
+        said = f"As of {day} \u00b7 Scryfall can't be reached right now"
         assert note.inner_text().strip() == said
         assert note.get_attribute("role") == "status" and "notice" in (note.get_attribute("class") or "")
         lines = note.evaluate(

@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from ..busy import outage
 from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
@@ -879,8 +880,8 @@ class ScanService:
         else:
             n = max(1, self.scryfall.retry_in())
             note = (
-                "not looked up yet; Scryfall asked the gateway to slow down and its lookups are paused for "
-                f"{n} second{'' if n == 1 else 's'}; try again after that"
+                f"Not looked up yet. {outage('slow_down', 'Scryfall')} Try again in {n} "
+                f"second{'' if n == 1 else 's'}."
             )
         return Resolution(inp, "deferred", note=note)
 
@@ -1443,8 +1444,8 @@ class ScanService:
             head = f"{deferred} of {len(results)} names were not looked up"
             if n:
                 out["message"] = (
-                    f"{head}: Scryfall asked us to wait. Keep the resolved cards and resolve the "
-                    f"deferred names again in about {n} s."
+                    f"{head}. {outage('slow_down', 'Scryfall')} Keep the resolved cards and resolve "
+                    f"the deferred names again in about {n} s."
                 )
             else:
                 out["message"] = (

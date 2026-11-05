@@ -43,7 +43,7 @@ from .archidekt import (
     page_turn,
 )
 from .binder_prices import BINDER_PAGE_SIZE, BINDER_READ_PAGES, BinderStore
-from .busy import busy_body, busy_headers, busy_plan, held_html, same_url
+from .busy import busy_body, busy_headers, busy_plan, held_html, outage, same_url
 from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
 from .decks import (
@@ -3113,8 +3113,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if job["state"] == "paused":
             return (
                 f"Paused at {done:,} of {of:,} {noun}: your account has used most of its Archidekt actions "
-                "for now, or Archidekt asked the gateway to slow down. It goes on by itself when there is "
-                "room, and keeps some back for your own changes."
+                f"for now, or {outage('slow_down')} It goes on by itself when there is room, and keeps some "
+                "back for your own changes."
             )
         if job["state"] == "stopped":
             reason = str((job.get("result") or {}).get("stopped") or "it could not go on").rstrip(".")
@@ -3335,7 +3335,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
-            "lookup": "Archidekt is not answering right now. Try again later.",
+            "lookup": outage("unavailable", again=True),
             "link": "Link your Archidekt account on the Account page first.",
             "writes": refusals.WRITES_OFF,
         }

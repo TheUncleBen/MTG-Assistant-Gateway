@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import html
 
+from .busy import outage
+
 # What a member reads when a sign-in cannot be finished for a reason only the gateway's log can
 # explain (a refused client secret, a bad ID token, a missing parameter).
 SIGNIN_FAILED = (
@@ -35,8 +37,11 @@ EXPIRED_APP_BACK = (
     "Go back to Claude, ChatGPT or the app you were connecting, and start connecting again there."
 )
 EXPIRED_TITLE = "Sign-in link expired"
-UNAVAILABLE = "The identity provider is unavailable. Try again later."
-IDP_UNREACHABLE = "The sign-in service can't be reached to confirm your access. Try again later."
+UNAVAILABLE = outage("unavailable", "The sign-in service", again=True)
+IDP_UNREACHABLE = (
+    f"{outage('unavailable', 'The sign-in service').removesuffix('.')}, so your access can't be confirmed. "
+    "Try again later."
+)
 REFUSED = "The app's sign-in request was refused. Start again from the app."
 FORM_EXPIRED = "This form expired. Reload the page and try again."
 TOO_LARGE = "That form was too large."

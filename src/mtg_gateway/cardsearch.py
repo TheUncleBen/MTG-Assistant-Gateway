@@ -28,6 +28,7 @@ from starlette.responses import JSONResponse, Response
 from . import cardquery as cq
 from . import cardsearch_view as cv
 from . import prefs
+from .busy import outage
 from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .scan.service import ScanError
 from .theme import esc as _esc
@@ -391,8 +392,8 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
 
     def problem_text(exc: ScanError) -> str:
         return {
-            "rate_limited": "Scryfall asked the gateway to wait. Try again later.",
-            "unavailable": "Scryfall is not answering right now. Try again later.",
+            "rate_limited": outage("slow_down", "Scryfall", again=True),
+            "unavailable": outage("unavailable", "Scryfall", again=True),
             "busy": "Your other card lookups are still running. Try again when they finish.",
             "invalid": f"Scryfall could not read that search: {exc}",
             "too_long": "This search is too long. Remove some filters or words.",

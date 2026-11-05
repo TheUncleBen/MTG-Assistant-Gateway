@@ -41,6 +41,8 @@ from typing import Any
 
 import httpx
 
+from .busy import outage
+
 logger = logging.getLogger(__name__)
 
 INTERVAL = 3600.0  # seconds between sweeps
@@ -118,7 +120,7 @@ def plan(groups: dict[str, list[dict[str, Any]]], linked: list[str], known: list
 SETUP = "“Optional: removed-member clean-up” in docs/IDP-AUTHENTIK.md"  # section 12, by its heading
 NEXT_STEPS = (
     (
-        "Authentik could not be reached",
+        outage("unreachable", "Authentik").removesuffix("."),
         "Check that the gateway can reach Authentik at the issuer's address "
         "(MTG_OIDC_ISSUER). It tries again by itself.",
     ),
@@ -247,7 +249,9 @@ class AuthentikSweep:
                 follow_redirects=False,
             )
         except httpx.HTTPError as exc:
-            raise SweepRefused(f"Authentik could not be reached ({type(exc).__name__})") from exc
+            raise SweepRefused(
+                f"{outage('unreachable', 'Authentik').removesuffix('.')} ({type(exc).__name__})"
+            ) from exc
         if r.status_code != 200:
             raise SweepRefused(f"Authentik answered HTTP {r.status_code}")
         try:

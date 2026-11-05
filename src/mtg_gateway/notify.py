@@ -45,6 +45,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from . import dbwait
+from .busy import outage
 from .db import Database
 from .theme import esc as _esc
 from .theme import icon, in_app
@@ -900,7 +901,7 @@ def add_stream_route(state: AppState, server: Any) -> None:
             if outcome is Membership.REVOKED:
                 return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
             if outcome is Membership.UNAVAILABLE:
-                return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again later.")
+                return _refuse(503, "unavailable", outage("unavailable", "The sign-in service", again=True))
             if outcome is Membership.SIGN_IN:
                 # none of the member's sign-ins is honoured: the key is kept, and the phone tries
                 # again later (any refusal but its three stop codes) until they sign in again
@@ -919,7 +920,7 @@ def add_stream_route(state: AppState, server: Any) -> None:
             raise
         if upstream is None:
             n.release(key)
-            return _refuse(503, "unavailable", "The notification server isn't answering. Try again later.")
+            return _refuse(503, "unavailable", outage("unavailable", "The notification server", again=True))
         finished = False
 
         async def finish() -> None:

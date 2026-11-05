@@ -156,7 +156,7 @@ async def test_a_live_failure_serves_printings_from_the_copy_with_its_date(tmp_p
         out = await service.printings(AESI)
         assert out["from_local_copy"] is True, handler
         assert out["as_of"] == AS_OF and out["prices_as_of"] == AS_OF
-        assert out["as_of_note"] == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
+        assert out["as_of_note"] == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached right now"
         assert "verif" not in out["as_of_note"].lower()
         assert _by_id(out["cards"]) == _by_id(live["cards"])
         assert [c["scryfall_id"] for c in out["cards"]] == [c["scryfall_id"] for c in live["cards"]]
@@ -197,7 +197,7 @@ async def test_the_tool_and_the_picker_say_the_printings_are_from_the_copy(stack
         "https://scryfall.test", min_interval=0.0, http=httpx.AsyncClient(transport=httpx.MockTransport(down))
     )
     token = await mcp_token(stack.h)
-    line = "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
+    line = "As of 3 Nov 2026 \u00b7 Scryfall can't be reached right now"
     for args in ({"oracle_id": AESI}, {"name": "Aesi, Tyrant of Gyre Strait"}):
         out = (await call(stack.h, token, "card_printings", args))["structuredContent"]
         assert out["ok"] is True, out
@@ -452,7 +452,7 @@ async def test_as_of_is_an_iso_date_time_with_one_wording(tmp_path: Path) -> Non
         when = datetime.fromisoformat(out["as_of"])
         assert when.tzinfo is not None and when.isoformat() == out["as_of"] == AS_OF
         notes.add(out["as_of_note"])
-    assert notes == {"As of 3 Nov 2026 \u00b7 Scryfall can't be reached"}
+    assert notes == {"As of 3 Nov 2026 \u00b7 Scryfall can't be reached right now"}
 
 
 async def test_a_restart_waits_for_the_next_try(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -651,11 +651,14 @@ def test_one_wording_for_the_copys_day_on_the_tools_and_the_pages() -> None:
     """A2: one function says how old the copy is, for the tools and the pages alike: the day in
     English whatever the locale, and with no readable day the copy itself; never "and prices"
     (the pages show no prices from the copy). The tools' separate prices line says the same day."""
-    assert bulk.as_of_line(AS_OF) == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
+    assert bulk.as_of_line(AS_OF) == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached right now"
     late = "2026-01-21T23:30:00-05:00"  # the day in UTC, as Scryfall dates its file
-    assert bulk.as_of_line(late) == "As of 22 Jan 2026 \u00b7 Scryfall can't be reached"
+    assert bulk.as_of_line(late) == "As of 22 Jan 2026 \u00b7 Scryfall can't be reached right now"
     for unread in (None, "", "soon"):
-        assert bulk.as_of_line(unread) == "From the gateway's own copy \u00b7 Scryfall can't be reached"
+        assert (
+            bulk.as_of_line(unread)
+            == "From the gateway's own copy \u00b7 Scryfall can't be reached right now"
+        )
         assert bulk.prices_line(unread) == "Prices are from that copy, not today."
     assert bulk.prices_line(AS_OF) == "Prices are from that day, not today."
     for line in (bulk.as_of_line(AS_OF), bulk.as_of_line(None)):

@@ -312,7 +312,7 @@ class AccountRequests:
         resp = await self._request("PUT", "/users/uploadImage/", token=token, upload=(png, "tmp.png"))
         url = resp.get("imageUrl") if isinstance(resp, dict) else None
         if not isinstance(url, str) or not url.startswith("https://"):
-            raise ArchidektError("contract", "Archidekt did not answer the upload with a picture address")
+            raise ArchidektError("contract", "Archidekt's answer to the upload had no picture address.")
         return url
 
     # -- card packages ---------------------------------------------------------------------------
@@ -345,7 +345,7 @@ class AccountRequests:
             body["parent_folder"] = _id(fields["parent_folder"], "folder ID")
         resp = await self._request("POST", "/decks/packages/", token=token, json_body=body)
         if not isinstance(resp, dict) or not str(resp.get("id") or "").isdigit():
-            raise ArchidektError("contract", "Archidekt did not answer with the new package's ID")
+            raise ArchidektError("contract", "Archidekt's answer had no ID for the new package.")
         return resp
 
     async def update_package(
@@ -438,7 +438,7 @@ class AccountRequests:
         resp = await self._request("POST", "/decks/exportPdf/", token=token, json_body=fields)
         url = resp.get("fileUrl") if isinstance(resp, dict) else None
         if not isinstance(url, str) or not url.startswith("https://"):
-            raise ArchidektError("contract", "Archidekt did not answer with the PDF's address")
+            raise ArchidektError("contract", "Archidekt's answer had no address for the PDF.")
         return url
 
     # -- the member's private profile: /users/{id}/private/ ------------------------------------

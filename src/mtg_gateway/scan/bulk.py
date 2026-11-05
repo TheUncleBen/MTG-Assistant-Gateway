@@ -64,6 +64,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..busy import outage
 from .names import fold
 from .scryfall import PRINT_ORDERS, PRINT_PAGES, ScryfallError, browse_row
 
@@ -152,7 +153,7 @@ def as_of_line(as_of: str | None) -> str:
     day can't be read. Never "and prices": the pages show no prices from the copy."""
     day = _day(as_of)
     where = f"As of {day}" if day else "From the gateway's own copy"
-    return f"{where} \u00b7 Scryfall can't be reached"
+    return f"{where} \u00b7 {outage('unavailable', 'Scryfall').removesuffix('.')}"
 
 
 def prices_line(as_of: str | None) -> str:
@@ -526,7 +527,7 @@ class PrintingsCopy:
     async def _index(self, client: Any) -> dict[str, str]:
         """``default_cards`` in Scryfall's bulk-data index: its ``updated_at`` and download address."""
         if client.retry_in() > 0:
-            raise ScryfallError("rate_limited", "Scryfall asked the gateway to slow down")
+            raise ScryfallError("rate_limited", outage("slow_down", "Scryfall"))
         try:
             resp = await client.http.get(f"{client.base}/bulk-data", headers=client.headers)
         except httpx.HTTPError as exc:

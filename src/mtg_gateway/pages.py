@@ -40,6 +40,7 @@ from . import decks as decks_mod
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
+from .busy import outage
 from .clickguard import GUARD_DWELL_MS, GUARD_SETTLE_MS, form_stamp, guarded_form, submitted_too_soon
 from .db import SESSION_END_NOTICE
 from .decks import (
@@ -2960,9 +2961,7 @@ def _page_step(p: dict[str, Any]) -> str:
         )
     if state == "pending" and p.get("try_again"):
         # Archidekt didn't answer the last apply, and nothing changed there (decks.TRY_AGAIN_KINDS)
-        return (
-            "Archidekt didn't answer, so nothing was changed. The change is waiting again: press Try again."
-        )
+        return f"{outage('stopped')} The change is waiting again: press Try again."
     if state == "pending":
         retry = (
             "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made"
@@ -3127,8 +3126,8 @@ def _progress_html(p: dict[str, Any]) -> str:
     text = "Applying to Archidekt" + (": " + ", ".join(bits) if bits else "") + "."
     if g.get("waiting_for_archidekt"):
         text += (
-            " Archidekt asked us to slow down, so the gateway is waiting about "
-            f"{int(g['waiting_for_archidekt'])} seconds before carrying on by itself."
+            f" {outage('slow_down')} The gateway carries on by itself in about "
+            f"{int(g['waiting_for_archidekt'])} seconds."
         )
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 

@@ -26,7 +26,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import alerts_push, notify, prefs, profile, ui
-from .busy import busy_json_response
+from .busy import busy_json_response, outage
 from .decks import DeckError, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -434,7 +434,7 @@ def cards(
 
     if now is None:
         unread = ui.notice(
-            "Archidekt did not answer, so your profile and settings can't be shown right now. "
+            f"{outage('unavailable').removesuffix('.')}, so your profile and settings can't be shown. "
             "Reload the page to try again.",
             "warn",
             role="status",

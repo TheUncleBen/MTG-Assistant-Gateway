@@ -38,6 +38,7 @@ from typing import Any
 import httpx
 
 from .. import dbwait
+from ..busy import outage
 from ..config import USER_AGENT
 
 logger = logging.getLogger(__name__)
@@ -47,9 +48,10 @@ COLLECTION_MAX = 75
 
 
 # What a member reads when Scryfall is down: plain words, no exception name or HTTP code
-# (whole-application audit, row 12); the log keeps the detail.
-SCRYFALL_UNREACHABLE = "Scryfall couldn't be reached. Try again later."
-SCRYFALL_FAILING = "Scryfall had a problem answering. Try again later."
+# (whole-application audit, row 12); the log keeps the detail. The words are busy.OUTAGE's.
+SCRYFALL_UNREACHABLE = outage("unreachable", "Scryfall", again=True)
+SCRYFALL_TIMEOUT = outage("timeout", "Scryfall", again=True)
+SCRYFALL_FAILING = outage("failing", "Scryfall", again=True)
 
 
 class ScryfallError(Exception):
@@ -373,8 +375,7 @@ class ScryfallClient:
         n = max(1, self.retry_in())
         return ScryfallError(
             "rate_limited",
-            f"Scryfall asked the gateway to slow down, so it is pausing its Scryfall lookups for {n} "
-            f"second{'' if n == 1 else 's'}. Try again after that.",
+            f"{outage('slow_down', 'Scryfall')} Try again in {n} second{'' if n == 1 else 's'}.",
         )
 
     async def _request(
@@ -398,7 +399,8 @@ class ScryfallClient:
                 resp = await self.http.request(method, f"{self.base}{path}", headers=self.headers, **kw)
             except httpx.HTTPError as exc:
                 logger.warning("Scryfall %s %s failed: %s", method, path, exc.__class__.__name__)
-                raise ScryfallError("unavailable", SCRYFALL_UNREACHABLE) from exc
+                words = SCRYFALL_TIMEOUT if isinstance(exc, httpx.TimeoutException) else SCRYFALL_UNREACHABLE
+                raise ScryfallError("unavailable", words) from exc
             finally:
                 self._last = time.monotonic()
                 self.requests += 1

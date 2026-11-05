@@ -1199,7 +1199,7 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
             note = card.locator("#asof")
             assert note.is_visible() and note.get_attribute("role") == "status"
             # the picker's short line, word for word (audit P8); the card never says "and prices"
-            said = f"As of {day} \u00b7 Scryfall can't be reached"
+            said = f"As of {day} \u00b7 Scryfall can't be reached right now"
             assert note.inner_text().strip() == said
             assert note.bounding_box()["y"] < card.locator("#grid").bounding_box()["y"]  # over the list
             # the day can't be read: the gateway's own line, from the link's JSON
@@ -1209,7 +1209,7 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
             card = _open(page, "printings-card", {"structuredContent": summary, **meta})
             card.locator(".tile").nth(2).wait_for()
             assert card.locator("#asof").inner_text().strip() == AS_OF_NOTE
-            assert AS_OF_NOTE == "From the gateway's own copy \u00b7 Scryfall can't be reached"
+            assert AS_OF_NOTE == "From the gateway's own copy \u00b7 Scryfall can't be reached right now"
             # a live list: nothing there
             page.unroute("https://mtg.test/cards/data/*")
             _route(page, printings=PRINTINGS)

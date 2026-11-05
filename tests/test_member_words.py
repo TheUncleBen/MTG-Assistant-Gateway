@@ -87,3 +87,62 @@ def test_prose_says_id_in_capitals() -> None:
                 continue
             found.append(f"{name}:{line}: …{around}…")
     assert not found, "\n".join(found)
+
+
+# -- B-1: one sentence per outage state -------------------------------------------------------------
+
+SERVICE = (
+    r"(Archidekt|Scryfall|Forge|Mystic Forge|[Tt]he research service|Authentik|GitHub|"
+    r"[Tt]he sign-in service|[Tt]he identity provider|[Tt]he notification server)"
+)
+# Any other way of saying a service is down, slow or pausing: busy.OUTAGE says each state once
+OTHER_OUTAGE = re.compile(
+    SERVICE + r"('s \w+)? ("
+    r"is not answering|isn't answering|is not reachable|did not answer|could not be reached"
+    r"|is unavailable|asked us to|asked the gateway to wait|is busy and"
+    r"|didn't answer(?! in time\.| in time;|, so nothing was changed\.)"
+    r"|can't be reached(?! right now)"
+    r")"
+    r"|asked the gateway to slow down(?!, so its requests are paused for now\.| for longer than)"
+    r"|\btry later\b|\bpausing its\b"
+)
+# "can't be reached" as a condition, not as the news itself
+OUTAGE_AS_CONDITION = {"settings_page.py": ("Used only when Scryfall can't be reached.",)}
+
+
+def _static_texts() -> Iterator[tuple[str, int, str]]:
+    """(file, line, text) of each line of the static scripts and cards, comments left out."""
+    for path in sorted((PKG / "static").rglob("*")):
+        if path.suffix not in (".js", ".html"):
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code = line.strip()
+            if not code.startswith(("//", "/*", "*")):
+                yield str(path.relative_to(PKG)), n, code
+
+
+def test_every_outage_is_said_in_the_words_of_one_table() -> None:
+    """B-1: a 429 read "slow down; try again later" in one tool and "paused for now" in the next,
+    the home panel said "did not answer in time" for a 429, a 503 and a refused connection alike,
+    and the site said "can't be reached", "is not answering" and "is busy" for one state. Every
+    surface now takes its sentence from busy.OUTAGE; any other phrasing of a service being down
+    or slow is refused here, in the Python strings and in the static scripts and cards alike."""
+    found = []
+    for name, line, text in [*_words(), *_static_texts()]:
+        for ok in OUTAGE_AS_CONDITION.get(name, ()):
+            text = text.replace(ok, "")
+        if m := OTHER_OUTAGE.search(text):
+            found.append(f"{name}:{line}: {m.group(0)!r} in {text[:120]!r}")
+    assert not found, "\n".join(found)
+
+
+def test_the_outage_table_has_one_sentence_a_state() -> None:
+    from mtg_gateway.busy import AGAIN, OUTAGE, outage
+
+    assert outage("timeout") == "Archidekt didn't answer in time."
+    assert outage("slow_down", "Scryfall", again=True) == (
+        f"Scryfall asked the gateway to slow down, so its requests are paused for now. {AGAIN}"
+    )
+    assert len(set(OUTAGE.values())) == len(OUTAGE)
+    for state, words in OUTAGE.items():
+        assert words.startswith("{s} ") and words.endswith("."), state

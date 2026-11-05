@@ -14,7 +14,7 @@
   var FIN = { nonfoil: "Normal", foil: "Foil", etched: "Etched" };
   var COND = { "": "Not set", NM: "Near Mint (NM)", LP: "Lightly Played (LP)", MP: "Moderately Played (MP)", HP: "Heavily Played (HP)", DMG: "Damaged (DMG)" };
   var LANG = { EN: "English", ES: "Spanish", FR: "French", DE: "German", IT: "Italian", PT: "Portuguese", JA: "Japanese", KO: "Korean", RU: "Russian", ZHS: "Chinese (Simplified)", ZHT: "Chinese (Traditional)" };
-  var NOT_ANSWERING = "Archidekt is not answering right now. Try again later.";
+  var NOT_ANSWERING = "Archidekt can't be reached right now. Try again later.";
   var ICON_X = "<svg class='i' viewBox='0 0 24 24' aria-hidden='true'><path d='M18 6L6 18M6 6l12 12'/></svg>";
 
   function say(text) {

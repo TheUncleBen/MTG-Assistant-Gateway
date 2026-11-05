@@ -39,6 +39,7 @@ from typing import Any
 
 import httpx
 
+from ..busy import outage
 from ..db import Database
 from .scryfall import ScryfallClient, ScryfallError
 
@@ -623,13 +624,11 @@ class ArtIndex:
             try:
                 resp = await self.http.get(url, headers={"User-Agent": self.scryfall.headers["User-Agent"]})
             except httpx.HTTPError as exc:
-                raise ScryfallError(
-                    "unavailable", f"image host unreachable: {exc.__class__.__name__}"
-                ) from exc
+                raise ScryfallError("unavailable", outage("unreachable", "Scryfall's image host")) from exc
             finally:
                 self._last_image = time.monotonic()
         if resp.status_code == 429:
-            raise ScryfallError("rate_limited", "image host asked us to slow down")
+            raise ScryfallError("rate_limited", outage("slow_down", "Scryfall's image host"))
         if resp.status_code != 200 or len(resp.content) > MAX_IMAGE_BYTES:
             logger.info("art gallery: skipping %s (%s, %d bytes)", url, resp.status_code, len(resp.content))
             return None

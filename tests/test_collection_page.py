@@ -216,7 +216,7 @@ async def test_notices_are_strips_with_a_close_button_and_the_words_are_kept(sta
         assert "aria-label='Close' title='Close'" in r.text.split("Added to your binder.")[0][-300:]
         r = await b.http.get("/collection?err=lookup", headers=NAV)
         assert "<div class='notice error' role='alert'>" in r.text
-        assert "Archidekt is not answering right now. Try again later." in r.text
+        assert "Archidekt can&#x27;t be reached right now. Try again later." in r.text
     finally:
         await b.aclose()
 

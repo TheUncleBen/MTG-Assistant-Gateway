@@ -236,7 +236,9 @@ async def test_outside_an_apply_429s_still_count_towards_the_breaker(clock: list
         assert err.value.kind == "rate_limited"
     with pytest.raises(ArchidektError) as err:
         await client.search_decks(name="Sample")
-    assert err.value.kind == "unavailable" and "paused after repeated failures" in str(err.value)
+    assert err.value.kind == "unavailable" and str(err.value) == (
+        "Archidekt failed several times in a row, so its requests are paused for now. Try again later."
+    )
     assert err.value.sent is False  # refused by the pacer: nothing left the gateway
     assert _reads(ark, "/api/decks/v3/") == 5
 
@@ -466,9 +468,8 @@ async def test_outside_an_apply_a_running_pause_refuses_at_once(clock: list[floa
         await client.search_decks(name="Sample")
     # no number of seconds in the words (0.7.46 audit C-15: no time promises); the wait is a field
     assert err.value.kind == "rate_limited" and (
-        "Archidekt asked the gateway to slow down, so its Archidekt requests are paused for now. "
-        "Try again a little later."
-    ) in str(err.value)
+        "Archidekt asked the gateway to slow down, so its requests are paused for now. Try again later."
+    ) == str(err.value)
     assert 20 <= err.value.retry_after <= 21
     assert clock == [] and ark.calls == []
 
