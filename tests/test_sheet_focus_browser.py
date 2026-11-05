@@ -14,13 +14,15 @@ from .test_suggest_browser import Server
 
 pytest.importorskip("playwright")
 
-# the six sheets: the Binder's View (no tags to filter by) and Filters (with tags), card search,
-# My decks, deck search and the precons
+# the seven sheets: the Binder's View (no tags to filter by) and Filters (with tags), card search,
+# My decks and its Packages view (deckpage.deck_list_controls_html, the one sheet in two states),
+# deck search and the precons
 SHEETS = [
     ("binder-view", "/collection", False),
     ("binder-filters", "/collection", True),
     ("cards", "/cards", False),
     ("decks", "/decks", False),
+    ("decks-packages", "/decks?show=packages", False),
     ("search", "/search", False),
     ("precons", "/precons", False),
 ]
