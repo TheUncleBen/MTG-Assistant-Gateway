@@ -164,8 +164,8 @@ def test_a_page_on_the_sheets_entry_shows_the_sheet(
     tags: bool,
 ) -> None:
     """N3: Forward onto the sheet's entry after a Back, and a reload with the sheet open (the
-    app's pull to refresh), show the sheet again, so the next Back closes it and the one after
-    leaves the page; no entry is ever a dead press."""
+    app's pull to refresh), show the sheet again, so the next Back closes it (on the page, in the
+    same document) and the one after leaves the page; no entry is ever a dead press."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -197,10 +197,52 @@ def test_a_page_on_the_sheets_entry_shows_the_sheet(
         page.locator("#sp-filters.open").wait_for()
         assert page.evaluate(WHERE) == "sheet", (name, page.evaluate(WHERE))
         page.go_back()
-        page.wait_for_url(here)
+        _closed_on(page, here, name, "back after a reload")
+        page.go_back()
+        page.wait_for_url(f"{server.base}{PREV}")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("name,path,kind", LIVE)
+def test_a_filter_set_after_a_reload_with_the_sheet_open_stays_in_the_address(
+    server: Server,  # noqa: F811
+    name: str,
+    path: str,
+    kind: str,
+) -> None:
+    """N3, the reload case as the normal one: a filter set in the sheet after a reload with it
+    open is kept by Back (the sheet closes onto the filtered address, a reload shows the same
+    list) and one more Back leaves the page. Chromium (and so the app's WebView) goes back from
+    the reloaded entry to the page's own entry under it within the same document, which is what
+    carries the address: the page's script must still be the one that was running."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360, "light", exe)
+        page.goto(f"{server.base}{PREV}", wait_until="networkidle")
+        page.goto(f"{server.base}{path}", wait_until="networkidle")
+        here = page.url
+        _open_sheet(page)
+        page.reload(wait_until="networkidle")
+        page.locator("#sp-filters.open").wait_for()
         page.wait_for_load_state("networkidle")
-        got = page.evaluate(FREE)
-        assert got["open"] is False and got["inert"] == 0, (name, got)
+        assert page.url == here, (name, page.url)
+        _tick(page, kind)
+        page.wait_for_url(lambda u: u != here)
+        page.wait_for_load_state("networkidle")
+        page.wait_for_function("() => !document.querySelector('[aria-busy=true]')")
+        filtered = page.url
+        sig = page.evaluate(SIG)
+        page.evaluate("() => { window.sameDocument = true; }")
+        page.go_back()
+        _closed_on(page, filtered, name, "back")
+        assert page.evaluate("() => window.sameDocument === true"), (name, "Back loaded the page anew")
+        page.reload(wait_until="networkidle")
+        page.wait_for_function("() => !document.querySelector('[aria-busy=true]')")
+        assert page.url == filtered and page.evaluate(SIG) == sig, (name, page.url, page.evaluate(SIG), sig)
         page.go_back()
         page.wait_for_url(f"{server.base}{PREV}")
         assert errors == []
