@@ -248,9 +248,8 @@ def test_back_closes_an_open_sheet_and_no_way_of_closing_it_leaves_an_entry_behi
     """Audit D4 on 099f600a: the sheet pushed no history entry, so Android's Back key left the
     page with the sheet open. Now, as the boxes and menus do, an open sheet holds one entry: Back
     closes it (the page stays, the focus goes back to the button), and closing it by ×, Escape or
-    its backdrop gives the entry back, so the next Back leaves the page. On deck search, where a
-    filter applies at once and pushes an entry of its own, Back undoes the filter first and closes
-    the sheet next."""
+    its backdrop gives the entry back, so the next Back leaves the page. A filter set inside the
+    sheet: tests/test_sheet_history_browser.py."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -282,22 +281,6 @@ def test_back_closes_an_open_sheet_and_no_way_of_closing_it_leaves_an_entry_behi
             assert opener.evaluate("e => e === document.activeElement"), (name, way, page.evaluate(WHERE))
             # the sheet's entry is given back: this page's own entry is the one left
             page.wait_for_function("() => history.state === null")
-            page.go_back()
-            page.wait_for_url(prev)
-        if path == "/search":
-            page.goto(f"{server.base}{path}", wait_until="networkidle")
-            here = page.url
-            _open_sheet(page)
-            page.locator("#sp-filters select").first.select_option(index=1)
-            page.wait_for_url(lambda u: u != here)
-            assert page.locator("#sp-filters.open").count() == 1
-            page.go_back()
-            page.wait_for_url(here)
-            page.wait_for_timeout(100)
-            assert page.locator("#sp-filters.open").count() == 1, (name, "Back undid the filter")
-            page.go_back()
-            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
-            assert page.url == here
             page.go_back()
             page.wait_for_url(prev)
         assert errors == []

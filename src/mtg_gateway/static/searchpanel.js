@@ -90,9 +90,22 @@
   var sheetScrim = null, madeInert = [];
   // the open sheet holds one history entry, as the boxes (static/box.js) and menus do, so the
   // phone's Back key closes it instead of leaving the page (audit D4); closing it any other way
-  // gives the entry back, so the next Back leaves the page as it would have
-  var pushed = false, ignorePop = false;
+  // gives the entry back, so the next Back leaves the page as it would have. Whichever way it
+  // closes, the history is as it was before the sheet opened, with the page's current address
+  // (audit N1): a filter set in the sheet changes the address in place through address() below,
+  // which keeps the entry's state and remembers the address (sheetHref) for the entry under the
+  // sheet's, which gets it when the sheet's entry goes
+  var pushed = false, ignorePop = false, sheetHref = null, carry = null, afterPop = null;
   function ownEntry() { return !!(history.state && history.state.spsheet); }
+  // the page's own address for a filter applied in place (static/cardsearch.js, decks.js,
+  // precons.js, collection.js, search.js while the sheet is open): the entry keeps its state
+  function address(url) {
+    try { history.replaceState(history.state, "", url); } catch (err) { /* a sandboxed frame */ }
+    if (sheetOpen()) sheetHref = location.href;
+  }
+  function setState(state) {
+    try { history.replaceState(state, "", location.href); } catch (err) { /* the entry stays */ }
+  }
   // another script's own back() still on its way (a menu's, the drop-downs'): its popstate is
   // not a Back press on the sheet
   function otherBackPending() {
@@ -147,13 +160,13 @@
     sheet.setAttribute("role", "dialog");
     sheet.setAttribute("aria-modal", "true");
     pageInert(true);
+    // ``pushed`` already: the page came onto the sheet's own entry (a reload, Forward)
     if (!pushed) { try { history.pushState({ spsheet: 1 }, ""); pushed = true; } catch (err) { pushed = false; } }
+    sheetHref = location.href;
     var c = $(".sp-sheet-head .close", sheet);
     if (c) c.focus();
   }
-  // ``fromHistory``: a Back press took the sheet's entry already. A filter that applies at once
-  // (deck search) pushes an entry of its own over the sheet's: then the sheet's entry is not the
-  // one the page is on and stays (Back lands on it with the sheet closed, one press more).
+  // ``fromHistory``: a Back press took the sheet's entry already
   function closeSheet(fromHistory) {
     if (!sheetOpen()) return;
     sheet.classList.remove("open");
@@ -163,9 +176,11 @@
     pageInert(false);
     if (sheetScrim) { sheetScrim.remove(); sheetScrim = null; }
     if (pushed && !fromHistory && ownEntry()) {
-      // going back over the sheet's entry fires popstate later; that one is ours, not a Back press
+      // going back over the sheet's entry fires popstate later; that one is ours, not a Back
+      // press, and it puts the sheet's address on the entry it lands on
       ignorePop = true;
-      try { history.back(); } catch (err) { ignorePop = false; }
+      carry = sheetHref;
+      try { history.back(); } catch (err) { ignorePop = false; carry = null; }
     }
     pushed = false;
     if (openBtn) openBtn.setAttribute("aria-expanded", "false");
@@ -176,10 +191,39 @@
     if (back) back.focus();
   }
   window.addEventListener("popstate", function (e) {
-    if (ignorePop) { ignorePop = false; return; }
+    if (ignorePop) {
+      ignorePop = false;
+      if (carry) { address(carry); carry = null; }
+      if (afterPop) { var go = afterPop; afterPop = null; go(); }
+      return;
+    }
+    if (e.state && e.state.spsheet) {
+      // Forward onto the sheet's entry (audit N3): the entry means the sheet is open, so it
+      // opens again; at a width without a sheet the entry is the page's own
+      if (!sheetOpen()) { if (phoneQuery && phoneQuery.matches && sheet) { pushed = true; openSheet(); } else setState(null); }
+      return;
+    }
     if (!sheetOpen() || !pushed || otherBackPending()) return;
-    if (e.state && e.state.spsheet) return;  // back onto the sheet's own entry: it stays open
     closeSheet(true);
+    if (sheetHref) address(sheetHref);
+  });
+  // the page loaded on the sheet's entry (a reload with the sheet open, the app's pull to
+  // refresh: audit N3): the sheet shows, so Back closes it as before the reload
+  if (ownEntry()) { if (phoneQuery && phoneQuery.matches && sheet) { pushed = true; openSheet(); } else setState(null); }
+  // a filter in the open sheet that sends the form (the Binder's tag, a precons set, Show on
+  // most panels): the sheet's entry goes back first, then the form goes, so the new page is one
+  // Back from the page the sheet opened on (audit N2: the entry stayed, one dead Back). A page
+  // script that takes the submit itself (deck search, card search) has stopped it before this
+  document.addEventListener("submit", function (e) {
+    if (e.defaultPrevented || e.target !== form || !sheetOpen() || !pushed || !ownEntry()) return;
+    e.preventDefault();
+    var submitter = e.submitter && e.submitter.form === form ? e.submitter : null;
+    pushed = false;
+    ignorePop = true;
+    afterPop = function () {
+      if (form.requestSubmit) { if (submitter) form.requestSubmit(submitter); else form.requestSubmit(); } else form.submit();
+    };
+    try { history.back(); } catch (err) { ignorePop = false; afterPop = null; form.submit(); }
   });
   // how many filters are in use: a group of boxes counts once, a text box when it has text, a
   // drop-down when it is not on its first choice
@@ -310,5 +354,5 @@
     });
   }
 
-  window.MtgSearchPanel = { openSheet: openSheet, closeSheet: closeSheet, isSheetOpen: sheetOpen, badge: badge };
+  window.MtgSearchPanel = { openSheet: openSheet, closeSheet: closeSheet, isSheetOpen: sheetOpen, badge: badge, address: address };
 })();

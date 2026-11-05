@@ -68,7 +68,9 @@
         if (!d || !d.ok) return;
         replace(d);
         var url = "/precons" + (p.toString() ? "?" + p.toString() : "");
-        if (window.history && history.replaceState) history.replaceState(null, "", url);
+        // through the panel (static/searchpanel.js address): the entry keeps its state (audit N1)
+        var P = window.MtgSearchPanel;
+        if (P && P.address) P.address(url); else if (window.history && history.replaceState) history.replaceState(history.state, "", url);
       })
       .catch(function (e) {
         if (!e || e.name !== "AbortError") main.removeAttribute("aria-busy");

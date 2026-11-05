@@ -440,7 +440,9 @@
         if (nomatch) nomatch.hidden = d.total > 0;
         listQuery = (params.get("q") || "").trim().toLowerCase();
         if (!/[?&]view=/.test(location.search)) params.delete("view");
-        try { history.replaceState(history.state, "", "/collection" + (params.toString() ? "?" + params.toString() : "")); } catch (err) { /* keep the address */ }
+        var addr = "/collection" + (params.toString() ? "?" + params.toString() : "");
+        if (window.MtgSearchPanel) window.MtgSearchPanel.address(addr);
+        else try { history.replaceState(history.state, "", addr); } catch (err) { /* keep the address */ }
         say(d.count_text + (params.get("q") ? " match “" + params.get("q") + "”." : "."));
       }).catch(function (d) {
         if (mine !== searchSeq) return;

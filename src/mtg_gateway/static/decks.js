@@ -246,9 +246,12 @@
     }
     list.dispatchEvent(new CustomEvent("decks:marked", { bubbles: true }));
   }
+  // through the panel (static/searchpanel.js address): the entry keeps its state, the sheet's
+  // while it is open (audit N1: a null state wiped the sheet's entry)
   function setAddress() {
-    var q = params().toString();
-    history.replaceState(null, "", "/decks" + (q ? "?" + q : ""));
+    var q = params().toString(), url = "/decks" + (q ? "?" + q : "");
+    var P = window.MtgSearchPanel;
+    if (P && P.address) P.address(url); else history.replaceState(history.state, "", url);
   }
   list.addEventListener("decks:loaded", function () { if (pkgs || pkgFailed) mark(); else readPackages(); });
   if (!list.hasAttribute("data-decks-src")) setTimeout(readPackages, 0); // the list came drawn
@@ -265,8 +268,7 @@
     load(list, "/api/decks/mine?" + api.toString())
       .then(function (data) {
         if (!data) return;  // an older load: a newer one draws and sets the address
-        var q = p.toString();
-        history.replaceState(null, "", "/decks" + (q ? "?" + q : ""));
+        setAddress();
       })
       .catch(function () { failed(list); });
   }

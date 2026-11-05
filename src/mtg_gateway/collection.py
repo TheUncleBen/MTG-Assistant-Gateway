@@ -2592,22 +2592,31 @@ ul.colllist .cardc .tagrow{margin-top:.25rem}
   min-height:0;margin:0;flex:none;accent-color:var(--orange-ctl)}
 .mtgbox .body label.tagck .sw{width:.75rem;height:.75rem}
 .mtgbox .body label.tagck .t{min-width:0;overflow-wrap:anywhere}
-/* notices are strips at the top of the page with a × to close */
-#col-notes .notice{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .75rem;overflow-wrap:anywhere}
+/* notices are strips at the top of the page with a × to close. The frame beside the words (the
+   strip's side padding, the × and the gap after it) is sized in px, as the × is, so large text
+   widens the words' column and not the frame: at 360 px and 200% text the frame in rem took
+   101 px and "Bannerkeeper" broke in two in a 227 px column (final polish Z6); it takes 70 */
+#col-notes .notice{display:flex;align-items:flex-start;gap:7px;margin:0 0 .75rem;padding-left:12px;
+  padding-right:12px;overflow-wrap:anywhere}
 #col-notes .notice .nx{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
-  width:var(--ctl);height:var(--ctl);margin:-.5rem 0 -.5rem -.4rem;border-radius:50%;color:inherit;flex:none}
+  width:var(--ctl);height:var(--ctl);margin:-.5rem 0 -.5rem -5px;border-radius:50%;color:inherit;flex:none}
 #col-notes .notice .nx:hover{background:rgba(0,0,0,.08)}
 #col-notes .notice .nx:focus-visible{outline:2px solid var(--focus)}
 #col-notes .notice .nx svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;
   stroke-linecap:round}
 #col-notes .notice .nt{flex:1 1 0;min-width:0}
 #col-notes .notice p{margin:0}
-/* a link in a strip ("Show them first" on the added-cards line) is a 44 px target that still reads
-   as part of its line (audit C4: 108×19 px): an inline-block whose padding makes it 44 px tall on
-   its line, which grows to hold it, so the hit box reaches no words of the line above or below (an
-   inline box's padding did, audit D7) and the link never splits over two lines */
-#col-notes .notice a:not(.btn){display:inline-block;line-height:1.35;
-  padding:calc((44px - 1.35em) / 2) .25rem;margin:0 -.25rem}
+/* the added-cards line is one target: its whole body (the words beside the ×) opens the
+   newest-first view, with "Show them first" underlined as the link's words (audit C4: a 108×19 px
+   inline link; D7 and N4: a 44 px box in the line reached the other lines, then grew its line and
+   the strip by 25 px). The body's box is the strip's full height, overhanging the strip's padding
+   as the × does, and 44 px at the least (less than the × takes), so the strip is no taller than
+   its words and their leading is even */
+#col-notes .notice a.nt{display:block;box-sizing:border-box;color:inherit;text-decoration:none;
+  min-height:44px;margin:-.7rem 0;padding:.7rem 0;border-radius:4px}
+#col-notes .notice a.nt .u{text-decoration:underline}
+#col-notes .notice a.nt:hover .u{text-decoration-thickness:2px}
+#col-notes .notice a.nt:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 #col-notes .notice ul{margin:.45rem 0 0;padding-left:1.2rem;font-weight:400;line-height:1.45}
 #col-notes .notice li+li{margin-top:.3rem}
 .collection .ui-widgets{margin:0 0 1rem}
@@ -3237,25 +3246,32 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 qs = {k: lq[k] for k in ("q", "tag") if lq[k]} | {"sort": "added", "dir": "desc"}
                 first = "/collection?" + urlencode(qs | ({"view": view} if view else {}))
                 line = strip(
-                    f"{_esc(cards)} {verb} shown {where}. <a href='{_esc(first)}'>Show them first</a>",
+                    f"{_esc(cards)} {verb} shown {where}. <span class='u'>Show them first</span>",
                     "info",
                     html=True,
+                    link=first,
                 )
         return {"got": got, "whole": whole, "added": shown_rows, "line": line, "binder": binder}
 
-    def strip(text: str, kind: str, *, html: bool = False, remember: str = "") -> str:
+    def strip(text: str, kind: str, *, html: bool = False, remember: str = "", link: str = "") -> str:
         """A notice strip at the top of the page, with a × to close (the page's script hides it).
         ``remember``: a name the script keeps the close under on this browser, so the strip stays
         closed on later visits (the price-sort note, re-audit N10). The strip is a flex row of two:
         the × and the body (``.nt``: the words, with an import result's list or a bulk Undo), so the
         body takes the room beside the × whatever it holds (audit C1: as loose text and a list it
-        was two items, the × on a row of its own or the list beside the words)."""
+        was two items, the × on a row of its own or the list beside the words). ``link``: the body
+        is one link to that address (the added-cards line, audit N4)."""
         x = (
             "<button type='button' class='nx' aria-label='Close' title='Close' data-dismiss>"
             f"{icon('x')}</button>"
         )
+        body = text if html else _esc(text)
+        if link:
+            body = f"<a class='nt' href='{_esc(link)}'>{body}</a>"
+        else:
+            body = f"<div class='nt'>{body}</div>"
         out = ui.notice(
-            f"{x}<div class='nt'>{text if html else _esc(text)}</div>",
+            f"{x}{body}",
             kind,
             html=True,
             role="alert" if kind == "error" else "status",

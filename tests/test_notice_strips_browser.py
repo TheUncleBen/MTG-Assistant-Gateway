@@ -62,9 +62,15 @@ STRIPS = """() => {
     strips: [...document.querySelectorAll('.notice')].filter(shown).map(n => {
       const cs = getComputedStyle(n), nb = n.getBoundingClientRect();
       const content = n.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const pad = parseFloat(cs.paddingTop);
       const x = n.querySelector(':scope > .nx');
       // the words' own box where they have one (the Binder's strips: .nt beside the ×)
       const nt = n.querySelector(':scope > .nt');
+      // the room the × takes in the row (its box less the padding it overhangs), and the body's
+      // own box (its line boxes, or its least height) less the padding it overhangs
+      const xrow = x ? x.getBoundingClientRect().height + 2 * parseFloat(getComputedStyle(x).marginTop) : 0;
+      const ns = nt ? getComputedStyle(nt) : null;
+      const body = nt ? nt.clientHeight - parseFloat(ns.paddingTop) - parseFloat(ns.paddingBottom) : 0;
       const words = text(n, t => !inBtn(t));
       const btns = [...n.querySelectorAll('.btn, button')].filter(b => !b.classList.contains('nx'))
         .filter(shown).map(b => {
@@ -79,9 +85,18 @@ STRIPS = """() => {
           return {text: b.textContent.trim(), box: box(b.getBoundingClientRect()),
             lines: lines(t.rects).length, broken: t.broken, natural: Math.round(natural)};
         });
+      // the gaps between the sentence's lines (a list's lines have their own leading): even
+      // when every one is the same (audit N4: a 44 px link box in the last line opened its gap)
+      const bts = [...n.querySelectorAll('.btn, button')].filter(b => !b.classList.contains('nx'))
+        .map(b => b.getBoundingClientRect());
+      const rows = lines(text(n, t => !inBtn(t) && !t.parentElement.closest('ul')).rects);
+      const withBtn = (l) => bts.some(b => b.top < l.bottom && l.top < b.bottom);
+      const gaps = [];
+      for (let i = 1; i < rows.length; i++)
+        if (!withBtn(rows[i]) && !withBtn(rows[i - 1])) gaps.push(rows[i].top - rows[i - 1].top);
       return {cls: n.className, text: n.textContent.trim().replace(/\\s+/g, ' ').slice(0, 60),
         box: box(nb), content: Math.round(content), x: x ? box(x.getBoundingClientRect()) : null,
-        nt: nt ? Math.round(nt.clientWidth) : null,
+        nt: nt ? Math.round(nt.clientWidth) : null, gaps, pad, xrow, body,
         lines: lines(words.rects), broken: words.broken, btns,
         // a link's box, how many pieces it is in, and the words of the other lines its box reaches
         links: [...n.querySelectorAll('a:not(.btn)')].filter(shown).map(a => {
@@ -137,6 +152,10 @@ def _check(where: str, got: dict, *, expect: str, touch: bool) -> None:
         if len(s["lines"]) > 1:
             assert _column(s) >= TEN_EM, (where, _column(s), s)
         if s["x"]:
+            # the strip's frame beside the words (its edges, the × and the gap) is sized in px,
+            # so large text widens the words' column and not the frame (final polish Z6: at 360 px
+            # and 200% text the frame took 101 px and "Bannerkeeper" broke in two)
+            assert s["box"]["width"] - s["nt"] <= 80, (where, s["box"]["width"], s["nt"])
             first = s["lines"][0]
             # the × shares the words' first line: beside it, not on a row of its own above
             assert s["x"]["top"] < first["bottom"] and first["top"] < s["x"]["bottom"], (where, s)
@@ -151,12 +170,20 @@ def _check(where: str, got: dict, *, expect: str, touch: bool) -> None:
             if b["lines"] > 1:
                 assert b["natural"] > s["content"], (where, b, s)
             assert bb["width"] >= 44, (where, b)
+        # the sentence's lines keep one leading: no line box grown by a target in it
+        assert max(s["gaps"], default=0) - min(s["gaps"], default=0) <= 1, (where, s["gaps"], s["text"])
         for a in s["links"]:
-            # one piece, on its own line's row: its hit box reaches no words of the line above or
-            # below (audit D7 on 099f600a: the inline padding that made it 44 px covered them)
-            assert a["pieces"] == 1 and a["over"] == [], (where, a)
-            if a["text"] == "Show them first" and touch:
+            # a link's hit box reaches no words of the line above or below (audit D7 on 099f600a:
+            # the inline padding that made "Show them first" 44 px covered them; it is a button
+            # now, checked above with the strip's other buttons: audit N4)
+            assert a["over"] == [], (where, a)
+            if "Show them first" in a["text"]:
+                # the whole body is the target, 44 px at the least, and the strip is no taller
+                # than its words (and their leading is even, above): the body overhangs the
+                # strip's padding as the × does, so only a one-line strip grows, by a few px
                 assert a["box"]["height"] >= 44 and a["box"]["width"] >= 44, (where, a)
+                least = max(s["body"], s["xrow"])
+                assert s["box"]["height"] <= least + 2 * s["pad"] + 1, (where, s)
 
 
 def _jobs(srv: Server, jid: str, state: str, done: int, result: dict | None = None) -> None:
@@ -294,7 +321,11 @@ def test_every_notice_keeps_its_x_its_words_and_its_buttons_in_the_strip(
         page.locator("#col-notes .notice[data-strip] button", has_text="Undo").click()
         page.locator("#col-notes .notice[data-strip]", has_text="back in your binder").wait_for()
         page.context.clear_cookies()
-        page.locator("li[data-id]").first.locator("form.qty button[value=inc]").click()
+        # the strip names the card: the sweep's long name, whose "Bannerkeeper" broke in two at
+        # 360 px and 200% text in a 210 px column (final polish Z6)
+        page.locator("li[data-id]", has_text="Bannerkeeper").first.locator(
+            "form.qty button[value=inc]"
+        ).click()
         page.locator("#col-notes .notice[data-strip]", has_text="signed out").wait_for()
         _check(f"Sign in @{width} {zoom}", page.evaluate(STRIPS), expect="signed out", touch=touch)
         assert errors == []

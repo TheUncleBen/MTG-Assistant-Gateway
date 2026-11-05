@@ -105,7 +105,12 @@
           if (!fresh) throw new Error("no results");
           results.replaceWith(document.importNode(fresh, true));
           if (count && own) own.textContent = count.textContent;
-          if (push) history.pushState({ search: true }, "", url);
+          // each search is an entry (Back undoes it); a filter picked in the open phone sheet
+          // changes the sheet's own entry instead, as the other panels' live filters do, so Back
+          // closes the sheet onto this address (audit N1)
+          var P = window.MtgSearchPanel;
+          if (push && P && P.isSheetOpen()) P.address(url);
+          else if (push) history.pushState({ search: true }, "", url);
           document.dispatchEvent(new CustomEvent("decks:loaded", { bubbles: true }));  // the tiles' ⋮
         })
         .catch(function (err) {
