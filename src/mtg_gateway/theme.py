@@ -2061,7 +2061,9 @@ CARD_MENU_CSS = """
 /* its action (Open Wants, Open the watchlist) is a button, finger-sized on a phone or the Fold */
 .toast.cards-toast a.btn{text-decoration:none}
 .toast.cards-toast .btn{min-height:44px}
-.toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
+/* the check mark sits in the message's first line, the text's size (final polish AA2) */
+.toast.cards-toast .ok{width:1.15em;height:1.15em;vertical-align:-.2em;margin-right:.35em;fill:none;
+  stroke:var(--green-text);stroke-width:2.4}
 """
 CSS += CARD_MENU_CSS
 # the deck, folder and row menus and the boxes (static/menus.js)
