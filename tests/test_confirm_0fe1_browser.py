@@ -283,7 +283,7 @@ def test_switches_keep_equal_parts_in_balanced_rows(server: Server, site) -> Non
 
 # -- NA5 and AD2: the tab bar's count -------------------------------------------------------------
 
-BADGE = """() => {
+BADGE = """(textZoom) => {
   const nb = document.querySelector('.tabbar > a .nb');
   if (!nb) return ['no count'];
   const tab = nb.closest('a'), svg = tab.querySelector('svg'), bar = tab.closest('.tabbar');
@@ -298,7 +298,7 @@ BADGE = """() => {
   // a capped size: no taller than the 22 px icon's corner allows (NA5: 25 px at a 28 px root);
   // under a text-only zoom (which scales px text too) its box follows its own line
   const fs = parseFloat(getComputedStyle(nb).fontSize);
-  if (b.height > Math.max(20.5, fs * 1.25)) out.push('the count is ' + Math.round(b.height) + 'px tall');
+  if (b.height > (textZoom ? Math.max(20.5, fs * 1.25) : 20.5)) out.push('the count is ' + Math.round(b.height) + 'px tall');
   if (ox * oy > 0.3 * i.width * i.height) out.push('the count covers ' + Math.round(100 * ox * oy / (i.width * i.height)) +
     '% of the icon');
   return out;
@@ -336,7 +336,7 @@ def test_the_tab_bar_count_stays_inside_its_tab_and_off_the_icon(
             page = ctx.new_page()
             for path in ("/precons", "/decks"):
                 _goto(page, server, path, zoom)
-                problems += [f"{path} @{tag}: {f}" for f in page.evaluate(BADGE)]
+                problems += [f"{path} @{tag}: {f}" for f in page.evaluate(BADGE, zoom == "text")]
             ctx.close()
         browser.close()
     assert problems == [], "\n".join(problems)
