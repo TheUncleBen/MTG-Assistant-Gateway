@@ -336,6 +336,9 @@ class PrintingsCopy:
         self._conn: sqlite3.Connection | None = None
         self._opened: tuple[int, int, int] | None = None
         self._meta: dict[str, Any] = {}
+        # the list of names worked out from an older copy's printings, and the file it is for
+        self._derived_names: list[str] | None = None
+        self._derived_for: Any = None
         self._damaged_stamp: tuple[int, int, int] | None = None
         self._task: asyncio.Task[None] | None = None
 
@@ -761,13 +764,27 @@ class PrintingsCopy:
     def card_names_now(self) -> list[str]:
         """Every card's name as Scryfall's card-name catalog lists it (no tokens, emblems or other
         extras), from the copy: the name catalog's stand-in while Scryfall can't send its own
-        (0.7.46 sweep B-4). Empty without a copy, for one turned off or unreadable, and for a copy
-        built before it kept the list (the next day's copy has it). Blocking: call it in a thread."""
+        (0.7.46 sweep B-4). A copy built before it kept the list has it worked out from its own
+        printings, once per file (the first day after an upgrade). Empty without a copy, and for
+        one turned off or unreadable. Blocking: call it in a thread."""
         return self._reading(self._card_names, [])
 
     def _card_names(self) -> list[str]:
         with self._lock:
-            if self._open() is None:
+            conn = self._open()
+            if conn is None:
                 return []
             blob = self._meta.get(CARD_NAMES_KEY)
-            return [n for n in zlib.decompress(blob).decode().split("\n") if n] if blob else []
+            if blob:
+                return [n for n in zlib.decompress(blob).decode().split("\n") if n]
+            if self._derived_names is None or self._derived_for != self._opened:
+                zdict = self._meta.get("zdict") or b""
+                names: set[str] = set()
+                for (row,) in conn.execute("SELECT row FROM printings"):
+                    z = zlib.decompressobj(zdict=zdict)
+                    card = json.loads(z.decompress(row) + z.flush())
+                    name = str(card.get("name") or "")
+                    if name and card.get("layout") not in CATALOG_EXTRAS:
+                        names.add(name)
+                self._derived_names, self._derived_for = sorted(names), self._opened
+            return list(self._derived_names)

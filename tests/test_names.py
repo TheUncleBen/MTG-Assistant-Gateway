@@ -353,3 +353,41 @@ def test_unknown_names_without_scryfalls_catalog_use_the_printings_copys_names(t
 
     assert asyncio.run(later()) is False
     assert service.names.known("Filler Card 3") is True
+
+
+def test_a_copy_built_before_it_kept_the_names_still_lists_them(tmp_path) -> None:
+    """B-4, confirmation round (0fe11813): a printings copy built by an older gateway has no list of
+    names, so the first day after an upgrade was still slow (9.56 s, 20 requests for six unknown
+    names). The copy works the list out from its own printings when it has none."""
+    import gzip
+    import json
+    import sqlite3
+
+    from mtg_gateway.scan.bulk import CARD_NAMES_KEY, PrintingsCopy
+
+    sf = FakeScryfall()
+    body = gzip.compress("".join(json.dumps(c) + "\n" for c in sf.cards).encode())
+    path = "/default-cards/default-cards-20261103220649.jsonl.gz"
+    sf.bulk_files = {path: body}
+    sf.bulk_index = [
+        {
+            "object": "bulk_data",
+            "type": "default_cards",
+            "updated_at": "2026-11-03T22:06:49.499+00:00",
+            "jsonl_download_uri": f"https://data.scryfall.io{path}",
+            "compressed_size": len(body),
+        }
+    ]
+    service = _service(sf)
+    copy = PrintingsCopy(tmp_path, lambda: service.scryfall)
+    copy.min_printings = 1
+    assert asyncio.run(copy.refresh())
+    expected = copy.card_names_now()
+    assert expected == sorted({c["name"] for c in sf.cards if c.get("layout") not in EXTRA_LAYOUTS})
+    # the same copy as an older gateway built it: no list of names
+    conn = sqlite3.connect(copy.path)
+    conn.execute("DELETE FROM meta WHERE key = ?", (CARD_NAMES_KEY,))
+    conn.commit()
+    conn.close()
+    older = PrintingsCopy(tmp_path, lambda: service.scryfall)
+    assert older.card_names_now() == expected
