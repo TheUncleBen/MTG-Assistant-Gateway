@@ -1097,7 +1097,10 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .home details.connect .addrline code{word-break:break-all;font-size:.9rem}
 /* the keyboard shortcuts box (static/sitesearch.js) */
-.mtgbox dl.keys{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem 1rem;margin:0}
+/* one row a key (each dt and its dd in a div of their own: in one wrapping row for the whole
+   list, a key followed the previous key's words where they left room, confirmation NA2) */
+.mtgbox dl.keys{display:flex;flex-direction:column;gap:.4rem;margin:0}
+.mtgbox dl.keys > div{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem 1rem}
 /* the key column is 6em wide (every key fits); the words take the rest of the row, or, when
    less than 12em is left beside the key (200% text on a phone), the row under it whole
    (final polish P-7: an 89 px column broke every word) */
@@ -1138,6 +1141,9 @@ ul.decklist.skeleton>li{height:230px;list-style:none}
    (z-index 20), so a tap on a row can never land on Save changes underneath. */
 .topbar:focus-within{z-index:25}
 body .tabbar:has(details.more[open]){z-index:25}
+/* static/topbar.js: a box 1em square in the labels' font, which tells the bar a text size change */
+.tabbar > .lbl-em{position:absolute;width:1em;height:1em;font-size:var(--tab-label);visibility:hidden;
+  pointer-events:none;top:0;left:0}
 .tabbar details.more summary{list-style:none;cursor:pointer}
 .tabbar details.more summary::-webkit-details-marker{display:none}
 .tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
@@ -2175,8 +2181,11 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
    first line leaves the ×'s room (a float in the title) and a second line takes the whole width,
    so a long name moves down whole instead of breaking inside beside the × (a 31-letter card name
    in "Price alert: …" on a 360 px phone) */
+/* flex:none: in the box's column a header of two lines and more held its full height only while
+   the box fitted the screen; in a taller box it shrank to its 44 px minimum and the content was
+   drawn over the title's lower lines (confirmation NA1) */
 .mtgbox .bh{--th:1.25rem;--tp:max(.45rem, calc((44px - 1.3 * var(--th)) / 2));position:relative;
-  min-height:44px;margin:0 -.5rem .5rem 0}
+  min-height:44px;margin:0 -.5rem .5rem 0;flex:none}
 .mtgbox .bh h2{margin:0;font-size:var(--th);line-height:1.3;overflow-wrap:break-word;
   padding:var(--tp) 0 .45rem}
 .mtgbox .bh h2::before{content:"";float:right;width:calc(44px + .5rem);height:1.3em}

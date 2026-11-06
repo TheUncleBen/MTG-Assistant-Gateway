@@ -119,6 +119,14 @@
     var ro = new ResizeObserver(fit);
     ro.observe(bar);
     tabs.forEach(function (t) { ro.observe(t); });
+    // a text size changed in place (a browser's text setting, no reload and no resize) changes
+    // neither the bar's nor a tab's size, and the hidden labels keep theirs: a box 1em square in
+    // the labels' font tells it (confirmation NA3: "HomeDecksBinderAssistMore")
+    var em = document.createElement("span");
+    em.className = "lbl-em";
+    em.setAttribute("aria-hidden", "true");
+    bar.appendChild(em);
+    ro.observe(em);
   } else fit();
   window.addEventListener("resize", fit);
 })();
