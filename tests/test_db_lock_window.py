@@ -88,7 +88,7 @@ async def test_an_apply_caught_by_the_lock_is_recorded_as_applied(
 def test_partly_changed_is_said_only_when_part_was_sent() -> None:
     every = _partial_note({"sent_entries": 1, "of_entries": 1, "snapshot_id": "s"})
     assert "partly changed" not in every, every
-    assert "All 1 deck row changes had already been sent" in every, every
+    assert "The 1 deck row change had already been sent" in every, every  # never "All 1" (P-6)
     some = _partial_note({"sent_entries": 1, "of_entries": 3, "snapshot_id": "s"})
     assert "1 of 3 deck row changes had already been sent, so the deck is partly changed." in some
 

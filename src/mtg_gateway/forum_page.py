@@ -380,7 +380,7 @@ def load_more_words(got: dict[str, Any]) -> dict[str, Any]:
         "shown": shown,
         "total": total,
         "label": f"Load more ({shown:,} of {total:,} shown)",
-        "done": f"All {total:,} shown.",
+        "done": ui.all_shown(total, ""),
     }
 
 

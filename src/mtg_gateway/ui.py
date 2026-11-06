@@ -726,6 +726,17 @@ def pager(
     )
 
 
+def all_shown(n: int, one: str, many: str = "") -> str:
+    """The line under a list loaded whole: "All 12 entries shown.", and "1 entry shown." for one
+    (never "All 1", confirmation P-6). ``many`` defaults to ``one`` with an "s"; with no ``one``,
+    "All 12 shown." and "1 shown."."""
+    if not one:
+        return "1 shown." if n == 1 else f"All {n:,} shown."
+    if n == 1:
+        return f"1 {one} shown."
+    return f"All {n:,} {many or one + 's'} shown."
+
+
 def load_more(
     href: str,
     *,

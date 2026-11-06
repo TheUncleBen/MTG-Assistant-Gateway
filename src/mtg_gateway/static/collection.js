@@ -87,8 +87,9 @@
     c.textContent = n.toLocaleString() + (n === 1 ? " entry" : " entries");
     // "All N entries shown." under the list follows the count too
     var line = $(".loadmore p.muted");
-    if (line && /^All [\d,]+ (entry|entries) shown\.$/.test(line.textContent.trim())) {
-      line.textContent = "All " + n.toLocaleString() + (n === 1 ? " entry" : " entries") + " shown.";
+    // (ui.all_shown: "1 entry shown." for one, never "All 1")
+    if (line && /^(All )?[\d,]+ (entry|entries) shown\.$/.test(line.textContent.trim())) {
+      line.textContent = n === 1 ? "1 entry shown." : "All " + n.toLocaleString() + " entries shown.";
     }
   }
   /* -- Remove: at once, with Undo (QOL-01, 0.7.46 audit QG-09) ------------------------------

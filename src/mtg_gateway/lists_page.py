@@ -812,7 +812,7 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) ->
             tab_href("defaults", page=page + 1, q=q), text=f"Load more ({seen:,} of {total:,} shown)"
         )
         if got["more"]
-        else (ui.load_more("", done=f"All {total:,} shown.") if total else "")
+        else (ui.load_more("", done=ui.all_shown(total, "")) if total else "")
     )
     return (
         head
@@ -1361,7 +1361,7 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
     more = (
         ui.load_more(tab_href("custom", page=page + 1, q=q), text=f"Load more ({shown:,} of {total:,} shown)")
         if got["more"]
-        else (ui.load_more("", done=f"All {total:,} shown.") if total else "")
+        else (ui.load_more("", done=ui.all_shown(total, "")) if total else "")
     )
     return (
         head + "<p class='ui-sub'>Cards you made on Archidekt. Add one to a deck from its menu; deleting one "

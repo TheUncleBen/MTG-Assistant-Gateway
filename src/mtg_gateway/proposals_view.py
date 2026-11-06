@@ -997,7 +997,7 @@ def list_html(
                     into=".pr-table",
                 )
                 if upto < total
-                else ui.load_more("", done=f"All {total:,} shown. {PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}.")
+                else ui.load_more("", done=f"{ui.all_shown(total, '')} {PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}.")
             )
         else:
             parts.append(

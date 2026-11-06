@@ -3501,7 +3501,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return ui.load_more(
                 link_to(lq, view, got["shown"]), text="Load more cards", shown=got["shown"], total=total
             )
-        return ui.load_more("", done=f"All {total:,} {'entry' if total == 1 else 'entries'} shown.")
+        return ui.load_more("", done=ui.all_shown(total, "entry", "entries"))
 
     @server.custom_route("/collection", methods=["GET"], include_in_schema=False)
     async def collection_page(request: Request) -> Response:
@@ -3799,7 +3799,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 "more": more_html(lq, view if qp.get("view") in ("grid", "list") else None, got),
                 "done": ""
                 if got["has_more"]
-                else f"All {total:,} {'entry' if total == 1 else 'entries'} shown.",
+                else ui.all_shown(total, "entry", "entries"),
             },
             headers=NO_STORE,
         )
