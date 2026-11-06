@@ -584,6 +584,13 @@ name per thing.
   more chips fades its edge instead of cutting a chip.
 
 ### Fixed
+- At large text, report charts make room for their labels: the labels no longer overlap, get cut
+  at the edge or sit on the axis line, and they are never larger than the text around them.
+- A switch whose parts fit on one row stays on one row on a small phone, such as the Binder's
+  Cards, Lists and Watchlist and the Scan page's tabs.
+- The tab bar's count keeps a small gap under the bar's top edge and its capped size when the
+  phone's font size is raised. The lock on a locked Apply or Reject button grows with its words,
+  and a button whose label wraps keeps its icon and label centred.
 - Pages no longer fade in from the browser's own grey for a moment before their colours load.
 - At large text, a tall pop-up box keeps its title above its content, the shortcuts box keeps each
   key beside its own words, text boxes grow with their text, and a hint too long for its box

@@ -31,7 +31,11 @@ and width class (final polish, B-13), and every check runs in one evaluation:
 - a band of the page between the top bar and a page's header (P-16), and a line saying only
   "Default" (P-10);
 - a box's title running under its content (NA1), and in the shortcuts box a key not beside or
-  above its own words, or beside the next pair's (NA2, P-7).
+  above its own words, or beside the next pair's (NA2, P-7);
+- a switch on more rows than it needs: its parts fit one row at their own widths (NC1);
+- a chart's labels running into each other, cut at its edge, on its axis line or larger than the
+  words around it (NC2);
+- a button with an icon whose label wraps, its content off its middle (P-13).
 
 A name seeded without any break opportunity (forty letters and more) breaks anywhere by design
 and is not counted, nor is a word in a code box. A word wider than its box has nowhere else to
@@ -734,8 +738,32 @@ CHECKS = r"""async ([o]) => {
       const counts = rows.map(r => r.n), most = Math.max(...counts);
       if (most - Math.min(...counts) > 1 || (most > 1 && counts[counts.length - 1] === 1))
         add('seg', name + '|rows', name + ' has rows of ' + counts.join('+'));
+      // each part at its own one-line width (a hidden copy laid out in one row), against the room
+      // its line gives it: a switch whose parts fit one row is on one row (NC1), and a row of parts
+      // as wide as their words is right only where equal parts would not fit it
+      const ps = cs(s.parentElement);
+      const room = Math.min(s.parentElement.clientWidth - px(ps.paddingLeft) - px(ps.paddingRight),
+        document.documentElement.clientWidth) - px(cs(s).paddingLeft) - px(cs(s).paddingRight) -
+        px(cs(s).borderLeftWidth) - px(cs(s).borderRightWidth);
+      const c = s.cloneNode(true), gap = px(cs(s).columnGap);
+      // (its own class kept, so its parts keep their padding; laid out in one row whatever it is)
+      c.classList.remove('seg-grid', 'seg-row', 'more-start', 'more-end');
+      c.style.cssText = 'position:absolute;visibility:hidden;display:flex;flex-wrap:nowrap;left:0;top:0;' +
+        'width:auto;max-width:none';
+      for (const k of c.children)
+        k.style.cssText += ';flex:none!important;white-space:nowrap!important;min-width:auto!important';
+      s.parentElement.appendChild(c);
+      let sum = 0, widest = 0, n = 0;
+      for (const k of c.children) {
+        const w = k.getBoundingClientRect().width;
+        if (w && getComputedStyle(k).position !== 'absolute') { sum += w; widest = Math.max(widest, w); n++; }
+      }
+      c.remove();
+      if (rows.length > 1 && sum + gap * (n - 1) <= room)
+        add('seg', name + '|stack', name + ' takes ' + rows.length + ' rows where its parts fit one');
       const ws = kids.map(k => rect(k).width);
-      if (Math.max(...ws) - Math.min(...ws) > 2)
+      const equalFit = n * widest + gap * (n - 1) <= room + 0.5;
+      if (Math.max(...ws) - Math.min(...ws) > 2 && (rows.length > 1 || equalFit))
         add('seg', name + '|widths', name + ' has parts of ' + ws.map(Math.round).join('/') + 'px');
     }
     timed('seg', t0); t0 = performance.now();
@@ -785,7 +813,56 @@ CHECKS = r"""async ([o]) => {
           add('keys', key + '|next', 'the key "' + txt(nx) + '" sits beside the words of "' + key + '"');
       });
     }
-    timed('title', t0);
+    timed('title', t0); t0 = performance.now();
+    // (17) a chart's labels: none over another, none out of the chart's box or past its edge, the
+    // turn labels under the axis line, none larger than the words around it (NC2)
+    const meet = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+    for (const sv of q('.chart svg', root)) {
+      if (!shown(sv)) continue;
+      const ch = sv.closest('.chart'), cr = rect(ch), sr = rect(sv), body = px(cs(ch).fontSize);
+      const title = txt(ch.querySelector('h3') || ch);
+      const ts = q('text', sv).filter(t => getComputedStyle(t).display !== 'none' &&
+        t.getClientRects().length);
+      const rs = ts.map(rect), axis = sv.querySelector('line.axis'), ar = axis && rect(axis);
+      ts.forEach((t, i) => {
+        const r = rs[i], name = 'the chart "' + title + '": "' + t.textContent + '"';
+        for (let j = i + 1; j < ts.length; j++)
+          if (meet(r, rs[j])) add('chart', title + '|' + t.textContent + '|' + ts[j].textContent,
+            name + ' runs into "' + ts[j].textContent + '"');
+        if (r.left < sr.left - 1 || r.right > sr.right + 1 || r.top < sr.top - 1 ||
+          r.bottom > sr.bottom + 1 || r.left < cr.left - 1 || r.right > cr.right + 1)
+          add('chart', title + '|' + t.textContent + '|out', name + ' is cut at its edge');
+        const size = px(getComputedStyle(t).fontSize) * t.getScreenCTM().a;
+        if (size > body + 0.5) add('chart', title + '|' + t.textContent + '|size', name + ' is ' +
+          Math.round(size) + 'px beside ' + body + 'px words');
+        if (ar && t.classList.contains('x') && r.top < ar.bottom + 1)
+          add('chart', title + '|' + t.textContent + '|axis', name + ' sits on the axis line');
+      });
+    }
+    // (18) a button with an icon whose label wraps: its icon and label in its middle (P-13); a
+    // button laid out from its start (a menu's rows) is not centred by design
+    for (const b of q('button, .btn', root)) {
+      const sv = b.querySelector(':scope > svg');
+      if (!sv || !rect(sv).width || !shown(b) || b.closest('[hidden]')) continue;
+      const bj = cs(b).display.includes('flex') ? cs(b).justifyContent : cs(b).textAlign;
+      if (!/center/.test(bj)) continue;
+      const tops = new Set(), rights = [], lefts = [];
+      for (const n of b.childNodes) {
+        const span = n.nodeType === 1 && n.tagName === 'SPAN' && !n.classList.contains('sr-only');
+        if (n.nodeType !== 3 && !span) continue;
+        const rg = document.createRange(); rg.selectNodeContents(n);
+        for (const x of rg.getClientRects())
+          if (x.width > 0) { tops.add(Math.round(x.top)); rights.push(x.right); lefts.push(x.left); }
+      }
+      if (tops.size < 2) continue;
+      const br = rect(b), bs = cs(b);
+      const l = Math.min(rect(sv).left, ...lefts) - br.left - px(bs.borderLeftWidth);
+      const r = br.right - px(bs.borderRightWidth) - Math.max(rect(sv).right, ...rights);
+      if (Math.abs(l - r) > 6) add('centre', txt(b), 'the button "' + txt(b) + '" sits ' + Math.round(l) +
+        'px from its left and ' + Math.round(r) + 'px from its right');
+    }
+    timed('chart', t0);
     return out;
   };
 

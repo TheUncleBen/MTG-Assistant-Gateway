@@ -147,10 +147,12 @@ VIZ_CSS = """
 .pips i{font-style:normal;color:var(--text-muted);font-size:.86rem}
 /* SVG charts drawn on the server: lines and columns take their colours from the theme */
 .chart{min-width:0} .chart h3{margin:0 0 .4rem}
-/* the labels (the axes' "0%" and "T1", the values over the columns) in rem: they grow with the
-   text size as the words around the chart do (confirmation AD1: 11 px at every size) */
+/* the labels (the axes' "0%" and "T1", the values over the columns) grow with the text size as the
+   words around the chart do (confirmation AD1: 11 px at every size): .chart svg's font-size is the
+   size static/topbar.js gives them on screen, in the chart's own units, making room for them
+   (NC2); without scripts they are 11 of the chart's units, as before */
 .chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:.786rem;overflow:visible}
-.chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
+.chart text{fill:currentColor;font-size:11px} .chart .grid{stroke:var(--border-soft);stroke-width:1}
 .chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)}
 .chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
 .chart .s4{stroke:var(--purple)} .chart polyline{fill:none;stroke-width:2.5;stroke-linejoin:round;
@@ -911,7 +913,8 @@ details.raw{margin:.5rem 0 0}
 /* a locked button wears a small lock (final audit F09, polish A7): it goes the moment the guard
    opens, so the member sees that the next tap counts; the unlocking tap looks pressed meanwhile */
 form.guarded button[data-guard] .lk{display:inline-flex;align-items:center;margin-right:.1rem}
-form.guarded button[data-guard] .lk svg.i{width:14px;height:14px;flex:none}
+/* the lock grows with its button's words (polish AD2: 14 px beside 32 px words at 200% text) */
+form.guarded button[data-guard] .lk svg.i{width:max(14px, .9em);height:max(14px, .9em);flex:none}
 form.guarded button[data-guard]:not(:disabled):not([aria-disabled=true]) .lk{display:none}
 form.guarded.unlocking button[data-guard]{transform:scale(.97);filter:brightness(.9)}
 /* the hint says what opens the lock on this kind of screen: a tap, or the mouse */
@@ -923,7 +926,8 @@ form.guarded.unlocking button[data-guard]{transform:scale(.97);filter:brightness
 form.guarded .choice .guard-hint{display:flex;align-items:flex-start;gap:.35rem;flex-basis:100%;width:100%;
   margin:0 0 .2rem}
 form.guarded .choice .guard-hint[hidden]{display:none}
-form.guarded .choice .guard-hint svg.i{width:16px;height:16px;flex:none;color:var(--orange-text);
+form.guarded .choice .guard-hint svg.i{width:max(16px, 1.15em);height:max(16px, 1.15em);flex:none;
+  color:var(--orange-text);
   margin-top:calc((1lh - 16px) / 2)}
 form.guarded .choice .guard-hint .t{min-width:0}
 /* A tap on a locked button lands on its row instead (a disabled button takes no events, so the
@@ -1178,9 +1182,12 @@ body .tabbar:has(details.more[open]){z-index:25}
    Assistant icon and "99+" ran out of its tab): 18 px tall, on the icon's corner and inside its tab
    (a text-only zoom, which scales px text too, still makes it taller by its own line) */
 .tabbar > a .nb,.tabbar > a.bell .n{font-size:min(.72rem, 12px);display:inline-grid;place-items:center;
-  line-height:normal;height:auto;min-height:18px;top:max(0px, calc(14px - .72rem));
+  line-height:normal;height:auto;min-height:18px;top:max(3px, calc(14px - .72rem));
   left:min(calc(50% + 5px), calc(100% - 1.7em - 3px));
   padding-left:max(2px, calc(14px - .72rem));padding-right:max(2px, calc(14px - .72rem))}
+/* 3 px at the least under the bar's top edge (polish AD2: it touched it at 200% text); under a
+   text-only zoom, which scales the 12 px cap too, static/topbar.js scales the count back to it
+   from its top left corner (confirmation NA5: 20 px, 25 px tall, over a third of the icon) */
 /* "99+" (.w3) is wider: it moves left as far as it must to stay inside its tab */
 .tabbar > a .nb.w3{left:min(calc(50% + 5px), calc(100% - 2.1em - 5px))}
 __MOBILE__
@@ -1504,6 +1511,9 @@ main.wrap.ui-wide{max-width:1200px}
    (confirmation NA4: parts of their own widths, and "Card models" alone on a second row). Without
    scripts the parts wrap as above. seg-measure is the one-row layout the script measures in */
 .hubseg.seg-grid{display:inline-grid;grid-template-columns:repeat(var(--seg-cols),minmax(0,1fr))}
+/* one row of parts as wide as their words, the row's room shared out (NC1) */
+.hubseg.seg-row{flex-wrap:nowrap}
+.hubseg.seg-row > *{flex:1 1 auto!important;white-space:nowrap}
 .hubseg.seg-measure{display:flex!important;flex-wrap:nowrap!important}
 .hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
 .hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}

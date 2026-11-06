@@ -253,7 +253,36 @@ def test_the_tab_bar_refits_when_the_text_size_changes_in_place(server: Server, 
 
 # -- NA4: switches in balanced rows of equal parts ----------------------------------------------
 
+# A switch's parts each at its own one-line width (a hidden copy of it laid out in one row), and the
+# room its line gives it: {sum, widest, n, gap, room}
+SEG_NATURAL = """(s) => {
+  const cs = getComputedStyle(s), ps = getComputedStyle(s.parentElement);
+  const line = s.parentElement.clientWidth - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+  const room = Math.min(line, document.documentElement.clientWidth) - parseFloat(cs.paddingLeft) -
+    parseFloat(cs.paddingRight) - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+  const c = s.cloneNode(true);
+  // (its own class kept, so its parts keep their padding; laid out in one row whatever it is)
+  c.classList.remove('seg-grid', 'seg-row', 'more-start', 'more-end');
+  c.style.cssText = 'position:absolute;visibility:hidden;display:flex;flex-wrap:nowrap;left:0;top:0;' +
+    'width:auto;max-width:none';
+  for (const k of c.children)
+    k.style.cssText += ';flex:none!important;white-space:nowrap!important;min-width:auto!important';
+  s.parentElement.appendChild(c);
+  let sum = 0, widest = 0, n = 0;
+  for (const k of c.children) {
+    const w = k.getBoundingClientRect().width;
+    if (w && getComputedStyle(k).position !== 'absolute') { sum += w; widest = Math.max(widest, w); n++; }
+  }
+  c.remove();
+  return { sum, widest, n, gap: parseFloat(cs.columnGap) || 0, room };
+}"""
+
 SEG_ROWS = """() => {
+  const natural = SEG_NATURAL_JS;
+  const equalPartsOverflow = s => {
+    const m = natural(s);
+    return m.n * m.widest + (m.n - 1) * m.gap > m.room + 0.5;
+  };
   const out = [];
   for (const s of document.querySelectorAll('.hubseg, [role=tablist]')) {
     const kids = [...s.children].filter(k => k.getClientRects().length &&
@@ -276,11 +305,12 @@ SEG_ROWS = """() => {
     if (most - Math.min(...counts) > 1 || (most > 1 && counts[counts.length - 1] === 1))
       out.push(name + ' rows of ' + counts.join('+'));
     const ws = kids.map(k => k.getBoundingClientRect().width);
-    if (Math.max(...ws) - Math.min(...ws) > 2)
+    // one row of parts as wide as their words is right where equal parts would not fit it (NC1)
+    if (Math.max(...ws) - Math.min(...ws) > 2 && (rows.size > 1 || !equalPartsOverflow(s)))
       out.push(name + ' parts of ' + ws.map(Math.round).join('/') + ' px');
   }
   return out;
-}"""
+}""".replace("SEG_NATURAL_JS", SEG_NATURAL)
 
 
 def test_switches_keep_equal_parts_in_balanced_rows(server: Server, site) -> None:  # noqa: F811

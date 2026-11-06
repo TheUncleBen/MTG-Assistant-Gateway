@@ -156,7 +156,9 @@
   }
   // a switch's parts are all as wide as its widest one, in rows that hold as many each (one apart
   // at most): as many a row as fit whole, then spread evenly over the rows needed, so no part sits
-  // alone under a full row ("Card models" at 412 px) and none is cut (confirmation NA4, P-9)
+  // alone under a full row ("Card models" at 412 px) and none is cut (confirmation NA4, P-9).
+  // Where equal parts would need a second row but the parts fit one at their own widths, they keep
+  // to one row (NC1)
   function balance(n) {
     if (!n.matches(".hubseg") || !n.getClientRects().length) return;
     var kids = Array.prototype.filter.call(n.children, function (k) {
@@ -169,11 +171,32 @@
       document.documentElement.clientWidth) - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) -
       parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth), w = 0;
     // each part measured on one line at its own width
-    n.classList.remove("seg-grid");
+    n.classList.remove("seg-grid", "seg-row");
+    // each part measured without the padding a wrapped label's centring gave it (below): New deck's
+    // "Paste a list" kept 110 px of it, so the parts no longer fitted one row and went one a row,
+    // then fitted again, by turns
+    kids.forEach(function (k) {
+      if (!k.hasAttribute("data-fit-pad")) return;
+      k.style.removeProperty("padding-left");
+      k.style.removeProperty("padding-right");
+      k.removeAttribute("data-fit-pad");
+    });
     n.classList.add("seg-measure");
-    kids.forEach(function (k) { w = Math.max(w, k.getBoundingClientRect().width); });
+    var sum = 0;
+    kids.forEach(function (k) {
+      var kw = k.getBoundingClientRect().width;
+      w = Math.max(w, kw);
+      sum += kw;
+    });
     n.classList.remove("seg-measure");
     var len = kids.length;
+    // parts that fit the line side by side at their own widths stay on one row, each as wide as
+    // its words and the row's room shared out (NC1: the Binder's Cards, Lists and Watchlist went
+    // one a row at 320 px, each as wide as "Watchlist 2", and the Scan page's tabs two by two)
+    if (len * w + (len - 1) * gap > room + 0.5 && sum + (len - 1) * gap <= room + 0.5) {
+      n.classList.add("seg-row");
+      return;
+    }
     var cols = Math.max(1, Math.min(len, Math.floor((room + gap) / (w + gap) + 0.001)));
     cols = Math.ceil(len / Math.ceil(len / cols));
     // a last row of one part under fuller rows is a part alone: fewer a row until none is
@@ -207,6 +230,9 @@
       });
       ro.observe(n);
       Array.prototype.forEach.call(n.children, function (k) { ro.observe(k); });
+      // and the room it has: the line it sits on can widen with no change to its own size (New
+      // deck's Empty, Paste a list and From a file stayed one a row at 900 px and 200% text)
+      if (n.parentElement) ro.observe(n.parentElement);
     }
   }
   function watchIn(root) {
@@ -268,7 +294,7 @@
     if (room > 0 && w > room + 0.5) h.style.zoom = String(Math.floor(room / w * 1000) / 1000);
   }
   function lineRights(b) {
-    var tops = {}, right = -Infinity, lines = 0;
+    var tops = {}, right = -Infinity, left = Infinity, lines = 0;
     for (var c = b.firstChild; c; c = c.nextSibling) {
       if (c.nodeType === 1 && (c.tagName !== "SPAN" || c.classList.contains("sr-only"))) continue;
       if (c.nodeType !== 1 && c.nodeType !== 3) continue;
@@ -280,9 +306,10 @@
         var t = Math.round(rs[i].top);
         if (!tops[t]) { tops[t] = 1; lines++; }
         if (rs[i].right > right) right = rs[i].right;
+        if (rs[i].left < left) left = rs[i].left;
       }
     }
-    return { lines: lines, right: right };
+    return { lines: lines, right: right, left: left };
   }
   function centre(b) {
     if (b.hasAttribute("data-fit-pad")) {
@@ -293,21 +320,41 @@
     var svg = b.querySelector(":scope > svg");
     if (!svg || !b.getClientRects().length || !svg.getBoundingClientRect().width ||
       getComputedStyle(svg).position === "absolute") return;
+    var cs = getComputedStyle(b);
+    // a button laid out from its start (a menu's rows) keeps its content there
+    if (!/center/.test(cs.display.indexOf("flex") >= 0 ? cs.justifyContent : cs.textAlign)) return;
     var got = lineRights(b);
     if (got.lines < 2) return;
-    var cs = getComputedStyle(b), br = b.getBoundingClientRect();
-    var pl = parseFloat(cs.paddingLeft), pr = parseFloat(cs.paddingRight);
-    var left = svg.getBoundingClientRect().left - br.left - parseFloat(cs.borderLeftWidth) - pl;
-    var slack = br.right - parseFloat(cs.borderRightWidth) - pr - got.right - left;
-    if (slack < 4) return;
-    var half = Math.floor(slack / 2) - 1;
-    b.setAttribute("data-fit-pad", "");
-    b.style.paddingLeft = pl + half + "px";
-    b.style.paddingRight = pr + half + "px";
-    // a button sized by its words narrows its words' room with the padding: kept only when
-    // the label still wraps as it did
-    var now = lineRights(b);
-    if (now.lines !== got.lines) {
+    var pl = parseFloat(cs.paddingLeft), pr = parseFloat(cs.paddingRight), bl = parseFloat(cs.borderLeftWidth);
+    var brw = parseFloat(cs.borderRightWidth);
+    // the room left of the icon and label less the room right of them (the icon before the label
+    // or after it)
+    function off(at) {
+      var br = b.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+      return br.right - brw - Math.max(at.right, sr.right) - (Math.min(at.left, sr.left) - br.left - bl);
+    }
+    // the padding on both sides grows by half the difference at a time, in a few rounds: how far
+    // the label moves with it depends on how its lines sit in their room (centred, they stay put
+    // and the icon alone moves; P-13: "Upload a picture…" kept 58 px left and 90 px right when the
+    // padding took the whole difference in one step, computed as if the lines moved with it).
+    // A step that changes how the label wraps is taken back, and the rounds end there
+    // (a step that leaves them no nearer the middle is taken back too), and a smaller one tried
+    // instead ("HTML page" at 320 px and 200% text: half the difference wrapped it on 3 lines)
+    var add = 0, d = Math.abs(off(got)), step = Math.max(1, Math.floor(d / 2));
+    for (var round = 0; round < 12 && d > 2 && step >= 1; round++) {
+      b.setAttribute("data-fit-pad", "");
+      b.style.paddingLeft = pl + add + step + "px";
+      b.style.paddingRight = pr + add + step + "px";
+      var now = lineRights(b), nd = Math.abs(off(now));
+      if (now.lines !== got.lines || nd >= d) { step = Math.floor(step / 2); continue; }
+      add += step;
+      d = nd;
+      step = Math.max(1, Math.floor(d / 2));
+    }
+    if (add) {
+      b.style.paddingLeft = pl + add + "px";
+      b.style.paddingRight = pr + add + "px";
+    } else {
       b.style.removeProperty("padding-left");
       b.style.removeProperty("padding-right");
       b.removeAttribute("data-fit-pad");
@@ -327,6 +374,51 @@
       for (i = 1; i < shown.length; i++) if (shown[i].left < shown[i - 1].right + 2) { hit = true; break; }
       if (!hit) return;
     }
+  }
+  // a chart's labels at the size of the words around it (.chart svg's font-size, .786rem, and never
+  // more than the chart's own words), not the chart's: the chart is drawn in its own units and
+  // scaled to its width, so at 200% text its labels were 36 px beside 32 px words, ran out of its
+  // left edge ("00%") and into each other ("0%" over "25%" and "T1") (NC2). The chart's box is
+  // widened to hold its labels whole (the plot gives way), a y label is left out where the next
+  // gridline's is too near, and the turn labels and values are thinned as before (AD1)
+  function fitChart(svg) {
+    if (!svg.getClientRects().length) return;
+    if (!svg.hasAttribute("data-vb")) svg.setAttribute("data-vb", svg.getAttribute("viewBox") || "");
+    var o = svg.getAttribute("data-vb").split(/[\s,]+/).map(Number);
+    if (o.length !== 4 || !(o[2] > 0)) return;
+    var W = svg.getBoundingClientRect().width;
+    var want = Math.min(parseFloat(getComputedStyle(svg).fontSize),
+      parseFloat(getComputedStyle(svg.parentNode).fontSize));
+    var ts = svg.querySelectorAll("text"), ys = svg.querySelectorAll("text.y"), i, k;
+    for (i = 0; i < ts.length; i++) ts[i].removeAttribute("display");
+    // the gridlines' spacing in the chart's units (the y labels sit on them)
+    var gap = ys.length > 1 ? Math.abs(ys[1].getAttribute("y") - ys[0].getAttribute("y")) : Infinity;
+    var vb = o.slice();
+    svg.setAttribute("viewBox", vb.join(" "));
+    // the size in the chart's units depends on its box, and its box on the labels' size: a few
+    // rounds settle it (each one widens the box less)
+    for (var round = 0; round < 4; round++) {
+      var f = want * vb[2] / W;
+      for (i = 0; i < ts.length; i++) ts[i].style.setProperty("font-size", f + "px", "important");
+      // every 1st, 2nd or 4th y label, as many as have a line's room between them
+      var every = 1;
+      while (every < 4 && every * gap < f * 1.25 + 2) every *= 2;
+      for (i = 0; i < ys.length; i++) {
+        if (i % every && i !== ys.length - 1) ys[i].setAttribute("display", "none");
+        else ys[i].removeAttribute("display");
+      }
+      if (every === 4 && ys.length === 5) ys[2].setAttribute("display", "none");
+      var b = svg.getBBox(), pad = 1;
+      var x0 = Math.min(o[0], b.x - pad), y0 = Math.min(o[1], b.y - pad);
+      var x1 = Math.max(o[0] + o[2], b.x + b.width + pad), y1 = Math.max(o[1] + o[3], b.y + b.height + pad);
+      var nb = [x0, y0, x1 - x0, y1 - y0];
+      for (k = 0; k < 4 && Math.abs(nb[k] - vb[k]) < 0.25; k++);
+      vb = nb;
+      svg.setAttribute("viewBox", vb.map(function (v) { return Math.round(v * 100) / 100; }).join(" "));
+      if (k === 4) break;
+    }
+    thin(svg, "text.x");
+    thin(svg, "text.v");
   }
   // a text box's hint: the longest of its hints (ui.hint_attrs: data-ph lists the shorter ones)
   // that fits the box at its size, the shortest where none does (P-5, P-19)
@@ -351,12 +443,42 @@
       // shown later (a sheet, a box) or resized: its own size tells
       if (hintRO) hintRO.observe(ph[k]);
     }
+    // the tab bar's counts kept at their 12 px cap when a text-only zoom scales it (NA5, theme.py)
+    var nbs = root.querySelectorAll(".tabbar > a .nb, .tabbar > a.bell .n");
+    for (k = 0; k < nbs.length; k++) {
+      nbs[k].style.removeProperty("transform");
+      var fs = parseFloat(getComputedStyle(nbs[k]).fontSize);
+      if (fs > 12.5) {
+        nbs[k].style.transformOrigin = "left top";
+        nbs[k].style.transform = "scale(" + Math.round(1200 / fs) / 100 + ")";
+      }
+    }
     var cs2 = root.querySelectorAll(".chart svg");
-    for (k = 0; k < cs2.length; k++) { thin(cs2[k], "text.x"); thin(cs2[k], "text.v"); }
+    for (k = 0; k < cs2.length; k++) { fitChart(cs2[k]); seen(cs2[k]); }
     var hs = root.querySelectorAll("h1, h2, h3"), i;
     for (i = 0; i < hs.length; i++) fitHeading(hs[i]);
     var bs = root.querySelectorAll("button, .btn");
-    for (i = 0; i < bs.length; i++) if (bs[i].querySelector(":scope > svg")) centre(bs[i]);
+    for (i = 0; i < bs.length; i++) if (bs[i].querySelector(":scope > svg")) { centre(bs[i]); seen(bs[i]); }
+  }
+  // a chart or an icon button whose width changed since the page was fitted is fitted again: one
+  // hidden then (a box or a sheet already in the page and shown later, a folded section opened),
+  // or narrowed by the page's scroll bar coming in after it (the crawl's P-13 check: "Search all
+  // decks" in the filter sheet, 28 px left and 58 px right; "HTML page" fitted on one line and
+  // wrapped on two once the report's charts had grown). Its own padding, set by the fit, leaves
+  // its width as the fit before left it, so a fit does not start another
+  var widths = new WeakMap();
+  var widthRO = window.ResizeObserver ? new ResizeObserver(function (es) {
+    for (var i = 0; i < es.length; i++) {
+      var el = es[i].target, bb = es[i].borderBoxSize, before = widths.get(el);
+      var w = bb && bb[0] ? bb[0].inlineSize : el.getBoundingClientRect().width;
+      widths.set(el, w);
+      if (w > 0 && Math.abs(w - before) > 0.5) later(el.parentElement || el);
+    }
+  }) : null;
+  function seen(el) {
+    if (!widthRO || widths.has(el)) return;
+    widths.set(el, el.getBoundingClientRect().width);
+    widthRO.observe(el, { box: "border-box" });
   }
   // the next frame fits the whole page (a resize, a text size) or only what was drawn since (a
   // box, a sheet, a list's next rows), so opening a box does not measure the page under it again
@@ -386,18 +508,22 @@
   // a box, a sheet or a list drawn after this ran
   if (window.MutationObserver) {
     new MutationObserver(function (muts) {
-      var FIT = "h1, h2, h3, button, .btn, input[data-ph], .chart";
+      var FIT = "h1, h2, h3, button, .btn, input[data-ph], .chart", fitNow = [];
       for (var i = 0; i < muts.length; i++) {
         for (var j = 0; j < muts[i].addedNodes.length; j++) {
           var n = muts[i].addedNodes[j];
           if (n.nodeType !== 1 || !(n.matches(FIT) || n.querySelector(FIT))) continue;
-          // the added part with what holds it (a button fits within its own box)
-          later(n.parentElement || n);
+          // the added part with what holds it (a button fits within its own box), in this task:
+          // a box's content fetched and put in was shown a frame off centre (the crawl's P-13 check
+          // measured "Delete this deck" as it came in, 28 px left and 77 px right)
+          var at = n.parentElement || n;
+          if (fitNow.indexOf(at) < 0) fitNow.push(at);
           // a hint fits from its first frame (a box's field drawn after its answer came)
           var ph = n.matches("input[data-ph]") ? [n] : n.querySelectorAll("input[data-ph]");
           for (var k = 0; k < ph.length; k++) { fitHint(ph[k]); if (hintRO) hintRO.observe(ph[k]); }
         }
       }
+      for (i = 0; i < fitNow.length; i++) if (fitNow[i].isConnected) fitIn(fitNow[i]);
     }).observe(document.body, { childList: true, subtree: true });
   }
 })();

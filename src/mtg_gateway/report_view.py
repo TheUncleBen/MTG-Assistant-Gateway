@@ -732,14 +732,22 @@ def svg_lines(series: list[tuple[str, list[float | None]]], *, turns: int, label
     for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
         yy = y(frac)
         parts.append(f"<line class='grid' x1='{left}' y1='{yy:.1f}' x2='{w - right}' y2='{yy:.1f}'/>")
-        parts.append(f"<text x='{left - 4}' y='{yy + 3.5:.1f}' text-anchor='end'>{int(frac * 100)}%</text>")
+        # centred on its gridline, whatever its size (static/topbar.js sizes the labels)
+        parts.append(
+            f"<text class='y' x='{left - 4}' y='{yy:.1f}' text-anchor='end' dominant-baseline='central'>"
+            f"{int(frac * 100)}%</text>"
+        )
     parts.append(f"<line class='axis' x1='{left}' y1='{y(0):.1f}' x2='{w - right}' y2='{y(0):.1f}'/>")
     every = 1 if turns <= 12 else 2
     for i in range(turns):
         if (i + 1) % every == 0 or i == 0:
-            # the last turn's label ends at the chart's edge (centred, it ran past it)
-            anchor = "end" if i == turns - 1 and turns > 1 else "middle"
-            parts.append(f"<text class='x' x='{x(i):.1f}' y='{h - 8}' text-anchor='{anchor}'>T{i + 1}</text>")
+            # the last turn's label ends at the chart's edge (centred, it ran past it), and the
+            # first starts at the axis, clear of "0%" beside it
+            anchor = "end" if i == turns - 1 and turns > 1 else "start" if i == 0 else "middle"
+            parts.append(
+                f"<text class='x' x='{x(i):.1f}' y='{y(0) + 4:.1f}' text-anchor='{anchor}' "
+                f"dominant-baseline='text-before-edge'>T{i + 1}</text>"
+            )
     for n, (name, pts) in enumerate(series[:4], start=1):
         coords = [f"{x(i):.1f},{y(p):.1f}" for i, p in enumerate(pts[:turns]) if isinstance(p, (int, float))]
         if len(coords) >= 2:
@@ -786,11 +794,16 @@ def svg_columns(
             )
             if n <= 12 or i % every == 0:
                 parts.append(
-                    f"<text class='v' x='{cx:.1f}' y='{top + ph - bh - 4:.1f}' text-anchor='middle'>"
+                    f"<text class='v' x='{cx:.1f}' y='{top + ph - bh - 3:.1f}' text-anchor='middle' "
+                    "dominant-baseline='text-after-edge'>"
                     f"{_num(v, digits)}</text>"
                 )
         if (i + 1) % every == 0 or i == 0 or n <= 12:
-            parts.append(f"<text class='x' x='{cx:.1f}' y='{h - 8}' text-anchor='middle'>{_esc(k)}</text>")
+            # under the axis line, whatever its size (static/topbar.js sizes the labels)
+            parts.append(
+                f"<text class='x' x='{cx:.1f}' y='{top + ph + 4:.1f}' text-anchor='middle' "
+                f"dominant-baseline='text-before-edge'>{_esc(k)}</text>"
+            )
     parts.append("</svg>")
     return "".join(parts)
 
