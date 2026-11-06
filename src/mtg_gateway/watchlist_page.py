@@ -7,7 +7,7 @@ status line (the last check, the biggest 7-day move, the price alerts past, wher
 from); then the watched cards grouped by watchlist list (the member's own groups, kept on this
 gateway; the cards in no list after them) and the watched decks as a group of their own. A row:
 its tick box, picture, name (opens the card viewer), printing, price and 7-day change, its price
-alert as a blue label and "In binder · you own N" when the member's Binder holds the card. Each
+alert as a blue label and "You own N" when the member's Binder holds the card. Each
 row has Details (its 30-day chart, "Full history (N days)", the price history table, the alert
 form, Open card and a red-outline Remove) and a ⋮ (static/menus.js: Open card, Details, Price
 alert…, Move to list…, Stop watching). A tick on any row shows the bulk bar: Price alert…, Move to
@@ -253,27 +253,28 @@ def alert_label(v: dict[str, Any]) -> str:
 
 
 def owned_label(v: dict[str, Any]) -> str:
-    """ "In binder · you own N" when the member's Binder holds the card (any printing). The dot
-    keeps its words and the count its "own" (no-break spaces): where the label wraps (a 390 or
-    412 px phone at 100% text, a 320 px one at 200%) it breaks before "own N", never with the dot
-    at a line's end or the count alone on a line (audit W2)."""
+    """ "You own N" (the Binder's icon, and "In your Binder: N copies" as its tooltip) when the
+    member's Binder holds the card (any printing). One line on every phone: "In binder · you own
+    N" took two in the row's narrow column at 390 and 412 px (confirmation P-8); the count keeps
+    its "own" (a no-break space)."""
     n = int(v.get("owned") or 0)
     if n <= 0:
         return ""
-    return ui.label(f"In binder\u00a0·\u00a0you own\u00a0{n}", "green", "collection", cls="owned")
+    tip = f"In your Binder: {n} cop{'y' if n == 1 else 'ies'}"
+    return ui.label(f"You own\u00a0{n}", "green", "collection", cls="owned", title=tip)
 
 
 def where_text(v: dict[str, Any]) -> str:
     """The printing a row follows: "CMR 472 · Foil", or for a watch by name alone "Cheapest
-    printing (now PLST CMR-365) · Normal". The dot keeps its finish (a no-break space): where the
-    line wraps, on a 320 px phone with the browser's font doubled, the dot starts the next line
-    rather than ending one (final polish W1)."""
+    printing (now PLST CMR-365) · Normal". The row draws it as two facts (ui.dotted), so where the
+    line wraps, on a 320 px phone with the browser's font doubled, the dot neither ends a line nor
+    starts one (final polish W1, confirmation P-15)."""
     where = " ".join(p for p in ((v.get("set") or "").upper(), v.get("collector_number") or "") if p)
     if not where:
         low = v.get("cheapest") or {}
         now_at = " ".join(p for p in ((low.get("set") or "").upper(), low.get("collector_number") or "") if p)
         where = f"Cheapest printing (now {now_at})" if now_at else "Cheapest printing"
-    return f"{where} ·\u00a0{FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
+    return f"{where} · {FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
 
 
 def _priced(hist: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -415,7 +416,7 @@ def _row(
     href = f"{query.href(open=key)}#wr-{esc(key)}"
     return (
         f"<div class='tr{' open' if is_open else ''}' id='wr-{esc(key)}'{attrs}>{check}{thumb}"
-        f"<span class='title'><span class='t'>{title}</span><span class='deck'>{esc(line)}</span>"
+        f"<span class='title'><span class='t'>{title}</span><span class='deck'>{ui.dotted(line)}</span>"
         f"<span class='sub'>{sub}</span></span>"
         f"<span class='px md-hide'>{px}<small>{esc(when)}</small></span>"
         f"<span class='md-hide chgs'>{changes_html(view)}</span>"

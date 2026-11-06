@@ -92,9 +92,11 @@
     var dl = document.createElement("dl");
     dl.className = "keys";
     rows.forEach(function (r) {
-      var dt = document.createElement("dt"), kbd = document.createElement("kbd"), dd = document.createElement("dd");
+      // each key with its words in a row of their own (theme: dl.keys > div)
+      var row = document.createElement("div"), dt = document.createElement("dt"),
+        kbd = document.createElement("kbd"), dd = document.createElement("dd");
       kbd.textContent = r[0]; dt.appendChild(kbd); dd.textContent = r[1];
-      dl.appendChild(dt); dl.appendChild(dd);
+      row.appendChild(dt); row.appendChild(dd); dl.appendChild(row);
     });
     Box.open({ title: "Keyboard shortcuts", body: dl, actions: [Box.button("Close", "btn", null, { cancel: true })], returnFocus: document.activeElement });
   }

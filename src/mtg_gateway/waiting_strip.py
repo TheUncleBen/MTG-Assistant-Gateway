@@ -162,7 +162,8 @@ def deck_box_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str
             f"<input type='hidden' name='back' value='/decks/{did}'>"
             "<div class='ylist'>"
             f"<label class='pick all'><input type='checkbox' class='all' data-all='{did}'>"
-            f"<span>All {len(lines)} waiting</span></label>"
+            # one change is "The 1 waiting", never "All 1" (confirmation P-6)
+            f"<span>{'The 1' if len(lines) == 1 else f'All {len(lines)}'} waiting</span></label>"
             f"<ul class='wlist'>{rows}</ul></div>" + action_bar(inline=True) + every + "</form>"
             # the click guard first: the bar's Apply box carries it (static/proposals.js)
             f"<script src='{GUARD_SCRIPT}' defer></script><script src='{LIST_SCRIPT}' defer></script>"

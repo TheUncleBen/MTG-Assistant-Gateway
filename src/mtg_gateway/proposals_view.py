@@ -116,6 +116,11 @@ WAIT_COLS = ("32px minmax(0,1fr) auto",) * 3
 ALL_COLS = ("minmax(0,1fr) auto",) * 3
 
 
+def _pager_note() -> str:
+    """The pager's note as a sentence of its own, after the count of what is shown."""
+    return f"{PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}."
+
+
 def read_query(params: Any) -> dict[str, Any]:
     """The page's filters from the query string, each limited to what the page offers."""
 
@@ -787,7 +792,7 @@ def _waiting_table(
 
     def group(key: str, title_html: str, aria: str, lines: list[dict[str, Any]], open_deck: str) -> None:
         oldest = _span(now - min(x["created_at"] for x in lines))
-        meta = f"{len(lines)} waiting · oldest {oldest}"
+        meta = ui.facts([f"{len(lines)} waiting", f"oldest {oldest}"])
         box = (
             f"<label class='chk'><input type='checkbox' class='all' data-all='{esc(key)}' "
             f"aria-label='{esc(aria)}'></label>"
@@ -917,23 +922,26 @@ def list_html(
     if waiting_view:
         side = "Waiting ones are grouped by deck, oldest deck first"
     elif query["group"] == "deck":
-        side = (
-            "Grouped by deck · "
-            + ui.cap_link("Show newest first", "/proposals" + query_string(query, group="", offset=0))
-            if query["order"] != "old"
-            else "Grouped by deck · "
-            + ui.cap_link("Show oldest first", "/proposals" + query_string(query, group="", offset=0))
+        which = "Show newest first" if query["order"] != "old" else "Show oldest first"
+        side = ui.facts(
+            ["Grouped by deck", ui.cap_link(which, "/proposals" + query_string(query, group="", offset=0))],
+            html=True,
         )
     else:
         # the order and its switch (once the table's Made header), then Group by deck
         newer = "" if query["order"] == "old" else "old"
-        side = ui.order_note(
-            "Oldest first" if query["order"] == "old" else "Newest first",
-            "Oldest first" if newer else "Newest first",
-            "/proposals" + query_string(query, order=newer, offset=0),
-        )
+        other = "Oldest first" if newer else "Newest first"
         grouped = query_string(query, group="deck", offset=0)
-        side += " · " + ui.cap_link("Group by deck", "/proposals" + grouped)
+        side = ui.facts(
+            [
+                "Oldest first" if query["order"] == "old" else "Newest first",
+                ui.cap_link(
+                    f"Show {other.lower()}", "/proposals" + query_string(query, order=newer, offset=0)
+                ),
+                ui.cap_link("Group by deck", "/proposals" + grouped),
+            ],
+            html=True,
+        )
     head = (
         f"<div class='list-head'><h2>All proposals <span class='ui-sub'>{counts['all']:,}</span></h2>"
         f"<span class='ui-sub'>{side if not waiting_view else esc(side)}</span></div>"
@@ -997,7 +1005,7 @@ def list_html(
                     into=".pr-table",
                 )
                 if upto < total
-                else ui.load_more("", done=f"All {total:,} shown. {PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}.")
+                else ui.load_more("", done=f"{ui.all_shown(total, '')} {_pager_note()}")
             )
         else:
             parts.append(

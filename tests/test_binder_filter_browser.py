@@ -54,7 +54,7 @@ def test_typing_a_name_finds_a_card_past_the_first_screen(server: Server) -> Non
         assert page.locator("#col-count").inner_text() == "1 entry"
         assert page.locator("#cards > li[data-id]:visible").count() == 1
         assert not page.locator(".col-nomatch").is_visible()
-        assert page.locator(".loadmore p").inner_text() == "All 1 entry shown."
+        assert page.locator(".loadmore p").inner_text() == "1 entry shown."
         assert "q=Acid" in page.url
         # a name nobody owns: then, and only then, "No cards match"
         page.locator("#col-q").fill("Zzyzx")

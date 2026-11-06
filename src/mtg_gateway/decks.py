@@ -12662,7 +12662,12 @@ def _partial_note(
     of = progress.get("of_entries")
     note = (
         # every row went out: the deck may well have the whole change, not a part of it
-        f"All {sent} deck row changes had already been sent, so the deck may have the whole change."
+        (
+            "The 1 deck row change had already been sent"
+            if sent == 1
+            else f"All {sent} deck row changes had already been sent"
+        )
+        + ", so the deck may have the whole change."
         if isinstance(of, int) and sent >= of
         else f"{sent} of {of if of is not None else '?'} deck row changes had already been sent, "
         "so the deck is partly changed."

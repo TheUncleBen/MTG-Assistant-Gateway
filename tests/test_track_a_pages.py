@@ -247,6 +247,9 @@ async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stac
         assert "class='nb'" not in pill  # nothing waiting: no count
         assert "Nothing is waiting for this deck." in page
         await _propose(h, token, _add("Opt"))
+        # one change: the box's tick box names it alone, never "All 1 waiting" (confirmation P-6)
+        box = (await b.http.get("/decks/42")).text.split("id='proposals'")[1]
+        assert "<span>The 1 waiting</span>" in box and "All 1" not in box
         await _propose(h, token, _add("Delver of Secrets"))
         page = (await b.http.get("/decks/42")).text
         pill = page.split("<a class='soc prop'")[1].split("</a>")[0]
@@ -257,7 +260,7 @@ async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stac
         home = (await b.http.get("/")).text
         # Home's Needs you row (0.7.46: in place of the old Proposals tile)
         assert "<b>2 proposals</b> waiting for you" in home
-        assert "2 on 1 deck · oldest 1 min · next expires in" in home
+        assert "<span>2 on 1 deck</span><span>oldest 1 min</span><span>next expires in" in home
     finally:
         await b.aclose()
 

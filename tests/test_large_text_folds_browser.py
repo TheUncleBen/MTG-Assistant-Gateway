@@ -254,13 +254,13 @@ def test_the_settings_rows_stack_the_label_over_the_control_when_the_text_is_lar
                 assert r["ems"] >= min(12, r["rowEms"] - 0.5), (width, zoom, r)
             broken = page.evaluate(
                 BROKEN,
-                [".set-row .set-label, .set-row .set-help, .set-choices label, .set-seg label", ".set-row"],
+                [".set-row .set-label, .set-row .set-help, .set-choices label, .set-sw", ".set-row"],
             )
             assert broken == [], (width, zoom, broken)
             short = page.evaluate(
                 SHORT,
-                ".set-choices label, .set-seg label, .set-ctl input:not([type=radio]), .set-ctl select, "
-                ".set-ctl .msel-btn, .set-save button",
+                ".set-choices label, .set-sw, .set-ctl input:not([type=radio]):not([type=checkbox]), "
+                ".set-ctl select, .set-ctl .msel-btn, .set-save button",
             )
             assert short == [], (width, zoom, short)
             assert page.evaluate(MEASURE) == [], (width, zoom)

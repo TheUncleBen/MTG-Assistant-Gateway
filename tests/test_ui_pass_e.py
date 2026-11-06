@@ -133,9 +133,11 @@ async def test_a_threads_reply_count_agrees_with_the_section_table(member: Brows
 async def test_phone_rows_keep_the_date_on_the_one_second_line(member: Browser) -> None:
     page = (await member.http.get(SECTION)).text
     row = re.search(r"<a class='tr' href='/forum/thread/700002'.*?</a>", page, re.S).group(0)
-    # owner · replies · date, the date inline (its separator inside the phone-only span)
+    # owner · replies · date as facts (the dots drawn between them), the date a phone-only fact
     assert re.search(
-        r"<span class='sub'><span>amy · \d+ repl\w+<span class='sm-only fm-when'> · <time[^>]*>", row
+        r"<span class='sub'><span class='ui-dots-w'><span class='tx ui-dots balanced'><span>amy</span>"
+        r"<span>\d+ repl\w+</span><span class='sm-only fm-when'><time[^>]*>",
+        row,
     ), row
     assert ".fm-when{display:block}" not in page
 

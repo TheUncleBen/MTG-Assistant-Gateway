@@ -169,8 +169,8 @@ def test_the_watched_rows_labels_fit_a_phone_at_200_percent_text(
             page.evaluate({"browser": BROWSER_200, "root": ROOT_200, "text": TEXT_200}[zoom])
             redrawn(page)
         labels = page.evaluate(LABELS)
-        owned = [lb for lb in labels if lb["text"].startswith("In binder")]
-        assert len(owned) == 2 and all(lb["text"].endswith("you own\u00a01") for lb in owned), labels
+        owned = [lb for lb in labels if lb["text"].startswith("You own")]
+        assert len(owned) == 2 and all(lb["text"] == "You own\u00a01" for lb in owned), labels
         assert all(lb["fits"] and lb["inside"] and lb["tail"] for lb in labels), (width, zoom, labels)
         if zoom == "none" and width <= 375:  # one line each, the 24 px pill (polish B8)
             assert all(lb["height"] <= 26 for lb in labels), labels

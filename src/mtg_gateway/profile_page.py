@@ -1007,7 +1007,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         tools = ui.toolbar(
             "/notifications",
             search_label="Search alerts",
-            placeholder="Search alerts",
+            placeholder="Search alerts|Search",
             q=q,
             filters=[ui.filter_select("type", "Type", notify.ALERT_TYPES, kind)],
         )

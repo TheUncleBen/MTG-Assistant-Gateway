@@ -116,7 +116,7 @@
   var Box = window.MtgBox;
   function countChars(ta) {
     var id = ta.getAttribute("data-count"), c = id ? document.getElementById(id) : null;
-    if (c) c.textContent = ta.value.length + " / " + (ta.getAttribute("maxlength") || "");
+    if (c) c.textContent = ta.value.length + "\u00a0/\u00a0" + (ta.getAttribute("maxlength") || "");
   }
   function noteIn(box, text) {
     var b = Box && Box.current ? Box.current() : null;

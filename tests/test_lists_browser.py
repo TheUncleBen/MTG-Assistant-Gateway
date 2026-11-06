@@ -153,7 +153,7 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
         assert ark.pins["alice"][0]["quantity"] == 2 and row.locator(".lp-step .n").inner_text() == "2"
         note = row.locator("textarea")
         note.fill("Trade for it")
-        assert row.locator("[data-counter]").inner_text() == "12 / 256"
+        assert row.locator("[data-counter]").inner_text() == "12\u00a0/\u00a0256"
         # leaving the field saves the note (lists.js posts action=edit): wait for that answer
         with page.expect_response(
             lambda r: r.request.method == "POST" and "action=edit" in (r.request.post_data or "")

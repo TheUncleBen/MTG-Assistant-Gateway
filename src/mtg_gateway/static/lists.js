@@ -135,7 +135,7 @@
   }
   function countOf(field) {
     var id = field.getAttribute("data-count"), c = id ? document.getElementById(id) : null;
-    if (c) c.textContent = field.value.length + " / " + (field.getAttribute("maxlength") || "");
+    if (c) c.textContent = field.value.length + "\u00a0/\u00a0" + (field.getAttribute("maxlength") || "");
   }
   function clearNote(box) {
     var n = $(".boxnote", box);

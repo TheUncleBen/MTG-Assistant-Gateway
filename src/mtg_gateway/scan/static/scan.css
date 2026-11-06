@@ -30,6 +30,8 @@
    S3). Each keeps its name on one line; four that don't fit scroll the switch sideways, with the
    faded edges and the chosen tab in view that static/topbar.js gives every .hubseg */
 .scan .tabs > button{min-width:max-content;padding-inline:.5rem}
+/* parts of one width in balanced rows where the script has measured them (topbar.js, NA4) */
+.scan .tabs.seg-grid{display:grid}
 .scan .tabs .badge.zero{background:var(--surface-3);color:var(--text)}  /* an empty list: no alarm */
 .scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--orange);
   color:var(--on-orange);border-color:var(--orange)}
@@ -39,11 +41,12 @@
 .scan .scan-opts{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .scan .scan-opts > *{margin:0}
 /* the Set box draws the edge; the label, the field and the × sit inside it side by side */
-.scan .setbox{position:relative;display:flex;align-items:center;width:max(128px,9em);flex:none;height:var(--ctl);box-sizing:content-box;
+.scan .setbox{position:relative;display:flex;align-items:center;width:max(128px,9em);flex:none;min-height:var(--ctl);box-sizing:content-box;
   border:1px solid var(--control-border);border-radius:var(--radius);background:var(--surface)}
 .scan .setbox:focus-within{outline:2px solid var(--focus);outline-offset:2px}
 .scan .setbox .pre{flex:none;padding:0 0 0 10px;font-weight:700;color:var(--text-muted);margin:0}
-.scan .setbox input#set-lock{flex:1 1 auto;width:100%;min-width:3.5em;height:100%;min-height:0;padding:0 2px 0 6px;border:0;border-radius:0;
+.scan .setbox input#set-lock{flex:1 1 auto;width:100%;min-width:3.5em;height:auto;min-height:0;align-self:stretch;
+  padding:.3em 2px .3em 6px;border:0;border-radius:0;
   background:transparent;color:inherit;font-weight:700;font-size:.95rem;letter-spacing:.04em;text-transform:uppercase;
   font-family:ui-monospace,Menlo,Consolas,monospace}
 .scan .setbox input#set-lock:focus,.scan .setbox input#set-lock:focus-visible{outline:none;box-shadow:none}
@@ -51,7 +54,7 @@
 .scan .scan-opts.locked .setbox{border-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
 .scan .scan-opts.invalid .setbox{border-color:var(--danger-text);background:var(--red-tint);color:var(--danger-text)}
 /* the × at the box's right end: a full-height target, no edge of its own */
-.scan .setbox .clear{flex:none;width:var(--ctl);height:100%;min-width:0;min-height:0;padding:0;margin:0;
+.scan .setbox .clear{flex:none;width:var(--ctl);height:auto;align-self:stretch;min-width:0;min-height:0;padding:0;margin:0;
   border:0;border-radius:0 var(--radius) var(--radius) 0;background:transparent;color:var(--text-muted)}
 .scan .setbox .clear:hover{background:var(--surface-2);color:var(--text)}
 /* the toggles (Foil, Auto, the picker's Foil): a pill, filled with the orange tint when on */

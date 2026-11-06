@@ -137,7 +137,7 @@ def field(
     attrs: str = "",
 ) -> str:
     extra = (f" maxlength='{limit}'" if limit else "") + (" required" if required else "")
-    ph = f" placeholder='{esc(placeholder)}'" if placeholder else ""
+    ph = ui.hint_attrs(placeholder)
     return (
         f"<div class='field'><label for='{esc(fid)}'>{esc(label)}</label>"
         f"<input id='{esc(fid)}' type='text' name='{esc(name)}' value='{esc(value)}' autocomplete='off'"
@@ -673,15 +673,15 @@ def contest_box_html(
             "contest",
             "Contest link or ID",
             v.get("contest", ""),
-            placeholder="https://archidekt.com/contest/discussion/…",
+            placeholder="https://archidekt.com/contest/discussion/…|Contest link|Link",
             required=True,
         )
         + "<div class='field'><label for='dx-es'>Summary of the deck (required)</label>"
         f"<textarea id='dx-es' name='summary' rows='4' maxlength='{actions.CONTEST_SUMMARY_MAX}' "
         f"data-count='dx-es-c' required>{esc(summary)}</textarea>"
         "<div class='dx-under'><span class='muted small'>Shown on the contest page.</span>"
-        f"<span class='muted small' id='dx-es-c' data-counter>{len(summary)} / "
-        f"{actions.CONTEST_SUMMARY_MAX}</span></div></div>"
+        f"<span class='muted small' id='dx-es-c' data-counter>"
+        f"{ui.counted(len(summary), actions.CONTEST_SUMMARY_MAX)}</span></div></div>"
         + ui.notice(
             f"<b>Archidekt replaces the deck's description with this summary.</b> {esc(CONTEST_WARN)}",
             "warn",
@@ -724,7 +724,7 @@ def withdraw_box_html(
             "contest",
             "Contest link or ID",
             v.get("contest", ""),
-            placeholder="https://archidekt.com/contest/discussion/…",
+            placeholder="https://archidekt.com/contest/discussion/…|Contest link|Link",
             required=True,
         )
         + f"<p>{esc(WITHDRAW_TEXT)}</p>"

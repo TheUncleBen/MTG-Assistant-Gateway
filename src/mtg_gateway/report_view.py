@@ -737,7 +737,9 @@ def svg_lines(series: list[tuple[str, list[float | None]]], *, turns: int, label
     every = 1 if turns <= 12 else 2
     for i in range(turns):
         if (i + 1) % every == 0 or i == 0:
-            parts.append(f"<text x='{x(i):.1f}' y='{h - 8}' text-anchor='middle'>T{i + 1}</text>")
+            # the last turn's label ends at the chart's edge (centred, it ran past it)
+            anchor = "end" if i == turns - 1 and turns > 1 else "middle"
+            parts.append(f"<text class='x' x='{x(i):.1f}' y='{h - 8}' text-anchor='{anchor}'>T{i + 1}</text>")
     for n, (name, pts) in enumerate(series[:4], start=1):
         coords = [f"{x(i):.1f},{y(p):.1f}" for i, p in enumerate(pts[:turns]) if isinstance(p, (int, float))]
         if len(coords) >= 2:
@@ -784,11 +786,11 @@ def svg_columns(
             )
             if n <= 12 or i % every == 0:
                 parts.append(
-                    f"<text x='{cx:.1f}' y='{top + ph - bh - 4:.1f}' text-anchor='middle'>"
+                    f"<text class='v' x='{cx:.1f}' y='{top + ph - bh - 4:.1f}' text-anchor='middle'>"
                     f"{_num(v, digits)}</text>"
                 )
         if (i + 1) % every == 0 or i == 0 or n <= 12:
-            parts.append(f"<text x='{cx:.1f}' y='{h - 8}' text-anchor='middle'>{_esc(k)}</text>")
+            parts.append(f"<text class='x' x='{cx:.1f}' y='{h - 8}' text-anchor='middle'>{_esc(k)}</text>")
     parts.append("</svg>")
     return "".join(parts)
 

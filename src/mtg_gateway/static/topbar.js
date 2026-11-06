@@ -119,6 +119,14 @@
     var ro = new ResizeObserver(fit);
     ro.observe(bar);
     tabs.forEach(function (t) { ro.observe(t); });
+    // a text size changed in place (a browser's text setting, no reload and no resize) changes
+    // neither the bar's nor a tab's size, and the hidden labels keep theirs: a box 1em square in
+    // the labels' font tells it (confirmation NA3: "HomeDecksBinderAssistMore")
+    var em = document.createElement("span");
+    em.className = "lbl-em";
+    em.setAttribute("aria-hidden", "true");
+    bar.appendChild(em);
+    ro.observe(em);
   } else fit();
   window.addEventListener("resize", fit);
 })();
@@ -146,7 +154,35 @@
     n.classList.toggle("more-start", over && n.scrollLeft > 1);
     n.classList.toggle("more-end", over && n.scrollLeft + n.clientWidth < n.scrollWidth - 1);
   }
+  // a switch's parts are all as wide as its widest one, in rows that hold as many each (one apart
+  // at most): as many a row as fit whole, then spread evenly over the rows needed, so no part sits
+  // alone under a full row ("Card models" at 412 px) and none is cut (confirmation NA4, P-9)
+  function balance(n) {
+    if (!n.matches(".hubseg") || !n.getClientRects().length) return;
+    var kids = Array.prototype.filter.call(n.children, function (k) {
+      return k.getClientRects().length && getComputedStyle(k).position !== "absolute";
+    });
+    if (kids.length < 2) return;
+    // the room: the line the switch sits on (its parent's width, less its own padding)
+    var cs = getComputedStyle(n), ps = getComputedStyle(n.parentElement), gap = parseFloat(cs.columnGap) || 0;
+    var room = Math.min(n.parentElement.clientWidth - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight),
+      document.documentElement.clientWidth) - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) -
+      parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth), w = 0;
+    // each part measured on one line at its own width
+    n.classList.remove("seg-grid");
+    n.classList.add("seg-measure");
+    kids.forEach(function (k) { w = Math.max(w, k.getBoundingClientRect().width); });
+    n.classList.remove("seg-measure");
+    var len = kids.length;
+    var cols = Math.max(1, Math.min(len, Math.floor((room + gap) / (w + gap) + 0.001)));
+    cols = Math.ceil(len / Math.ceil(len / cols));
+    // a last row of one part under fuller rows is a part alone: fewer a row until none is
+    while (cols > 1 && len % cols === 1) cols--;
+    n.style.setProperty("--seg-cols", String(cols));
+    n.classList.add("seg-grid");
+  }
   function show(n) {
+    balance(n);
     var cur = n.querySelector("[aria-current=page], [aria-selected=true]");
     if (cur && n.scrollWidth > n.clientWidth + 1) {
       var r = n.getBoundingClientRect(), c = cur.getBoundingClientRect();
@@ -162,7 +198,13 @@
     show(n);
     // the phone's text size can change after this runs: follow the parts' own size
     if (window.ResizeObserver) {
-      var ro = new ResizeObserver(function () { show(n); });
+      // in the next frame: the switch laid out again by show() is not measured in this one
+      var queued = false;
+      var ro = new ResizeObserver(function () {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(function () { queued = false; show(n); });
+      });
       ro.observe(n);
       Array.prototype.forEach.call(n.children, function (k) { ro.observe(k); });
     }
@@ -182,6 +224,182 @@
   }
   window.addEventListener("resize", function () { navs.forEach(show); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { navs.forEach(show); });
+})();
+
+/* Fitting to the text (confirmation P-1, P-13), again whenever the window, the text size or the
+   page changes:
+   - a heading word wider than the heading's whole line (a phone's font scale: "Preconstructed"
+     424 px in a 288 px line) broke bare; the heading is zoomed down until its widest word fits;
+   - a button with an icon whose label wraps kept its lines against the icon but sat left of
+     centre (the label's lines take the whole width left): the room its lines leave is split
+     between the button's two sides. */
+(function () {
+  "use strict";
+  // text cut on purpose (an ellipsis, a clipped box) is already held in its place
+  function clipped(e, top) {
+    for (; e && e !== top; e = e.parentElement) {
+      var c = getComputedStyle(e);
+      if (c.textOverflow === "ellipsis" || c.overflowX !== "visible") return true;
+    }
+    return false;
+  }
+  function widestWord(el) {
+    var w = 0, tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n, m, re = /\S+/g;
+    while ((n = tw.nextNode())) {
+      if (clipped(n.parentElement, el)) continue;
+      re.lastIndex = 0;
+      while ((m = re.exec(n.textContent))) {
+        var r = document.createRange(), sum = 0, rs;
+        r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        rs = r.getClientRects();
+        for (var i = 0; i < rs.length; i++) sum += rs[i].width;
+        if (sum > w) w = sum;
+      }
+    }
+    return w;
+  }
+  function fitHeading(h) {
+    if (h.style.zoom) h.style.removeProperty("zoom");
+    // a heading that holds its own controls keeps them at their full size
+    if (!h.getClientRects().length || h.querySelector("button, summary, a, input, select")) return;
+    var cs = getComputedStyle(h);
+    var room = h.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    var w = widestWord(h);
+    if (room > 0 && w > room + 0.5) h.style.zoom = String(Math.floor(room / w * 1000) / 1000);
+  }
+  function lineRights(b) {
+    var tops = {}, right = -Infinity, lines = 0;
+    for (var c = b.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 1 && (c.tagName !== "SPAN" || c.classList.contains("sr-only"))) continue;
+      if (c.nodeType !== 1 && c.nodeType !== 3) continue;
+      var r = document.createRange();
+      r.selectNodeContents(c);
+      var rs = r.getClientRects();
+      for (var i = 0; i < rs.length; i++) {
+        if (!rs[i].width) continue;
+        var t = Math.round(rs[i].top);
+        if (!tops[t]) { tops[t] = 1; lines++; }
+        if (rs[i].right > right) right = rs[i].right;
+      }
+    }
+    return { lines: lines, right: right };
+  }
+  function centre(b) {
+    if (b.hasAttribute("data-fit-pad")) {
+      b.style.removeProperty("padding-left");
+      b.style.removeProperty("padding-right");
+      b.removeAttribute("data-fit-pad");
+    }
+    var svg = b.querySelector(":scope > svg");
+    if (!svg || !b.getClientRects().length || !svg.getBoundingClientRect().width ||
+      getComputedStyle(svg).position === "absolute") return;
+    var got = lineRights(b);
+    if (got.lines < 2) return;
+    var cs = getComputedStyle(b), br = b.getBoundingClientRect();
+    var pl = parseFloat(cs.paddingLeft), pr = parseFloat(cs.paddingRight);
+    var left = svg.getBoundingClientRect().left - br.left - parseFloat(cs.borderLeftWidth) - pl;
+    var slack = br.right - parseFloat(cs.borderRightWidth) - pr - got.right - left;
+    if (slack < 4) return;
+    var half = Math.floor(slack / 2) - 1;
+    b.setAttribute("data-fit-pad", "");
+    b.style.paddingLeft = pl + half + "px";
+    b.style.paddingRight = pr + half + "px";
+    // a button sized by its words narrows its words' room with the padding: kept only when
+    // the label still wraps as it did
+    var now = lineRights(b);
+    if (now.lines !== got.lines) {
+      b.style.removeProperty("padding-left");
+      b.style.removeProperty("padding-right");
+      b.removeAttribute("data-fit-pad");
+    }
+  }
+  // a chart's labels along its axis (and the values over its columns) that run into each other at
+  // a large text size: every other one is left out, the first and last kept (AD1)
+  function thin(svg, sel) {
+    var ts = svg.querySelectorAll(sel), i;
+    for (i = 0; i < ts.length; i++) ts[i].removeAttribute("display");
+    for (var step = 2; step < ts.length; step++) {
+      var shown = [], hit = false;
+      for (i = 0; i < ts.length; i++) {
+        if (i % (step - 1) && i !== ts.length - 1) ts[i].setAttribute("display", "none");
+        else { ts[i].removeAttribute("display"); shown.push(ts[i].getBoundingClientRect()); }
+      }
+      for (i = 1; i < shown.length; i++) if (shown[i].left < shown[i - 1].right + 2) { hit = true; break; }
+      if (!hit) return;
+    }
+  }
+  // a text box's hint: the longest of its hints (ui.hint_attrs: data-ph lists the shorter ones)
+  // that fits the box at its size, the shortest where none does (P-5, P-19)
+  var ctx = document.createElement("canvas").getContext("2d");
+  var hintRO = window.ResizeObserver ? new ResizeObserver(function (es) {
+    for (var i = 0; i < es.length; i++) fitHint(es[i].target);
+  }) : null;
+  function fitHint(el) {
+    if (!el.hasAttribute("data-ph-full")) el.setAttribute("data-ph-full", el.getAttribute("placeholder") || "");
+    var hints = [el.getAttribute("data-ph-full")].concat(el.getAttribute("data-ph").split("|"));
+    if (!el.getClientRects().length) return;
+    var cs = getComputedStyle(el);
+    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    var room = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), pick = hints[hints.length - 1];
+    for (var i = 0; i < hints.length; i++) if (ctx.measureText(hints[i]).width <= room) { pick = hints[i]; break; }
+    if (el.getAttribute("placeholder") !== pick) el.setAttribute("placeholder", pick);
+  }
+  function fitIn(root) {
+    var ph = root.querySelectorAll("input[data-ph]"), k;
+    for (k = 0; k < ph.length; k++) {
+      fitHint(ph[k]);
+      // shown later (a sheet, a box) or resized: its own size tells
+      if (hintRO) hintRO.observe(ph[k]);
+    }
+    var cs2 = root.querySelectorAll(".chart svg");
+    for (k = 0; k < cs2.length; k++) { thin(cs2[k], "text.x"); thin(cs2[k], "text.v"); }
+    var hs = root.querySelectorAll("h1, h2, h3"), i;
+    for (i = 0; i < hs.length; i++) fitHeading(hs[i]);
+    var bs = root.querySelectorAll("button, .btn");
+    for (i = 0; i < bs.length; i++) if (bs[i].querySelector(":scope > svg")) centre(bs[i]);
+  }
+  // the next frame fits the whole page (a resize, a text size) or only what was drawn since (a
+  // box, a sheet, a list's next rows), so opening a box does not measure the page under it again
+  var queued = false, roots = [], whole = false;
+  function later(root) {
+    if (root && !whole) { if (roots.indexOf(root) < 0) roots.push(root); } else whole = true;
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () {
+      var them = whole ? [document.body] : roots;
+      queued = false; roots = []; whole = false;
+      for (var i = 0; i < them.length; i++) if (them[i].isConnected) fitIn(them[i]);
+    });
+  }
+  fitIn(document.body);
+  window.addEventListener("resize", function () { later(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { later(); });
+  if (window.ResizeObserver) {
+    // a text size changed in place (no reload, no resize): a box 1em square tells it
+    var em = document.createElement("span");
+    em.setAttribute("aria-hidden", "true");
+    em.style.cssText = "position:absolute;left:-9999px;top:0;width:1em;height:1em;visibility:hidden";
+    document.body.appendChild(em);
+    var first = true;
+    new ResizeObserver(function () { if (first) { first = false; return; } later(); }).observe(em);
+  }
+  // a box, a sheet or a list drawn after this ran
+  if (window.MutationObserver) {
+    new MutationObserver(function (muts) {
+      var FIT = "h1, h2, h3, button, .btn, input[data-ph], .chart";
+      for (var i = 0; i < muts.length; i++) {
+        for (var j = 0; j < muts[i].addedNodes.length; j++) {
+          var n = muts[i].addedNodes[j];
+          if (n.nodeType !== 1 || !(n.matches(FIT) || n.querySelector(FIT))) continue;
+          // the added part with what holds it (a button fits within its own box)
+          later(n.parentElement || n);
+          // a hint fits from its first frame (a box's field drawn after its answer came)
+          var ph = n.matches("input[data-ph]") ? [n] : n.querySelectorAll("input[data-ph]");
+          for (var k = 0; k < ph.length; k++) { fitHint(ph[k]); if (hintRO) hintRO.observe(ph[k]); }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  }
 })();
 
 /* Pull to refresh in the Android app (0.7.46, screen 9). The app's pull layer knows nothing of the

@@ -257,7 +257,8 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert changes and ">Change</span>" in changes[0] and "+1 Sol Ring; -1 Card 8" in changes[0]
         # 15 + 20 snapshots, 15 applied changes (the restore among them), 2 tests
         assert "Load more</a>" in body and "25 of 52</p>" in body
-        assert "<div class='tr daygroup'>Today · " in body and "<div class='tr daygroup'>Yesterday · " in body
+        assert "<div class='tr daygroup'><span class='ui-dots'><span>Today</span>" in body
+        assert "<div class='tr daygroup'><span class='ui-dots'><span>Yesterday</span>" in body
         snaps = [r for r in rows if "open=s-" in r and "open=p-" not in r]
         assert snaps and all("Restore (review first)" in r and ">Details</span>" in r for r in snaps)
         # a row's one main action, Details (a test's: its report page), is a capsule beside its ⋮:

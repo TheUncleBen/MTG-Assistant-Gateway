@@ -147,7 +147,9 @@ VIZ_CSS = """
 .pips i{font-style:normal;color:var(--text-muted);font-size:.86rem}
 /* SVG charts drawn on the server: lines and columns take their colours from the theme */
 .chart{min-width:0} .chart h3{margin:0 0 .4rem}
-.chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:11px;overflow:visible}
+/* the labels (the axes' "0%" and "T1", the values over the columns) in rem: they grow with the
+   text size as the words around the chart do (confirmation AD1: 11 px at every size) */
+.chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:.786rem;overflow:visible}
 .chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
 .chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)}
 .chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
@@ -401,7 +403,10 @@ pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(-
 /* forms: phatInput / phatButton */
 label{display:block;margin:.9rem 0 .3rem;font-weight:700}
 input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],
-input[type=url],select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:var(--radius);
+/* height:auto from 44 px: the box grows with its text (at 200% a fixed 44 px box left the words
+   touching its edges, confirmation AD3) */
+input[type=url],select{width:100%;height:auto;min-height:var(--ctl);padding:.3em 1rem;font:inherit;
+  border-radius:var(--radius);
   border:1px solid var(--control-border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
 /* a field inside a <label> keeps its normal weight: only the label's own text is bold */
@@ -968,7 +973,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
   .addbox button.tchip,.popular a,.cardview .chip{min-height:44px}
   .switch{min-height:44px;min-width:44px}
-  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:44px}
+  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:auto}
   /* kept a list item (a flex summary loses its native fold-out marker in Chromium); the padding
      and the minimum make the 44 px */
   details > summary{min-height:44px;padding:.6rem 0}
@@ -1097,7 +1102,10 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .home details.connect .addrline code{word-break:break-all;font-size:.9rem}
 /* the keyboard shortcuts box (static/sitesearch.js) */
-.mtgbox dl.keys{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem 1rem;margin:0}
+/* one row a key (each dt and its dd in a div of their own: in one wrapping row for the whole
+   list, a key followed the previous key's words where they left room, confirmation NA2) */
+.mtgbox dl.keys{display:flex;flex-direction:column;gap:.4rem;margin:0}
+.mtgbox dl.keys > div{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem 1rem}
 /* the key column is 6em wide (every key fits); the words take the rest of the row, or, when
    less than 12em is left beside the key (200% text on a phone), the row under it whole
    (final polish P-7: an 89 px column broke every word) */
@@ -1138,6 +1146,9 @@ ul.decklist.skeleton>li{height:230px;list-style:none}
    (z-index 20), so a tap on a row can never land on Save changes underneath. */
 .topbar:focus-within{z-index:25}
 body .tabbar:has(details.more[open]){z-index:25}
+/* static/topbar.js: a box 1em square in the labels' font, which tells the bar a text size change */
+.tabbar > .lbl-em{position:absolute;width:1em;height:1em;font-size:var(--tab-label);visibility:hidden;
+  pointer-events:none;top:0;left:0}
 .tabbar details.more summary{list-style:none;cursor:pointer}
 .tabbar details.more summary::-webkit-details-marker{display:none}
 .tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
@@ -1163,9 +1174,15 @@ body .tabbar:has(details.more[open]){z-index:25}
 /* the count grows with the text; its padding and its gap to the top give way as it grows (4 px at
    14 px text, 1 px and 0 at 200%), so a two-digit count stays inside its tab and off the icon's
    centre (W2) */
-.tabbar > a .nb,.tabbar > a.bell .n{font-size:.72rem;display:inline-grid;place-items:center;
+/* capped at 12 px (confirmation NA5, AD2: at 200% text a 20 px count, 25 px tall, covered the
+   Assistant icon and "99+" ran out of its tab): 18 px tall, on the icon's corner and inside its tab
+   (a text-only zoom, which scales px text too, still makes it taller by its own line) */
+.tabbar > a .nb,.tabbar > a.bell .n{font-size:min(.72rem, 12px);display:inline-grid;place-items:center;
   line-height:normal;height:auto;min-height:18px;top:max(0px, calc(14px - .72rem));
-  padding-left:max(1px, calc(14px - .72rem));padding-right:max(1px, calc(14px - .72rem))}
+  left:min(calc(50% + 5px), calc(100% - 1.7em - 3px));
+  padding-left:max(2px, calc(14px - .72rem));padding-right:max(2px, calc(14px - .72rem))}
+/* "99+" (.w3) is wider: it moves left as far as it must to stay inside its tab */
+.tabbar > a .nb.w3{left:min(calc(50% + 5px), calc(100% - 2.1em - 5px))}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
@@ -1483,8 +1500,15 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg a .cn{display:inline-grid;place-items:center;min-width:20px;min-height:20px;height:auto;padding:0 6px;
   border-radius:10px;background:var(--surface-3);color:var(--text);font-size:.78rem;font-weight:700}
 .hubseg a,.hubseg > button{min-height:44px}
+/* static/topbar.js: the parts in equal columns, as many a row as fit whole, the rows evenly filled
+   (confirmation NA4: parts of their own widths, and "Card models" alone on a second row). Without
+   scripts the parts wrap as above. seg-measure is the one-row layout the script measures in */
+.hubseg.seg-grid{display:inline-grid;grid-template-columns:repeat(var(--seg-cols),minmax(0,1fr))}
+.hubseg.seg-measure{display:flex!important;flex-wrap:nowrap!important}
+.hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
+.hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
-@media (max-width:599.98px){ .hubseg{display:flex;width:100%}
+@media (max-width:599.98px){ .hubseg{display:flex;width:100%} .hubseg.seg-grid{display:grid}
   .hubbar{display:block}
   /* large text on a narrow phone: a part keeps its name on one line and moves to the next row
      whole when the row is full (final polish AC9: "My / Decks" beside a one-line "Packages") */
@@ -1820,6 +1844,12 @@ main.wrap.ui-wide{max-width:1200px}
    loses its dot at the clipped edge, so no dot is ever left dangling at a line end (polish C1).
    Only the left edge is clipped: a capsule's transparent hang (.ui-cap's --hang, part of its tap
    area) may reach past the other edges, where overflow:hidden cut it off */
+/* ui.breakable: a long value breaks at its marks (its <wbr>), inside a piece only when the piece
+   alone is wider than the line; under a box's overflow-wrap:anywhere its narrowest size was one
+   letter, so it broke anywhere (confirmation P-14: "alice@example.tes/t") */
+.brk{overflow-wrap:break-word;word-break:normal}
+/* a count against its limit ("12 / 5000", ui.counted) keeps its own width beside the help line */
+[data-counter]{flex:none;white-space:nowrap}
 .ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;clip-path:inset(-8px -8px -8px 0)}
 .ui-dots > *{position:relative;min-width:0}
 .ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}
@@ -1833,6 +1863,7 @@ main.wrap.ui-wide{max-width:1200px}
    drawn before it falls in the clipped strip. A fact is a block in the line (inline-block): whole
    where it fits, and only one wider than the line itself (a long fact in a phone's half-width tile,
    or at 200% text) wraps inside instead of being cut off at the edge (re-check S5). */
+.ui-dots-w{display:block;min-width:0;overflow-x:clip;overflow-clip-margin:0}
 .ui-dots.balanced{display:block;text-wrap:balance;margin-left:-.85rem;clip-path:inset(0 0 0 .85rem)}
 .ui-dots.balanced > *{display:inline-block;margin-left:.85rem;white-space:normal;vertical-align:top}
 /* the sticky action bar while a list has a selection */
@@ -2175,8 +2206,11 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
    first line leaves the ×'s room (a float in the title) and a second line takes the whole width,
    so a long name moves down whole instead of breaking inside beside the × (a 31-letter card name
    in "Price alert: …" on a 360 px phone) */
+/* flex:none: in the box's column a header of two lines and more held its full height only while
+   the box fitted the screen; in a taller box it shrank to its 44 px minimum and the content was
+   drawn over the title's lower lines (confirmation NA1) */
 .mtgbox .bh{--th:1.25rem;--tp:max(.45rem, calc((44px - 1.3 * var(--th)) / 2));position:relative;
-  min-height:44px;margin:0 -.5rem .5rem 0}
+  min-height:44px;margin:0 -.5rem .5rem 0;flex:none}
 .mtgbox .bh h2{margin:0;font-size:var(--th);line-height:1.3;overflow-wrap:break-word;
   padding:var(--tp) 0 .45rem}
 .mtgbox .bh h2::before{content:"";float:right;width:calc(44px + .5rem);height:1.3em}
@@ -2307,7 +2341,8 @@ _TOPSEARCH_CSS = """
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
   background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
-.topbar .topsearch .box input{height:44px;border-radius:22px}
+.topbar .topsearch .box input{height:auto;min-height:44px;padding-top:.3em;padding-bottom:.3em;
+  border-radius:22px}
 .topbar .topsearch .box input::placeholder{color:var(--navbar-muted)}
 .topbar .topsearch .box input:focus{background:var(--surface);color:var(--text);
   border-color:var(--orange);outline-offset:1px}
@@ -2402,7 +2437,10 @@ SEARCH_PANEL_CSS = """
 .spanel .fg input,.spanel .fg select{margin:0}
 .spanel .range{display:flex;gap:8px;align-items:center}
 .spanel .range span{color:var(--text-muted)}
-.spanel .range input{flex:1 1 0;min-width:0;width:auto}
+/* each box at least as wide as its hint ("From", "To") with its padding; at large text on a phone
+   the second goes under the first (P-5: "From" was cut in a 53 px box) */
+.spanel .range{flex-wrap:wrap}
+.spanel .range input{flex:1 1 0;min-width:calc(3.2em + 2rem);width:auto}
 /* the Colours group: today's colour buttons (a pill with the mana symbol and the colour name), then
    the match drop-down 10 px after them, taking a little of the group's spare width */
 .spanel .colors{container:colors/inline-size;--gw:var(--cw,50em)}
@@ -3091,9 +3129,10 @@ def render(
         more_open = cur in {href for _h, links in groups for href, _l, _i in links}
 
         def badge(n: int, label: str) -> str:
-            # the count in the bell's orange; read out with the place's name
+            # the count in the bell's orange; read out with the place's name ("99+" is .w3, wider)
+            cls = "nb" if n < 100 else "nb w3"
             return (
-                f"<span class='nb' aria-hidden='true'>{n if n < 100 else '99+'}</span>"
+                f"<span class='{cls}' aria-hidden='true'>{n if n < 100 else '99+'}</span>"
                 f"<span class='sr-only'>, {n} {label}</span>"
                 if n
                 else ""
@@ -3152,7 +3191,8 @@ def render(
             "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
             "<label for='site-q' class='sr-only'>Search cards and decks</label>"
             f"<span class='box'>{icon('search')}<input id='site-q' type='search' name='q' maxlength='100' "
-            "placeholder='Cards and decks' data-suggest='cards' data-suggest-site='/cards?q=' "
+            "placeholder='Cards and decks' data-ph='Search' data-suggest='cards' "
+            "data-suggest-site='/cards?q=' "
             "data-suggest-menu autocomplete='off' enterkeyhint='search'></span></form>"
         )
         # The bell (parity release 2): Archidekt's unseen count, read after the page has loaded

@@ -639,7 +639,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<template class='tpl-icon'>{icon('tag')}</template>"
             f"<p class='muted small'>{icon('history')} A snapshot of the deck is kept first; one category is "
             "created per template, then the deck is read back. "
-            "<a href='/lists/templates'>Manage templates</a></p></form>"
+            + ui.cap_link("Manage templates", "/lists/templates")
+            + "</p></form>"
             + (ui.notice(error, "error", role="alert", cls="boxnote") if error else "")
         )
         return ui.box(
@@ -779,7 +780,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<input type='hidden' name='action' value='create'>"
             "<h3><label for='newcat'>New category</label></h3><div class='row'>"
             "<input id='newcat' type='text' name='category' maxlength='60' required "
-            "placeholder='e.g. Removal'>"
+            f"{ui.hint_attrs('e.g. Removal|Removal')}>"
             "<span class='ds-sw' role='group' aria-label='Switches of the new category'>"
             f"{new_switches}</span>"
             f"<button class='btn'>{icon('plus')} Create category</button></div></form>"

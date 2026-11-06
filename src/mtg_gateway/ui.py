@@ -450,8 +450,8 @@ def list_head(title: str, total: int | None = None, note: str = "", *, note_html
 
 def order_note(current: str, other: str, href: str) -> str:
     """The list's order beside its heading, with the switch to the other order as a capsule:
-    "Newest first · Show oldest first"."""
-    return f"{esc(current)} · " + cap_link(f"Show {other.lower()}", href)
+    "Newest first · Show oldest first", as facts (``facts``: never a dot left at a line's end)."""
+    return facts([esc(current), cap_link(f"Show {other.lower()}", href)], html=True)
 
 
 BUTTON_KINDS = {
@@ -516,7 +516,23 @@ def facts(parts: Iterable[str], *, html: bool = False) -> str:
     if not kept:
         return ""
     inner = "".join(f"<span>{p if html else esc(p)}</span>" for p in kept)
-    return f"<span class='tx ui-dots balanced'>{inner}</span>"
+    # the line starts a gap early (the dot's strip, clipped): its frame (.ui-dots-w) holds it
+    # inside the box, so it never reaches past a window's edge where the box has no padding
+    return f"<span class='ui-dots-w'><span class='tx ui-dots balanced'>{inner}</span></span>"
+
+
+def dotted(text: str) -> str:
+    """Plain text whose facts are set apart by " · " ("10 entries · 2 added this week"), as
+    ``facts``: the dot goes with the fact after it to the next line, never left at the end of a
+    line or the start of one (confirmation P-15). Text with no dot is only escaped."""
+    parts = text.split(" · ")
+    return facts(parts) if len(parts) > 1 else esc(text)
+
+
+def counted(n: int, limit: int | str) -> str:
+    """A count against its limit ("7 / 150"), kept on one line so the "/" never ends or starts
+    one (confirmation P-15); counters that scripts update write the same spaces."""
+    return f"{n}\u00a0/\u00a0{limit}"
 
 
 def widgets(items: Iterable[str], *, label: str = "At a glance", line: str = "") -> str:
@@ -527,7 +543,7 @@ def widgets(items: Iterable[str], *, label: str = "At a glance", line: str = "")
     fid = "glance-" + "".join(c if c.isalnum() else "-" for c in label.casefold())
     return (
         f"<input type='checkbox' class='glance-tgl' id='{fid}'>"
-        f"<label class='glance-lbl' for='{fid}'>{icon('stats')}<span>{esc(line or label)}</span>"
+        f"<label class='glance-lbl' for='{fid}'>{icon('stats')}<span>{dotted(line or label)}</span>"
         f"{icon('chev')}</label>"
         f"<section class='ui-widgets' aria-label='{esc(label)}'>{''.join(items)}</section>"
     )
@@ -581,7 +597,7 @@ def toolbar(
     return (
         f"<form class='{cls}' role='search' method='get' action='{esc(action)}'>{hidden}"
         f"<label class='search'><span class='sr-only'>{esc(search_label)}</span>{icon('search')}"
-        f"<input type='search' name='{esc(name)}' value='{esc(q)}' placeholder='{esc(placeholder)}'></label>"
+        f"<input type='search' name='{esc(name)}' value='{esc(q)}'{hint_attrs(placeholder)}></label>"
         f"{''.join(filters)}"
         "<noscript><button type='submit' class='btn-plain'>Search</button></noscript></form>"
     )
@@ -670,8 +686,13 @@ def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str
 
 
 def day_row(text: str) -> str:
-    """A quiet day heading between rows ("Today", "Oct 12")."""
-    return f"<div class='tr daygroup'>{esc(text)}</div>"
+    """A quiet day heading between rows ("Today", "Oct 12", "October 2026 · 3"): its facts in a
+    row of their own (.ui-dots), the dots in the gaps, from the row's own edge."""
+    parts = [p for p in text.split(" · ") if p]
+    if len(parts) < 2:
+        return f"<div class='tr daygroup'>{esc(text)}</div>"
+    inner = "".join(f"<span>{esc(p)}</span>" for p in parts)
+    return f"<div class='tr daygroup'><span class='ui-dots'>{inner}</span></div>"
 
 
 def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> str:
@@ -724,6 +745,40 @@ def pager(
         f"<nav class='ui-pager' aria-label='Pages'><span class='info'>{info}</span><span class='btns'>"
         f"{btn(NEWER, newer_href, 'prev')}{btn(OLDER, older_href, 'next')}</span></nav>"
     )
+
+
+def hint_attrs(hint: str) -> str:
+    """A text box's ``placeholder`` attribute (with its leading space; "" for no hint). ``hint`` may
+    list shorter hints after the full one, separated by "|" ("Set name or code|Set or code|Set"):
+    static/topbar.js shows the longest that fits the box at its size, so a hint is never cut at
+    large text on a phone (confirmation P-5, P-19)."""
+    if not hint:
+        return ""
+    full, *shorter = hint.split("|")
+    return f" placeholder='{esc(full)}'" + (f" data-ph='{esc('|'.join(shorter))}'" if shorter else "")
+
+
+def breakable(text: str) -> str:
+    """``text`` escaped, with a break opportunity after each "_", "@", "." and "/" inside it (a
+    variable's name, an e-mail address, a file's path): where it does not fit its line it breaks
+    there, never mid-word (confirmation P-14: "MTG_BACKUP_C/OPY_DIR", "alice@example.tes/t")."""
+    out = esc(text)
+    for mark in ("_", "@", ".", "/"):
+        out = out.replace(mark, mark + "<wbr>")
+    # a mark that ends the text, or one before a space, needs no break after it; .brk (theme)
+    # breaks inside a piece only when the piece alone is wider than the line
+    return "<span class='brk'>" + out.replace("<wbr> ", " ").removesuffix("<wbr>") + "</span>"
+
+
+def all_shown(n: int, one: str, many: str = "") -> str:
+    """The line under a list loaded whole: "All 12 entries shown.", and "1 entry shown." for one
+    (never "All 1", confirmation P-6). ``many`` defaults to ``one`` with an "s"; with no ``one``,
+    "All 12 shown." and "1 shown."."""
+    if not one:
+        return "1 shown." if n == 1 else f"All {n:,} shown."
+    if n == 1:
+        return f"1 {one} shown."
+    return f"All {n:,} {many or one + 's'} shown."
 
 
 def load_more(

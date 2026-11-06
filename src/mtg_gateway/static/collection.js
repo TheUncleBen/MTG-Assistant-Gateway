@@ -87,8 +87,9 @@
     c.textContent = n.toLocaleString() + (n === 1 ? " entry" : " entries");
     // "All N entries shown." under the list follows the count too
     var line = $(".loadmore p.muted");
-    if (line && /^All [\d,]+ (entry|entries) shown\.$/.test(line.textContent.trim())) {
-      line.textContent = "All " + n.toLocaleString() + (n === 1 ? " entry" : " entries") + " shown.";
+    // (ui.all_shown: "1 entry shown." for one, never "All 1")
+    if (line && /^(All )?[\d,]+ (entry|entries) shown\.$/.test(line.textContent.trim())) {
+      line.textContent = n === 1 ? "1 entry shown." : "All " + n.toLocaleString() + " entries shown.";
     }
   }
   /* -- Remove: at once, with Undo (QOL-01, 0.7.46 audit QG-09) ------------------------------
@@ -307,13 +308,25 @@
       cells[1].textContent = fin; cells[2].textContent = COND[cond] || cond || "Not set";
       cells[3].textContent = row.lang_name || lang;
     }
-    var sub = $(".sub", item);
-    if (sub) {
-      var parts = [item.getAttribute("data-setline"), item.getAttribute("data-setname"), fin, COND[cond] || cond || "Not set", row.lang_name || lang];
-      sub.textContent = parts.filter(Boolean).join(" · ");
+    // the facts as the page draws them (ui.facts): one span each, the dots between them drawn,
+    // and the price kept where the line has one
+    function facts(el, parts) {
+      var pr = $(":scope > .pr", el) || $(".ui-dots > span > .pr", el), line = document.createElement("span");
+      line.className = "tx ui-dots balanced";
+      parts.filter(Boolean).forEach(function (p) {
+        var s = document.createElement("span"); s.textContent = p; line.appendChild(s);
+      });
+      if (pr && !pr.classList.contains("lgh")) {
+        var last = document.createElement("span"); last.appendChild(pr); line.appendChild(last); pr = null;
+      }
+      el.textContent = "";
+      el.appendChild(line);
+      if (pr) el.appendChild(pr);
     }
+    var sub = $(".sub", item);
+    if (sub) facts(sub, [item.getAttribute("data-setline"), item.getAttribute("data-setname"), fin, COND[cond] || cond || "Not set", row.lang_name || lang]);
     var sm = $(".smline", item);
-    if (sm) sm.textContent = [item.getAttribute("data-setline"), fin, cond || "Not set", row.lang_name || lang].filter(Boolean).join(" · ");
+    if (sm) facts(sm, [item.getAttribute("data-setline"), fin, cond || "Not set", row.lang_name || lang]);
   }
   if (detailsBox) {
     detailsBox.addEventListener("click", function (e) {

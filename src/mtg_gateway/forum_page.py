@@ -322,7 +322,7 @@ def sections_html(got: dict[str, Any], q: str = "") -> str:
             if needle
             else "<p class='muted'>Archidekt's forum lists no sections right now.</p>"
         )
-    tools = ui.toolbar(PAGE, search_label="Find a section", placeholder="Section name", q=q)
+    tools = ui.toolbar(PAGE, search_label="Find a section", placeholder="Section name|Name", q=q)
     status = "<p class='muted small fm-count' data-filter-count aria-live='polite'></p>"
     return tools + status + "".join(out)
 
@@ -352,11 +352,12 @@ def thread_rows_html(threads: list[dict[str, Any]]) -> str:
         last_html = by + (" · " if by and when else "") + when
         # on a phone the last post's date joins the owner and the replies on the second line
         # (one flex item, so the row's gap doesn't open a space before the date's dot)
+        # as facts (ui.facts): no dot left at a line's end; the date a fact of its own, shown on a phone
         sub = (
-            "<span>"
-            + " · ".join((esc(t["owner"]), _plural(t["responses"], "reply")))
-            + (f"<span class='sm-only fm-when'> · {when}</span>" if when else "")
-            + "</span>"
+            "<span class='ui-dots-w'><span class='tx ui-dots balanced'>"
+            f"<span>{esc(t['owner'])}</span><span>{_plural(t['responses'], 'reply')}</span>"
+            + (f"<span class='sm-only fm-when'>{when}</span>" if when else "")
+            + "</span></span>"
         )
         rows.append(
             f"<a class='tr' href='{thread_href(t['id'])}' data-id='{t['id']}'>"
@@ -380,7 +381,7 @@ def load_more_words(got: dict[str, Any]) -> dict[str, Any]:
         "shown": shown,
         "total": total,
         "label": f"Load more ({shown:,} of {total:,} shown)",
-        "done": f"All {total:,} shown.",
+        "done": ui.all_shown(total, ""),
     }
 
 
@@ -595,8 +596,8 @@ def enter_box_html(
         f"<textarea id='fm-es' name='summary' rows='4' maxlength='{actions.CONTEST_SUMMARY_MAX}' "
         f"data-count='fm-es-c' required>{esc(summary)}</textarea>"
         f"<div class='dx-under'><span class='muted small'>{esc(CONTEST_SUMMARY_HELP)}</span>"
-        f"<span class='muted small' id='fm-es-c' data-counter>{len(summary)} / "
-        f"{actions.CONTEST_SUMMARY_MAX}</span></div></div>"
+        f"<span class='muted small' id='fm-es-c' data-counter>"
+        f"{ui.counted(len(summary), actions.CONTEST_SUMMARY_MAX)}</span></div></div>"
         + ui.notice(
             f"<b>{esc(CONTEST_REPLACES)}</b> {esc(deck_extras.CONTEST_WARN)}",
             "warn",

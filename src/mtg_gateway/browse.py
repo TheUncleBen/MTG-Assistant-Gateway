@@ -337,7 +337,7 @@ def search_form_html(
             label="Deck name, or an Archidekt link or deck ID",
             name="name",
             value=query["name"],
-            placeholder="Name or link",
+            placeholder="Name or link|Name",
             input_id="s-name",
             search_label="Search decks",
             cross_html=sp.cross_link("Search cards instead", cards_link, "image"),
@@ -519,7 +519,7 @@ def precon_body(
         if shown < len(decks):
             nxt = precon_link(pq, view_in_link, offset=shown)
             return html + ui.load_more(nxt, text="Load more decks", shown=shown, total=len(decks)), nxt
-        return html + ui.load_more("", done=f"All {len(decks)} decks shown."), ""
+        return html + ui.load_more("", done=ui.all_shown(len(decks), "deck")), ""
     shown_groups = groups[: pq["sets"]]
     html = "".join(precon_group_html(g, view=view, open=filtering) for g in shown_groups)
     if len(shown_groups) < len(groups):
@@ -527,9 +527,7 @@ def precon_body(
         return html + ui.load_more(
             nxt, text="Load more sets", shown=len(shown_groups), total=len(groups)
         ), nxt
-    return html + ui.load_more(
-        "", done=f"All {len(groups)} {'set' if len(groups) == 1 else 'sets'} shown."
-    ), ""
+    return html + ui.load_more("", done=ui.all_shown(len(groups), "set")), ""
 
 
 def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str, count: str) -> str:

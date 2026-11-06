@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import cardquery as cq
-from . import prefs
+from . import prefs, ui
 from . import searchpanel as sp
 from .deckpage import mana_html
 from .theme import UNPRICED_HTML, icon
@@ -294,7 +294,7 @@ def _picker(
         f"<div class='field cs-pick' data-picker='{key}' data-source='{source}'"
         f"{' data-signed' if signed else ''}><label class='lbl' for='p-{key}'>{_esc(label)}</label>"
         f"<ul class='chips' aria-label='{_esc(label)} chosen'>{chips}</ul>"
-        f"<input id='p-{key}' type='text' name='{key}' autocomplete='off' placeholder='{_esc(placeholder)}' "
+        f"<input id='p-{key}' type='text' name='{key}' autocomplete='off'{ui.hint_attrs(placeholder)} "
         f"role='combobox' aria-expanded='false' aria-autocomplete='list' aria-controls='o-{key}'>"
         f"<ul class='opts' id='o-{key}' role='listbox' hidden></ul>{hint_html}</div>"
     )
@@ -306,7 +306,7 @@ def _text_field(key: str, label: str, value: str, *, placeholder: str = "", hint
     return (
         f"<div class='field'><label for='f-{key}'>{_esc(label)}</label>"
         f"<input id='f-{key}' type='text' name='{key}' value='{_esc(value)}' maxlength='{cq.MAX_TEXT}' "
-        f"placeholder='{_esc(placeholder)}' autocomplete='off'{described}>{hint_html}</div>"
+        f"{ui.hint_attrs(placeholder)} autocomplete='off'{described}>{hint_html}</div>"
     )
 
 
@@ -394,7 +394,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
                 f.types,
                 source="types",
                 signed=True,
-                placeholder="Creature, Goblin, Equipment…",
+                placeholder="Creature, Goblin, Equipment…|Goblin, Equipment…|Goblin…",
             ),
             sp.group(
                 "Mana value",
@@ -418,7 +418,14 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
             sp.pick_group(
                 label="Rarity", name="r", options=cq.RARITIES, chosen=f.rarity, none_text="Any rarity"
             ),
-            _picker("s", "Set", f.sets, source="sets", signed=False, placeholder="Set name or code"),
+            _picker(
+                "s",
+                "Set",
+                f.sets,
+                source="sets",
+                signed=False,
+                placeholder="Set name or code|Set or code|Set",
+            ),
         ]
     )
     more = (
@@ -452,7 +459,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
             f.criteria,
             source="criteria",
             signed=True,
-            placeholder="Foil, Full Art, Reprint…",
+            placeholder="Foil, Full Art, Reprint…|Foil, Reprint…|Foil…",
         )
         + "<fieldset><legend>Matching</legend><div class='checks'>"
         f"<label><input type='checkbox' name='tany' value='1'{' checked' if f.types_any else ''}> "
@@ -472,7 +479,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
             "x",
             "Scryfall syntax",
             f.syntax,
-            placeholder="o:draw t:creature",
+            placeholder="o:draw t:creature|o:draw",
             hint="Added to everything picked above.",
         )
         + "</div></details>"

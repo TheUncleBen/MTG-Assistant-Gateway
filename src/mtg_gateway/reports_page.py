@@ -534,7 +534,7 @@ def reports_page_html(
             query.href(offset=shown_to), text="Load more reports", shown=shown_to, total=total
         )
     else:
-        pager = ui.load_more("", done=f"All {total:,} {'report' if total == 1 else 'reports'} shown.")
+        pager = ui.load_more("", done=ui.all_shown(total, "report"))
     note = (
         f"<p class='ui-note'>{QUEUE_NOTE} To run a report, open one of your decks and press "
         "<strong>Run test</strong>, or ask your assistant to test a deck.</p>"

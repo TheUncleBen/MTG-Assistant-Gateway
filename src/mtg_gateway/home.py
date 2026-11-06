@@ -122,7 +122,7 @@ def proposals_line(rows: list[dict[str, Any]], *, now: float) -> str:
 def need_row(ic: str, text: str, detail: str, button: str, *, accent: bool = False, attrs: str = "") -> str:
     """One Needs you row: an icon, what waits (``text`` with its count in bold, ``detail`` the
     small line under it) and the button that goes there."""
-    det = f"<small>{_esc(detail)}</small>" if detail else ""
+    det = f"<small>{ui.dotted(detail)}</small>" if detail else ""
     # ``ic`` "spinner": the theme's one animated ring, for a run still going, never a still icon
     mark = SPINNER if ic == "spinner" else icon(ic)
     return (

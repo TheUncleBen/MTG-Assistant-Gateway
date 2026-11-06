@@ -2,7 +2,7 @@
 watched card is on the first screen, Select ticks every row and the bulk bar appears with the
 count, a group head's tick box follows its rows, a right-click and a press and hold on a row open
 its menu (Details, Move to list…, Stop watching), the ⋮ on a group head opens Rename with the
-name filled in, "In binder · you own N" shows, and nothing scrolls sideways at 100% or 200% text,
+name filled in, "You own N" shows, and nothing scrolls sideways at 100% or 200% text,
 in the app's own browser too. Skipped without a Chromium build."""
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
         heads = page.locator(".w-t .tr.group.wgrp b").all_inner_texts()
         assert heads == ["Meren wants", "Not in a list"]
         owned = page.locator("#wr-w_one .ui-lbl.owned").first.inner_text()
-        assert owned == "In binder\u00a0·\u00a0you own\u00a02"
+        assert owned == "You own\u00a02"
         assert page.locator("#wr-w_two .ui-lbl.owned").count() == 0
         # the group head's ⋮ is a script menu (never the page's drop-down, whose history entry
         # would race the box's): Rename list… opens the box with the name filled in; Delete list…

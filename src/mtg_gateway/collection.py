@@ -1864,10 +1864,13 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
     # under 900 px the Price column is hidden: the price goes on the card's own lines; a price
     # nobody knows says so there too, as the column does (audit N7, N12)
     price = _esc(price_text(r)) or UNPRICED_HTML
-    sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x)
-    sub_sm = " · ".join(x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x)
+    # one span a fact, the dots between them drawn (ui.facts), so none is left at a line's end
+    sub_md = ui.facts((set_line, set_name, fin_word, cond_word, lang_word), html=True)
+    sub_sm = ui.facts(
+        (set_line, fin_word, _esc(cond or "Not set"), lang_word, f"<span class='pr'>{price}</span>"),
+        html=True,
+    )
     sub_md += f"<span class='pr lgh'>{price}</span>"
-    sub_sm += f" · <span class='pr'>{price}</span>"
     return (
         f"<li class='tr row' role='row' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
         f"<span class='cardc' role='cell'>{_tick(r)}<button type='button' class='thumbbtn' "
@@ -1962,7 +1965,8 @@ def _tag_boxes(all_tags: list[str], on: list[str], colors: dict[str, str] | None
     if not all_tags:
         return (
             "<div class='field tags'><span>Tags</span><span class='muted small'>No binder tags yet. "
-            "<a href='/lists/btags'>Make one</a></span></div>"
+            + ui.cap_link("Make one", "/lists/btags")
+            + "</span></div>"
         )
     ticks = "".join(
         tag_tick(t, colors, field=f"tag:{t}", checked=any(collection_tags.same_name(t, x) for x in on))
@@ -1994,7 +1998,7 @@ def details_box_html(
     lang = (r.get("lang") or "EN").upper()
     tags = [str(t) for t in (r.get("tags") or [])[:8]]
     tagline = "".join(tag_chip(t, tag_colors) for t in tags)
-    sub = " · ".join(x for x in (_esc(_set_line(r)), _esc(r.get("set_name") or "")) if x)
+    sub = ui.facts((_set_line(r), r.get("set_name") or ""))
     body = (
         f"<form method='post' action='/collection' id='col-detailsform' class='detailsform' data-id='{rid}'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'><input type='hidden' name='id' value='{rid}'>"
@@ -3501,7 +3505,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return ui.load_more(
                 link_to(lq, view, got["shown"]), text="Load more cards", shown=got["shown"], total=total
             )
-        return ui.load_more("", done=f"All {total:,} {'entry' if total == 1 else 'entries'} shown.")
+        return ui.load_more("", done=ui.all_shown(total, "entry", "entries"))
 
     @server.custom_route("/collection", methods=["GET"], include_in_schema=False)
     async def collection_page(request: Request) -> Response:
@@ -3797,9 +3801,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 "next": link_to(lq, view, got["shown"]) if got["has_more"] else "",
                 "count_text": f"{total:,} {'entry' if total == 1 else 'entries'}",
                 "more": more_html(lq, view if qp.get("view") in ("grid", "list") else None, got),
-                "done": ""
-                if got["has_more"]
-                else f"All {total:,} {'entry' if total == 1 else 'entries'} shown.",
+                "done": "" if got["has_more"] else ui.all_shown(total, "entry", "entries"),
             },
             headers=NO_STORE,
         )

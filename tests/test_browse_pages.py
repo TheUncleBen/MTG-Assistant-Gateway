@@ -50,12 +50,12 @@ async def test_precons_have_the_shared_panel_set_headings_and_load_more(stack: S
         assert "class='avatar" not in tiles and "class='tags'" not in tiles and "No deck tags" not in tiles
         assert "<span class='info plain'>" in tiles and "<time class='ui-when'" in tiles
         assert "class='disc pre-all' data-n='1' hidden aria-expanded='false'>Show all 1</button>" in page
-        assert "All 1 set shown." in page and "data-load-more" not in page
+        assert "1 set shown." in page and "All 1" not in page and "data-load-more" not in page
         assert "No preconstructed deck matches that filter." not in page
         # by name is one grid without headings
         r = await b.http.get("/precons?sort=name", headers=NAV)
         assert "class='sec'" not in r.text and r.text.count("<ul class='plain decklist") == 1
-        assert "All 1 decks shown." in r.text
+        assert "1 deck shown." in r.text and "All 1" not in r.text
         # the sort picked is remembered for the next visit and the page's own asks (audit F-10):
         # by set again for the rest
         r = await b.http.get("/precons", headers=NAV)

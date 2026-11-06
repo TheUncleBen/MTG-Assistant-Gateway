@@ -281,6 +281,18 @@ SETTINGS_CSS = """
 .set-group details[open] > summary > svg.i{transform:rotate(180deg)}
 .set-row{display:grid;grid-template-columns:minmax(0,1fr) 16rem;gap:.35rem 1.5rem;align-items:start;
   padding:.85rem 0;border-top:1px solid var(--border-soft);scroll-margin-top:4.5rem}
+/* an On/Off setting: the switch at the end of its name's row at every width (as the deck
+   settings' switches); a locked one, greyed, also says its state in words beside it */
+.set-row.sw,.set-row.sw.ui-row{grid-template-columns:minmax(0,1fr) auto!important;column-gap:1rem}
+.set-row.sw .set-ctl{grid-column:2;grid-row:1;align-items:flex-end}
+.set-row.sw .set-ctl .reset{align-self:auto}
+.set-sw{min-height:44px;margin:0;gap:.5rem;font-weight:700}
+.set-sw .w-on,.set-sw .w-off{display:none}
+.set-row.locked .set-sw input:checked ~ .w-on,.set-row.locked .set-sw input:not(:checked) ~ .w-off{
+  display:inline}
+.set-row.locked .set-sw{cursor:not-allowed;color:var(--text-muted)}
+.set-row .set-sw input:disabled{opacity:0}
+.set-row.locked .set-sw .track{opacity:.6;outline:1px dashed var(--text-muted);outline-offset:2px}
 form > .set-row:first-of-type{border-top:0}
 .set-row .sl{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem}
 .set-label{display:inline;margin:0;font-weight:700}
@@ -288,7 +300,6 @@ form > .set-row:first-of-type{border-top:0}
 .set-help{margin:.3rem 0 0;color:var(--text-muted);font-size:.88rem;line-height:1.4}
 .set-src{margin:.3rem 0 0;font-size:.86rem}
 .set-src code{font-size:.8rem}
-.set-ctl .set-src.def{margin:0;color:var(--text-muted);font-size:.84rem}
 .set-lock code{overflow-wrap:break-word}
 .set-err{margin:.35rem 0 0;color:var(--danger-text);font-weight:700;font-size:.88rem}
 .set-row.bad input:not([type=checkbox]):not([type=radio]),.set-row.bad select{border-color:var(--danger-text)}
@@ -303,17 +314,9 @@ form > .set-row:first-of-type{border-top:0}
 .set-num .unit{position:absolute;right:.75rem;top:50%;transform:translateY(-50%);color:var(--text-muted);
   pointer-events:none}
 .set-num.typed input{border-color:var(--orange-text);box-shadow:inset 0 0 0 1px var(--orange-text)}
-/* On / Off: two equal halves of the control column */
-.set-seg{display:grid;grid-template-columns:1fr 1fr;margin:0;padding:0;border:1px solid var(--control-border);
-  border-radius:var(--radius);overflow:hidden;min-width:0}
-.set-seg legend,.set-choices legend{position:absolute;width:1px;height:1px;overflow:hidden;
+.set-choices legend{position:absolute;width:1px;height:1px;overflow:hidden;
   clip:rect(0 0 0 0);white-space:nowrap}
-.set-seg label{position:relative;display:flex;align-items:center;justify-content:center;min-height:var(--ctl);
-  margin:0;cursor:pointer;font-weight:400;background:var(--surface)}
-.set-seg label + label{border-left:1px solid var(--control-border)}
-.set-seg input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
-.set-seg label:has(input:checked){background:var(--orange-tint);font-weight:700}
-.set-seg label:has(input:focus-visible),.set-choices label:has(input:focus-visible){
+.set-choices label:has(input:focus-visible){
   outline:2px solid var(--focus);outline-offset:-2px}
 .set-choices{display:flex;flex-direction:column;margin:0;padding:0;border:1px solid var(--control-border);
   border-radius:var(--radius);overflow:hidden;min-width:0}
@@ -325,17 +328,17 @@ form > .set-row:first-of-type{border-top:0}
 .set-choices label + label{border-top:1px solid var(--control-border)}
 .set-choices input{flex:none;margin:0;width:1.1rem;height:1.1rem;accent-color:var(--orange)}
 .set-choices label:has(input:checked){background:var(--orange-tint);font-weight:700}
-.set-seg label:has(input:disabled),.set-choices label:has(input:disabled){cursor:default;
+.set-choices label:has(input:disabled){cursor:default;
   color:var(--text-muted)}
 /* set in the stack: greyed, dashed, the value still readable (4.5:1) */
 .set-row.locked input:disabled:not([type=radio]):not([type=checkbox]),.set-row.locked select:disabled,
 .set-row.locked .msel-btn:disabled{background:var(--surface-2);color:var(--text-muted);
   -webkit-text-fill-color:var(--text-muted);border-style:dashed;opacity:1;cursor:not-allowed}
-.set-row.locked .set-seg,.set-row.locked .set-choices{border-style:dashed}
+.set-row.locked .set-choices{border-style:dashed}
 .set-row.locked input[type=radio]{accent-color:var(--text-muted)}
-.set-row.locked .set-seg label,.set-row.locked .set-choices label{background:var(--surface-2);
+.set-row.locked .set-choices label{background:var(--surface-2);
   cursor:not-allowed}
-.set-row.locked .set-seg label:has(input:checked),.set-row.locked .set-choices label:has(input:checked){
+.set-row.locked .set-choices label:has(input:checked){
   background:var(--surface-2);box-shadow:inset 0 0 0 2px var(--text-muted)}
 /* the tick that confirms lowering or turning off; with scripts only once the value goes down */
 .set-confirm{grid-column:1 / -1;margin:.25rem 0 0;padding:.6rem .75rem;border-left:4px solid var(--orange);
@@ -368,6 +371,9 @@ p.set-saved{margin:0} ul.set-saved{margin:.35rem 0 0;padding-left:1.2rem}
    so nothing moves there. */
 .set-group form{container-type:inline-size}
 @media (min-width:720px){ @container (max-width:45em){ .set-row{grid-template-columns:minmax(0,1fr)} } }
+/* a form too narrow for 12em of words beside a switch: the switch goes under them, at the end */
+@container (max-width:17em){ .set-row.sw,.set-row.sw.ui-row{grid-template-columns:minmax(0,1fr)!important}
+  .set-row.sw .set-ctl{grid-column:1;grid-row:auto} }
 """
 
 
@@ -618,20 +624,25 @@ def _row(d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when:
     confirm = ""
     if key in CONFIRM and not locked and (CONFIRM[key][0] == "lower" or d["value"]):
         confirm = _confirm(spec, d["value"], outcome.posted.get(key))
+    # the settings-list style of the deck settings (ui-row): the name and its help, the control
+    # beside them (a switch at the row's end, on a phone too); a setting at its default says so to
+    # screen readers only (confirmation P-10: 35 lone "Default" lines), the others who changed it
+    cls = "set-row ui-row" + (" sw" if spec.kind == "bool" else "") + (" bad" if err else "")
     return (
-        f"<div class='set-row{' bad' if err else ''}{' locked' if locked else ''}' id='s-row-{key}'>"
+        f"<div class='{cls}{' locked' if locked else ''}' id='s-row-{key}'>"
         f"<div class='set-text'><div class='sl'>{title}{badges}</div>"
         + (
             f"<p class='set-help' id='{help_id}'>{html.escape(help_text)}</p>"
             if help_text
             else f"<span id='{help_id}' hidden></span>"
         )
-        + ("" if src == "Default." else f"<p class='set-src' id='s-{key}'>{src}</p>")
+        + (
+            f"<span class='sr-only' id='s-{key}'>Default.</span>"
+            if src == "Default."
+            else f"<p class='set-src' id='s-{key}'>{src}</p>"
+        )
         + (f"<p class='set-err' id='e-{key}' role='alert'>{html.escape(err)}</p>" if err else "")
         + f"</div><div class='set-ctl'>{control}{reset}"
-        # at its default, the word sits under the control (final polish P-10: a lone "Default."
-        # line under every name)
-        + (f"<p class='set-src def' id='s-{key}'>Default</p>" if src == "Default." else "")
         + f"</div>{confirm}</div>"
     )
 
@@ -693,12 +704,14 @@ def _control(spec: SettingSpec, value: Any, *, locked: bool, described: str) -> 
     name = f"v_{key}"
     if spec.kind == "bool":
         on = value if isinstance(value, bool) else str(value).lower() in ("1", "true", "yes", "on")
+        # a switch, its state in words beside it; the hidden "off" after it is what an unticked
+        # switch sends (the form reads a name's first value: a ticked switch sends "on" first)
         return (
-            f"<fieldset class='set-seg' aria-labelledby='l-{key}' aria-describedby='{described}'>"
-            f"<legend>{html.escape(label(key))}</legend>"
-            f"<label><input type='radio' name='{name}' value='on'{' checked' if on else ''}{dis}>On</label>"
-            f"<label><input type='radio' name='{name}' value='off'{'' if on else ' checked'}{dis}>Off</label>"
-            "</fieldset>"
+            f"<label class='switch set-sw'><input type='checkbox' id='f-{key}' name='{name}' value='on' "
+            f"role='switch' aria-labelledby='l-{key}' aria-describedby='{described}'"
+            f"{' checked' if on else ''}{dis}><span class='track'></span>"
+            "<span class='w-on'>On</span><span class='w-off'>Off</span></label>"
+            f"<input type='hidden' name='{name}' value='off'{dis}>"
         )
     if spec.kind == "choice" and spec.labels:
         # Named choices (the approval modes) as a list of radio buttons, so the whole name shows
