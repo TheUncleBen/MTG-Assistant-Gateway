@@ -15,7 +15,7 @@ import pytest
 
 from .test_cardsearch_browser import _chromium
 from .test_editor_browser import PNG
-from .test_overflow_sweep_browser import SHEETS_LOADED, _seed, server  # noqa: F401
+from .test_overflow_sweep_browser import CARDS, SHEETS_LOADED, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
 from .test_ui_standard_0746_browser import APP_UA
@@ -43,15 +43,26 @@ def site(server: Server):  # noqa: F811
     return exe, sid, pending
 
 
-def _ctx(browser, server: Server, sid: str, width: int, *, root: bool = False, app: bool = False,  # noqa: F811
-         touch: bool | None = None, height: int = 860):
+def _ctx(
+    browser,
+    server: Server,
+    sid: str,
+    width: int,
+    *,
+    root: bool = False,
+    app: bool = False,  # noqa: F811
+    touch: bool | None = None,
+    height: int = 860,
+):
     touch = width < 900 if touch is None else touch
     kw = dict(viewport={"width": width, "height": height}, has_touch=touch, reduced_motion="reduce")
     if app:
         kw.update(is_mobile=True, user_agent=APP_UA)
     ctx = browser.new_context(**kw)
     ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
-    ctx.route(re.compile(r"https://cards\.scryfall\.io/.*"), lambda r: r.fulfill(content_type="image/png", body=PNG))
+    ctx.route(
+        re.compile(r"https://cards\.scryfall\.io/.*"), lambda r: r.fulfill(content_type="image/png", body=PNG)
+    )
     ctx.route(re.compile(r"/decks/[^/]+/check(\?|$)"), lambda r: r.abort())
     if root:
         ctx.add_init_script(ROOT_28)
@@ -216,16 +227,21 @@ def test_the_tab_bar_refits_when_the_text_size_changes_in_place(server: Server, 
             for how, zoom in (("every font doubled", TEXT_200), ("a 28 px root", root)):
                 _goto(page, server, "/account")
                 assert page.evaluate(TAB_LABELS) == []
-                assert not page.evaluate("() => document.querySelector('.tabbar').classList.contains('icons')")
+                assert not page.evaluate(
+                    "() => document.querySelector('.tabbar').classList.contains('icons')"
+                )
                 page.evaluate(zoom)
                 redrawn(page)
                 assert page.evaluate(TAB_LABELS) == [], (width, how)
                 # back to the usual size in place: the names come back
-                page.evaluate("() => { for (const e of [document.documentElement, ...document.querySelectorAll("
-                              "'body, body *')]) e.style.removeProperty('font-size'); }")
+                page.evaluate(
+                    "() => { for (const e of [document.documentElement, ...document.querySelectorAll("
+                    "'body, body *')]) e.style.removeProperty('font-size'); }"
+                )
                 redrawn(page)
-                assert not page.evaluate("() => document.querySelector('.tabbar').classList.contains('icons')"), (
-                    width, how)
+                assert not page.evaluate(
+                    "() => document.querySelector('.tabbar').classList.contains('icons')"
+                ), (width, how)
             ctx.close()
         browser.close()
 
@@ -269,8 +285,12 @@ def test_switches_keep_equal_parts_in_balanced_rows(server: Server, site) -> Non
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        for tag, width, root in (("412", 412, False), ("320 root", 320, True), ("1280", 1280, False),
-                                 ("360", 360, False)):
+        for tag, width, root in (
+            ("412", 412, False),
+            ("320 root", 320, True),
+            ("1280", 1280, False),
+            ("360", 360, False),
+        ):
             ctx = _ctx(browser, server, sid, width, root=root)
             page = ctx.new_page()
             for path in ("/admin/users", "/admin/settings", "/watchlist", "/collection", "/decks/42/export"):
@@ -345,12 +365,24 @@ def test_the_tab_bar_count_stays_inside_its_tab_and_off_the_icon(
 # -- P-8: the watchlist's "In binder" pill --------------------------------------------------------
 
 
+def _binder_holds_the_watched_cards(server: Server) -> None:  # noqa: F811
+    """The Binder as last read whole: three copies of each watched card."""
+    with server.db.tx() as c:
+        for i, name in enumerate(CARDS[-2:]):
+            c.execute(
+                "INSERT INTO binder_records (sub, rid, scryfall_id, name, finish, quantity, row_json) "
+                "VALUES ('user-1', ?, '', ?, 'nonfoil', 3, '{}')",
+                (900 + i, name),
+            )
+
+
 @pytest.mark.parametrize("width", [320, 360, 390, 412, 430])
 def test_the_in_binder_pill_keeps_to_one_line(server: Server, site, width: int) -> None:  # noqa: F811
     """P-8: "In binder · you own 3" wrapped to two lines at 390 and 412 px at 100% text."""
     from playwright.sync_api import sync_playwright
 
     exe, sid, _ = site
+    _binder_holds_the_watched_cards(server)
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         ctx = _ctx(browser, server, sid, width)
@@ -358,8 +390,10 @@ def test_the_in_binder_pill_keeps_to_one_line(server: Server, site, width: int) 
         _goto(page, server, "/watchlist")
         lines = page.evaluate(
             "() => [...document.querySelectorAll('.owned')].filter(e => e.getClientRects().length).map(e => {"
-            " const r = document.createRange(); r.selectNodeContents(e);"
-            " return new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top))).size; })"
+            " const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT), tops = [];"
+            " for (let n = w.nextNode(); n; n = w.nextNode()) { const r = document.createRange();"
+            "  r.selectNodeContents(n); for (const x of r.getClientRects()) if (x.width > 0) tops.push(x.top); }"
+            " return tops.filter((t, i) => tops.findIndex(u => Math.abs(u - t) < 4) === i).length; })"
         )
         assert lines and all(n == 1 for n in lines), lines
         ctx.close()

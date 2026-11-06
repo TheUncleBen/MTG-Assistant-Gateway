@@ -7,7 +7,7 @@ status line (the last check, the biggest 7-day move, the price alerts past, wher
 from); then the watched cards grouped by watchlist list (the member's own groups, kept on this
 gateway; the cards in no list after them) and the watched decks as a group of their own. A row:
 its tick box, picture, name (opens the card viewer), printing, price and 7-day change, its price
-alert as a blue label and "In binder · you own N" when the member's Binder holds the card. Each
+alert as a blue label and "You own N" when the member's Binder holds the card. Each
 row has Details (its 30-day chart, "Full history (N days)", the price history table, the alert
 form, Open card and a red-outline Remove) and a ⋮ (static/menus.js: Open card, Details, Price
 alert…, Move to list…, Stop watching). A tick on any row shows the bulk bar: Price alert…, Move to
@@ -253,14 +253,15 @@ def alert_label(v: dict[str, Any]) -> str:
 
 
 def owned_label(v: dict[str, Any]) -> str:
-    """ "In binder · you own N" when the member's Binder holds the card (any printing). The dot
-    keeps its words and the count its "own" (no-break spaces): where the label wraps (a 390 or
-    412 px phone at 100% text, a 320 px one at 200%) it breaks before "own N", never with the dot
-    at a line's end or the count alone on a line (audit W2)."""
+    """ "You own N" (the Binder's icon, and "In your Binder: N copies" as its tooltip) when the
+    member's Binder holds the card (any printing). One line on every phone: "In binder · you own
+    N" took two in the row's narrow column at 390 and 412 px (confirmation P-8); the count keeps
+    its "own" (a no-break space)."""
     n = int(v.get("owned") or 0)
     if n <= 0:
         return ""
-    return ui.label(f"In binder\u00a0·\u00a0you own\u00a0{n}", "green", "collection", cls="owned")
+    tip = f"In your Binder: {n} cop{'y' if n == 1 else 'ies'}"
+    return ui.label(f"You own\u00a0{n}", "green", "collection", cls="owned", title=tip)
 
 
 def where_text(v: dict[str, Any]) -> str:

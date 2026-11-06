@@ -2,7 +2,7 @@
 watch gets the member's default price alert (shipped: a drop of 10% below the price it was added
 at) and remembers that price; the member's own defaults, saved in a box; the watchlist's lists
 (groups) made, renamed, deleted and drawn as group heads; the bulk bar's actions on many cards;
-"In binder · you own N" from the Binder as last read; a box named in the address drawn open and
+"You own N" from the Binder as last read; a box named in the address drawn open and
 the way back to the list the member was on; the assistant's watch_card tool taking a drop alert
 and a list; and the Lists hub under Binder showing the watchlist's lists."""
 
@@ -356,7 +356,7 @@ async def test_a_watched_card_the_member_owns_says_so(stack: Stack, monkeypatch)
         await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")
         await _watch(b, name="Sol Talisman")
         page = (await b.http.get("/watchlist")).text
-        assert "In binder" not in page  # nothing known of the Binder yet
+        assert "ui-lbl green owned" not in page  # nothing known of the Binder yet
         # the Binder as last read whole: two Sol Ring records in two printings, 3 copies in all
         svc.binder.replace(
             SUB,
@@ -376,11 +376,15 @@ async def test_a_watched_card_the_member_owns_says_so(stack: Stack, monkeypatch)
         page = (await b.http.get("/watchlist")).text
         ids = _ids(stack)
         sol = page.split(f"id='wr-{ids['Sol Ring']}'")[1].split(f"id='wr-{ids['Sol Talisman']}'")[0]
-        assert "In binder\u00a0·\u00a0you own\u00a03</span>" in sol and "class='ui-lbl green owned'" in sol
+        assert (
+            "You own\u00a03</span>" in sol
+            and "title='In your Binder: 3 copies'" in sol
+            and "class='ui-lbl green owned'" in sol
+        )
         # the label is drawn twice in a row (phone line, desktop column); not on Sol Talisman's
         assert (
-            page.count("In binder") == 2
-            and "In binder" not in page.split(f"id='wr-{ids['Sol Talisman']}'")[1]
+            page.count("ui-lbl green owned") == 2
+            and "ui-lbl green owned" not in page.split(f"id='wr-{ids['Sol Talisman']}'")[1]
         )
         cards = svc.card_summaries(SUB)
         assert {c["name"]: c["owned"] for c in cards} == {"Sol Ring": 3, "Sol Talisman": 0}

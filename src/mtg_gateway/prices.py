@@ -452,7 +452,7 @@ class PriceService:
             "ORDER BY m.name, m.set_code, m.finish",
             (sub, span, *(span for _ in CHANGE_DAYS)),
         )
-        # "In binder · you own N": the copies of each name in the member's Binder as last read
+        # "You own N": the copies of each name in the member's Binder as last read
         # whole (binder_prices), one query for the whole list; nothing until a first read
         owned = {
             r["n"]: int(r["q"] or 0)
