@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
     private var pendingAuto = false // ...with Auto on (the page's Auto switch asked for it)
     private var scanReloaded = false // the /scan page was reloaded once to get its hooks; never loop
     private var layerOpen = false // the page says a layer (a menu, a box, a sheet) is open over it
-    private val backCallback = object : OnBackPressedCallback(false) {
+    private val backCallback: OnBackPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             if (camera != null) {
                 closeCamera()
@@ -154,7 +154,7 @@ class MainActivity : ComponentActivity() {
                     web.goBack()
                 } else {
                     syncBackCallback()
-                    if (!backCallback.isEnabled) onBackPressedDispatcher.onBackPressed()
+                    if (!isEnabled) onBackPressedDispatcher.onBackPressed()
                 }
             }
         }
