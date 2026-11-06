@@ -100,7 +100,8 @@ def test_the_deck_page_and_home_follow_a_test_until_it_ends(server: Server, tmp_
             home.goto(f"{server.base}/", wait_until="networkidle")
             row = home.locator("section.needs li", has_text="test running")
             assert "1 test running: Forge has played 3 of 5 games." in row.inner_text()
-            assert "Liesa Test Deck · 5 min so far" in row.inner_text()
+            # the deck and the time are two facts, the dot between them drawn (ui.facts)
+            assert "<span>Liesa Test Deck</span><span>5 min so far</span>" in row.inner_html()
             # the test ends: both say so, with the way to the report, and stop asking
             _playing(server, "rep_run", 5, state="done")
             page.wait_for_function("() => document.body.innerText.includes('Test finished.')", timeout=15000)

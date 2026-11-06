@@ -241,7 +241,7 @@ a{color:var(--link)} a:hover{color:var(--orange-text)}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* the dark bars keep the orange ring in the light theme too (the light ring is made for pale panels) */
 .topbar,footer.site,.banner{--focus:#fa890d}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);
+.sr-only{position:absolute;width:1px;height:1px;min-height:0;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);
   white-space:nowrap;border:0}
 /* skip link: the first thing Tab reaches; hidden until it has focus, then over the top bar */
 a.skip{position:absolute;left:.5rem;top:-100px;z-index:50;padding:.6rem 1rem;border-radius:var(--radius);
@@ -425,8 +425,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--focus);outline-o
    the shared .menu panel (a bottom sheet under 600px or with a coarse pointer). The .menu button
    rules would restyle a trigger inside a menu panel (the collection's row details), hence the
    doubled selector. */
-select.msel-native{position:absolute!important;width:1px!important;height:1px!important;margin:-1px!important;
-  padding:0!important;border:0;overflow:hidden;clip:rect(0,0,0,0);opacity:0;pointer-events:none;
+select.msel-native{position:absolute!important;width:1px!important;height:1px!important;
+  min-height:0!important;margin:-1px!important;padding:0!important;border:0;overflow:hidden;clip:rect(0,0,0,0);opacity:0;pointer-events:none;
   flex:none!important}
 .msel-btn,.menu button.msel-btn,details.dd .menu button.msel-btn{display:flex;align-items:center;
   justify-content:flex-start;gap:0;width:100%;
@@ -478,7 +478,7 @@ details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.
   gap:.4rem .75rem}
 .filepick > .lbl{flex:0 0 100%}
 .filepick > label.filebtn{display:inline-flex;margin:0;font-weight:400;cursor:pointer}
-.filepick .filebtn input{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
+.filepick .filebtn input{position:absolute;width:1px;height:1px;min-height:0;margin:-1px;padding:0;border:0;
   overflow:hidden;clip:rect(0,0,0,0)}
 .filepick .filebtn input:focus-visible + .btn{outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange)}

@@ -302,7 +302,7 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
         assert "A summary is required." in box.inner_text()
         assert ark.account.entries.get(700007, []) == []
         page.fill("#fm-es", "Simic ramp, big sea monsters")
-        assert box.locator("#fm-es-c").inner_text().startswith("28 / ")
+        assert box.locator("#fm-es-c").inner_text().startswith("28\u00a0/\u00a0")  # one line (ui.counted)
         box.locator(".acts button", has_text="Review the entry").click()
         page.wait_for_url("**/proposals/**")
         assert ark.account.entries.get(700007, []) == []  # the member applies it on the review page

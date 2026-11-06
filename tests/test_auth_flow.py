@@ -521,7 +521,7 @@ async def test_account_page_shows_the_person_what_their_sign_in_shares(gw: Harne
     try:
         await b.login()
         page = (await b.http.get("/account/details")).text
-        assert "What your sign-in shares" in page and "alice@example.test" in page
+        assert "What your sign-in shares" in page and "alice@<wbr>example.<wbr>test" in page
         assert "Other &lt;Service&gt; Admins" in page and "<Service>" not in page
         assert "rel='icon' href='/favicon.ico'" in page
     finally:

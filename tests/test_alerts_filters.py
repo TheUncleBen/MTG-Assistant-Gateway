@@ -42,7 +42,9 @@ async def test_the_alerts_page_filters_by_type_and_by_words(stack: Stack) -> Non
         # words: a title or a line that holds them, any type
         page = (await b.http.get("/notifications?q=week", headers=NAV)).text
         assert "Your week on the gateway" in page and "Sol Ring fell below $10" not in page
-        assert "<input type='search' name='q' value='week' placeholder='Search alerts'>" in page
+        # the hint, and the shorter one for a box too narrow for it (ui.hint_attrs)
+        hint = "placeholder='Search alerts' data-ph='Search'"
+        assert f"<input type='search' name='q' value='week' {hint}>" in page
         page = (await b.http.get("/notifications?q=nothing+like+this", headers=NAV)).text
         assert "No alerts match." in page
         # the bell's box is never filtered (the page's script asks for it whole)

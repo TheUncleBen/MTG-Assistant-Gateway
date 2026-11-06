@@ -184,7 +184,8 @@ RAIL = """() => {
   const shown = e => e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
   const bar = document.querySelector('.tabbar');
   const r = e => e.getBoundingClientRect();
-  const items = [...bar.children].filter(shown);
+  // the tabs, not the text-size sentinel (topbar.js)
+  const items = [...bar.children].filter(e => shown(e) && !e.classList.contains('lbl-em'));
   const moreTab = document.querySelector('.tabbar details.more summary');
   const labels = items.filter(e => e.tagName === 'A').map(a => {
     const l = a.querySelector('.lbl'), lb = r(l), ab = r(a);
