@@ -680,8 +680,8 @@ def contest_box_html(
         f"<textarea id='dx-es' name='summary' rows='4' maxlength='{actions.CONTEST_SUMMARY_MAX}' "
         f"data-count='dx-es-c' required>{esc(summary)}</textarea>"
         "<div class='dx-under'><span class='muted small'>Shown on the contest page.</span>"
-        f"<span class='muted small' id='dx-es-c' data-counter>{len(summary)} / "
-        f"{actions.CONTEST_SUMMARY_MAX}</span></div></div>"
+        f"<span class='muted small' id='dx-es-c' data-counter>"
+        f"{ui.counted(len(summary), actions.CONTEST_SUMMARY_MAX)}</span></div></div>"
         + ui.notice(
             f"<b>Archidekt replaces the deck's description with this summary.</b> {esc(CONTEST_WARN)}",
             "warn",

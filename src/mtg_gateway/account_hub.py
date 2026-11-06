@@ -8,7 +8,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from . import modes
+from . import modes, ui
 from .theme import app_version, current_layout, current_path, current_theme, display_name, icon, in_app
 
 # what a sign-out clears on the device (Clear-Site-Data "storage", pages.logout_post): said on
@@ -180,12 +180,13 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
     )
     mode = html.escape(modes.MODE_LABELS.get(state.decks.mode_of(sub), ""))
     app = in_app()
+    sub_line = ui.facts([linked, f"Default approval: {mode}" if mode else ""], html=True)
     cols, lone = balance(groups(csrf, admin=admin, app=app))
     return (
         "<div class='yhub'>"
         "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
         f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
-        f"<span class='sub'>{linked}{f' · Default approval: {mode}' if mode else ''}</span></span></div>"
+        f"<span class='sub'>{sub_line}</span></span></div>"
         "<div class='ycols'>"
         + "".join(f"<div class='ycol'>{''.join(_group_html(g) for g in c)}</div>" for c in cols if c)
         + "</div>"

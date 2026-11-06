@@ -260,7 +260,7 @@ async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stac
         home = (await b.http.get("/")).text
         # Home's Needs you row (0.7.46: in place of the old Proposals tile)
         assert "<b>2 proposals</b> waiting for you" in home
-        assert "2 on 1 deck · oldest 1 min · next expires in" in home
+        assert "<span>2 on 1 deck</span><span>oldest 1 min</span><span>next expires in" in home
     finally:
         await b.aclose()
 

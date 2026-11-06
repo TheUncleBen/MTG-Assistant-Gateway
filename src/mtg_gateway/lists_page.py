@@ -293,7 +293,7 @@ def warn(lead: str, rest: str) -> str:
 def counter(for_id: str, n: int, limit: int) -> str:
     return (
         f"<div class='lp-under'><span></span><span class='muted small' id='{esc(for_id)}-c' data-counter"
-        f" aria-live='polite'>{n} / {limit}</span></div>"
+        f" aria-live='polite'>{ui.counted(n, limit)}</span></div>"
     )
 
 
@@ -1130,8 +1130,8 @@ def pin_row(p: dict[str, Any], csrf: str) -> str:
         f" aria-label='Note on {esc(name)}' data-count='pn-{pid}-c' data-saves>{esc(notes)}</textarea>"
         "<span class='lp-under'><noscript><button type='submit' class='btn-plain small'>Save "
         "note</button></noscript>"
-        f"<span class='muted small c' id='pn-{pid}-c' data-counter>{len(notes)} / "
-        f"{account_lists.PIN_NOTES_MAX}</span></span></form>"
+        f"<span class='muted small c' id='pn-{pid}-c' data-counter>"
+        f"{ui.counted(len(notes), account_lists.PIN_NOTES_MAX)}</span></span></form>"
     )
     menu = kebab_menu(
         name,
@@ -1157,7 +1157,7 @@ def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
     n = len(items)
     head = list_head(
         "Pinned cards",
-        f"{n} / {account_lists.MAX_PINS}",
+        ui.counted(n, account_lists.MAX_PINS),
         ui.box_opener(
             "Remove all…", tab_href("pins", remove_all=1), "pin-all", kind="danger", icon_name="trash"
         )

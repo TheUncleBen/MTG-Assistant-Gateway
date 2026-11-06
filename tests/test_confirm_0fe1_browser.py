@@ -45,7 +45,7 @@ def site(server: Server):  # noqa: F811
 
 def _ctx(
     browser,
-    server: Server,
+    server: Server,  # noqa: F811
     sid: str,
     width: int,
     *,
@@ -183,7 +183,8 @@ def test_each_key_sits_with_its_own_words(server: Server, site, width: int) -> N
             if width == 320 and tag != "100%":
                 stacked = page.evaluate(
                     "() => [...document.querySelectorAll('.mtgbox dl.keys dt')].every(dt =>"
-                    " dt.nextElementSibling.getBoundingClientRect().top >= dt.getBoundingClientRect().bottom - 1)"
+                    " dt.nextElementSibling.getBoundingClientRect().top >="
+                    " dt.getBoundingClientRect().bottom - 1)"
                 )
                 assert stacked, f"{width} {tag}: a key's words should go under it on a phone at 200%"
             ctx.close()
@@ -200,7 +201,9 @@ TAB_LABELS = """() => {
   if (bar.classList.contains('icons')) return out;
   const lbls = tabs.map(t => t.querySelector('.lbl')).filter(l => l && l.getBoundingClientRect().width > 1);
   // the words' own extent (a label is as wide as its tab at most; its words may run past it)
-  const words = (l) => { const g = document.createRange(); g.selectNodeContents(l); return g.getBoundingClientRect(); };
+  const words = (l) => {
+    const g = document.createRange(); g.selectNodeContents(l); return g.getBoundingClientRect();
+  };
   lbls.forEach((l, i) => {
     const r = words(l), tab = l.closest('a, summary').getBoundingClientRect();
     if (r.left < tab.left - 1 || r.right > tab.right + 1)
@@ -267,11 +270,14 @@ SEG_ROWS = """() => {
     }
     if (s.scrollWidth > s.clientWidth + 1) out.push('scrolls sideways');
     const counts = [...rows.values()].map(r => r.length);
-    const name = (s.getAttribute('aria-label') || s.className) + ' (' + kids.map(k => k.textContent.trim()).join('|') + ')';
-    if (Math.max(...counts) - Math.min(...counts) > 1 || (Math.max(...counts) > 1 && counts[counts.length - 1] === 1))
+    const name = (s.getAttribute('aria-label') || s.className) + ' (' +
+      kids.map(k => k.textContent.trim()).join('|') + ')';
+    const most = Math.max(...counts);
+    if (most - Math.min(...counts) > 1 || (most > 1 && counts[counts.length - 1] === 1))
       out.push(name + ' rows of ' + counts.join('+'));
     const ws = kids.map(k => k.getBoundingClientRect().width);
-    if (Math.max(...ws) - Math.min(...ws) > 2) out.push(name + ' parts of ' + ws.map(Math.round).join('/') + ' px');
+    if (Math.max(...ws) - Math.min(...ws) > 2)
+      out.push(name + ' parts of ' + ws.map(Math.round).join('/') + ' px');
   }
   return out;
 }"""
@@ -311,18 +317,21 @@ BADGE = """(textZoom) => {
   const tab = nb.closest('a'), svg = tab.querySelector('svg'), bar = tab.closest('.tabbar');
   const b = nb.getBoundingClientRect(), i = svg.getBoundingClientRect(), t = tab.getBoundingClientRect();
   const r = bar.getBoundingClientRect(), out = [];
-  if (b.top < r.top - 0.5 || b.top < t.top - 0.5) out.push('the count rises above the bar by ' + Math.round(r.top - b.top));
+  if (b.top < r.top - 0.5 || b.top < t.top - 0.5)
+    out.push('the count rises above the bar by ' + Math.round(r.top - b.top));
   if (b.left < t.left - 0.5 || b.right > t.right + 0.5) out.push('the count runs out of its tab');
   const cx = (i.left + i.right) / 2, cy = (i.top + i.bottom) / 2;
-  if (cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom) out.push("the count covers the icon's centre");
+  if (cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom)
+    out.push("the count covers the icon's centre");
   const ox = Math.max(0, Math.min(b.right, i.right) - Math.max(b.left, i.left));
   const oy = Math.max(0, Math.min(b.bottom, i.bottom) - Math.max(b.top, i.top));
   // a capped size: no taller than the 22 px icon's corner allows (NA5: 25 px at a 28 px root);
   // under a text-only zoom (which scales px text too) its box follows its own line
   const fs = parseFloat(getComputedStyle(nb).fontSize);
-  if (b.height > (textZoom ? Math.max(20.5, fs * 1.25) : 20.5)) out.push('the count is ' + Math.round(b.height) + 'px tall');
-  if (ox * oy > 0.3 * i.width * i.height) out.push('the count covers ' + Math.round(100 * ox * oy / (i.width * i.height)) +
-    '% of the icon');
+  if (b.height > (textZoom ? Math.max(20.5, fs * 1.25) : 20.5))
+    out.push('the count is ' + Math.round(b.height) + 'px tall');
+  if (ox * oy > 0.3 * i.width * i.height)
+    out.push('the count covers ' + Math.round(100 * ox * oy / (i.width * i.height)) + '% of the icon');
   return out;
 }"""
 
@@ -394,7 +403,8 @@ def test_the_in_binder_pill_keeps_to_one_line(server: Server, site, width: int) 
             "() => [...document.querySelectorAll('.owned')].filter(e => e.getClientRects().length).map(e => {"
             " const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT), tops = [];"
             " for (let n = w.nextNode(); n; n = w.nextNode()) { const r = document.createRange();"
-            "  r.selectNodeContents(n); for (const x of r.getClientRects()) if (x.width > 0) tops.push(x.top); }"
+            "  r.selectNodeContents(n);"
+            "  for (const x of r.getClientRects()) if (x.width > 0) tops.push(x.top); }"
             " return tops.filter((t, i) => tops.findIndex(u => Math.abs(u - t) < 4) === i).length; })"
         )
         assert lines and all(n == 1 for n in lines), lines
@@ -433,7 +443,8 @@ DANGLING = r"""(root) => {
       for (let i = 0; i < m.textContent.length; i++) chars.push([m, i, m.textContent[i]]);
     }
     const box = (k) => {
-      const r = document.createRange(); r.setStart(chars[k][0], chars[k][1]); r.setEnd(chars[k][0], chars[k][1] + 1);
+      const r = document.createRange();
+      r.setStart(chars[k][0], chars[k][1]); r.setEnd(chars[k][0], chars[k][1] + 1);
       const rs = [...r.getClientRects()].filter(x => x.width > 0 || x.height > 0);
       return rs.length ? rs[0] : null;
     };
@@ -449,7 +460,8 @@ DANGLING = r"""(root) => {
       while (b < chars.length && /\s/.test(chars[b][2])) b++;
       const half = me.height / 2;
       const ra = a >= 0 ? box(a) : null, rb = b < chars.length ? box(b) : null;
-      const around = (j) => chars.slice(Math.max(0, j - 14), j + 14).map(x => x[2]).join('').replace(/\s+/g, ' ');
+      const around = (j) => chars.slice(Math.max(0, j - 14), j + 14).map(x => x[2]).join('')
+        .replace(/\s+/g, ' ');
       if (ra && Math.abs(ra.top - me.top) > half)
         out.push('"' + c + '" starts a line: "' + around(k).trim() + '"');
       else if (rb && Math.abs(rb.top - me.top) > half)
@@ -473,7 +485,9 @@ DOT_PLACES = [
 ]
 
 
-@pytest.mark.parametrize("variant", ["320 root", "320 text", "360 text", "360 app root", "412 root", "412 app text"])
+@pytest.mark.parametrize(
+    "variant", ["320 root", "320 text", "360 text", "360 app root", "412 root", "412 app text"]
+)
 def test_no_dot_between_facts_dangles_at_a_line_end_or_start(server: Server, site, variant: str) -> None:  # noqa: F811
     """P-15: a "·" between facts was left at a line's end or start in seven places ("Archidekt:
     alice ·" on Account, "alice@example.test ·", "10 entries ·", "English ·", "· next expir…" on
@@ -513,7 +527,8 @@ SETTINGS_LIST = """() => {
     if (!sw) continue;
     const lab = row.querySelector('.set-label').getBoundingClientRect();
     const ctl = (sw.closest('label') || sw).getBoundingClientRect();
-    if (ctl.top > lab.bottom || ctl.left < lab.right) out.push(row.id + ': its On/Off is not at the end of its row');
+    if (ctl.top > lab.bottom || ctl.left < lab.right)
+      out.push(row.id + ': its On/Off is not at the end of its row');
   }
   return out;
 }"""
@@ -628,8 +643,12 @@ def test_long_values_break_only_after_a_mark(server: Server, site) -> None:  # n
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        for tag, width, root, zoom in (("320 root", 320, True, None), ("360 text", 360, False, "text"),
-                                       ("320 text", 320, False, "text"), ("412 root", 412, True, None)):
+        for tag, width, root, zoom in (
+            ("320 root", 320, True, None),
+            ("360 text", 360, False, "text"),
+            ("320 text", 320, False, "text"),
+            ("412 root", 412, True, None),
+        ):
             ctx = _ctx(browser, server, sid, width, root=root)
             page = ctx.new_page()
             for path in ("/admin", "/account/details", "/admin/users", "/account"):
@@ -652,7 +671,8 @@ HEADING_WORDS = r"""() => {
       while ((m = re.exec(n.textContent))) {
         const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
         const rs = [...r.getClientRects()].filter(x => x.width > 0);
-        if (rs.length > 1 && Math.abs(rs[0].top - rs[rs.length - 1].top) > 2) out.push('"' + m[0] + '" breaks');
+        if (rs.length > 1 && Math.abs(rs[0].top - rs[rs.length - 1].top) > 2)
+          out.push('"' + m[0] + '" breaks');
       }
     }
   }
@@ -688,19 +708,23 @@ ICON_BUTTONS = r"""() => {
   for (const b of document.querySelectorAll('button, .btn')) {
     const svg = b.querySelector(':scope > svg');
     // (an icon hidden at large text leaves a label alone, centred as any)
-    if (!svg || !svg.getBoundingClientRect().width || !b.getClientRects().length || b.closest('[hidden]')) continue;
+    if (!svg || !svg.getBoundingClientRect().width || !b.getClientRects().length) continue;
+    if (b.closest('[hidden]')) continue;
     const tops = [], rights = [];
     for (const n of b.childNodes) {
-      if (n.nodeType !== 3 && !(n.nodeType === 1 && n.tagName === 'SPAN' && !n.classList.contains('sr-only'))) continue;
+      const span = n.nodeType === 1 && n.tagName === 'SPAN' && !n.classList.contains('sr-only');
+      if (n.nodeType !== 3 && !span) continue;
       const r = document.createRange(); r.selectNodeContents(n);
-      for (const x of r.getClientRects()) if (x.width > 0) { tops.push(Math.round(x.top)); rights.push(x.right); }
+      for (const x of r.getClientRects())
+        if (x.width > 0) { tops.push(Math.round(x.top)); rights.push(x.right); }
     }
     if (new Set(tops).size < 2) continue;  // a one-line label
     const cs = getComputedStyle(b), br = b.getBoundingClientRect();
     const left = svg.getBoundingClientRect().left - br.left - parseFloat(cs.borderLeftWidth);
     const right = br.right - parseFloat(cs.borderRightWidth) - Math.max(...rights);
     if (Math.abs(left - right) > 6)
-      out.push('"' + b.textContent.trim().slice(0, 30) + '" ' + Math.round(left) + ' left, ' + Math.round(right) + ' right');
+      out.push('"' + b.textContent.trim().slice(0, 30) + '" ' + Math.round(left) + ' left, ' +
+        Math.round(right) + ' right');
   }
   return out;
 }"""
@@ -715,8 +739,11 @@ def test_a_wrapped_icon_buttons_content_is_centred(server: Server, site) -> None
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        for tag, width, root, zoom in (("320 root", 320, True, None), ("360 text", 360, False, "text"),
-                                       ("412 text", 412, False, "text")):
+        for tag, width, root, zoom in (
+            ("320 root", 320, True, None),
+            ("360 text", 360, False, "text"),
+            ("412 text", 412, False, "text"),
+        ):
             ctx = _ctx(browser, server, sid, width, root=root)
             page = ctx.new_page()
             for path in ("/decks/42", "/forum", "/watchlist", "/decks/42/edit", "/collection", "/decks"):
@@ -729,7 +756,8 @@ def test_a_wrapped_icon_buttons_content_is_centred(server: Server, site) -> None
 
 # -- AD1: the report charts' labels grow with the text ---------------------------------------------
 
-CHART_TEXT = """() => [...document.querySelectorAll('.chart svg')].filter(s => s.getClientRects().length).map(s => {
+CHART_TEXT = """() => [...document.querySelectorAll('.chart svg')]
+  .filter(s => s.getClientRects().length).map(s => {
   const vb = s.viewBox.baseVal, scale = s.getBoundingClientRect().width / vb.width;
   return [...s.querySelectorAll('text')].map(t => parseFloat(getComputedStyle(t).fontSize) * scale);
 })"""
@@ -771,22 +799,25 @@ BOX_ROOM = """() => {
   const sel = 'input:not([type]),input[type=text],input[type=search],input[type=email],input[type=number],' +
     'input[type=url],input[type=password],select';
   for (const el of document.querySelectorAll(sel)) {
-    if (!el.getClientRects().length || el.closest('[hidden],.sr-only') || el.classList.contains('msel-native')) continue;
+    if (!el.getClientRects().length || el.closest('[hidden],.sr-only')) continue;
+    if (el.classList.contains('msel-native')) continue;
     const cs = getComputedStyle(el);
     if (cs.opacity === '0' || cs.visibility === 'hidden') continue;
     // the inside of the box against its text's line and some air over and under it
     const room = el.clientHeight;
     const line = parseFloat(cs.fontSize) * 1.5;
-    if (room < line - 1) out.push((el.name || el.id || el.placeholder || el.tagName) + ': ' + Math.round(room) +
-      'px for a ' + Math.round(line) + 'px line');
+    if (room < line - 1)
+      out.push((el.name || el.id || el.placeholder || el.tagName) + ': ' + Math.round(room) +
+        'px for a ' + Math.round(line) + 'px line');
   }
   return out;
 }"""
 
+PHONE_HINTS = ["/cards", "/search", "/decks/42/contest", "/lists/custom?new=1"]
 HINT_PLACES = [
-    ("320 root", 320, True, None, False, ["/cards", "/search", "/decks/42/contest", "/lists/custom?new=1"]),
+    ("320 root", 320, True, None, False, PHONE_HINTS),
     ("320", 320, False, None, False, ["/decks/42/contest", "/lists/custom?new=1", "/cards"]),
-    ("412 text", 412, False, "text", False, ["/cards", "/search", "/decks/42/contest", "/lists/custom?new=1"]),
+    ("412 text", 412, False, "text", False, PHONE_HINTS),
     ("717 app root", 717, True, None, True, ["/", "/decks", "/cards"]),
     ("900 browser", 900, False, "browser", False, ["/search", "/cards", "/decks"]),
 ]

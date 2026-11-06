@@ -595,8 +595,8 @@ def enter_box_html(
         f"<textarea id='fm-es' name='summary' rows='4' maxlength='{actions.CONTEST_SUMMARY_MAX}' "
         f"data-count='fm-es-c' required>{esc(summary)}</textarea>"
         f"<div class='dx-under'><span class='muted small'>{esc(CONTEST_SUMMARY_HELP)}</span>"
-        f"<span class='muted small' id='fm-es-c' data-counter>{len(summary)} / "
-        f"{actions.CONTEST_SUMMARY_MAX}</span></div></div>"
+        f"<span class='muted small' id='fm-es-c' data-counter>"
+        f"{ui.counted(len(summary), actions.CONTEST_SUMMARY_MAX)}</span></div></div>"
         + ui.notice(
             f"<b>{esc(CONTEST_REPLACES)}</b> {esc(deck_extras.CONTEST_WARN)}",
             "warn",

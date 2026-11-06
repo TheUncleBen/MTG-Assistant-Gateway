@@ -2022,7 +2022,7 @@ async def details_html(
     me = (
         "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
         f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
-        f"<span class='sub'>{who} · Archidekt writes {writes}</span></span></div>"
+        f"<span class='sub'>{ui.facts([who, f'Archidekt writes {writes}'], html=True)}</span></span></div>"
     )
     archidekt = [
         row("archidekt", f"{info['archidekt_username']} · linked" if linked else "Not linked"),

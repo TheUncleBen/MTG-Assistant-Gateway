@@ -375,7 +375,7 @@ def build_events(
                 "kind": "snapshot",
                 "deck_id": x.get("deck_id"),
                 "deck_name": x.get("deck_name") or x.get("deck_id"),
-                "line": " · ".join(bits),
+                "line": ui.facts(bits, html=True),
                 "review": f"/proposals/{x['proposal_id']}" if x.get("proposal_id") else None,
                 "backup": str(x["backup_url"]) if x.get("backup_url") and not x.get("backup_gone") else None,
                 "app": None,
@@ -430,7 +430,13 @@ def build_events(
                 "deck_name": r.get("deck_name") or r.get("deck_id"),
                 # the report's overall status (reports.report_status), shown unless complete
                 "state": r["status"] if r.get("status") and r.get("status") != "complete" else "",
-                "line": source_label_html(r) + _esc((", ".join(bits) + f" · {sim}") if bits else sim),
+                "line": ui.facts(
+                    [
+                        source_label_html(r),
+                        *(_esc(x) for x in ((", ".join(bits) + f" · {sim}") if bits else sim).split(" · ")),
+                    ],
+                    html=True,
+                ),
                 "app": app,
                 "client": client,
                 "who": True,

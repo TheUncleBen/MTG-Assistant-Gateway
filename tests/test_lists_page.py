@@ -121,7 +121,7 @@ async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
         assert "static/lists.js" in page or "lists.js" in page, slug
         assert "kept under History" in page, slug
     page = (await member.http.get("/collection/wants")).text
-    assert "1 / 150" in page and "for Meren" in page and "9 / 256" in page
+    assert "1\u00a0/\u00a0150" in page and "for Meren" in page and "9\u00a0/\u00a0256" in page
     assert "class='danger' data-box='pin-rm'" in page
     page = (await member.http.get("/lists/templates")).text
     assert "class='danger' data-box='tpl-del'" in page
@@ -324,7 +324,7 @@ async def test_remove_all_pins_asks_then_removes_every_pin(member: Browser, stac
         {"id": 32, "card": ark.account._card(9007), "notes": "", "modifier": "Foil", "quantity": 1}
     )
     page = (await member.http.get("/collection/wants")).text
-    assert "2 / 150" in page and "Foil" in page
+    assert "2\u00a0/\u00a0150" in page and "Foil" in page
     assert (
         "<a class='btn btn-outline-danger' href='/collection/wants?remove_all=1' data-box-open='pin-all'>"
         in page

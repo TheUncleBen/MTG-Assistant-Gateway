@@ -58,7 +58,7 @@ def test_needs_you_shows_only_what_waits() -> None:
     )
     assert "<h2 id='needs-h'>Needs you</h2>" in out
     assert "<li class=accent>" in out and "<b>1 proposal</b> waiting for you" in out
-    assert "1 on 1 deck · oldest 1 h · next expires in 2 h" in out
+    assert "<span>1 on 1 deck</span><span>oldest 1 h</span><span>next expires in 2 h</span>" in out
     assert "href='/proposals'" in out and ">Review it</a>" in out and out.count("btn-primary") == 1
     two = home.needs_you_html(pending=2, board=rows, running=[], watch_hits=[], linked=True, now=NOW)
     assert "<b>2 proposals</b> waiting for you" in two and ">Review them</a>" in two

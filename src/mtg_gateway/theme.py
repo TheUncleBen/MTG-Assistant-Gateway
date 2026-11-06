@@ -2338,7 +2338,8 @@ _TOPSEARCH_CSS = """
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
   background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
-.topbar .topsearch .box input{height:auto;min-height:44px;padding-top:.3em;padding-bottom:.3em;border-radius:22px}
+.topbar .topsearch .box input{height:auto;min-height:44px;padding-top:.3em;padding-bottom:.3em;
+  border-radius:22px}
 .topbar .topsearch .box input::placeholder{color:var(--navbar-muted)}
 .topbar .topsearch .box input:focus{background:var(--surface);color:var(--text);
   border-color:var(--orange);outline-offset:1px}
@@ -3187,7 +3188,8 @@ def render(
             "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
             "<label for='site-q' class='sr-only'>Search cards and decks</label>"
             f"<span class='box'>{icon('search')}<input id='site-q' type='search' name='q' maxlength='100' "
-            "placeholder='Cards and decks' data-ph='Search' data-suggest='cards' data-suggest-site='/cards?q=' "
+            "placeholder='Cards and decks' data-ph='Search' data-suggest='cards' "
+            "data-suggest-site='/cards?q=' "
             "data-suggest-menu autocomplete='off' enterkeyhint='search'></span></form>"
         )
         # The bell (parity release 2): Archidekt's unseen count, read after the page has loaded

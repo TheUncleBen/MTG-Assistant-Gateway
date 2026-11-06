@@ -519,6 +519,20 @@ def facts(parts: Iterable[str], *, html: bool = False) -> str:
     return f"<span class='tx ui-dots balanced'>{inner}</span>"
 
 
+def dotted(text: str) -> str:
+    """Plain text whose facts are set apart by " · " ("10 entries · 2 added this week"), as
+    ``facts``: the dot goes with the fact after it to the next line, never left at the end of a
+    line or the start of one (confirmation P-15). Text with no dot is only escaped."""
+    parts = text.split(" · ")
+    return facts(parts) if len(parts) > 1 else esc(text)
+
+
+def counted(n: int, limit: int | str) -> str:
+    """A count against its limit ("7 / 150"), kept on one line so the "/" never ends or starts
+    one (confirmation P-15); counters that scripts update write the same spaces."""
+    return f"{n}\u00a0/\u00a0{limit}"
+
+
 def widgets(items: Iterable[str], *, label: str = "At a glance", line: str = "") -> str:
     """The row of 3 to 6 widgets (two a row on the open Fold). On a phone the row is folded
     behind one line (``line``, or the label) so the list comes first on the screen (re-audit
@@ -527,7 +541,7 @@ def widgets(items: Iterable[str], *, label: str = "At a glance", line: str = "")
     fid = "glance-" + "".join(c if c.isalnum() else "-" for c in label.casefold())
     return (
         f"<input type='checkbox' class='glance-tgl' id='{fid}'>"
-        f"<label class='glance-lbl' for='{fid}'>{icon('stats')}<span>{esc(line or label)}</span>"
+        f"<label class='glance-lbl' for='{fid}'>{icon('stats')}<span>{dotted(line or label)}</span>"
         f"{icon('chev')}</label>"
         f"<section class='ui-widgets' aria-label='{esc(label)}'>{''.join(items)}</section>"
     )
@@ -670,8 +684,8 @@ def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str
 
 
 def day_row(text: str) -> str:
-    """A quiet day heading between rows ("Today", "Oct 12")."""
-    return f"<div class='tr daygroup'>{esc(text)}</div>"
+    """A quiet day heading between rows ("Today", "Oct 12", "October 2026 · 3")."""
+    return f"<div class='tr daygroup'>{dotted(text)}</div>"
 
 
 def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> str:

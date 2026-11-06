@@ -116,6 +116,11 @@ WAIT_COLS = ("32px minmax(0,1fr) auto",) * 3
 ALL_COLS = ("minmax(0,1fr) auto",) * 3
 
 
+def _pager_note() -> str:
+    """The pager's note as a sentence of its own, after the count of what is shown."""
+    return f"{PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}."
+
+
 def read_query(params: Any) -> dict[str, Any]:
     """The page's filters from the query string, each limited to what the page offers."""
 
@@ -997,7 +1002,7 @@ def list_html(
                     into=".pr-table",
                 )
                 if upto < total
-                else ui.load_more("", done=f"{ui.all_shown(total, '')} {PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}.")
+                else ui.load_more("", done=f"{ui.all_shown(total, '')} {_pager_note()}")
             )
         else:
             parts.append(

@@ -341,7 +341,7 @@ def _counts(text: str) -> dict[str, int]:
 
     return {
         "tab": one(r"<a href='/collection' aria-current=page>Cards<span class='cn'>([\d,]+)</span>"),
-        "glance": one(r"<span>([\d,]+) entries · \d+ added this week</span>"),
+        "glance": one(r"<span>([\d,]+) entries</span><span>\d+ added this week</span>"),
         "tile": one(r"Entries</span><span class='big'>([\d,]+)</span>"),
         "bar": one(r"id='col-count' aria-live='polite'>([\d,]+) entries</h2>"),
         "more": one(r"<p class='muted'>\d+ of ([\d,]+)</p>|All ([\d,]+) entries shown"),
@@ -353,7 +353,7 @@ def _week(text: str) -> tuple[int, int]:
     import re
 
     tile = re.search(r"Added this week</span><span class='big'>(\d+)</span>", text)
-    line = re.search(r"entries · (\d+) added this week</span>", text)
+    line = re.search(r"entries</span><span>(\d+) added this week</span>", text)
     assert tile and line
     return int(tile.group(1)), int(line.group(1))
 
@@ -471,7 +471,7 @@ async def test_a_held_binder_read_empty_counts_the_cards_added_since_in_every_ti
         assert held.status_code == 200 and "as it was read" in held.text
         assert set(_counts(held.text).values()) == {10}, _counts(held.text)
         assert _week(held.text) == (10, 10)
-        assert "<span>10 entries · 10 added this week</span>" in held.text
+        assert "<span>10 entries</span><span>10 added this week</span>" in held.text
         copies = re.search(
             r"Entries</span><span class='big'>10</span><span class='det'>([^<]*)</span>", held.text
         )
@@ -527,7 +527,7 @@ def _week_text(text: str) -> tuple[str, str, str]:
     tile = re.search(
         r"Added this week</span><span class='big'>([^<]*)</span><span class='det'>([^<]*)</span>", text
     )
-    line = re.search(r"entries · ([^ <]+) added this week</span>", text)
+    line = re.search(r"entries</span><span>([^ <]+) added this week</span>", text)
     assert tile and line, text[:400]
     return tile.group(1), tile.group(2), line.group(1)
 

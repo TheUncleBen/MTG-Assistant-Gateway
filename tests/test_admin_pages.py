@@ -166,7 +166,8 @@ async def test_users_list_reads_in_words_with_widgets_chips_and_filters(gw: Harn
         found = await _get(b, "/admin/users?q=bob")
         assert found.count("class='tr mem") == 1 and ">bob<" in found
         nobody = await _get(b, "/admin/users?q=zzz")
-        assert "Nobody matches these filters. <a class='ui-cap' href='/admin/users'>Show everyone</a>" in nobody
+        everyone = "<a class='ui-cap' href='/admin/users'>Show everyone</a>"
+        assert f"Nobody matches these filters. {everyone}" in nobody
     finally:
         await b.aclose()
 
@@ -309,7 +310,8 @@ async def test_metrics_read_in_words_with_the_raw_name_only_in_a_rows_details(gw
         opened = await _get(b, "/admin/metrics?open=tool%3Asearch_decks")
         assert "<div class='more-body' id='m-0-more'>" in opened and "aria-expanded='true'" in opened
         none = await _get(b, "/admin/metrics?q=zzz")
-        assert "Nothing counted matches these filters. <a class='ui-cap' href='/admin/metrics'>Show everything</a>" in none
+        everything = "<a class='ui-cap' href='/admin/metrics'>Show everything</a>"
+        assert f"Nothing counted matches these filters. {everything}" in none
     finally:
         await b.aclose()
 

@@ -527,9 +527,7 @@ def precon_body(
         return html + ui.load_more(
             nxt, text="Load more sets", shown=len(shown_groups), total=len(groups)
         ), nxt
-    return html + ui.load_more(
-        "", done=ui.all_shown(len(groups), "set")
-    ), ""
+    return html + ui.load_more("", done=ui.all_shown(len(groups), "set")), ""
 
 
 def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str, count: str) -> str:
