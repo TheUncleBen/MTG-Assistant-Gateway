@@ -122,9 +122,14 @@ def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server
         # the category menu is a sheet over the page and the tab bar: a tap above it (on its
         # scrim) closes it, and B's button, there again, is tapped at once, before A's back() lands
         assert page.evaluate("() => document.querySelector('.ctxmenu').getBoundingClientRect().top") > 160
-        page.touchscreen.tap(195, 120)
         box = b.bounding_box()
+        page.evaluate(  # counts the two taps' clicks (set before them: B's comes at once)
+            "() => { window.__clicks = 0; addEventListener('click', () => { window.__clicks++; }, true); }"
+        )
+        page.touchscreen.tap(195, 120)
         page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.wait_for_function("() => window.__clicks >= 2")  # B's tap's click came
+        frame(page)  # and its drop-down's toggle event (which takes the layer) has run
         quiet(page)  # A's back() lands and B takes the entry again
         assert page.evaluate(STATE) == {"menu": True, "open": 1}, page.evaluate(OPEN)
         page.go_back(wait_until="commit")
