@@ -110,7 +110,7 @@ class Server:
                     if httpx.get(url, timeout=1).status_code == 200:
                         break
                 except httpx.HTTPError:
-                    time.sleep(0.1)
+                    time.sleep(0.1)  # fixed wait: poll interval of the start-up loop (100 tries)
             else:
                 raise RuntimeError(f"{url} did not come up")
 
@@ -244,6 +244,7 @@ def test_consent_click_guard_defeats_a_double_click_swap(server: Server) -> None
             )
             # The "second click" of a double-click, at once, where the button is.
             page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            # fixed wait: a negative check: the swapped-in click submits nothing within 400 ms
             page.wait_for_timeout(400)
             assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
             since = page.evaluate("() => performance.now() - window.__swappedAt")
@@ -321,17 +322,21 @@ def test_consent_on_a_phone_unlocks_with_a_first_tap(server: Server) -> None:
             page = browser.new_context(has_touch=True, is_mobile=True).new_page()
             page.goto(server.authorize_url())
             page.wait_for_selector(APPROVE)
-            page.wait_for_timeout(1000)  # past the dwell time, so only the touch is missing
+            # fixed wait: past the guard's 800 ms dwell (a timer of clickguard.js the page does not show),
+            # so only the touch is missing
+            page.wait_for_timeout(1000)
             # Re-lock first: a loaded headless Chromium can emit a mouse move of its own after a
             # late layout, which would count as the unlocking interaction instead of the tap
             # (seen in CI; the next test does the same). The clocks restart from here.
             page.evaluate("() => window.dispatchEvent(new Event('blur'))")
+            # fixed wait: past the guard's 800 ms dwell again after the re-lock (its own timer, not shown)
             page.wait_for_timeout(1000)
             page.locator(APPROVE).scroll_into_view_if_needed()  # the panel is taller than 720 px
             box = page.locator(APPROVE).bounding_box()
             assert box is not None
             x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
             page.touchscreen.tap(x, y)
+            # fixed wait: a negative check: the unlocking tap's click submits nothing within 100 ms
             page.wait_for_timeout(100)
             assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
             expect(page.locator(APPROVE)).to_be_enabled(timeout=5000)
@@ -356,6 +361,7 @@ def test_consent_unlocking_tap_is_swallowed_even_when_its_click_comes_late(serve
             page = browser.new_context(has_touch=True, is_mobile=True).new_page()
             page.goto(server.authorize_url())
             page.wait_for_selector(APPROVE)
+            # fixed wait: past the guard's 800 ms dwell (a timer of clickguard.js the page does not show)
             page.wait_for_timeout(1000)
             # The touch by itself, then its click a second later (longer than data-settle). The
             # guard is re-locked first, in the same script so nothing can slip in between: a
@@ -368,9 +374,10 @@ def test_consent_unlocking_tap_is_swallowed_even_when_its_click_comes_late(serve
                 " b.dispatchEvent(new TouchEvent(t, {bubbles: true, cancelable: true})); }",
                 APPROVE,
             )
-            page.wait_for_timeout(1000)  # past the dwell time again after the re-lock
             expect(page.locator(APPROVE)).to_be_enabled()
             page.evaluate("(sel) => document.querySelector(sel).click()", APPROVE)
+            # fixed wait: a negative check: the unlocking touch's click is swallowed, nothing submits
+            # in 300 ms
             page.wait_for_timeout(300)
             assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
             page.locator(APPROVE).scroll_into_view_if_needed()  # the panel is taller than 720 px

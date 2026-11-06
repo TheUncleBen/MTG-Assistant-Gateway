@@ -13,6 +13,7 @@ from .test_overflow_sweep_browser import MEASURE
 from .test_settings_page_browser import _admin, _shot
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import LIFT_WATCH, expect, lifted
 
 pytest.importorskip("playwright")
 
@@ -132,8 +133,10 @@ def test_cancel_and_the_close_link_leave_the_model_alone(server: Server) -> None
         assert page.url.endswith("/admin/models")  # the address no longer names the box
         assert page.locator(".amo .ui-table .tr.model").count() == 4
         # a press and hold on a row opens the menu on a touch screen
+        page.evaluate(LIFT_WATCH)
         page.evaluate(HOLD, "#cm-0 .title")
-        page.wait_for_timeout(700)
+        expect(page.locator(".ctxmenu")).to_have_count(1)  # the hold opened the menu
+        lifted(page)  # and the finger lifted (HOLD, 600 ms)
         assert page.locator(".ctxmenu").count() == 1
         assert page.locator(".ctxmenu [role=menuitem]", has_text="Remove…").count() == 1
         browser.close()

@@ -21,6 +21,7 @@ from .test_card_search_filters_browser import CONTRAST
 from .test_overflow_sweep_browser import MEASURE
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import quiet
 
 pytest.importorskip("playwright")
 
@@ -379,7 +380,7 @@ def test_a_box_opened_from_a_menu_on_a_touch_screen_stays_until_back_is_pressed(
             _menu(page)
             _pick(page, "Rename…")
             box = _box(page)
-            page.wait_for_timeout(600)  # the menu's Back has landed by now
+            quiet(page)  # the menu's Back has landed
             assert page.locator(".mtgbox-scrim .mtgbox[role=dialog]").count() == 1
             assert box.locator("input#mb-fname").input_value() == "Archive"
             page.go_back()

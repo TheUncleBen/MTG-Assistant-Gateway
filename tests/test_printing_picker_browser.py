@@ -41,6 +41,7 @@ from .test_card_search_filters_browser import CONTRAST
 from .test_deck_menu_browser import PNG
 from .test_overflow_sweep_browser import MEASURE
 from .test_scan_browser import _chromium_path, _free_port, _serve
+from .waits import expect, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -87,7 +88,7 @@ class Server:
                 if httpx.get(f"{self.base}/healthz", timeout=1).status_code == 200:
                     return
             except httpx.HTTPError:
-                time.sleep(0.1)
+                time.sleep(0.1)  # fixed wait: poll interval of the start-up loop (100 tries)
         raise RuntimeError("gateway did not start")
 
     def stop(self) -> None:
@@ -249,7 +250,7 @@ def _choose(page, label: str, value: str) -> None:
         raise AssertionError(
             f"{label} list closed before {value!r} was clicked:\n" + "\n".join(map(str, log))
         ) from exc
-    page.wait_for_timeout(150)
+    quiet(page)
 
 
 # every control of the open dialog: on screen, inside its scroller, and the one under its middle
@@ -321,7 +322,7 @@ def _shots_both_themes(page, name: str) -> None:
     if SHOTS:
         for theme in ("light", "dark"):
             page.evaluate("t => document.documentElement.setAttribute('data-theme', t)", theme)
-            page.wait_for_timeout(100)
+            settled(page)
             _shot(page, f"{name}-{theme}")
         page.evaluate("() => document.documentElement.setAttribute('data-theme', 'light')")
 
@@ -888,7 +889,7 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
         _shot(page, f"menu-{width}-{theme}")
         page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         page.locator(".printpick .pptile").first.wait_for(timeout=5000)
-        page.wait_for_timeout(250)  # the dialog's entrance
+        settled(page)  # the dialog's entrance
         problems = page.evaluate(MEASURE) + page.evaluate(COVERED)
         assert problems == [], problems
         assert page.evaluate(CONTRAST, TEXT) == []
@@ -904,14 +905,16 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
             page.locator(".printpick .ppfiltbtn").tap()
         # a search the card's own printing doesn't match: it shows anyway, and the count says why
         page.locator("#pp-q").fill("secret")
-        page.wait_for_timeout(100)
+        expect(page.locator(".ppstatus")).to_contain_text("The card's current printing is shown too.")
+        settled(page)
         assert "The card's current printing is shown too." in page.locator(".ppstatus").inner_text()
         assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []
         assert page.evaluate(CONTRAST, TEXT + ", .printpick .ppstatus") == []
         _shot(page, f"own-{width}-{theme}")
         # nothing matches: the card's own printing stays, and "no match" is said once, in the box
         page.locator("#pp-q").fill("zzz")
-        page.wait_for_timeout(100)
+        expect(page.locator(".ppempty", has_text="No printing matches these filters.")).to_be_visible()
+        settled(page)
         assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
         assert page.locator(".ppstatus").inner_text().count("No printing matches") == 0
         assert "Only the card's current printing is shown." in page.locator(".ppstatus").inner_text()
@@ -926,7 +929,7 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
         else:
             tile.click()
         page.locator(".pppreview .ppnote").wait_for(timeout=3000)
-        page.wait_for_timeout(100)
+        settled(page)
         problems = page.evaluate(MEASURE) + page.evaluate(COVERED)
         assert problems == [], problems
         assert page.evaluate(CONTRAST, TEXT) == []
@@ -961,7 +964,7 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
             loc.click()
 
     def check(name: str, texts: str) -> None:
-        page.wait_for_timeout(150)
+        settled(page)
         _shot(page, f"{name}-{tag}")
         assert page.evaluate(MEASURE) == [], name
         assert page.evaluate(CONTRAST, texts) == [], name
@@ -973,7 +976,7 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
             if not page.locator(".printpick.open").count():
                 return
             page.keyboard.press("Escape")
-            page.wait_for_timeout(200)
+            quiet(page)
         assert page.locator(".printpick.open").count() == 0
 
     def pick(code: str) -> None:
@@ -1006,7 +1009,7 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
         for _ in range(50):
             if held:
                 break
-            page.wait_for_timeout(100)
+            page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
         held[0].continue_()
         page.unroute(EDIT_URL)
         msg.filter(has_text="Saved").wait_for(timeout=8000)
@@ -1305,11 +1308,12 @@ def test_the_filter_box_says_it_filters_by_set_and_offers_a_card_search(server: 
             assert page.locator(".printpick .ppsearch svg.i").count() == 1
             go = page.locator(".printpick .ppempty a.btn")
             box.fill("zzz")
-            page.wait_for_timeout(100)
+            expect(page.locator(".ppempty", has_text="No printing matches these filters.")).to_be_visible()
             assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
             assert go.count() == 0
             box.fill("Lightning Bolt")
-            page.wait_for_timeout(100)
+            expect(go).to_have_text("Search all cards for \u201cLightning Bolt\u201d")
+            settled(page)
             assert go.inner_text() == "Search all cards for \u201cLightning Bolt\u201d"
             assert go.get_attribute("href") == "/cards?q=Lightning%20Bolt"
             assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []

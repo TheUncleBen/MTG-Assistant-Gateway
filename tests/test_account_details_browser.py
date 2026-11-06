@@ -18,6 +18,7 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, redrawn
 
 TEXT = (
     ".ygrp h2, .ygrp .lbl, .ygrp .val, .yme b, .yme .sub, .yback, h1, .yfold p, .yfold dt, .yfold dd, "
@@ -135,7 +136,7 @@ def test_the_list_and_every_page_fit_each_surface(
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             if zoom:
                 page.evaluate(TEXT_200)
-                page.wait_for_timeout(300)
+                redrawn(page)
             if path == "/account/details":
                 # the list: four groups in the mockup's order, rows with values, no form on it
                 # (textContent: the style sets the headings in capitals), top to bottom on a phone;
@@ -178,7 +179,7 @@ def test_the_list_and_every_page_fit_each_surface(
                 assert page.locator(".yrow .val").filter(has_text="alice · linked").count() == 1
                 # the folds open in place, their bodies drawn
                 page.evaluate("() => document.querySelectorAll('details.yrow').forEach(d => d.open = true)")
-                page.wait_for_timeout(100)
+                expect(page.locator("#identity .yfold dt").filter(has_text="Email")).to_have_count(1)
                 assert page.locator("#identity .yfold dt").filter(has_text="Email").count() == 1
                 assert page.locator("#writes .yfold .ui-lbl").inner_text().strip() == "On"
             else:

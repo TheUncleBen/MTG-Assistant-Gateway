@@ -27,6 +27,7 @@ from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_ui_pass_c_browser import _close_menu, _items, _seed, _targets
+from .waits import expect, frame, redrawn, settled
 
 SIZES = [(344, "dark"), (390, "light"), (1280, "dark"), (1280, "light")]
 # the one list date (ui.when_text / MtgText.rel): "just now", "40 min ago", "2 h ago", "3 days ago",
@@ -248,7 +249,8 @@ def test_the_deck_pages_custom_card_viewer_and_a_failed_picture(
         page.keyboard.press("Enter")
         view = page.locator(".cardview.open")
         view.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        expect(view.locator(".pane .ph .nm")).to_have_text("Old Ranger")
+        settled(page)
         tile = view.locator(".pane .ph")
         assert tile.locator(".nm").inner_text() == "Old Ranger"
         assert tile.locator(".ty").inner_text() == "Creature — Human Advisor"
@@ -295,7 +297,6 @@ def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) ->
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
-        page.wait_for_timeout(300)
         tabs = page.locator(".lp-tabs a")
         # six lists: Pinned cards is a tab again (at /collection/wants) since the Binder redesign,
         # and Binder tags joined them in 0.7.46 (lists_page.TABS)
@@ -334,11 +335,11 @@ def test_the_color_tag_sheet_never_covers_its_field(server: Server, width: int, 
         box = _open_from_deck_menu(page, "Add a package…", "package")
         btn = box.locator("#dx-ptag-btn")
         btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(200)
+        frame(page)
         btn.click()
         sheet = page.locator(".msel-list.sheet")
         sheet.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        settled(page)  # the sheet slid in
         b, s = _rect(btn), _rect(sheet)
         label = _rect(box.locator("label[for='dx-ptag']"))
         assert b["b"] <= s["t"], (b, s)  # the field sits above the sheet
@@ -394,7 +395,7 @@ def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, them
         # the list is on Account > Assistants > Default for new assistants
         page.goto(f"{server.base}/account/assistants/default", wait_until="networkidle")
         page.locator("#mode .mode-opt .mode-pick").first.wait_for(state="visible")
-        page.wait_for_timeout(200)
+        settled(page)
         rows = page.evaluate(MODE_LINES)
         assert len(rows) == 3, rows
         assert [r["label"] for r in rows] == [
@@ -414,7 +415,7 @@ def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, them
         assert page.evaluate(CONTRAST, "#mode .mode-pick > span, #mode .mode-body") == []
         # at 200% text the names may wrap, but nothing may overflow sideways
         page.evaluate("() => { document.documentElement.style.fontSize = '28px'; }")
-        page.wait_for_timeout(200)
+        redrawn(page)
         assert page.evaluate(MEASURE) == []
         browser.close()
     assert errors == []

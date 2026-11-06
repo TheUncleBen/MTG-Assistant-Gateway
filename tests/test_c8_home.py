@@ -14,6 +14,7 @@ import pytest
 from mtg_gateway import home
 
 from .test_suggest_browser import Server
+from .waits import bell_read
 
 NOW = 1_800_000_000.0
 
@@ -133,7 +134,7 @@ def test_the_needs_you_section_follows_the_alert_count_in_a_browser() -> None:
                 )
                 page.route("https://mtg.test/", _answer("text/html", body))
                 page.goto("https://mtg.test/")
-                page.wait_for_timeout(300)
+                bell_read(page)
                 assert page.locator("#needs-h").is_visible() is shown, n
                 assert page.locator("[data-bell-row]").is_visible() is shown, n
                 page.close()

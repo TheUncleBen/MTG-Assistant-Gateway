@@ -13,6 +13,7 @@ import pytest
 
 from .test_overflow_sweep_browser import MEASURE
 from .test_printing_picker_browser import Server, _chromium, _page
+from .waits import quiet
 
 pytest.importorskip("playwright")
 
@@ -188,7 +189,7 @@ def test_the_bar_is_one_slim_row_on_a_phone(server: Server, width: int, theme: s
         # the box stays open once the menu's own history entry has gone back (the menu gives
         # its entry back before the box takes one); the phone's Back then closes the box, not
         # the page
-        page.wait_for_timeout(700)
+        quiet(page)
         assert not page.locator("#col-bulk-tags").evaluate("b => b.hidden")
         page.go_back()
         page.wait_for_function("() => document.getElementById('col-bulk-tags').hidden")

@@ -18,6 +18,7 @@ from mtg_gateway import theme
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import redrawn
 
 NAV = {"Accept": "text/html"}
 APP_UA = "Mozilla/5.0 (Linux; Android 16) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.7.46"
@@ -75,7 +76,7 @@ def _zoom(page, zoom: str) -> None:
         page.evaluate(ROOT_200)
     elif zoom == "text":
         page.evaluate(TEXT_200)
-    page.wait_for_timeout(80)
+    redrawn(page)
 
 
 def _tabbar(page_html: str) -> str:

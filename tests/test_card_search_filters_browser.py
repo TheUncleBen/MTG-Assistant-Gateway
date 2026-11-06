@@ -20,6 +20,7 @@ from .test_cardsearch_browser import SIZES, _chromium, _page
 from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
+from .waits import expect, frame
 
 pytest.importorskip("playwright")
 
@@ -228,6 +229,7 @@ def test_load_more_reads_to_the_end_and_the_list_view_and_sort_stay_in_the_searc
         first = page.locator("#cardgrid .cc").count()
         assert 0 < first < 60
         page.mouse.wheel(0, 8000)
+        # fixed wait: a negative check: scrolling loads nothing within 700 ms
         page.wait_for_timeout(700)
         assert page.locator("#cardgrid .cc").count() == first  # scrolling loads nothing
         for _ in range(12):
@@ -428,11 +430,11 @@ def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server, handler
             if page.evaluate(MORE_READY):
                 page.locator("#cs-more [data-more]").click()
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         for _ in range(100):  # the request reaches `hold` (late on purpose with handler_delay)
             if held:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert held, "no page-2 request was made"
         assert _query(held[0].request.url)["q"] == ["test land"]
         page.locator("#c-q").fill("sol")
@@ -441,6 +443,7 @@ def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server, handler
             held[0].continue_()  # the old page's answer arrives late (or was already called off)
         except Exception:  # noqa: BLE001 - an aborted request cannot be continued, which is the point
             pass
+        # fixed wait: a negative check: the old page's late answer changes nothing within 800 ms
         page.wait_for_timeout(800)
         assert _names(page) == ["Sol Ring", "Sol Talisman"], _names(page)
         assert page.locator("#cs-count").text_content() == "2 cards"
@@ -454,6 +457,8 @@ def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server, handler
         page.locator("#c-q").press_sequentially("x", delay=10)  # the search waits 400 ms
         page.evaluate("document.querySelector('#cs-more [data-more]').click()")
         page.wait_for_load_state("networkidle")
+        # fixed wait: a negative check over the search's 400 ms debounce: no request for the new
+        # words' page goes out within 600 ms
         page.wait_for_timeout(600)
         assert asked and all(_query(u)["q"] == ["test land"] for u in asked), asked
         assert errors == [], errors
@@ -509,7 +514,8 @@ def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: 
         top = sheet.bounding_box()
         assert top is not None and box["y"] + box["height"] < top["y"], (box, top)  # it's above the sheet
         page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-        page.wait_for_timeout(300)
+        expect(page.locator(".msel-list")).to_have_count(0)
+        frame(page)  # the tap's click has landed too
         assert page.locator(".msel-list").count() == 0
         assert not colour.is_checked()
         assert errors == [], errors

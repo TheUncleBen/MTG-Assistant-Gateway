@@ -184,7 +184,7 @@ def test_quick_size_changes_keep_the_last_one(server: Server) -> None:
         for _ in range(100):  # both saves answered (the first waits 1.2 s on purpose)
             if len(answered) >= 2:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert len(answered) == 2 and all(r.ok for r in answered)
         assert server.db.get_pref("user-1", "card.size.deck") == "s"
         browser.close()
@@ -220,7 +220,7 @@ def test_a_save_with_an_unreadable_answer_does_not_stop_the_next_ones(server: Se
         for _ in range(100):
             if len(sent) >= 3 and server.db.get_pref("user-1", "card.size.deck") == "s":
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert len(sent) == 3, sent
         assert server.db.get_pref("user-1", "card.size.deck") == "s"
         browser.close()
@@ -495,7 +495,7 @@ def test_a_save_still_waiting_when_the_page_is_left_reaches_the_account(server: 
         for _ in range(100):
             if server.db.get_pref("user-1", "card.size.deck") == "s":
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert server.db.get_pref("user-1", "card.size.deck") == "s"
         # the page loaded while the flush was on its way may still show the old size; the next shows it
         page.reload(wait_until="load")
@@ -567,7 +567,7 @@ def test_two_flushes_with_a_slow_first_one_end_on_the_newest_value(server: Serve
         for _ in range(100):
             if server.db.get_pref("user-1", "card.size.deck") == "s" and len(held) == 2:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert server.db.get_pref("user-1", "card.size.deck") == "s", posts
         assert len(held) == 2, posts
         for route in held:  # M, then L, reach the gateway after S
@@ -575,11 +575,11 @@ def test_two_flushes_with_a_slow_first_one_end_on_the_newest_value(server: Serve
                 route.continue_()
             except Exception:  # noqa: BLE001  (a save the page cancelled: nothing to let through)
                 pass
-            page.wait_for_timeout(300)
+            route.request.response()  # its answer came (none for a save called off) before the next goes
         for _ in range(100):
             if len(answered) >= 3:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert server.db.get_pref("user-1", "card.size.deck") == "s", posts
         sizes = [(b.get("set") or {}).get("card.size.deck") for b in posts]
         assert sizes == ["l", "m", "s"], posts  # each once, no merged repeat of L

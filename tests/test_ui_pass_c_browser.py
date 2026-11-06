@@ -25,6 +25,7 @@ from .test_forum_page import _contest, _reply
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import LIFT_WATCH, expect, lifted, quiet, settled
 
 TEXT = (
     ".fm .ui-table .t, .fm .ui-table .sub, .fm .ui-table .th span, .fm .fm-section, .fm .fm-post .text, "
@@ -88,14 +89,15 @@ def _items(page) -> list[str]:
 
 def _close_menu(page) -> None:
     page.keyboard.press("Escape")
-    page.wait_for_timeout(300)
+    expect(page.locator(".ctxmenu")).to_have_count(0)
+    quiet(page)
     assert page.locator(".ctxmenu").count() == 0
 
 
 def _close_box(page) -> None:
     page.keyboard.press("Escape")
     page.locator(".mtgbox-scrim").wait_for(state="detached")
-    page.wait_for_timeout(300)
+    quiet(page)
 
 
 @pytest.mark.parametrize("width,theme", SIZES)
@@ -137,8 +139,10 @@ def test_the_thread_table_and_the_posts_menus_fit_and_open_every_way(
         assert _items(page)[0] == "Reply"
         _close_menu(page)
         if width < 900:
+            page.evaluate(LIFT_WATCH)
             page.evaluate(HOLD, ".fm-post .text")
-            page.wait_for_timeout(900)
+            expect(page.locator(".ctxmenu")).to_have_count(1)  # the hold opened it
+            lifted(page)  # and the finger lifted (HOLD, 600 ms)
             assert page.locator(".ctxmenu").count() == 1
             _close_menu(page)
         # Report comment… fills and opens the box for the first post
@@ -146,7 +150,8 @@ def test_the_thread_table_and_the_posts_menus_fit_and_open_every_way(
         page.locator(".ctxmenu [role=menuitem]", has_text="Report comment…").click()
         rc = page.locator("#reportcomment")
         rc.wait_for(state="visible")
-        page.wait_for_timeout(400)
+        expect(rc.locator("input[name=comment_id]")).to_have_value("700002")
+        settled(page)
         assert rc.locator("h2").inner_text() == "Report amy's comment to Archidekt's moderators"
         assert rc.locator("input[name=comment_id]").input_value() == "700002"
         _fits(page, "report box", width)
@@ -168,7 +173,7 @@ def test_the_thread_table_and_the_posts_menus_fit_and_open_every_way(
         amy.locator("> .who .kebab").click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Report comment…").click()
         rc.wait_for(state="visible")
-        page.wait_for_timeout(400)
+        expect(rc.locator("input[name=who]")).to_have_value("amy")
         assert rc.locator("input[name=comment_id]").input_value() != "700002"
         assert rc.locator("input[name=who]").input_value() == "amy"
         _close_box(page)
@@ -187,7 +192,6 @@ def test_the_text_style_buttons_and_the_post_this_reply_box(server: Server, widt
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/forum/thread/700002", wait_until="networkidle")
         page.locator(".comments .cmt .who .kebab").first.wait_for(state="visible")
-        page.wait_for_timeout(800)  # the click guard
         ta = page.locator("#ctext")
         ta.fill("Sol Ring")
         page.evaluate("() => document.getElementById('ctext').setSelectionRange(0, 8)")
@@ -217,7 +221,8 @@ def test_the_text_style_buttons_and_the_post_this_reply_box(server: Server, widt
         page.locator("form.newcomment button[type=submit]").click()
         box = page.locator(".mtgbox-scrim .mtgbox")
         box.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        expect(box.locator("h2")).to_have_text("Post this reply?")
+        settled(page)
         assert box.locator("h2").inner_text() == "Post this reply?"
         pv = box.locator(".post-preview")
         assert (
@@ -233,7 +238,7 @@ def test_the_text_style_buttons_and_the_post_this_reply_box(server: Server, widt
         _fits(page, "post box", width)
         if width < 900:
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(50)
+            settled(page)
             assert page.evaluate(MEASURE) == []
         box.locator(".acts button", has_text="Keep editing").click()
         page.locator(".mtgbox-scrim").wait_for(state="detached")
@@ -275,7 +280,8 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
         strip.locator(".btn", has_text="Enter a deck…").click()
         box = page.locator("#enter")
         box.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        expect(box.locator("h2")).to_have_text("Enter a deck in “October deck contest”")
+        settled(page)
         assert box.locator("h2").inner_text() == "Enter a deck in “October deck contest”"
         page.wait_for_function("() => !document.querySelector('#enter select[name=deck]').disabled")
         # the list starts on "Pick a deck…" (0.7.44, M4); the member picks the deck
@@ -284,7 +290,7 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
         _fits(page, "enter box", width)
         if width < 900:
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(50)
+            settled(page)
             assert page.evaluate(MEASURE) == []
             page.reload(wait_until="networkidle")
             strip.locator(".btn", has_text="Enter a deck…").click()
@@ -323,7 +329,8 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
         strip.locator(".btn", has_text="Withdraw…").click()
         wd = page.locator("#withdraw")
         wd.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        expect(wd.locator("h2")).to_have_text("Withdraw “Sample Commander Deck” from this contest?")
+        settled(page)
         assert wd.locator("h2").inner_text() == "Withdraw “Sample Commander Deck” from this contest?"
         _fits(page, "withdraw box", width)
         wd.locator(".acts button", has_text="Withdraw").click()
@@ -387,7 +394,7 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         page.wait_for_function(
             "() => document.querySelector(\".row[data-custom-id='41']\").getAttribute('data-qty') === '2'"
         )
-        page.wait_for_timeout(1200)
+        page.locator(".deck-toast", has_text="Saved Grizzled Mentor: 2 copies.").wait_for(state="visible")
         assert row()["quantity"] == 2
         page.locator(".deck-toast", has_text="Saved Grizzled Mentor: 2 copies.").wait_for(state="visible")
         # Move to: the card files under Artifact, from the menu opened afresh (a page scroll, such as
@@ -397,7 +404,7 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         menu.wait_for(state="visible")
         menu.locator(".more").click()
         menu.locator(".sub button", has_text="Artifact").click()
-        page.wait_for_timeout(1200)
+        page.locator(".deck-toast", has_text="Moved Grizzled Mentor to Artifact.").wait_for(state="visible")
         assert row()["categories"] == ["Artifact"] and row()["quantity"] == 2
         assert page.locator(".stack[data-group='Artifact'] .row[data-custom-id='41']").count() == 1
         _close_menu(page) if page.locator(".ctxmenu").count() else None
@@ -410,7 +417,7 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
             x, y = b["x"] + 60, b["y"] + b["height"] / 2
             cdp = page.context.new_cdp_session(page)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-            page.wait_for_timeout(600)
+            page.locator(".ctxmenu").wait_for(state="visible")  # the hold opened the menu
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         else:
             card.click(button="right")
@@ -672,7 +679,7 @@ def test_custom_card_pictures_on_my_lists(server: Server, width: int, theme: str
         ranger.locator(".kebab").click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Edit…").click()
         box.wait_for(state="visible")
-        page.wait_for_timeout(800)
+        expect(box.locator(".lp-crop[data-crop='f'] .lp-nm")).to_have_text("Old Ranger")
         crop = box.locator(".lp-crop[data-crop='f']")
         assert crop.locator("img").count() == 0 and crop.locator(".img-fallback").count() == 0
         # the frame says which card it is, as the deck's viewer does, and the one line why
@@ -702,7 +709,8 @@ def test_add_to_deck_on_my_lists_custom_cards(server: Server, width: int, theme:
         page.locator(".ctxmenu [role=menuitem]", has_text="Add to deck…").click()
         box = page.locator("#cc-add")
         box.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        expect(box.locator("h2")).to_have_text("Add “Grizzled Mentor” to a deck")
+        settled(page)
         assert box.locator("h2").inner_text() == "Add “Grizzled Mentor” to a deck"
         page.wait_for_function("() => !document.querySelector('#cc-add select[name=deck]').disabled")
         # the deck's categories come in once a deck is picked (the first deck is picked for you)
@@ -712,7 +720,7 @@ def test_add_to_deck_on_my_lists_custom_cards(server: Server, width: int, theme:
         _fits(page, "add box", width)
         if width < 900:
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(50)
+            settled(page)
             assert page.evaluate(MEASURE) == []
             page.reload(wait_until="networkidle")
             row.locator(".kebab").click()

@@ -21,6 +21,7 @@ from .test_menus_browser import _items, _menu, _pick
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, quiet, redrawn
 
 pytest.importorskip("playwright")
 
@@ -144,12 +145,13 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
         rename = page.locator("#w-rename")
         assert rename.locator("input[name=new_name]").input_value() == "Meren wants"
         assert rename.locator("input[name=name]").input_value() == "Meren wants"  # the hidden one
-        page.wait_for_timeout(600)  # the menu's history entry lands, then the box holds its own
+        quiet(page)  # the menu's history entry lands, then the box holds its own
         assert page.locator("#w-rename:not([hidden])").count() == 1
         page.keyboard.press("Escape")
         page.wait_for_selector("#w-rename:not([hidden])", state="detached", timeout=3000)
-        page.wait_for_timeout(500)  # the box's history entry goes back (box.js) before the next opens
+        quiet(page)  # the box's history entry goes back (box.js) before the next opens
         page.locator(".wgrp[data-list=''] .gname").click(button="right")
+        # fixed wait: a negative check: a right-click on the head of no list opens no menu within 300 ms
         page.wait_for_timeout(300)
         assert page.locator(".ctxmenu").count() == 0
         # Select (shown by the script) ticks every row; the bar says how many; Cancel clears
@@ -215,7 +217,7 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
         assert move.locator("select option").all_inner_texts() == ["Not in a list", "Meren wants"]
         page.keyboard.press("Escape")
         page.wait_for_selector("#w-move:not([hidden])", state="detached", timeout=3000)
-        page.wait_for_timeout(500)  # the box's history entry goes back (box.js) before the next opens
+        quiet(page)  # the box's history entry goes back (box.js) before the next opens
         # a press and hold on a row (as Chrome on Android sends it) opens the same menu
         row = page.locator("#wr-w_three .title")
         row.scroll_into_view_if_needed()
@@ -223,7 +225,7 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
         x, y = b["x"] + 20, b["y"] + b["height"] / 2
         cdp = page.context.new_cdp_session(page)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(500)
+        page.locator(".ctxmenu").first.wait_for(timeout=3000)  # held: the hold opened the menu
         cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
         row.evaluate(
             """(t, xy) => t.dispatchEvent(new MouseEvent("contextmenu",
@@ -255,7 +257,7 @@ def test_every_surface_fits_at_100_and_200_percent_text(
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert page.evaluate(OVERFLOW) == 0, (path, width)
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(100)
+            redrawn(page)
             assert page.evaluate(OVERFLOW) == 0, (path, width, "200%")
         # Binder › Lists: the five Archidekt lists stacked as rows, each whole on the screen, their
         # counts filled by the script; the watchlist's lists under them
@@ -300,7 +302,8 @@ def test_a_watchlist_list_row_opens_its_menu_from_a_right_click_and_a_hold(serve
         assert _items(page) == ["Rename list…", "Delete list…"]
         assert page.locator(".ctxmenu .head").inner_text().strip() == "Meren wants"
         page.keyboard.press("Escape")
-        page.wait_for_timeout(200)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         assert page.locator(".ctxmenu").count() == 0 and page.url.endswith("/collection/lists")
         row.locator("summary.kebab").click()
         _menu(page)
@@ -316,7 +319,7 @@ def test_a_watchlist_list_row_opens_its_menu_from_a_right_click_and_a_hold(serve
         x, y = b["x"] + 30, b["y"] + b["height"] / 2
         cdp = page.context.new_cdp_session(page)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(500)
+        page.locator(".ctxmenu").first.wait_for(timeout=3000)  # held: the hold opened the menu
         cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
         row.locator("a.lbl").evaluate(
             """(a, xy) => a.dispatchEvent(new MouseEvent("contextmenu",

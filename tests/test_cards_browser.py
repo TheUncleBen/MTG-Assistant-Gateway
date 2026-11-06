@@ -19,6 +19,7 @@ from mtg_gateway.modes import MODE_LABELS
 from mtg_gateway.scan.bulk import as_of_line
 
 from .test_consent_browser import _chromium_or_skip, _launch
+from .waits import settled
 
 pytest.importorskip("playwright")
 
@@ -681,7 +682,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                     )
                     card.locator(".tile").nth(2).wait_for()
                     card.locator(".tile").first.click()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"printings-{theme}-{label}")
                     card = _open(
                         page,
@@ -691,7 +692,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                         theme=theme,
                     )
                     card.locator(".row").nth(2).wait_for()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"picker-{theme}-{label}")
                     page.unroute("https://mtg.test/cards/data/*")
                     _route(page, deck=DECK)
@@ -706,7 +707,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                         theme=theme,
                     )
                     card.locator(".row.cardrow").nth(3).wait_for()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"deck-{theme}-{label}")
                     card.locator(".row.cardrow").first.click()
                     card.locator("#dtext", has_text="Add").wait_for()
@@ -726,7 +727,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                         theme=theme,
                     )
                     card.locator("#open").wait_for()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"account-{theme}-{label}")
                     page.close()
         finally:
@@ -924,7 +925,7 @@ def _display_card(name: str, result: dict, ready: str, check) -> None:
                 _route(page)
                 card = _open(page, name, result, width=320, theme=theme)
                 card.locator(ready).first.wait_for(timeout=10_000)
-                page.wait_for_timeout(150)
+                settled(page.frames[1])
                 _fits(card)
                 check(page, card)
                 _fits(card)
@@ -1151,7 +1152,9 @@ def test_deck_card_curve_labels_read_against_their_background(theme: str) -> Non
                     "() => [...document.querySelectorAll('.curve b')].map(b => b.offsetHeight)"
                 )
                 assert heights == [2, 28, 2, 28, 2, 2, 28, 2], heights  # curve 1, 3 and 6: one card each
-                page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
+                from .test_cards_audit_browser import _frame_follows
+
+                _frame_follows(page)  # the frame takes the card's height (size-changed)
                 _shot(page, f"l14-deckcard-curve-{width}-{theme}")
                 page.close()
         finally:

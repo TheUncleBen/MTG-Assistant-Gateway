@@ -65,7 +65,7 @@ class Server:
                 if httpx.get(f"{self.base}/healthz", timeout=1).status_code == 200:
                     return
             except httpx.HTTPError:
-                time.sleep(0.1)
+                time.sleep(0.1)  # fixed wait: poll interval of the start-up loop (100 tries)
         raise RuntimeError("gateway did not start")
 
     def stop(self) -> None:
@@ -135,6 +135,8 @@ def test_commander_box_suggests_from_a_themed_listbox(server: Server) -> None:
         n = len(searches)
         box.fill("")
         box.press_sequentially("Shelob's", delay=30)
+        # fixed wait: a negative check over the suggestions' debounce: narrowing asks at most once more
+        # within 400 ms
         page.wait_for_timeout(400)
         assert page.locator("[role=option]").all_inner_texts() == ["Shelob's Ambush"]
         assert len(searches) <= n + 1, searches
@@ -184,6 +186,8 @@ def test_no_match_and_escape(server: Server) -> None:
         page.route("**/scan/api/search*", lambda route: route.fulfill(status=503, body="{}"))
         box.fill("")
         box.press_sequentially("shelob d", delay=20)
+        # fixed wait: a negative check over the debounce: failed answers never show "no such card"
+        # within 600 ms
         page.wait_for_timeout(600)
         assert page.locator(".suggest-list li.none").count() == 0
         assert page.locator("[role=listbox]:visible").count() == 0

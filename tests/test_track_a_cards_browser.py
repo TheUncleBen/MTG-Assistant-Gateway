@@ -13,6 +13,7 @@ from mtg_gateway.approve import APPROVAL_META_KEY, APPROVAL_SET_META_KEY, APPROV
 from mtg_gateway.cards import card_html as cards_html
 
 from .test_consent_browser import _chromium_or_skip, _launch
+from .waits import redrawn
 
 # the proposal card's way to the review page: a grey capsule under the status line
 OPEN_CAP = "#status + .open-row a.cap"
@@ -1077,7 +1078,7 @@ def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str)
             badge.wait_for()
             frame = page.frames[1]
             frame.evaluate("(t) => { document.documentElement.style.fontSize = t; }", text)
-            page.wait_for_timeout(100)
+            redrawn(frame)
             assert badge.inner_text().lower() == "high"
             assert "high" in (badge.get_attribute("class") or "")
             note = card.locator("#nopress")
@@ -1178,6 +1179,7 @@ def test_apply_all_on_the_waiting_card_posts_nothing_as_the_user_and_a_row_appro
             card.locator("#row-p1 .done").wait_for()
             page.wait_for_function("() => window.log.some(m => m.method === 'ui/update-model-context')")
             assert card.locator("#status").inner_text() == "Applied. The deck is liked on Archidekt."
+            # fixed wait: a negative check: nothing is posted as the person (ui/message) within 300 ms
             page.wait_for_timeout(300)
             assert not [m for m in page.evaluate("() => window.log") if m.get("method") == "ui/message"]
             page.close()
@@ -1194,6 +1196,7 @@ def test_apply_all_on_the_waiting_card_posts_nothing_as_the_user_and_a_row_appro
             card.locator("#go:not([disabled])").click()
             card.locator("#result:not(.hidden)").wait_for()
             page.wait_for_function("() => window.log.some(m => m.method === 'ui/update-model-context')")
+            # fixed wait: a negative check: nothing is posted as the person (ui/message) within 300 ms
             page.wait_for_timeout(300)
             log = page.evaluate("() => window.log")
             assert not [m for m in log if m.get("method") == "ui/message"]
@@ -1213,6 +1216,8 @@ def test_apply_all_on_the_waiting_card_posts_nothing_as_the_user_and_a_row_appro
             card.locator("#apply-all:not([disabled])").click()
             card.locator("#go:not([disabled])").click()
             card.locator("#status", has_text="Applied 1.").wait_for(timeout=8000)
+            # fixed wait: a negative check: no more model context updates (two only) and nothing posted
+            # as the person within 300 ms
             page.wait_for_timeout(300)
             log = page.evaluate("() => window.log")
             assert len([m for m in log if m.get("method") == "ui/update-model-context"]) == 2, log

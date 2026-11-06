@@ -18,6 +18,7 @@ from .test_forum_page import _reply
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import redrawn
 
 TEXT = (
     ".fm h1, .fm .ui-sub, .fm .crumbs a, .fm .ui-chip, .fm .ui-table .t, .fm .ui-table .sub, "
@@ -126,7 +127,7 @@ def test_the_forum_pages_fit_every_width_in_both_themes(server: Server, width: i
         _fits(page, "thread", width)
         # 200% text
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(200)
+        redrawn(page)
         assert page.evaluate(MEASURE) == [], "thread at 200% text"
         # a locked thread: the note, no reply box, no Reply on the replies either
         page.goto(f"{server.base}/forum/thread/700003", wait_until="networkidle")
@@ -161,7 +162,6 @@ def test_a_reply_is_confirmed_once_and_lands_in_the_thread(server: Server) -> No
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
         page.goto(f"{server.base}/forum/thread/700002", wait_until="networkidle")
         page.locator(".comments .cmt .acts button", has_text="Reply").first.wait_for(state="visible")
-        page.wait_for_timeout(800)  # the click guard
         page.fill("#ctext", "Mind Stone too.")
         page.locator("form.newcomment button[type=submit]").click()
         # the mockup's Post this reply? box: the reply as it will appear, asked once more

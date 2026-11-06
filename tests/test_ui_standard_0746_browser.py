@@ -16,6 +16,7 @@ from .test_overflow_sweep_browser import FOLDERS, MEASURE, _seed, server  # noqa
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -255,7 +256,7 @@ def _goto(server: Server, page, path: str, zoom: str | None = None) -> None:  # 
     assert r is not None and r.status == 200, (path, r and r.status)
     if zoom:
         page.evaluate(zoom)
-    page.wait_for_timeout(40)
+    redrawn(page)
 
 
 @pytest.fixture
@@ -346,7 +347,7 @@ def test_every_control_is_a_44_px_target(server: Server, walk, kw: dict) -> None
                     continue
                 opened.add(kind)
                 summary.click()
-                page.wait_for_timeout(100)
+                settled(page)
             kebab = page.locator(".kebab").first
             if kebab.count() and kebab.is_visible() and not page.locator(".mtgbox-scrim.in").count():
                 before = page.url
@@ -389,7 +390,7 @@ def test_the_tab_bar_keeps_its_names_whole_or_shows_icons_alone(server: Server, 
         page, errors = _open(server, ctx, sid)
         _goto(server, page, "/decks")
         page.evaluate("() => document.fonts.ready")
-        page.wait_for_timeout(300)  # the Assistant tab's waiting badge lands
+        redrawn(page)  # the bar measured its labels with the loaded fonts
         normal = page.evaluate(TABBAR)
         assert normal and not normal["icons"] and normal["cut"] == [], normal
         assert {"Home", "Decks", "Assistant", "Binder"} <= set(normal["names"]), normal
@@ -397,14 +398,14 @@ def test_the_tab_bar_keeps_its_names_whole_or_shows_icons_alone(server: Server, 
         # measures again on a resize, which stands in for that here
         page.evaluate(TEXT_200)
         page.evaluate("() => window.dispatchEvent(new Event('resize'))")
-        page.wait_for_timeout(150)
+        redrawn(page)
         large = page.evaluate(TABBAR)
         assert large["icons"] and large["cut"] == [], large
         assert large["hidden"] == len(large["names"]), large
         assert large["names"] == normal["names"], "the names stay, for screen readers"
         # a wider screen gives the labels back
         page.set_viewport_size({"width": 717, "height": 800})
-        page.wait_for_timeout(150)
+        redrawn(page)
         back = page.evaluate(TABBAR)
         assert not back["icons"] and back["cut"] == [], back
         browser.close()
@@ -520,7 +521,7 @@ def test_filter_rows_stack_to_one_column_at_large_text(server: Server, walk) -> 
             normal = [t for t in page.evaluate(FILTER_ROWS) if t["n"] >= 2]
             assert normal and all(t["rows"] < t["n"] for t in normal), (path, normal)
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(40)
+            redrawn(page)
             large = [t for t in page.evaluate(FILTER_ROWS) if t["n"] >= 2]
             assert all(t["rows"] == t["n"] and t["wide"] for t in large), (path, large)
         browser.close()
@@ -545,17 +546,20 @@ def test_a_hold_on_a_binder_tiles_picture_opens_its_menu(server: Server, walk) -
         x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
         cdp = page.context.new_cdp_session(page)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(600)
+        page.locator(".ctxmenu[role=menu]").wait_for(timeout=3000)  # the hold opened the menu
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         menu = page.locator(".ctxmenu[role=menu]")
         menu.wait_for(timeout=3000)
+        # fixed wait: a negative check: the lift opens no card view within 300 ms
         page.wait_for_timeout(300)
         assert page.locator(".cardview.open").count() == 0, "the lift opened the card view too"
         page.keyboard.press("Escape")
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        # fixed wait: the hold's lift swallows a tap in the grid for 400 ms (cardmenu.js's swallow
+        # timer, which the page does not show); the tap below must come after it
         page.wait_for_timeout(600)
         assert page.locator(".ctxmenu").count() == 0
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(80)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         page.wait_for_selector(".cardview.open", timeout=3000)
         assert page.locator(".ctxmenu").count() == 0

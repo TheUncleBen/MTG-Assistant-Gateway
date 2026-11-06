@@ -12,6 +12,7 @@ from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import call, linked_user, structured
 from .test_social_layout import linked, post
 from .track_a_helpers import account_call
+from .waits import redrawn
 
 ROOT = 300043
 
@@ -372,7 +373,7 @@ def test_with_writes_switched_off_the_deck_page_is_read_only(tmp_path, monkeypat
                 assert got["ratio"] >= 4.5, (where, got)
                 if shots:
                     reason.scroll_into_view_if_needed()
-                    page.wait_for_timeout(300)  # let the scroll settle before the picture
+                    redrawn(page)  # the scroll has landed before the picture
                     page.screenshot(path=f"{shots}/a-writes-off-deck-{where}.png")
                 page.locator("#comments").scroll_into_view_if_needed()
                 page.wait_for_selector("#comments .cmt[data-id='555001']", timeout=10000)

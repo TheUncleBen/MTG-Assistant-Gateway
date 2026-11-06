@@ -12,9 +12,11 @@ import pytest
 
 from mtg_gateway.approve import APPROVAL_META_KEY, card_html
 
+from .test_cards_audit_browser import _frame_follows
 from .test_cards_browser import HOST as SIZED_HOST
 from .test_cards_browser import PNG
 from .test_consent_browser import _chromium_or_skip, _launch
+from .waits import expect
 
 # the proposal card's way to the review page: a grey capsule under the status line
 OPEN_CAP = "#status + .open-row a.cap"
@@ -269,6 +271,8 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             auto = {**PROPOSAL, "approval_mode": "auto", "risk": "low", "assistant_may_apply": True}
             card = _open(page, {"structuredContent": auto})
             card.locator("#title").wait_for()
+            # fixed wait: a negative check: past the card's 700 ms arming delay (a timer of the card) no
+            # button comes back
             page.wait_for_timeout(900)
             assert "lets your assistant apply this itself" in card.locator("#note").inner_text()
             assert card.locator("button:visible").count() == 0
@@ -296,6 +300,8 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
             page = browser.new_page()
             card = _open(page, {"structuredContent": PROPOSAL})
             card.locator("#title").wait_for()
+            # fixed wait: a negative check: past the card's 700 ms arming delay (a timer of the card) no
+            # button comes back
             page.wait_for_timeout(900)
             assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
             button = card.locator("button", has_text="Apply on the review page")
@@ -315,7 +321,7 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
                 },
             )
             card.locator("#reject").wait_for()
-            page.wait_for_timeout(900)
+            card.locator("#reject:enabled").wait_for(timeout=5_000)  # armed
             card.locator("#reject").click()
             # Reject first asks why (optional), so the assistant can do better; nothing is sent yet.
             card.locator("#why:not(.hidden)").wait_for(timeout=5_000)
@@ -490,7 +496,8 @@ def test_a_card_drawn_for_a_proposal_closed_since_shows_that_and_no_buttons() ->
             status = card.locator("#status").inner_text()
             assert "Already rejected by the assistant in ChatGPT (its reject_proposal call) at " in status
             assert "Ask the assistant for a new proposal" in status
-            page.wait_for_timeout(900)  # past the arming delay: still no buttons
+            # fixed wait: a negative check: past the card's 700 ms arming delay: still no buttons
+            page.wait_for_timeout(900)
             assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
             assert _confirms(page) == []
             assert [m["params"]["name"] for m in _calls(page, "tools/call")] == ["get_proposal"]
@@ -572,7 +579,8 @@ def test_a_failed_approve_shows_failed_with_one_message_and_no_buttons(message: 
             assert "err" in (status.get_attribute("class") or "").split()
             assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
             assert card.locator(".status").count() == 1
-            page.wait_for_timeout(900)  # nothing comes back after the arming delay
+            # fixed wait: a negative check: nothing comes back after the card's 700 ms arming delay
+            page.wait_for_timeout(900)
             assert card.locator("#approve").count() == 0
             assert len(_confirms(page)) == 1
             ctx = _calls(page, "ui/update-model-context")
@@ -783,7 +791,7 @@ def test_locked_buttons_read_at_full_strength(theme: str) -> None:
                     for k in ("border", "borderColour", "colour", "bg"):
                         assert b[k] == was[k], (width, k, b, was)
                     assert b["ratio"] >= 4.5, (width, b)
-                page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
+                _frame_follows(page)  # the frame takes the card's height (size-changed)
                 _shot(page, f"l8-chatcard-locked-{width}-{theme}")
                 page.close()
         finally:
@@ -829,6 +837,7 @@ def test_approve_tells_the_assistant_and_never_posts_as_the_user() -> None:
                 page = browser.new_page()
                 card = _open(page, start, end, host_caps=caps, openai=True)
                 _press(page, card, button)
+                # fixed wait: a negative check: no message is posted as the person within 400 ms of the press
                 page.wait_for_timeout(400)
                 told = [
                     m
@@ -861,7 +870,7 @@ def test_the_member_only_note_says_what_each_kind_does() -> None:
                 sc = {**PROPOSAL, "kind": kind, "risk": "destructive", "assistant_may_apply": False}
                 card = _open(page, {"structuredContent": sc, "_meta": {APPROVAL_META_KEY: "c"}})
                 card.locator("#title").wait_for()
-                page.wait_for_timeout(300)
+                expect(card.locator("body")).to_contain_text(words)
                 text = card.locator("body").inner_text()
                 assert words in text, (kind, text)
                 if kind != "action":

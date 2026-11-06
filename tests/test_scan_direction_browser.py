@@ -233,7 +233,12 @@ def test_in_the_app_the_shutter_and_auto_open_the_phone_camera(server: Server, a
     with sync_playwright() as p:
         browser, page, errors = _page(p, exe, server, init=TABLE_CAMERA + bridge)
         page.wait_for_function("() => window.__scan.state.ocrState !== 'idle'")
-        page.wait_for_timeout(300)
+        if app == "browser":
+            page.wait_for_function("() => (document.querySelector('#camera video') || {}).videoWidth > 0")
+        else:
+            # fixed wait: a negative check: in the app the page's own camera does not start
+            # within 300 ms
+            page.wait_for_timeout(300)
         opened = page.evaluate("() => window.__cameraOpened || 0")
         if app == "browser":
             # A browser keeps its own camera, and the shutter reads the frame.

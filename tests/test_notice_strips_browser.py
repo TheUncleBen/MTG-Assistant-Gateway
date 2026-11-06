@@ -17,6 +17,7 @@ from .test_cardsearch_browser import _chromium, _page
 from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -115,7 +116,7 @@ STRIPS = """() => {
 def _zoom(page, zoom: str) -> None:  # noqa: ANN001
     if zoom != "none":
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-        page.wait_for_timeout(150)
+        redrawn(page)
 
 
 def _column(s: dict) -> int:

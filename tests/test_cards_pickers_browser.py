@@ -13,6 +13,7 @@ import pytest
 
 from .test_cards_browser import HOST, LINK, ROWS, _calls, _open, _shot, png
 from .test_consent_browser import _chromium_or_skip, _launch
+from .waits import expect, settled
 
 pytest.importorskip("playwright")
 
@@ -122,7 +123,8 @@ def test_printings_tiles_are_whole_cards_big_enough_to_read_at_phone_widths() ->
             for width in (320, 400):
                 card = _open(page, "printings-card", RESULT, width=width, theme="light")
                 card.locator(".tile img").nth(5).wait_for()
-                page.wait_for_timeout(300)
+                expect(card.locator("#grid .tile img")).to_have_count(8)
+                settled(page.frames[1])
                 tiles = _tiles(card)
                 assert len(tiles) == 8  # a page; Show more adds the next (test_cards_audit_browser)
                 for t in tiles:
@@ -180,6 +182,7 @@ def test_a_tap_shows_the_printing_big_and_only_use_this_printing_sends_the_pick(
             assert big["w"] >= 280 and "488w" in big["srcset"], big
             assert "SLD #101" in card.locator("#dcap").inner_text()
             assert card.locator("#grid").is_hidden()
+            # fixed wait: a negative check: looking sends no model context update within 300 ms
             page.wait_for_timeout(300)
             assert _calls(page, "ui/update-model-context") == []  # looking is not picking
             _shot(page, "printings-detail-375-dark")
@@ -221,13 +224,18 @@ def test_the_frame_follows_the_card_both_ways_and_settles_in_a_report_or_two() -
             _route(page, _long_list(), pictures="held", held=held)
             card = _open(page, "printings-card", RESULT, width=375, theme="light")
             card.locator(".tile").nth(7).wait_for()
-            page.wait_for_timeout(800)
+            settled(page.frames[1])
+            from .test_cards_audit_browser import _frame_follows
+
+            _frame_follows(page)  # the list drew and the card reported its size
             before = _tiles(card)
             n0 = len(_calls(page, "ui/notifications/size-changed"))
             # the pictures arrive: every box was reserved, so nothing moves
             for route in list(held):
                 route.fulfill(status=200, content_type="image/png", body=SMALL)
             held.clear()
+            # fixed wait: a negative check over a window: in 3 s of pictures loading (and the next batch
+            # they ask for) the card sends no growing series of size reports
             page.wait_for_timeout(3_000)
             for route in list(held):  # the ones asked for after the first batch
                 route.fulfill(status=200, content_type="image/png", body=SMALL)
@@ -249,7 +257,12 @@ def test_the_frame_follows_the_card_both_ways_and_settles_in_a_report_or_two() -
             assert card.locator(".scroll").evaluate("s => getComputedStyle(s).maxHeight") == "none"
             # the list filtered to nothing: the frame drops to the card
             card.locator("#filter").fill("zzz")
-            page.wait_for_timeout(500)
+            page.frames[1].wait_for_function(
+                "(h) => document.body.getBoundingClientRect().height < h - 100", arg=body
+            )
+            from .test_cards_audit_browser import _frame_follows
+
+            _frame_follows(page)
             frame2, body2 = _frame_and_body(page)
             assert body2 < body - 100 and abs(frame2 - body2) <= 2, (frame, body, frame2, body2)
             assert not errors, errors
@@ -341,6 +354,7 @@ def test_picker_rows_keep_their_suggestions_bright_and_a_picture_opens_big() -> 
             _shot(page, "picker-detail-358-dark")
             card.locator("#back").click()
             assert card.locator("#rows").is_visible() and card.locator("input.check").first.is_checked()
+            # fixed wait: a negative check: Back sends no model context update within 200 ms
             page.wait_for_timeout(200)
             assert _calls(page, "ui/update-model-context") == []
             assert not errors, errors

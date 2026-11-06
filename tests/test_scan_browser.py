@@ -197,7 +197,7 @@ class Server:
                 if httpx.get(f"{self.base}/healthz", timeout=1).status_code == 200:
                     return
             except httpx.HTTPError:
-                time.sleep(0.1)
+                time.sleep(0.1)  # fixed wait: poll interval of the start-up loop (100 tries)
         raise RuntimeError("gateway did not start")
 
     def stop(self) -> None:
@@ -1019,7 +1019,9 @@ def test_the_app_camera_loads_text_recognition_at_once_and_shows_progress(tmp_pa
             assert page.evaluate("() => window.__scan.state.ocrState") == "idle"
             # The phone camera opens; a second later the first photo is taken.
             assert page.evaluate("() => window.__mtgNative.begin()") == "ok"
-            page.wait_for_timeout(1000)
+            page.wait_for_function(
+                "() => window.__events.some((e) => e.type === 'ocr' && e.state === 'loading')"
+            )
             url = page.evaluate(
                 """(b) => { const bin = atob(b), a = new Uint8Array(bin.length);
                     for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);

@@ -81,7 +81,10 @@ def test_an_older_card_steps_aside_for_the_newest_and_stops_reading() -> None:
             assert card.locator("#summary").is_hidden()
             # the one-line card reports its own small height, so the chat keeps no blank band under
             # it (that a card's report also drops is proved in test_cards_pickers_browser)
-            page.wait_for_timeout(300)
+            page.wait_for_function(
+                "() => { const s = window.log.filter(m => m.method === 'ui/notifications/size-changed');"
+                " return s.length > 0 && s[s.length - 1].params.height < 200; }"
+            )
             heights = [m["params"]["height"] for m in _calls(page, "ui/notifications/size-changed")]
             assert heights and heights[-1] < 200, heights
             # it reads nothing more: shown again, or the chat coming back, changes nothing
@@ -95,6 +98,7 @@ def test_an_older_card_steps_aside_for_the_newest_and_stops_reading() -> None:
                 "() => document.getElementById('f').contentWindow.postMessage({jsonrpc: '2.0',"
                 " method: 'ui/notifications/tool-result', params: window.toolResult}, '*')"
             )
+            # fixed wait: a negative check: shown again, the card reads nothing more within 600 ms
             page.wait_for_timeout(600)
             assert len(_reads(page)) == n
             assert card.locator("#approve").count() == 0
@@ -246,6 +250,7 @@ def test_a_read_that_fails_is_tried_again_with_growing_waits(monkeypatch) -> Non
             # the retries stop at RETRY_MAX
             page.evaluate("() => { window.getReply = 'refuse'; }")
             n = len(_reads(page))
+            # fixed wait: a negative check: past RETRY_MAX no further read within 800 ms
             page.wait_for_timeout(800)
             assert len(_reads(page)) == n
         finally:

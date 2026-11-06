@@ -14,6 +14,7 @@ from mtg_gateway import theme as site_theme
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_suggest_browser import server as _server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -153,10 +154,10 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         seen = {}
         for width in (1000, 800, 760, 720, 705, 683, 673, 640, 600):
             page.set_viewport_size({"width": width, "height": 700})
-            page.wait_for_timeout(50)
+            redrawn(page)
             seen[width] = page.evaluate(GEOMETRY)
         page.set_viewport_size({"width": 599, "height": 700})
-        page.wait_for_timeout(50)
+        redrawn(page)
         phone = page.evaluate(GEOMETRY)
     full = 4 + len(site_theme.rail_extra())  # a bar wide enough lists the rail's pages instead of More ▾
     for width, g in seen.items():

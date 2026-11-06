@@ -15,6 +15,7 @@ from .test_overflow_sweep_browser import _seed, server  # noqa: F401
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import frame, redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -69,7 +70,7 @@ def _settle(page, script: bool) -> None:
     """topbar.js measures again in a ResizeObserver callback after the zoom: wait two frames."""
     if script:
         page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
-    page.wait_for_timeout(50)
+    settled(page)
 
 
 @pytest.mark.parametrize("script", [True, False], ids=["script", "noscript"])
@@ -100,7 +101,7 @@ def test_tab_never_hides_a_control_under_the_bars_at_the_foot(
                 seen = 0
                 for _ in range(45):
                     page.keyboard.press("Tab")
-                    page.wait_for_timeout(20)
+                    frame(page)  # the focus moved and the page scrolled it into view
                     g = page.evaluate(FOCUS_AT_FOOT)
                     if g is None:
                         continue
@@ -155,7 +156,7 @@ def test_the_deck_pages_view_boxes_never_overlap_at_desktop_width(server: Server
                 page.locator(".toolbar form.views .field").first.wait_for(timeout=10_000)
                 if ZOOM[zoom]:
                     page.evaluate(ZOOM[zoom])
-                page.wait_for_timeout(30)
+                redrawn(page)
                 problems += [f"{view} @{width}px {zoom}: {x}" for x in page.evaluate(VIEW_BOXES)]
             ctx.close()
         browser.close()

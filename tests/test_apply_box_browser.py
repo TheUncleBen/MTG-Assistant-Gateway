@@ -70,6 +70,8 @@ def _locked_press_sends_nothing(page, server: Server, button, pid: str, url: str
     button.evaluate("b => b.click()")
     button.focus()
     page.keyboard.press("Enter")  # and a key press on it
+    # fixed wait: a negative check: the click and the key press that come too soon send no
+    # patch and leave the page within 300 ms
     page.wait_for_timeout(300)
     assert page.url == url and len(server.ark.patches) == sent and _state(server, pid) == "pending"
 

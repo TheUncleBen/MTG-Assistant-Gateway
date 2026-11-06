@@ -25,6 +25,7 @@ from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from .test_editor_browser import PNG, _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import settled
 
 pytest.importorskip("playwright")
 
@@ -228,7 +229,7 @@ def test_save_from_the_question_and_the_browser_box_on_tab_close(server: Server)
             for _ in range(50):
                 if dialogs:
                     break
-                helper.wait_for_timeout(100)
+                helper.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
             assert dialogs == ["beforeunload"], dialogs
         finally:
             browser.close()
@@ -275,7 +276,7 @@ def test_no_footer_link_under_the_save_bar_at_the_breakpoint(server: Server, tou
                 page = ctx.new_page()
                 page.goto(f"{server.base}/decks/{DECK}/edit", wait_until="networkidle")
                 _make_a_change(page)  # the save bar's full height, count and all
-                page.wait_for_timeout(100)
+                settled(page)
                 problems += [f"{width}px: {m}" for m in page.evaluate(COVERED)]
                 # and the save bar itself is never under the tab bar
                 save = page.locator(".editbar button.review")
@@ -339,7 +340,7 @@ def test_the_top_bar_list_and_the_more_sheet_sit_above_the_save_bar(server: Serv
                 page.goto(f"{server.base}/decks/{DECK}/edit", wait_until="networkidle")
                 _make_a_change(page)
                 page.locator(".tabbar details.more summary").click()
-                page.wait_for_timeout(150)
+                settled(page)  # the sheet rose
                 problems += [
                     f"{width}px: {m}"
                     for m in page.evaluate(ROWS_ON_TOP, ".tabbar details.more .menu.sheet a")

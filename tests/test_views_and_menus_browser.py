@@ -24,6 +24,7 @@ from .test_editor_browser import PNG, _link
 from .test_editor_leave_browser import HOSTILE
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -204,7 +205,7 @@ def test_short_menu_items_keep_one_line(server: Server, width: int, touch: bool)
                     continue
                 s.scroll_into_view_if_needed()
                 s.click()
-                page.wait_for_timeout(50)
+                redrawn(page)
                 label = s.get_attribute("aria-label") or s.inner_text().strip()[:30]
                 problems += [f"{path} [{label}]: {m}" for m in page.evaluate(MENU_ITEMS)]
                 page.keyboard.press("Escape")

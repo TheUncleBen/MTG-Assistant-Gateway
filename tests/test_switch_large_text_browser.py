@@ -11,6 +11,7 @@ import pytest
 
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -59,7 +60,7 @@ def test_the_switch_shows_its_page_and_that_it_scrolls(server: Server, scheme: s
             )
             for path in PAGES:
                 page.goto(f"{server.base}{path}", wait_until="networkidle")
-                page.wait_for_timeout(100)
+                redrawn(page)
                 st = page.evaluate(STATE)
                 assert st["page"] <= 0, (path, st)
                 assert st["inView"], (path, st)

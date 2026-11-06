@@ -21,6 +21,7 @@ from .test_editor_browser import PNG, _link
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -403,7 +404,7 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
             page.wait_for_function(SHEETS_LOADED, timeout=10_000)
             for w in WIDTHS:
                 page.set_viewport_size({"width": w, "height": 900})
-                page.wait_for_timeout(20)
+                redrawn(page)
                 found = page.evaluate(MEASURE) + page.evaluate(MENUS)
                 problems += [f"{path} @{w}px: {f}" for f in found]
         browser.close()

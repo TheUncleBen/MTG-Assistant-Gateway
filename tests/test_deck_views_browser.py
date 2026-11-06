@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from .test_deck_menu_browser import EDIT_URL, Server, _cats, _chromium, _edits, _file_under, _overflow, _page
+from .waits import expect, frame, settled
 
 pytest.importorskip("playwright")
 
@@ -167,7 +168,7 @@ def _poll(page, js: str, timeout_ms: int = 6000) -> None:
     for _ in range(timeout_ms // 50):
         if page.evaluate(js):
             return
-        page.wait_for_timeout(50)
+        page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
     raise AssertionError(f"timed out waiting for {js}")
 
 
@@ -194,7 +195,7 @@ def test_a_held_card_drags_to_a_category_off_screen_by_touch(server: Server) -> 
         b = row.bounding_box()
         x, y = b["x"] + 60, b["y"] + b["height"] / 2
         _touch(cdp, "touchStart", x, y)
-        page.wait_for_timeout(450)
+        _poll(page, "!!document.querySelector('.ctxmenu')")  # the hold opened its menu
         page.evaluate(
             f"""() => document.elementFromPoint({x}, {y}).dispatchEvent(new MouseEvent('contextmenu',
                 {{bubbles: true, cancelable: true, clientX: {x}, clientY: {y}}}))"""
@@ -202,18 +203,18 @@ def test_a_held_card_drags_to_a_category_off_screen_by_touch(server: Server) -> 
         assert page.locator(".ctxmenu").count() == 1  # the hold's own menu, one only
         for i in range(1, 11):
             _touch(cdp, "touchMove", x, y + (790 - y) * i / 10)
-            page.wait_for_timeout(16)
+            frame(page)  # one move a frame, as a finger's
         assert page.locator(".dragghost").count() == 1
         assert page.locator(".ctxmenu").count() == 0  # the slide moves the card: the menu made way
         _poll(page, "document.querySelector(\"[data-group='Sorcery']\").getBoundingClientRect().top < 600")
         _touch(cdp, "touchMove", x, 450)
-        page.wait_for_timeout(100)
+        frame(page)
         # on Sorcery's rows (the page may still be settling after the scroll: measure until the
         # finger really is over that stack)
         for _ in range(20):
             t = page.locator(".stack[data-group='Sorcery']").bounding_box()["y"]
             _touch(cdp, "touchMove", x, t + 40)
-            page.wait_for_timeout(100)
+            page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with 20 tries
             over = page.evaluate(
                 f"() => (document.elementFromPoint({x}, {t + 40}).closest('.stack') || {{}}).dataset?.group"
             )
@@ -226,7 +227,7 @@ def test_a_held_card_drags_to_a_category_off_screen_by_touch(server: Server) -> 
         assert json.loads(req.value.post_data)["changes"] == [
             {"action": "set_category", "card_name": "Aesi, Tyrant of Gyre Strait", "category": "Sorcery"}
         ]
-        page.wait_for_timeout(100)
+        expect(page.locator(".dragghost")).to_have_count(0)
         assert page.locator(".dragghost").count() == 0
         moved = page.locator(".stack[data-group='Sorcery'] .row[data-card='Aesi, Tyrant of Gyre Strait']")
         assert moved.count() == 1
@@ -771,8 +772,9 @@ def test_quantity_steps_save_in_the_background(server: Server, width: int, heigh
             if len(sent) == 2 and server.quantity("Cultivate") == 5:
                 break
             assert row.get_attribute("data-qty") == "5"
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        # fixed wait: a negative check: no further save (one back) goes out within 300 ms of Saved
         page.wait_for_timeout(300)
         assert [ch[0]["quantity"] for ch in sent] == [4, 5], sent  # in order, never one back
         assert server.quantity("Cultivate") == 5 and row.get_attribute("data-qty") == "5"
@@ -822,7 +824,7 @@ def test_move_to_saves_in_the_background(server: Server, width: int, height: int
             assert page.locator(".stack[data-group='Ramp']").count() == 0  # emptied, so gone
             page.locator(".deck-toast .msg", has_text="Moving Cultivate to Lands").wait_for(timeout=3000)
             row.scroll_into_view_if_needed()
-            page.wait_for_timeout(300)
+            settled(page)
             _menu_shot(page, "move-saving", width, scheme)
         finally:
             held.set()
@@ -874,7 +876,7 @@ def test_remove_saves_in_the_background(server: Server, width: int, height: int,
             assert page.locator(".ctxmenu").count() == 0
             assert rows.count() == 0  # off the page before Archidekt answers
             page.locator(".deck-toast .msg", has_text="Removing Cultivate").wait_for(timeout=3000)
-            page.wait_for_timeout(300)
+            settled(page)
             _menu_shot(page, "remove-saving", width, scheme)
         finally:
             held.set()
@@ -1000,6 +1002,8 @@ def _settle(page, ms: int = 1200) -> None:
     page.wait_for_function(
         "() => !document.querySelector('.deck-toast .msg')?.textContent.startsWith('Saving')", timeout=8000
     )
+    # fixed wait: a negative check: the end state holds for ``ms`` (a later save of the same card,
+    # the old bug, would change it within this time)
     page.wait_for_timeout(ms)
 
 
@@ -1021,6 +1025,7 @@ def test_plus_then_minus_leaves_no_saving_note(server: Server, width: int, heigh
         assert page.locator(".deck-toast .msg", has_text="Saving Cultivate: 1 copy").count() == 1
         page.clock.resume()
         page.locator(".deck-toast").wait_for(state="detached", timeout=3000)
+        # fixed wait: a negative check: nothing is sent within 600 ms of the note going
         page.wait_for_timeout(600)
         assert sent == [] and row.get_attribute("data-qty") == "1"
         assert page.locator(".deck-toast").count() == 0

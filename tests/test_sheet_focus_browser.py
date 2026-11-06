@@ -11,6 +11,7 @@ import pytest
 from .test_cardsearch_browser import _chromium, _page
 from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
+from .waits import frame, redrawn
 
 pytest.importorskip("playwright")
 
@@ -146,7 +147,8 @@ def test_an_open_sheet_keeps_the_keyboard_and_escape_closes_it_from_anywhere(
                 arg=i,
             )
             page.keyboard.press("Tab")
-            page.wait_for_timeout(250)
+            page.wait_for_function(f"() => ({WHERE})() === 'sheet'")
+            frame(page)
             assert page.evaluate(WHERE) == "sheet"
             _escape_closes(page, opener)
         # closed: the page has its controls back, no dialog role is left on the groups
@@ -231,7 +233,7 @@ def test_a_sheet_open_in_a_window_that_grows_past_phone_width_lets_the_page_go(
         page.locator(".spanel .sp-name input").first.click()
         assert page.evaluate(WHERE).startswith("page: input"), (name, start, page.evaluate(WHERE))
         page.set_viewport_size({"width": 360, "height": 860})
-        page.wait_for_timeout(100)
+        redrawn(page)
         got = page.evaluate(FREE)
         assert got["open"] is False and got["inert"] == 0 and got["lock"] is False, (name, got)
         assert page.evaluate(MEASURE) == [] and errors == []

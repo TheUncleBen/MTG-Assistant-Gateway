@@ -14,6 +14,7 @@ import pytest
 
 from .test_deck_menu_browser import Server, _chromium, _overflow, _page
 from .test_deck_views_browser import _shot
+from .waits import expect, quiet
 
 pytest.importorskip("playwright")
 
@@ -91,7 +92,7 @@ def _open_card(page, zone: str, index: int = 0) -> str:
 def _act(page, label: str) -> None:
     page.locator(".cardview.open .acts button", has_text=label).first.click()
     page.wait_for_function("() => !document.querySelector('.cardview.open')", timeout=3000)
-    page.wait_for_timeout(80)
+    quiet(page)
 
 
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1366, "light")])
@@ -234,7 +235,7 @@ def test_sixty_card_goldfish_by_keyboard_and_touch(server: Server) -> None:
         page.wait_for_selector(".cardview.open", timeout=3000)
         page.locator(".cardview.open .acts button", has_text="Play to the battlefield").tap()
         page.wait_for_function("() => !document.querySelector('.cardview.open')", timeout=3000)
-        page.wait_for_timeout(80)
+        expect(page.locator("#gf-battlefield .gf-card")).to_have_count(1)
         assert _count(page, "battlefield") == 1
         page.locator("[data-act=next]").tap()
         assert _count(page, "hand") == 6 and "Turn 2" in page.locator("#gf-status").inner_text()
@@ -469,7 +470,7 @@ def test_each_goldfish_card_has_a_menu_button_beside_it(server: Server, width: i
         items = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
         assert "Copy name" in items and any(i.startswith("Tap") or i.startswith("Play") for i in items), items
         page.keyboard.press("Escape")
-        page.wait_for_timeout(100)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0
         # the card stays its own button: the ⋮ is beside it, not inside it
         assert page.locator("#gf-hand .gf-card .kebab").count() == 0

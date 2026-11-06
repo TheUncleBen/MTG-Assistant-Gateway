@@ -32,6 +32,7 @@ from .test_cardsearch_browser import _chromium, _page
 from .test_overflow_sweep_browser import _seed, server  # noqa: F401
 from .test_sheet_focus_browser import FREE, SHEETS, _open_sheet
 from .test_suggest_browser import Server
+from .waits import history_step, quiet, redrawn
 
 pytest.importorskip("playwright")
 
@@ -124,7 +125,7 @@ def _shows(page, sig: str, where: str) -> None:  # noqa: ANN001
                 return
         except Error:
             pass
-        page.wait_for_timeout(100)
+        page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
     assert page.evaluate(SIG) == sig, (where, page.evaluate(SIG), sig)
 
 
@@ -186,8 +187,7 @@ def _forward_shows_nothing(page, here: str, where: object) -> None:  # noqa: ANN
     """Forward after a layer closed: the page as it was, no layer, on a plain entry with the
     same address (an entry a layer gave back is stepped back over at once, so Playwright's own
     go_forward, which waits for a landing, is not used)."""
-    page.evaluate("() => history.forward()")
-    page.wait_for_timeout(400)
+    history_step(page)
     page.wait_for_function(PLAIN)
     assert page.url == here, (where, page.url)
     got = page.evaluate(CLEAR)
@@ -343,7 +343,7 @@ def test_forward_after_the_sheet_closed_shows_nothing_new_whichever_way_it_close
         _closed_on(page, here, name, way)
         if way == "widen":
             page.set_viewport_size({"width": 360, "height": 860})
-            page.wait_for_timeout(100)
+            redrawn(page)
         _forward_shows_nothing(page, here, (name, way))
         assert page.evaluate(SIG) == before, (name, way, page.evaluate(SIG), before)
         page.go_back()
@@ -559,7 +559,7 @@ def test_a_search_landing_while_the_sheets_back_is_on_its_way_keeps_its_address(
         page.locator("#sp-filters .sp-show").click()
         page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
         page.wait_for_url(lambda u: u != here)
-        page.wait_for_timeout(1500)  # the held back() and its popstate
+        quiet(page)  # the held back() and its popstate
         _settle(page)
         filtered = page.url
         assert "format=" in filtered and page.evaluate(PLAIN), filtered
@@ -653,7 +653,7 @@ def _wait_shown(page, sel: str, shown: bool, where: object, layer: str = "") -> 
             or page.evaluate("() => window.MtgLayers.top() && window.MtgLayers.top().name") == layer
         ):
             return
-        page.wait_for_timeout(100)
+        page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
     raise AssertionError((where, sel, "shown" if shown else "closed"))
 
 
@@ -668,7 +668,7 @@ def _nothing_open_on(page, here: str, where: object) -> None:  # noqa: ANN001
     for _ in range(50):
         if page.evaluate(NO_LAYER) and page.evaluate(PLAIN):
             break
-        page.wait_for_timeout(100)
+        page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
     assert page.evaluate(NO_LAYER), (where, "a layer is still open", page.evaluate(WHAT_OPEN))
     assert page.evaluate(PLAIN), (
         where,
@@ -712,7 +712,7 @@ def test_every_layer_leaves_the_history_as_it_was_for_back_forward_reload_show_a
                 _wait_shown(page, shown, False, (name, way))
                 if under:
                     # the layer it sat in is still open, and closes the same way
-                    page.wait_for_timeout(200)
+                    quiet(page)  # the inner layer's Back has landed
                     assert _shown(page, under), (name, way, "the layer under it closed too")
                     assert page.url == here, (name, way, page.url)
                     _close_layer(page, way)
@@ -737,7 +737,8 @@ def test_every_layer_leaves_the_history_as_it_was_for_back_forward_reload_show_a
             _open_layer(page, how)
             _wait_shown(page, shown, True, (name, "widen"), layer)
             page.set_viewport_size({"width": 1280, "height": 860})
-            page.wait_for_timeout(300)
+            redrawn(page)
+            quiet(page)
             if _shown(page, shown):
                 page.keyboard.press("Escape")
                 _wait_shown(page, shown, False, (name, "widen"))

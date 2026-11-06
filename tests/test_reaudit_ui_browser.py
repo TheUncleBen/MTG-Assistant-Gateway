@@ -130,6 +130,7 @@ def test_a_hold_on_a_deck_page_row_opens_its_menu_during_the_hold(server: Server
         menu.wait_for(state="visible", timeout=1500)  # during the hold: no touchend was sent
         assert menu.locator(".head").inner_text() == "Cultivate"
         row.evaluate(TOUCH_END)
+        # fixed wait: a negative check: the lift after the hold does not close the menu within 100 ms
         page.wait_for_timeout(100)
         assert menu.is_visible()
         browser.close()

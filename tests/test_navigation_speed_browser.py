@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from .test_deck_menu_browser import Server, _chromium, _page
+from .waits import poll
 
 pytest.importorskip("playwright")
 
@@ -74,10 +75,7 @@ def test_stylesheets_apply_and_a_tap_shows_the_navigation_bar(server: Server) ->
                })"""
         )
         assert shown
-        for _ in range(200):  # until the held request has reached the route (10 s at most)
-            if held:
-                break
-            page.wait_for_timeout(50)
+        poll(page, lambda: held, timeout=10_000)  # the held request has reached the route
         assert len(held) == 1
         held[0].continue_()
         page.unroute(server.base + "/decks", hold)

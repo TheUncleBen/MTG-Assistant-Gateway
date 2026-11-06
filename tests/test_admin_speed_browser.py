@@ -19,6 +19,7 @@ from .test_overflow_sweep_browser import MEASURE
 from .test_settings_page_browser import _admin
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -70,7 +71,7 @@ def test_the_speed_cards_addresses_break_only_after_a_slash(
         page.goto(f"{server.base}/admin", wait_until="networkidle")
         if zoom != "none":
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-            page.wait_for_timeout(150)
+            redrawn(page)
         for route in ROUTES:
             assert page.locator("#speed .ui-row .lab", has_text=route).count() == 1, route
         got = page.evaluate(BREAKS)

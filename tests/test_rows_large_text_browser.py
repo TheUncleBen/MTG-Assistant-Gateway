@@ -17,6 +17,7 @@ from .test_cardsearch_browser import PNG
 from .test_deck_categories import _give_categories
 from .test_menus_browser import _exe, _seed_rows, _server
 from .test_text_zoom_browser import TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -132,7 +133,7 @@ def test_every_row_list_reads_at_200_percent_text_on_a_phone(tmp_path: Path, app
             for path, sel in PAGES.items():
                 page.goto(f"{server.base}{path}", wait_until="networkidle")
                 page.evaluate(TEXT_200)
-                page.wait_for_timeout(300)
+                redrawn(page)
                 over = page.evaluate(
                     "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
                 )
@@ -184,7 +185,7 @@ def test_the_watchlists_long_names_wrap_by_word_not_by_letter(tmp_path: Path) ->
             page = ctx.new_page()
             page.goto(f"{server.base}/watchlist", wait_until="networkidle")
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(300)
+            redrawn(page)
             lines = page.evaluate(
                 """() => [...document.querySelectorAll('.w-t .gname b, .w-t .tr .t a.wcard')].map(n => {
                   const rg = document.createRange(); rg.selectNodeContents(n);

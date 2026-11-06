@@ -28,6 +28,7 @@ from .test_editor_browser import _link
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import expect, quiet
 
 pytest.importorskip("playwright")
 
@@ -171,7 +172,7 @@ def test_a_deck_tile_menu_opens_four_ways_and_lists_the_owners_actions(tmp_path:
             _menu(page)
             assert _items(page) == OWN
             page.mouse.click(5, 5)
-            page.wait_for_timeout(100)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
             assert page.locator(".ctxmenu").count() == 0
             # the ⋮, a real button outside the tile's link
             kebab = tile.locator("button.kebab")
@@ -253,7 +254,7 @@ def test_a_hold_on_a_deck_tile_opens_its_menu_and_leaves_nothing_stuck(tmp_path:
             x, y = box["x"] + 30, box["y"] + box["height"] / 2
             cdp = page.context.new_cdp_session(page)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-            page.wait_for_timeout(500)
+            _menu(page)  # the hold opened the menu
             refused = tile.locator("a").evaluate(
                 """(a) => {
                     const dt = new DataTransfer();
@@ -279,13 +280,12 @@ def test_a_hold_on_a_deck_tile_opens_its_menu_and_leaves_nothing_stuck(tmp_path:
             assert page.url.endswith("/decks?folder=503&view=list")
             # Back closes the sheet and stays on the page
             page.go_back()
-            page.wait_for_timeout(300)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
+            quiet(page)
             assert page.locator(".ctxmenu").count() == 0 and "/decks" in page.url
             assert "/decks/42" not in page.url
             # a tap on the tile still opens the deck (nothing swallowed or faded)
-            page.wait_for_timeout(500)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-            page.wait_for_timeout(80)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
             page.wait_for_url(re.compile(r"/decks/42$"), timeout=5000)
             assert errors == [], errors
@@ -328,7 +328,6 @@ def test_a_tap_on_the_menu_right_after_a_hold_acts(tmp_path: Path) -> None:
             ix, iy = ib["x"] + ib["width"] / 2, ib["y"] + ib["height"] / 2
             # a real tap on an item while the lift's tap would still be swallowed
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": ix, "y": iy}]})
-            page.wait_for_timeout(40)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
             page.locator(".ctxmenu[role=menu]").wait_for(state="detached", timeout=2000)
             assert errors == [], errors
@@ -824,7 +823,7 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             assert menu.locator(".mqty .lbl").inner_text() == "Quantity"
             n = int(menu.locator(".mqty .n").inner_text())
             menu.locator(".mqty button.step", has_text="+").click()
-            page.wait_for_timeout(800)
+            expect(menu.locator(".mqty .n")).to_have_text(str(n + 1))  # the count follows the step
             assert page.locator(".ctxmenu").count() == 1  # the menu stays for more steps
             assert int(menu.locator(".mqty .n").inner_text()) == n + 1
             _pick(page, "Details…")
@@ -836,7 +835,7 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             row.locator(".kebab").click()
             assert page.locator(".ctxmenu").count() == 1
             page.keyboard.press("Escape")
-            page.wait_for_timeout(100)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
             assert page.locator(".ctxmenu").count() == 0
             # the editor's rows
             page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")

@@ -50,7 +50,7 @@ def _goto_held(page, url: str, skeleton: str, while_held=None) -> None:
     for _ in range(200):
         if held:
             break
-        page.wait_for_timeout(50)
+        page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
     assert held, "the page never asked for the deck list"
     if while_held:
         while_held()
@@ -177,7 +177,7 @@ def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> 
         for _ in range(200):
             if held:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert held, "the panel never asked for the deck list"
         held.pop().continue_()
         page.unroute(re.compile(r".*/api/decks/mine\?shape=recent$"))
