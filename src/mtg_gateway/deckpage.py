@@ -3321,7 +3321,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   /* the count stands alone beside the heart here: its box is trimmed to the digit's cap height, so
      centring the box centres the ink (a digit's ink sits above its line box's centre: polish B1) */
   .banner .social .soc .n{text-box:trim-both cap alphabetic}
-  .banner .social .confirm{flex-basis:100%} }
+  .banner .social .confirm{grid-column:1 / -1} }
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;min-height:34px;height:auto;
   padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;

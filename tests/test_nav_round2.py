@@ -97,14 +97,16 @@ def test_the_history_purpose_line_links_to_proposals(server: Server) -> None:
     assert "&lt;a href" not in page
 
 
-def test_a_long_word_scrolls_the_switch_not_the_page() -> None:
-    # the switch scrolls inside at every width (large text on a Fold's inner screen beside the
-    # rail pushed the page sideways); full width on a phone; position:relative keeps its hidden counts
-    # inside the scroller (they widened /collection at 200% text)
+def test_a_long_word_wraps_the_switch_not_the_page() -> None:
+    # the switch's parts wrap onto a second line at every width instead of scrolling inside it, so
+    # every part is in sight (large text on a Fold's inner screen beside the rail pushed the page
+    # sideways); full width on a phone; position:relative keeps its hidden counts inside the switch
+    # (they widened /collection at 200% text)
     assert (
-        "max-width:100%;\n  overflow-x:auto;scrollbar-width:none;position:relative;border:0;margin:0}"
-        in theme.CSS
-    )
+        ".hubseg{display:inline-flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:12px;"
+        "background:var(--seg-track);\n  max-width:100%;position:relative;border:0;margin:0}"
+    ) in theme.CSS
+    assert "overflow-x:auto;scrollbar-width:none;position:relative" not in theme.CSS
     assert ".hubseg{display:flex;width:100%}" in theme.CSS
     js = (Path(theme.__file__).parent / "static" / "topbar.js").read_text(encoding="utf-8")
     assert 'seg.querySelector("[aria-current=page]")' in js
@@ -325,11 +327,20 @@ def test_the_deck_pills_share_one_row_on_a_phone() -> None:
     from mtg_gateway.deckpage import DECK_CSS
 
     css = " ".join(DECK_CSS.split())
-    phone = css.split("@media (max-width:599.98px){ .banner .social{")[1].split("} }")[0]
-    assert phone.startswith("display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;")
+    # the phone block runs to its last rule, the confirmation's row (a container rule inside it
+    # closes with "} }" too)
+    phone = css.split("@media (max-width:599.98px){ .banner .social{")[1]
+    phone = phone.split(".banner .social .confirm{grid-column:1 / -1} }")[0]
+    # equal columns, two and two when the row is narrow (large text), never three and one (P-17)
+    assert phone.startswith(
+        "display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:.4rem;margin:0; "
+        "flex:1 1 auto;order:5;"
+    )
+    two = "@container (max-width:20em){ .banner .social{grid-template-columns:repeat(2,minmax(0,1fr))} }"
+    assert two in phone
     assert ".banner .social .soc{justify-content:center;min-width:44px;height:36px;" in phone
     assert ".banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;" in phone
-    assert ".banner .social .confirm{flex-basis:100%" in phone
+    assert ".banner .social .confirm{grid-column:1 / -1} }" in css
     assert (
         ".banner .controls .primary{display:grid;width:100%;gap:.4rem; "
         "grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}"
