@@ -1240,7 +1240,7 @@ _MOBILE_RULES = """
   /* large text: when a label no longer fits its tab (static/topbar.js measures), the bar shows the
      icons alone and keeps every name for screen readers, so no tab reads "Assi…" (audit D13) */
   body{b} .tabbar.icons > a > .lbl,body{b} .tabbar.icons details.more summary .lbl{position:absolute;
-    width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+    width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   body{b} .tabbar.icons > a,body{b} .tabbar.icons details.more summary{gap:0}
   body{b} .tabbar details.more summary.on,
   body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
@@ -1272,8 +1272,8 @@ _RAIL_RULES = """
   body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar > a > .lbl{max-width:100%;white-space:normal;overflow-wrap:normal;line-height:1.1;
     text-align:center;padding:0 2px}  /* "Card models" takes two lines */
-  body{b} .tabbar.icons > a > .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
-    white-space:nowrap}
+  body{b} .tabbar.icons > a > .lbl{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap}
   body{b} .tabbar.icons > a{gap:0}
   body{b} .tabbar > a::before{content:'';position:absolute;top:7px;left:50%;width:56px;height:32px;
     margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
@@ -1851,12 +1851,12 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-bar.slim > .btn{min-width:var(--ctl)}
 /* a narrow bar (a phone, or large text) keeps the red action's icon and drops its word; the
    narrowest (a 360 px phone) keeps the count's number and leaves its word to screen readers
-   (drawn out of sight as .sr-only is, so it stays in the accessibility tree; a zero font size
-   kept it there too but read as text that does not grow with the text size). The sizes are the
-   bar's content box. */
+   (a 1 px clipped box in the line, as .sr-only draws one but inline, so "1 selected" still reads
+   as one phrase; a zero font size kept it too but read as text that does not grow with the text
+   size). The sizes are the bar's content box. */
 @container (max-width:29em){ .ui-bar.slim > .btn .lbl{display:none} }
-@container (max-width:23.5em){ .ui-bar.slim .count .lbl{position:absolute;width:1px;height:1px;padding:0;
-  margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0} }
+@container (max-width:23.5em){ .ui-bar.slim .count .lbl{display:inline-block;width:1px;height:1px;
+  padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;vertical-align:top} }
 /* it stays above the phone's bottom tab bar (--tab-room: its real height, static/topbar.js; 4rem
    without scripts covers it at 200% text) */
 .has-tabbar .ui-bar{bottom:calc(var(--tab-room,0px) + .75rem)}
@@ -2465,10 +2465,12 @@ SEARCH_PANEL_CSS = """
   max-width:100%;margin:0}
 .spanel .rbar .sortw .msel-btn{min-width:8rem} .spanel .rbar .dirw .msel-btn{min-width:7rem}
 .spanel .rbar .brk,.spanel .rbar .brka{display:none;flex-basis:100%;height:0;margin-top:-8px}
-/* the card search's bar has More filters before the count: the count heads a row of its own and
-   More filters leads the controls' row, as Search decks lays out (final polish AC8) */
-.spanel .rbar.cards .cnt{order:-1;flex-basis:100%}
-.spanel .rbar.cards .more{margin-right:auto}
+/* the card search's bar has More filters before the count (from 600 px; a phone has it in the
+   filter sheet): the count heads a row of its own and More filters leads the controls' row, as
+   Search decks lays out (final polish AC8). A phone keeps the count, Sort and the view on one row */
+@media (min-width:600px){
+  .spanel .rbar.cards .cnt{order:-1;flex-basis:100%}
+  .spanel .rbar.cards .more{margin-right:auto} }
 /* A narrower panel (an open Fold) keeps the count, Sort, the view and the card size on one row:
    "Sort by" is read out but not shown (the box says what it sorts by), and the bar breaks only
    when even that row can't fit (the owner, 2026-10-25: no empty corner under the row) */

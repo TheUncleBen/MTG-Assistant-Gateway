@@ -552,13 +552,17 @@ BRAND_AND_SEARCH = """() => {
   const word = document.querySelector('.topbar .brand .word');
   const search = document.querySelector('.topbar .topsearch');
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-  return {cut: word.scrollWidth > word.clientWidth + 1, search: search.getBoundingClientRect().width / rem};
+  // the brand's word gave way: moved out of the brand's line, whole (final polish AC6), or cut
+  const gone = word.getBoundingClientRect().top >= word.parentElement.getBoundingClientRect().bottom - 0.5;
+  return {gave: gone || word.scrollWidth > word.clientWidth + 1, cut: word.scrollWidth > word.clientWidth + 1,
+    search: search.getBoundingClientRect().width / rem};
 }"""
 
 
 def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromium, server: Server) -> None:
     """The order the one-row bar gives up room in: the search box's growth past its 20rem, then
-    the brand's word (an ellipsis), then the search box down to 9rem; the links never."""
+    the brand's word (whole, out of its line: final polish AC6), then the search box down to 9rem;
+    the links never; the word is never cut short."""
     sid = _admin(server)
     settings = server.app.state.gateway.settings
     short_name = settings.server_name
@@ -589,8 +593,10 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromi
                     # the box grows into the room the four places leave (up to 40rem), so a
                     # long name takes from that growth first; below its own 20rem the name gives
                     # way before the box does
-                    if b["search"] < 9 - 0.05 or (b["search"] < min(full, 20) - 0.05 and not b["cut"]):
+                    if b["search"] < 9 - 0.05 or (b["search"] < min(full, 20) - 0.05 and not b["gave"]):
                         problems.append(f"@{width}px {zoom}: search box shrank first: {b}, full {full}")
+                    if b["cut"]:
+                        problems.append(f"@{width}px {zoom}: the name is cut short: {b}")
             full_1280 = measure(short_name, 1280, "none")["search"]
             at_1280 = measure(LONG_NAME, 1280, "none")
         finally:
@@ -766,7 +772,11 @@ APP_BAR = """() => {
     nav: q('.topbar nav.site').getClientRects().length > 0,
     navStart: box('.topbar nav.site').left, navEnd: box('.topbar nav.site').right,
     leftGap: parseFloat(cs('.topbar .left').columnGap), margin: parseFloat(cs('.topbar .brand').marginRight),
-    full: word.scrollWidth, cut: word.scrollWidth > word.clientWidth + 1};
+    full: word.scrollWidth, cut: word.scrollWidth > word.clientWidth + 1,
+    gone: box('.topbar .brand .word').top >= box('.topbar .brand').bottom - 0.5,
+    // where the word starts on the brand's line: after the mark and the brand's gap (a word that
+    // moved out of the line starts the next one instead)
+    lineStart: box('.topbar .brand .mark').right + parseFloat(cs('.topbar .brand').columnGap)};
 }"""
 
 
@@ -808,13 +818,16 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
         assert not got["nav"], (name, got)
         end = got["leftEnd"] - got["margin"]
         assert got["brandEnd"] <= end + 0.5, (name, got)  # a whole name may end sooner
-        assert got["cut"] == (got["full"] > end - got["wordStart"] + 0.5), (name, got)
-        if got["cut"]:
-            assert abs(got["wordEnd"] - end) <= 0.5, (name, got)
+        # the name shows whole or not at all, never cut short (final polish AC6: "MTG …" looked
+        # broken): where its whole width has no room, it moves out of the brand's line
+        assert not got["cut"], (name, got)
+        assert got["gone"] == (got["full"] > end - got["lineStart"] + 0.5), (name, got)
+        if not got["gone"]:
+            assert got["wordEnd"] <= end + 0.5, (name, got)
     # at 884 px the brand has about 400 px, about as wide as the long name itself (418 px in Inter,
-    # 374 px in serif), so whether it is cut there depends on the font; the check above covers it
+    # 374 px in serif), so whether it shows there depends on the font; the check above covers it
     if 600 <= width < 800:
-        assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
+        assert seen[LONG_NAME]["gone"], seen[LONG_NAME]
 
 
 # Account details and its Archidekt account page (0.7.46: the link form and its disclosure are
@@ -971,4 +984,4 @@ def test_the_search_box_starts_from_20rem_whatever_the_fonts(chromium, server: S
         finally:
             object.__setattr__(settings, "server_name", short_name)
     # at 1100 px the brand's word has the room to give: the box keeps its 20rem
-    assert all(b["search"] >= 20 - 0.05 and b["cut"] for _css, b in seen), seen
+    assert all(b["search"] >= 20 - 0.05 and b["gave"] and not b["cut"] for _css, b in seen), seen

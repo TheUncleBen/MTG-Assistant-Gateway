@@ -403,24 +403,47 @@ def test_the_tab_bar_keeps_its_names_whole_or_shows_icons_alone(server: Server, 
         assert large["icons"] and large["cut"] == [], large
         assert large["hidden"] == len(large["names"]), large
         assert large["names"] == normal["names"], "the names stay, for screen readers"
-        # a wider screen gives the labels back
+        # the Fold's rail at the same 200% text: its labels grow with the text too (final polish AC1)
+        # and do not fit its 80 px, so it shows the icons alone as well, nothing cut
         page.set_viewport_size({"width": 717, "height": 800})
         redrawn(page)
         back = page.evaluate(TABBAR)
-        assert not back["icons"] and back["cut"] == [], back
+        assert back["cut"] == [], back
+        assert back["icons"] and back["names"] == normal["names"], back
         browser.close()
     assert errors == []
 
 
-# the switches and tab rows that wrapped at 412 px: Export's formats, Budget, Admin's tabs, the
-# New deck box's tabs, the Binder's add box tabs, the Lists tabs, the deck toolbar's main row
-ONE_ROW = ".hubseg, [role=tablist], .budget, .toolbar .primary, .spanel .rbar .sort"
+# the rows that wrapped at 412 px: Budget, the deck toolbar's main row, the search's sort row
+ONE_ROW = ".budget, .toolbar .primary, .spanel .rbar .sort"
+# the switches and tab rows (Export's formats, Admin's tabs, the New deck box's tabs, the Binder's
+# add box tabs, the Lists tabs): a part that doesn't fit takes the next row whole; none scrolls
+# with a part cut off at its edge (final polish P-9)
+SWITCHES = ".hubseg, [role=tablist]"
+CUT_PARTS = (
+    "(sel) => {"
+    + VISIBLE
+    + """
+  const out = [];
+  for (const el of document.querySelectorAll(sel)) {
+    if (!visible(el)) continue;
+    const box = el.getBoundingClientRect();
+    if (el.scrollWidth > el.clientWidth + 1) out.push(name(el) + ' scrolls sideways');
+    for (const k of [...el.children].filter(visible)) {
+      const r = k.getBoundingClientRect();
+      if (r.left < box.left - 1 || r.right > box.right + 1) out.push(name(el) + ': a part is cut off');
+    }
+  }
+  return out;
+}"""
+)
 
 
 def test_switches_and_tab_rows_stay_on_one_row_in_the_app(server: Server, walk) -> None:  # noqa: F811
-    """At 412 px in the app a segmented switch or a tab row never wraps onto a second line (the
-    Export, Budget, Admin, Precons and Binder sort rows did): the one shared tab style scrolls
-    sideways instead. The deck toolbar's ⋮ stays beside its button at 360 px too."""
+    """At 412 px in the app the Budget row, the deck toolbar's main row and the sort row never wrap
+    onto a second line; a segmented switch or a tab row shows every part whole, taking a second
+    row for a part that doesn't fit rather than scrolling with a part cut off (final polish P-9).
+    The deck toolbar's ⋮ stays beside its button at 360 px too."""
     from playwright.sync_api import sync_playwright
 
     exe, sid, pages = walk
@@ -433,6 +456,7 @@ def test_switches_and_tab_rows_stay_on_one_row_in_the_app(server: Server, walk) 
             for path in pages:
                 _goto(server, page, path)
                 problems += [f"{path} @{tag}: {f}" for f in page.evaluate(ROWS, ONE_ROW)]
+                problems += [f"{path} @{tag}: {f}" for f in page.evaluate(CUT_PARTS, SWITCHES)]
             ctx.close()
             assert errors == []
         browser.close()

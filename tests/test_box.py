@@ -103,7 +103,7 @@ def test_the_box_look_is_rounder_and_softer_than_the_panels_in_both_themes() -> 
     # the header: the title and a 44 px round × at its top right, on every box; the title's first
     # line leaves the ×'s room and a second line takes the whole width (a long name moves down
     # whole instead of breaking beside the ×)
-    assert ".mtgbox .bh{--th:1.25rem;" in css and "position:relative;min-height:44px" in css
+    assert re.search(r"\.mtgbox \.bh\{--th:1\.25rem;[^}]*position:relative;\s*min-height:44px", css)
     centred = (
         ".mtgbox .bh > .bx{position:absolute;top:max(0px, calc(var(--tp) + .65 * var(--th) - 22px));right:0}"
     )

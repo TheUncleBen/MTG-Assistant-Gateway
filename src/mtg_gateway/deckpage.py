@@ -3308,20 +3308,23 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .deltatable td{text-align:right;font-variant-numeric:tabular-nums}
 .banner .social{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
 /* a phone (mockup screen 5): the chips on one row, each its icon and count, the words for a
-   screen reader; a confirmation (social.js) takes the row under them */
+   screen reader; a confirmation (social.js) takes the row under them. The chips are equal (each
+   grows from nothing); a chip the confirmation stands in for is hidden and the others share the
+   row (a grid's columns did not: with the confirmation across them the chips fell on top of each
+   other) */
 @media (max-width:599.98px){
-  .banner .social{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:.4rem;margin:0;
-    flex:1 1 auto;order:5;align-items:center}
+  .banner .social{display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;align-items:center}
+  .banner .social .soc{flex:1 1 0}
   /* the chips' row narrower than 20em (large text): two and two, never three and one (P-17) */
   .banner .info{container-type:inline-size}
-  @container (max-width:20em){ .banner .social{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  @container (max-width:20em){ .banner .social .soc{flex:0 1 calc(50% - .2rem)} }
   .banner .social .soc{justify-content:center;min-width:44px;height:36px;padding:0 .6rem;gap:.3rem}
   .banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0);white-space:nowrap;padding:0;margin:0;line-height:1}
   /* the count stands alone beside the heart here: its box is trimmed to the digit's cap height, so
      centring the box centres the ink (a digit's ink sits above its line box's centre: polish B1) */
   .banner .social .soc .n{text-box:trim-both cap alphabetic}
-  .banner .social .confirm{grid-column:1 / -1} }
+  .banner .social .confirm{flex:1 1 100%} }
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;min-height:34px;height:auto;
   padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;

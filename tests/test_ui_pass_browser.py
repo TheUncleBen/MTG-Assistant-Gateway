@@ -264,9 +264,11 @@ def test_member_text_no_longer_says_verify(server: Server) -> None:  # noqa: F81
 
 
 def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(server: Server) -> None:  # noqa: F811
-    """Dragging a card into the Commander stack asks "Save anyway?" in the deck page's own dialog
-    strip. On a 344 px touch screen, at 100 % and 200 % text, the strip stays inside the window above
-    the tab bar, nothing in it is clipped, and its buttons are 44 px targets."""
+    """Dragging a card into the Commander stack asks "Save anyway?" in the pop-up box every risky
+    confirm uses (audit F-7: it was the deck page's dialog strip, with Save anyway focused). On a
+    344 px touch screen, at 100 % and 200 % text, the box stays inside the window with its scrim
+    over the tab bar, nothing in it is clipped, its buttons are 44 px targets, Keep it has the
+    focus and the red Save anyway comes last."""
     from playwright.sync_api import sync_playwright
 
     from .test_text_zoom_browser import ROOT_200
@@ -294,11 +296,16 @@ def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(se
                 ".deckview .row[data-card='Sol Ring'][data-zone='main']",
                 ".stack[data-group='Commander'] .stackhead",
             )
-            dialog = page.locator(".deck-toast[role='alertdialog']")
+            dialog = page.locator(".mtgbox-scrim.in > .mtgbox")
             dialog.wait_for(timeout=5000)
             assert "Save anyway?" in dialog.inner_text()
+            page.wait_for_function(
+                "() => getComputedStyle(document.querySelector('.mtgbox-scrim.in > .mtgbox'))"
+                ".transform === 'none'"
+            )
+            assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
             m = page.evaluate(
-                "() => { const d = document.querySelector(\".deck-toast[role='alertdialog']\");"
+                "() => { const d = document.querySelector('.mtgbox-scrim.in > .mtgbox');"
                 " const r = d.getBoundingClientRect(); const bar = document.querySelector('.tabbar');"
                 " return {left: r.left, right: r.right, bottom: r.bottom, top: r.top, w: innerWidth,"
                 " bar: bar ? bar.getBoundingClientRect().top : innerHeight,"
@@ -307,9 +314,17 @@ def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(se
                 " Math.round(b.getBoundingClientRect().height)])} }"
             )
             assert m["left"] >= 0 and m["right"] <= m["w"] and m["top"] >= 0, m
-            assert m["bottom"] <= m["bar"] + 1, m  # above the bottom tab bar
+            # a phone's box is a sheet at the window's foot, over the tab bar: the scrim covers the
+            # bar, so nothing under the box can be pressed while it asks
+            assert m["bottom"] <= page.viewport_size["height"] + 1, m
+            assert page.evaluate(
+                "() => { const b = document.querySelector('.tabbar'); if (!b) return true;"
+                " const r = b.getBoundingClientRect();"
+                " const e = document.elementFromPoint(r.left + 10, r.top + r.height / 2);"
+                " return !!e && !!e.closest('.mtgbox-scrim'); }"
+            ), m
             assert not m["clipped"], m
             assert all(h >= 44 for _, h in m["buttons"]), m
-            assert m["buttons"][0][0] == "Save anyway", m
+            assert m["buttons"][-1][0] == "Save anyway", m
             ctx.close()
         browser.close()

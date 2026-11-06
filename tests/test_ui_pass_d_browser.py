@@ -288,7 +288,9 @@ def test_the_deck_pages_custom_card_viewer_and_a_failed_picture(
 
 
 @pytest.mark.parametrize("width,theme", [(344, "light"), (390, "dark"), (1280, "light")])
-def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) -> None:
+def test_my_lists_tabs_are_whole_on_a_phone_and_one_row_on_a_computer(
+    server: Server, width: int, theme: str
+) -> None:
     from playwright.sync_api import sync_playwright
 
     sid = _link(server)
@@ -306,11 +308,16 @@ def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) ->
         tops = [_rect(tabs.nth(i))["t"] for i in range(6)]
         heights = [_rect(tabs.nth(i))["h"] for i in range(6)]
         if width < 600:
-            # one row that scrolls sideways, every tab the same height, the current one in view
-            assert len(set(round(t) for t in tops)) == 1, tops
+            # rows of whole tabs (a tab that doesn't fit takes the next row, final polish P-9): every
+            # tab inside the switch, none cut off at a scrolled edge, every tab the same height
             nav = _rect(page.locator(".lp-tabs"))
-            cur = _rect(page.locator(".lp-tabs a[aria-current]"))
-            assert cur["l"] >= nav["l"] - 1 and cur["r"] <= nav["r"] + 1, (cur, nav)
+            for i in range(6):
+                tab = _rect(tabs.nth(i))
+                assert tab["l"] >= nav["l"] - 1 and tab["r"] <= nav["r"] + 1, (i, tab, nav)
+            assert page.evaluate(
+                "() => { const n = document.querySelector('.lp-tabs');"
+                " return n.scrollWidth <= n.clientWidth + 1; }"
+            )
             assert page.locator(".lp-tabs a[aria-current]").inner_text().startswith("Custom cards")
             sizes = _targets(page, ".lp-tabs a")
             assert min(sizes) >= 43.5, sizes

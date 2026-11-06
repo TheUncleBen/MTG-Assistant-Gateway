@@ -330,7 +330,7 @@ def test_selection_bar_and_side_panel() -> None:
     assert cancel in slim
     count = (
         "<span class='count' aria-live='polite'><span class='n'>0</span>"
-        "<span class='lbl'> selected</span></span>"
+        " <span class='lbl'>selected</span></span>"
     )
     assert count in slim
     assert slim.index("col-clear") < slim.index("class='count'") < slim.index("class='all'")

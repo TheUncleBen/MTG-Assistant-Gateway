@@ -166,8 +166,9 @@ HISTORY_ROWS = """
 def test_a_history_row_on_a_phone_is_its_title_its_words_and_its_facts(tmp_path: Path, app: bool) -> None:
     """Confirmation pass, L9: a History change row on a 375 px phone was five lines, with the
     Proposal capsule alone on a line of its own. Now a row is the deck's name, what the entry is
-    on one line (the rest in its Details), then its facts, with no link in the line: the review
-    page and a backup copy are in the ⋮ and the Details. The facts wrap by word at most once on
+    on a line (a second where it must, never cut short; the rest in its Details), then its
+    facts, with no link in the line: the review page and a backup copy are in the ⋮ and the
+    Details. The facts wrap by word at most once on
     a phone (a long time with an assistant's name), never a chip split, and on a desktop they
     are one line. At 200% text the "what" line still holds and nothing scrolls sideways."""
     from playwright.sync_api import sync_playwright
@@ -199,7 +200,8 @@ def test_a_history_row_on_a_phone_is_its_title_its_words_and_its_facts(tmp_path:
             assert len(rows) >= 10 and any("Applied a change" in r["text"] or True for r in rows)
             for r in rows:
                 assert r["links"] == [], r  # no Proposal, The change or Backup copy capsule in the line
-                assert r["deck_lines"] == 1, r
+                # the line is never cut with an ellipsis (final polish): a long one takes a second line
+                assert r["deck_lines"] <= 2, r
                 assert r["sub_lines"] <= 2 and r["tall_kid"] <= 24, r
                 assert r["order"][0] < r["order"][1] < r["order"][2], r
                 assert r["h"] <= 100, r
@@ -220,7 +222,9 @@ def test_a_history_row_on_a_phone_is_its_title_its_words_and_its_facts(tmp_path:
             redrawn(page)
             page.evaluate(long_time)
             for r in page.evaluate(HISTORY_ROWS):
-                assert r["links"] == [] and r["deck_lines"] == 1, r
+                # at 200% the line wraps by word as far as it must (never cut short); the row's
+                # height bound below holds it
+                assert r["links"] == [], r
                 assert r["sub_lines"] <= 3 and r["h"] <= 300, r
             assert page.evaluate(NO_SIDEWAYS)
             ctx.close()

@@ -330,17 +330,14 @@ def test_the_deck_pills_share_one_row_on_a_phone() -> None:
     # the phone block runs to its last rule, the confirmation's row (a container rule inside it
     # closes with "} }" too)
     phone = css.split("@media (max-width:599.98px){ .banner .social{")[1]
-    phone = phone.split(".banner .social .confirm{grid-column:1 / -1} }")[0]
-    # equal columns, two and two when the row is narrow (large text), never three and one (P-17)
-    assert phone.startswith(
-        "display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:.4rem;margin:0; "
-        "flex:1 1 auto;order:5;"
-    )
-    two = "@container (max-width:20em){ .banner .social{grid-template-columns:repeat(2,minmax(0,1fr))} }"
-    assert two in phone
+    phone = phone.split(".banner .social .confirm{flex:1 1 100%} }")[0]
+    # equal chips, two and two when the row is narrow (large text), never three and one (P-17)
+    assert phone.startswith("display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;")
+    assert ".banner .social .soc{flex:1 1 0}" in phone
+    assert "@container (max-width:20em){ .banner .social .soc{flex:0 1 calc(50% - .2rem)} }" in phone
     assert ".banner .social .soc{justify-content:center;min-width:44px;height:36px;" in phone
     assert ".banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;" in phone
-    assert ".banner .social .confirm{grid-column:1 / -1} }" in css
+    assert ".banner .social .confirm{flex:1 1 100%} }" in css
     assert (
         ".banner .controls .primary{display:grid;width:100%;gap:.4rem; "
         "grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}"

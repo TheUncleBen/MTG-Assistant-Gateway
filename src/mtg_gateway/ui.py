@@ -777,7 +777,7 @@ def selection_bar(
     count = esc(count_text)
     if slim and count_text.endswith(" selected"):
         # "12 selected": the word folds away on a narrow bar (the scripts update .n)
-        count = f"<span class='n'>{esc(count_text[:-9])}</span><span class='lbl'> selected</span>"
+        count = f"<span class='n'>{esc(count_text[:-9])}</span> <span class='lbl'>selected</span>"
     cancel = (
         f"<button type='button' class='btn icon-only bar-x {esc(cancel_cls)}' aria-label='Cancel' "
         f"title='Cancel'>{icon('x')}</button>"

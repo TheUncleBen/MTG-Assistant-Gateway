@@ -220,8 +220,22 @@ def test_the_tab_and_rail_labels_grow_with_the_text_size(chromium, server, width
         normal = page.evaluate(size)
         page.evaluate("() => document.documentElement.style.setProperty('font-size', '28px', 'important')")
         big = page.evaluate(size)
-        assert normal >= 11 and big > normal, (normal, big)
-        assert big <= 16, big  # capped: the labels stay inside their tabs
+        # the labels grow with the text as all text does (final polish AC1: no capped px size); a
+        # word that no longer fits its tab turns the bar to icons alone, every name kept for screen
+        # readers (static/topbar.js), so no label runs out of its tab
+        assert normal >= 11 and big >= normal * 1.5, (normal, big)
+        page.evaluate("() => window.dispatchEvent(new Event('resize'))")
+        page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+        out = page.evaluate(
+            """() => { const bar = document.querySelector('.tabbar');
+              return [...bar.querySelectorAll(':scope > a')]
+                .filter(a => getComputedStyle(a).display !== 'none')
+                .filter(a => { const l = a.querySelector('.lbl'), r = a.getBoundingClientRect(),
+                  q = l.getBoundingClientRect(); return getComputedStyle(l).position !== 'absolute'
+                  && (q.left < r.left - 1 || q.right > r.right + 1 || l.scrollWidth > l.clientWidth + 1); })
+                .map(a => a.textContent.trim()); }"""
+        )
+        assert out == [], out
         assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
 
 

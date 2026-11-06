@@ -496,10 +496,17 @@ WIDENS_PAGE = """(vw) => { const de = document.documentElement, base = de.scroll
   return out.slice(-6); }"""
 
 # each of these stays inside its panel (they used to run past the panel's edge at 344 px, 200% text)
+# an element inside a box that scrolls sideways on its own (the mana curve on a 320 or 360 px phone,
+# where eight 44 px axis buttons don't fit: final polish P-11) is measured by that box instead
 INSIDE_PANEL = """() => [...document.querySelectorAll(
     '.panel.description > h2, .comments .panel-head h2, .checks li, .curve, .curveaxis')]
+  .map(e => { const panel = e.closest('.panel');
+    for (let a = e.parentElement; a && a !== panel; a = a.parentElement)
+      if (/auto|scroll/.test(getComputedStyle(a).overflowX)) return a;
+    return e; })
   .filter(e => { const p = e.closest('.panel').getBoundingClientRect(), r = e.getBoundingClientRect();
-    return r.width > 0 && (r.right > p.right + 0.5 || e.scrollWidth > e.clientWidth + 1); })
+    return r.width > 0 && (r.right > p.right + 0.5
+      || (!/auto|scroll/.test(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth + 1)); })
   .map(e => `${e.tagName}.${e.getAttribute('class')} ${(e.textContent || '').trim().slice(0, 30)}`)"""
 
 
@@ -519,7 +526,8 @@ def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
     curve count pushed the page 4 px wider than the screen (39 px with scripts off, from the Group by
     box), and the Description and Comments headings and a long deck check ran past their panels; at
     320 px the probability form's hidden native select added 5 px. At 100% text the layout stays as
-    it was: two View/Group/Sort boxes a row on a phone, and each check's value beside its label."""
+    it was: two View/Group/Sort boxes a row on a phone (one on the narrowest, where two don't fit
+    whole), and each check's value beside its label."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -584,8 +592,12 @@ def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
                                     if vw < 600 and "nojs" not in where:
                                         assert page.locator(".toolbar.compact .viewbtn").is_visible(), where
                                         assert page.locator("form.views").is_hidden(), where
-                                    elif vw < 600:  # without scripts: two a row, as before
-                                        assert page.evaluate(VIEWS_COLUMNS) == 2, where
+                                    elif vw < 600:
+                                        # without scripts: two a row where the toolbar holds two
+                                        # whole (each select needs 9em: 360 px and wider), one a
+                                        # row on the narrowest phones (320, 344), never three
+                                        want = 2 if vw >= 360 else 1
+                                        assert page.evaluate(VIEWS_COLUMNS) == want, where
                                     assert set(page.evaluate(CHECK_VALUES)) == {"beside"}, where
                                 ctx.close()
             finally:

@@ -201,6 +201,10 @@ def test_names_in_member_text_sit_in_curly_quotes() -> None:
         r"\"'\" \+|\+ \"'\"|'\"' \+|\+ '\"'|\"\\\"\" \+|\+ \"\\\"\"|\\\"\$\{|'\$\{[^}]+\}'|\"\$\{[^}]+\}\""
     )
     for path in sorted([*PKG.rglob("*.js"), *PKG.rglob("*.html")]):
+        # the OCR engine's third-party files (fetched by scripts/fetch_ocr_assets.py, not in git)
+        # carry no member text of ours
+        if "vendor" in path.relative_to(PKG).parts:
+            continue
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             # a CSS selector or a Scryfall search (!"name") is code, not words
             if re.search(r"querySelector|\[[\w-]+=|scryfall\.com|CSS\.escape", line):

@@ -194,6 +194,7 @@ RAIL = """() => {
   return {
     order: items.map(e => e.tagName === 'A' ? e.getAttribute('href') : e.className.split(' ')[0]),
     tops: items.map(e => Math.round(r(e).top)), bottoms: items.map(e => Math.round(r(e).bottom)),
+    icons: bar.classList.contains('icons'),
     scrolls: bar.scrollHeight > bar.clientHeight + 1, railBottom: Math.round(r(bar).bottom),
     railRight: Math.round(r(bar).right), height: innerHeight,
     more: !!moreTab && shown(moreTab),
@@ -251,11 +252,11 @@ def test_the_open_fold_rail_holds_every_page_without_scrolling(
     assert got["railBottom"] - got["bottoms"][-1] <= 24, got
     assert got["tops"][-1] - got["bottoms"][-2] > (24 if zoom == "none" else 3), got
     assert all(h >= 44 for h in got["targets"]), got
-    # every label whole, "Card models" on two lines at 200% (root) text; at a 200% font scale
-    # (text), where a label is 22 px tall in the 80 px rail, a long one ends in an ellipsis as
-    # the phone bar's do, which is the standard the bars had before
+    # every label whole; at 200% text, where the labels grow with the text (final polish AC1) and a
+    # word no longer fits the 80 px rail, the rail shows its icons alone, every name kept for screen
+    # readers (static/topbar.js), as the phone's bar does: no label is cut or ends in an ellipsis
     cut = [lb["text"] for lb in got["labels"] if lb["cut"]]
-    assert cut == [] or zoom == "text", got["labels"]
+    assert cut == [] or got["icons"], got["labels"]
     assert all(0 <= lb["left"] and lb["right"] <= got["railRight"] for lb in got["labels"]), got["labels"]
 
 

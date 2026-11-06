@@ -196,7 +196,7 @@ async def test_view_choices_asks_in_a_box_and_delete_my_data_puts_the_tick_above
     b = await _browser(stack)
     try:
         page = (await b.http.get("/account/details/choices")).text
-        # Forget my view choices asks in the shared box (Cancel, then the solid Forget), as every
+        # Forget my view choices asks in the shared box (Keep them, then the solid Forget), as every
         # action that can't be undone does; the card's own button only opens it (audit D17)
         choices = page.split("id='choices'", 1)[1].split("</form>", 1)[0]
         assert (
@@ -205,7 +205,7 @@ async def test_view_choices_asks_in_a_box_and_delete_my_data_puts_the_tick_above
         )
         box = page.split("id='forget-choices' role='dialog'", 1)[1].split("</div></div>", 1)[0]
         assert "<input type='hidden' name='confirm' value='yes'>" in box
-        assert "<button type='button' class='btn-plain' data-cancel>Cancel</button>" in box
+        assert "<button type='button' class='btn-plain' data-cancel>Keep them</button>" in box
         assert "<button type='submit' class='danger' form='forgetf'>Forget my view choices</button>" in box
         # Delete my data: the list's red row opens the box that holds the tick and the solid red button
         page = (await b.http.get("/account/details")).text

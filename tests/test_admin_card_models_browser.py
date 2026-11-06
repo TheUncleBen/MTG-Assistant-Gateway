@@ -128,7 +128,7 @@ def test_cancel_and_the_close_link_leave_the_model_alone(server: Server) -> None
         page.goto(f"{server.base}/admin/models?remove=opt&by=user-9", wait_until="networkidle")
         box = page.locator("#remove")
         assert box.is_visible()
-        box.locator(".acts button", has_text="Cancel").click()
+        box.locator(".acts button", has_text="Keep it").click()
         page.wait_for_selector("#remove", state="hidden")
         assert page.url.endswith("/admin/models")  # the address no longer names the box
         assert page.locator(".amo .ui-table .tr.model").count() == 4

@@ -221,7 +221,7 @@ def test_the_rows_open_their_pages_and_the_boxes_ask_first(server: Server) -> No
         box.wait_for(state="visible")
         assert "this one too" in box.inner_text()
         assert page.evaluate(MEASURE) == []
-        box.locator("button", has_text="Cancel").click()
+        box.locator("button", has_text="Keep them").click()
         box.wait_for(state="hidden")
         # Delete my data…: red on the list, the box holds the list of what goes and the gated button
         row = page.locator("#delete-data")
@@ -233,7 +233,7 @@ def test_the_rows_open_their_pages_and_the_boxes_ask_first(server: Server) -> No
         assert final.is_disabled() and "can't be undone" in box.inner_text()
         box.locator("#delete-tick").check()
         assert final.is_enabled()
-        box.locator("button", has_text="Cancel").click()
+        box.locator("button", has_text="Keep it").click()
         box.wait_for(state="hidden")
         # the sign-out form posts to /logout with everywhere=1 (a browser's post, as the box's button)
         h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
