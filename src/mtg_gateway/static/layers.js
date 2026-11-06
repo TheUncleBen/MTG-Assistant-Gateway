@@ -52,8 +52,17 @@
   function tell() {
     if (native && typeof native.layer === "function") { try { native.layer(stack.length > 0); } catch (e) { /* an older app */ } }
   }
+  // the page's own state (Load more's pages and place: static/loadmore.js) rides on the layer's
+  // entry too, so a reload with a layer open keeps it (audit NB3)
+  function pageState() {
+    var s = history.state, out = {};
+    if (s && typeof s === "object") for (var k in s) if (k !== "mtglayer") out[k] = s[k];
+    return out;
+  }
   function push() {
-    try { history.pushState({ mtglayer: 1 }, ""); owned = true; } catch (e) { owned = false; }
+    var s = pageState();
+    s.mtglayer = 1;
+    try { history.pushState(s, ""); owned = true; } catch (e) { owned = false; }
   }
   function flush() {
     var list = waiting;
@@ -154,7 +163,8 @@
   // the page loaded on a layer's entry (a reload with a layer open, the app's pull to refresh):
   // the layer is not back, so the entry becomes a plain one of the page
   if (history.state && history.state.mtglayer) {
-    try { history.replaceState(null, "", location.href); } catch (e) { /* the entry stays */ }
+    var kept = pageState();
+    try { history.replaceState(Object.keys(kept).length ? kept : null, "", location.href); } catch (e) { /* the entry stays */ }
   }
   window.MtgLayers = {
     open: open, release: release, settled: settled, top: top, mode: mode,

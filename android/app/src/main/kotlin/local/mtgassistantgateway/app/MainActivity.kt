@@ -144,18 +144,25 @@ class MainActivity : ComponentActivity() {
                 closeCamera()
                 return
             }
-            // A layer over the page (a menu, a box, a sheet: static/layers.js) closes first; the
-            // page holds no history entry for it, so Back goes back in the history only when no
-            // layer took it. On the first page with nothing open the system's own back runs.
-            web.evaluateJavascript(BACK_KEY) { closed ->
-                if (closed == "true") return@evaluateJavascript
-                layerOpen = false
-                if (web.canGoBack()) {
-                    web.goBack()
-                } else {
-                    syncBackCallback()
-                    if (!isEnabled) onBackPressedDispatcher.onBackPressed()
-                }
+            // A layer over a gateway page (a menu, a box, a sheet: static/layers.js) closes first;
+            // the page holds no history entry for it, so Back goes back in the history only when no
+            // layer took it. Only a gateway page is asked: another site's page (the sign-in
+            // provider's) could answer the hook and keep Back. On the first page with nothing open
+            // the system's own back runs.
+            if (gatewayPage) {
+                web.evaluateJavascript(BACK_KEY) { closed -> if (closed != "true") historyBack() }
+            } else {
+                historyBack()
+            }
+        }
+
+        private fun historyBack() {
+            layerOpen = false
+            if (web.canGoBack()) {
+                web.goBack()
+            } else {
+                syncBackCallback()
+                if (!isEnabled) onBackPressedDispatcher.onBackPressed()
             }
         }
     }
@@ -1218,6 +1225,9 @@ class MainActivity : ComponentActivity() {
             val allowed = nav.pageStarted(url)
             gatewayPage = GatewayUrl.isGateway(origin, url)
             pageGen++
+            // a new page starts with nothing open over it; a layer it opens before it has finished
+            // loading tells the app so itself (layer())
+            layerOpen = false
             syncFab()
             // pull to refresh on the list pages only; a new page starts with the touch allowed
             pagePull = true
@@ -1246,7 +1256,6 @@ class MainActivity : ComponentActivity() {
         override fun onPageFinished(view: WebView, url: String) {
             progress.visibility = View.GONE
             pullDone()
-            layerOpen = false // a new page starts with nothing open over it
             if (url == BLANK) {
                 // Back must not reload the refused page under it; Retry takes the person home.
                 view.clearHistory()
