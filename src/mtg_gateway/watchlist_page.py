@@ -266,15 +266,15 @@ def owned_label(v: dict[str, Any]) -> str:
 
 def where_text(v: dict[str, Any]) -> str:
     """The printing a row follows: "CMR 472 · Foil", or for a watch by name alone "Cheapest
-    printing (now PLST CMR-365) · Normal". The dot keeps its finish (a no-break space): where the
-    line wraps, on a 320 px phone with the browser's font doubled, the dot starts the next line
-    rather than ending one (final polish W1)."""
+    printing (now PLST CMR-365) · Normal". The row draws it as two facts (ui.dotted), so where the
+    line wraps, on a 320 px phone with the browser's font doubled, the dot neither ends a line nor
+    starts one (final polish W1, confirmation P-15)."""
     where = " ".join(p for p in ((v.get("set") or "").upper(), v.get("collector_number") or "") if p)
     if not where:
         low = v.get("cheapest") or {}
         now_at = " ".join(p for p in ((low.get("set") or "").upper(), low.get("collector_number") or "") if p)
         where = f"Cheapest printing (now {now_at})" if now_at else "Cheapest printing"
-    return f"{where} ·\u00a0{FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
+    return f"{where} · {FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
 
 
 def _priced(hist: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -416,7 +416,7 @@ def _row(
     href = f"{query.href(open=key)}#wr-{esc(key)}"
     return (
         f"<div class='tr{' open' if is_open else ''}' id='wr-{esc(key)}'{attrs}>{check}{thumb}"
-        f"<span class='title'><span class='t'>{title}</span><span class='deck'>{esc(line)}</span>"
+        f"<span class='title'><span class='t'>{title}</span><span class='deck'>{ui.dotted(line)}</span>"
         f"<span class='sub'>{sub}</span></span>"
         f"<span class='px md-hide'>{px}<small>{esc(when)}</small></span>"
         f"<span class='md-hide chgs'>{changes_html(view)}</span>"

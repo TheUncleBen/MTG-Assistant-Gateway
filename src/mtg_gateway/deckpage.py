@@ -647,7 +647,7 @@ def delete_box_html(
         f"<p>This deletes the deck ({plural(n, 'card')}) from your Archidekt account. {esc(undo)}</p>"
         "<div class='field'><label for='typed'>Type the deck's name to confirm</label>"
         f"<input id='typed' type='text' name='name' autocomplete='off' required maxlength='200' "
-        f"placeholder='Deck name' data-typed='{esc(title)}'></div></form>"
+        f"{ui.hint_attrs('Deck name|Name')} data-typed='{esc(title)}'></div></form>"
     )
     return ui.box(
         "delete",
@@ -3239,7 +3239,7 @@ def deck_list_controls_html(
             label="Filter package name" if show == "packages" else "Filter deck name",
             name="q",
             value=q,
-            placeholder="Package name" if show == "packages" else "Deck name",
+            placeholder="Package name|Name" if show == "packages" else "Deck name|Name",
             input_id="q",
             search_label="Filter",
             attrs=" maxlength='80'",
@@ -4110,7 +4110,7 @@ table.qty td:last-child,table.qty th:last-child{width:1%;white-space:nowrap}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
   color:var(--text-muted)}
 .odds .oddsform select:not(.msel-native),.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;
-  padding:0 .4rem;
+  padding:.25em .4rem;
   font-size:.9rem;width:auto;min-width:6rem;flex:none}
 .odds .oddsform .msel-btn{padding-right:1.5rem;background-position:right .5rem center}
 /* a long choice (Group by) never runs past the panel on a narrow phone with large text; the hidden
@@ -4377,7 +4377,8 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 .erow .note:empty{display:none}
 .erow .note{color:var(--orange-text)}
 .erow .qty{display:inline-flex;align-items:center;gap:.25rem}
-.erow .qty input{width:min(3.4rem,18vw);height:2.25rem;text-align:center;margin:0;padding:0 .25rem;
+.erow .qty input{width:min(3.4rem,18vw);height:auto;min-height:2.25rem;text-align:center;margin:0;
+  padding:.25em .25rem;
   font-variant-numeric:tabular-nums}
 .erow .qty button.mini{margin:0}
 .erow .sel select{height:2.25rem} .erow .sel .msel-btn{min-height:2.25rem}
@@ -4425,6 +4426,8 @@ html.printpick-open{overflow:hidden}
 .printpick .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
 .printpick .pptools{display:flex;flex-direction:column;gap:.5rem;flex:none;min-width:0}
+/* the set filter's hint whole at large text on a phone (confirmation P-5, P-19) */
+.printpick .pptools #pp-q{padding-left:.5em;padding-right:.5em}
 .printpick .ppsearch{display:flex;gap:.5rem;min-width:0}
 .printpick .ppsearch input{flex:1 1 auto;min-width:0;width:auto;margin:0}
 /* the filter box: a filter icon inside it, on the left */
@@ -4569,7 +4572,9 @@ html.printpick-open{overflow:hidden}
   .printpick .ppall{min-height:44px}
   /* the deck editor's − and + steps and the count box, its Foil and backup check boxes (the
      label is the finger area) and the deck page's Undo and Redo: 44 px (review 0.7.46, F18) */
-  .erow .qty button.mini,.erow .qty input{width:44px;min-width:44px;height:44px;min-height:44px}
+  .erow .qty button.mini{width:44px;min-width:44px;height:44px;min-height:44px}
+  /* the count box grows with its text from 44 px (confirmation P-5) */
+  .erow .qty input{width:44px;min-width:44px;height:auto;min-height:44px}
   .erow details.dd summary.mini{width:44px;height:44px;min-height:44px}
   .erow{grid-template-columns:44px minmax(0,1fr) auto minmax(7rem,10rem) auto}
   .erow .thumbbtn{min-width:44px;display:flex;justify-content:center}

@@ -1876,7 +1876,7 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
     tools = ui.toolbar(
         path,
         search_label="Search names",
-        placeholder="Search name",
+        placeholder="Search name|Name",
         q=q,
         filters=[
             ui.filter_select("days", "Period", [(str(n), f"Last {n} days") for n in METRIC_DAYS], str(days))

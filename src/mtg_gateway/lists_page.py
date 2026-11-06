@@ -1688,8 +1688,10 @@ CSS = """
 .lp-box .body .segc.lp-faces{margin:0 0 .75rem}
 .lp-face{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem}
 .lp-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.25rem 12px}
-/* 8rem: a box holds its hint whole ("Legendary" was cut in a 6rem box on a 320 px phone, P-19) */
-.lp-three{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8rem),1fr));gap:.25rem 12px}
+/* three equal columns where each has 7em, else one a row: never two and one alone, and a box
+   holds its hint whole ("Legendary" was cut in a 6rem column on a 320 px phone, P-19) */
+.lp-three{display:flex;flex-wrap:wrap;gap:.25rem 12px}
+.lp-three > *{flex:1 1 calc((21em + 24px - 100%) * 999);min-width:0}
 .mtgbox.lp-box .body textarea{min-height:5rem;font-family:inherit;font-size:.95rem;line-height:1.4}
 .mtgbox .body .lp-two .field + .field,.mtgbox .body .lp-three .field + .field{margin-top:0}
 .lp-two .field,.lp-three .field{margin-bottom:.5rem}
@@ -1704,7 +1706,7 @@ CSS = """
    .mtgbox .body .field{margin:0} would otherwise win over .lp-img .field) */
 .mtgbox .body .lp-img .field,.lp-img .field{margin-top:.75rem}
 /* the three type fields line up at their inputs when a label wraps on a phone */
-.lp-three{align-items:end}
+.lp-three{align-items:flex-end}
 /* the frame's words when the card's picture can't be shown (lists.js pictureWords) */
 .lp-crop .lp-nm{display:block;font-weight:700;color:var(--text)}
 .lp-crop .lp-ty,.lp-crop .lp-why{display:block}

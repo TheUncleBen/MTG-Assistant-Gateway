@@ -1848,6 +1848,8 @@ main.wrap.ui-wide{max-width:1200px}
    alone is wider than the line; under a box's overflow-wrap:anywhere its narrowest size was one
    letter, so it broke anywhere (confirmation P-14: "alice@example.tes/t") */
 .brk{overflow-wrap:break-word;word-break:normal}
+/* a count against its limit ("12 / 5000", ui.counted) keeps its own width beside the help line */
+[data-counter]{flex:none;white-space:nowrap}
 .ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;clip-path:inset(-8px -8px -8px 0)}
 .ui-dots > *{position:relative;min-width:0}
 .ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}
@@ -1861,6 +1863,7 @@ main.wrap.ui-wide{max-width:1200px}
    drawn before it falls in the clipped strip. A fact is a block in the line (inline-block): whole
    where it fits, and only one wider than the line itself (a long fact in a phone's half-width tile,
    or at 200% text) wraps inside instead of being cut off at the edge (re-check S5). */
+.ui-dots-w{display:block;min-width:0;overflow-x:clip;overflow-clip-margin:0}
 .ui-dots.balanced{display:block;text-wrap:balance;margin-left:-.85rem;clip-path:inset(0 0 0 .85rem)}
 .ui-dots.balanced > *{display:inline-block;margin-left:.85rem;white-space:normal;vertical-align:top}
 /* the sticky action bar while a list has a selection */

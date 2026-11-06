@@ -304,6 +304,14 @@
     b.setAttribute("data-fit-pad", "");
     b.style.paddingLeft = pl + half + "px";
     b.style.paddingRight = pr + half + "px";
+    // a button sized by its words narrows its words' room with the padding: kept only when
+    // the label still wraps as it did
+    var now = lineRights(b);
+    if (now.lines !== got.lines) {
+      b.style.removeProperty("padding-left");
+      b.style.removeProperty("padding-right");
+      b.removeAttribute("data-fit-pad");
+    }
   }
   // a chart's labels along its axis (and the values over its columns) that run into each other at
   // a large text size: every other one is left out, the first and last kept (AD1)
@@ -350,15 +358,22 @@
     var bs = root.querySelectorAll("button, .btn");
     for (i = 0; i < bs.length; i++) if (bs[i].querySelector(":scope > svg")) centre(bs[i]);
   }
-  var queued = false;
-  function later() {
+  // the next frame fits the whole page (a resize, a text size) or only what was drawn since (a
+  // box, a sheet, a list's next rows), so opening a box does not measure the page under it again
+  var queued = false, roots = [], whole = false;
+  function later(root) {
+    if (root && !whole) { if (roots.indexOf(root) < 0) roots.push(root); } else whole = true;
     if (queued) return;
     queued = true;
-    requestAnimationFrame(function () { queued = false; fitIn(document.body); });
+    requestAnimationFrame(function () {
+      var them = whole ? [document.body] : roots;
+      queued = false; roots = []; whole = false;
+      for (var i = 0; i < them.length; i++) if (them[i].isConnected) fitIn(them[i]);
+    });
   }
   fitIn(document.body);
-  window.addEventListener("resize", later);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+  window.addEventListener("resize", function () { later(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { later(); });
   if (window.ResizeObserver) {
     // a text size changed in place (no reload, no resize): a box 1em square tells it
     var em = document.createElement("span");
@@ -371,14 +386,16 @@
   // a box, a sheet or a list drawn after this ran
   if (window.MutationObserver) {
     new MutationObserver(function (muts) {
+      var FIT = "h1, h2, h3, button, .btn, input[data-ph], .chart";
       for (var i = 0; i < muts.length; i++) {
         for (var j = 0; j < muts[i].addedNodes.length; j++) {
           var n = muts[i].addedNodes[j];
-          var FIT = "h1, h2, h3, button, .btn, input[data-ph], .chart";
-          if (n.nodeType === 1 && (n.matches(FIT) || n.querySelector(FIT))) {
-            later();
-            return;
-          }
+          if (n.nodeType !== 1 || !(n.matches(FIT) || n.querySelector(FIT))) continue;
+          // the added part with what holds it (a button fits within its own box)
+          later(n.parentElement || n);
+          // a hint fits from its first frame (a box's field drawn after its answer came)
+          var ph = n.matches("input[data-ph]") ? [n] : n.querySelectorAll("input[data-ph]");
+          for (var k = 0; k < ph.length; k++) { fitHint(ph[k]); if (hintRO) hintRO.observe(ph[k]); }
         }
       }
     }).observe(document.body, { childList: true, subtree: true });

@@ -373,22 +373,21 @@ def test_phone_thread_rows_have_two_lines(server: Server) -> None:
         row = page.locator(".fm a.tr[data-id='700002']")
         sub = row.locator(".sub")
         # text_content: innerText breaks between flex items even when they sit on one line
-        words = " ".join(sub.text_content().split())
-        assert words.startswith("amy · ") and words.count(" · ") == 2 and words.endswith("ago"), words
+        facts = sub.locator(".ui-dots > span").all_text_contents()
+        assert len(facts) == 3 and facts[0] == "amy" and facts[2].strip().endswith("ago"), facts
         # one line: owner · replies · when (the date was a third line)
         size = sub.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
         assert sub.bounding_box()["height"] <= size * 1.6
         # on the same line (the date's smaller print sits a pixel or two lower)
         assert abs(sub.locator(".fm-when").bounding_box()["y"] - sub.bounding_box()["y"]) < 3
-        # the date's dot follows the replies at one space, as the first dot does (the row's flex
-        # gap opened a wider space before it)
-        gap = sub.evaluate(
-            """e => { const w = e.querySelector('.fm-when'), r = document.createRange();
-              r.setStart(w.previousSibling, w.previousSibling.length - 1);
-              r.setEnd(w.previousSibling, w.previousSibling.length);
-              return w.getBoundingClientRect().left - r.getBoundingClientRect().right; }"""
+        # the date's dot follows the replies at the gap the first dot has (the row's flex gap
+        # opened a wider space before it)
+        gaps = sub.evaluate(
+            """e => { const f = [...e.querySelectorAll('.ui-dots > span')]
+                .map(x => x.getBoundingClientRect());
+              return [f[1].left - f[0].right, f[2].left - f[1].right]; }"""
         )
-        assert gap < 1, gap
+        assert abs(gaps[0] - gaps[1]) < 1, gaps
         assert page.evaluate(MEASURE) == []
         browser.close()
     assert errors == []

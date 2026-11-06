@@ -450,8 +450,8 @@ def list_head(title: str, total: int | None = None, note: str = "", *, note_html
 
 def order_note(current: str, other: str, href: str) -> str:
     """The list's order beside its heading, with the switch to the other order as a capsule:
-    "Newest first · Show oldest first"."""
-    return f"{esc(current)} · " + cap_link(f"Show {other.lower()}", href)
+    "Newest first · Show oldest first", as facts (``facts``: never a dot left at a line's end)."""
+    return facts([esc(current), cap_link(f"Show {other.lower()}", href)], html=True)
 
 
 BUTTON_KINDS = {
@@ -516,7 +516,9 @@ def facts(parts: Iterable[str], *, html: bool = False) -> str:
     if not kept:
         return ""
     inner = "".join(f"<span>{p if html else esc(p)}</span>" for p in kept)
-    return f"<span class='tx ui-dots balanced'>{inner}</span>"
+    # the line starts a gap early (the dot's strip, clipped): its frame (.ui-dots-w) holds it
+    # inside the box, so it never reaches past a window's edge where the box has no padding
+    return f"<span class='ui-dots-w'><span class='tx ui-dots balanced'>{inner}</span></span>"
 
 
 def dotted(text: str) -> str:
@@ -595,7 +597,7 @@ def toolbar(
     return (
         f"<form class='{cls}' role='search' method='get' action='{esc(action)}'>{hidden}"
         f"<label class='search'><span class='sr-only'>{esc(search_label)}</span>{icon('search')}"
-        f"<input type='search' name='{esc(name)}' value='{esc(q)}' placeholder='{esc(placeholder)}'></label>"
+        f"<input type='search' name='{esc(name)}' value='{esc(q)}'{hint_attrs(placeholder)}></label>"
         f"{''.join(filters)}"
         "<noscript><button type='submit' class='btn-plain'>Search</button></noscript></form>"
     )
@@ -684,8 +686,13 @@ def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str
 
 
 def day_row(text: str) -> str:
-    """A quiet day heading between rows ("Today", "Oct 12", "October 2026 · 3")."""
-    return f"<div class='tr daygroup'>{dotted(text)}</div>"
+    """A quiet day heading between rows ("Today", "Oct 12", "October 2026 · 3"): its facts in a
+    row of their own (.ui-dots), the dots in the gaps, from the row's own edge."""
+    parts = [p for p in text.split(" · ") if p]
+    if len(parts) < 2:
+        return f"<div class='tr daygroup'>{esc(text)}</div>"
+    inner = "".join(f"<span>{esc(p)}</span>" for p in parts)
+    return f"<div class='tr daygroup'><span class='ui-dots'>{inner}</span></div>"
 
 
 def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> str:

@@ -55,7 +55,7 @@ async def test_proposals_waiting_rows_are_one_line_with_review_and_the_menu(stac
         # the deck's group row: its tick box, the name with its count line, Open deck as a capsule
         group = table.split("<div class='tr group'>")[1].split("<div class='tr'")[0]
         assert "data-all='43'" in group and "<a id='deck-43' href='/decks/43'>Reap the Tides</a>" in group
-        assert "<small>15 waiting · oldest " in group
+        assert "<span>15 waiting</span><span>oldest " in group
         assert "<span class='act'><a class='ui-cap' href='/decks/43'>Open deck</a></span>" in group
         # the header keeps the check-every box and nothing else
         assert "aria-label='Check every waiting change'" in table and ">Risk<" not in table
@@ -124,7 +124,7 @@ async def test_the_all_list_rows_carry_their_status_and_the_order_switch(stack: 
         # the Made sort left the header for the head line, as a capsule
         head = body.split("<div class='list-head'>")[1].split("</div>")[0]
         older = "<a class='ui-cap' href='/proposals?show=all&amp;order=old'>Show oldest first</a>"
-        assert f"Newest first · {older}" in head
+        assert f"<span>Newest first</span><span>{older}</span>" in head
         assert "pr-sort" not in body
     finally:
         await b.aclose()
@@ -195,10 +195,15 @@ async def test_reports_rows_have_open_and_the_menu_together(stack: Stack) -> Non
             assert "md-hide" not in r
             assert "<span class='sub'><span class='kv'>Won <b>" in r
         head = body.split("<div class='list-head'>")[1].split("</div>")[0]
-        assert "Newest first · <a class='ui-cap' href='/reports?order=oldest'>Show oldest first</a>" in head
+        assert (
+            "<span>Newest first</span>"
+            "<span><a class='ui-cap' href='/reports?order=oldest'>Show oldest first</a>" in head
+        )
         assert "rp-sort" not in body
         oldest = (await b.http.get("/reports?order=oldest", headers=NAV)).text
-        assert "Oldest first · <a class='ui-cap' href='/reports'>Show newest first</a>" in oldest
+        assert (
+            "<span>Oldest first</span><span><a class='ui-cap' href='/reports'>Show newest first</a>" in oldest
+        )
     finally:
         await b.aclose()
 

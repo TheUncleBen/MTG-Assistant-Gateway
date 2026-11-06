@@ -57,6 +57,8 @@
     i.autocomplete = "off";
     if (o.maxlength) i.maxLength = o.maxlength;
     if (o.placeholder) i.placeholder = o.placeholder;
+    // shorter hints, for a box too narrow for the full one (topbar.js shows the longest that fits)
+    if (o.shorter) i.setAttribute("data-ph", o.shorter);
     return i;
   }
   function cancelButton(text) { return Box.button(text || "Cancel", "btn", null, { cancel: true }); }
@@ -207,7 +209,7 @@
       // no copy on Archidekt for a delete: the words of decks.DELETE_KEPT_NOTE
       body.appendChild(el("p", null, "This deletes the deck (" + n + " card" + (n === 1 ? "" : "s") + ") from your Archidekt account. "
         + "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot can't be restored onto a deleted deck; History can make a new deck from it. Archidekt itself has no undo for a deleted deck."));
-      var input = textInput("", { maxlength: 200, placeholder: name });
+      var input = textInput("", { maxlength: 200, placeholder: name, shorter: "Deck name|Name" });
       body.appendChild(field("Type the deck's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete this deck", "danger", function () {
         box.busy(true);
@@ -293,7 +295,7 @@
       any.value = "any";
       s.appendChild(any);
       body.appendChild(field("Deck", s, "mb-cmp"));
-      var ref = textInput("", { placeholder: "Archidekt link or deck ID" });
+      var ref = textInput("", { placeholder: "Archidekt link or deck ID", shorter: "Link or deck ID|Link or ID" });
       var refField = field("Archidekt deck", ref, "mb-ref");
       refField.hidden = s.value !== "any";
       body.appendChild(refField);
@@ -530,7 +532,7 @@
       ul.appendChild(el("li", null, plural(c.folders, "folder") + " inside it, and the folder itself"));
       body.appendChild(ul);
       body.appendChild(el("p", null, "The gateway makes the snapshots first and stops if any of them fails. Then Archidekt deletes everything in one step, which can't be undone."));
-      var input = textInput("", { maxlength: 100, placeholder: name });
+      var input = textInput("", { maxlength: 100, placeholder: name, shorter: "Folder name|Name" });
       body.appendChild(field("Type the folder's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete folder", "danger", function () {
         box.busy(true);

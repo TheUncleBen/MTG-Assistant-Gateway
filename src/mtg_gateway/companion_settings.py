@@ -780,7 +780,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<input type='hidden' name='action' value='create'>"
             "<h3><label for='newcat'>New category</label></h3><div class='row'>"
             "<input id='newcat' type='text' name='category' maxlength='60' required "
-            "placeholder='e.g. Removal'>"
+            f"{ui.hint_attrs('e.g. Removal|Removal')}>"
             "<span class='ds-sw' role='group' aria-label='Switches of the new category'>"
             f"{new_switches}</span>"
             f"<button class='btn'>{icon('plus')} Create category</button></div></form>"
