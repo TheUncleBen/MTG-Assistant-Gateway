@@ -264,8 +264,10 @@ HUB_CSS = """
   .ygrp .yrow{min-height:44px} .ygrp details.yrow > summary{min-height:44px}
   .ygrp a.yrow:hover,.ygrp button.yrow:hover,.ygrp details.yrow > summary:hover,
   .ygrp .yfold button:hover{background:var(--surface-2)} }
-/* Sign out: a real button, alone in the middle at the foot, its icon and words centred together */
-.ysignout{display:flex;justify-content:flex-start;margin:.5rem 0 1rem}
+/* Sign out: a real button at the foot, its icon and words centred together, with the note on what
+   it clears on its own line under it (beside the button, the note ran out of a 320 px window) */
+.ysignout{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;margin:.5rem 0 1rem}
+.ysignout > p{margin:0;max-width:100%}
 .ysignout .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:48px;
   min-width:min(16rem,100%);padding:0 1.5rem;border-radius:14px;background:var(--surface);
   border:1px solid var(--border);color:var(--danger-text);font-weight:700;line-height:1.2}
