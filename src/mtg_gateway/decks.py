@@ -10562,7 +10562,7 @@ class DeckService:
                 {
                     "id": node["id"],
                     # Archidekt's top-level folder has a technical name; the pages call it by what it is
-                    "name": "Top level (no folder)" if depth == 0 else raw or "Folder",
+                    "name": "No folder" if depth == 0 else raw or "Folder",
                     "depth": depth,
                     "parent": parent,
                     "private": bool(node.get("private")),

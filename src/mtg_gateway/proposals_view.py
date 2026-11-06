@@ -1032,7 +1032,7 @@ PROPOSALS_CSS = """
   .pr-table .tr{grid-template-columns:32px minmax(0,1fr)}
   .pr-table .tr > .act{grid-column:2;justify-self:end} }
 .pr-table label.title{display:block}
-.pr-table .flag .ui-lbl{height:20px;font-size:.76rem;margin-right:.25rem}
+.pr-table .flag .ui-lbl{min-height:20px;font-size:.76rem;margin-right:.25rem}
 /* the waiting list's one header row: the check-every box and the word */
 .pr-table .tr.th{min-height:40px}
 .ui-drawer .apply{background:none;border:0;padding:0;margin-top:1rem}
@@ -1053,7 +1053,7 @@ PROPOSALS_CSS = """
   .ui-bar{padding:8px;gap:8px}
   .ui-bar .count{flex:1 1 40%;min-width:0}
   .ui-bar button{height:auto;white-space:normal;line-height:1.2;padding:6px 8px}
-  .ui-bar button[name=action]{flex:1 1 40%;min-width:0}
+  .ui-bar button[name=action]{flex:1 1 40%;min-width:min-content}
 }
 /* one proposal: the panel (from 1100 px) or its own page */
 .ui-drawer .dh .no{color:var(--text-muted)}

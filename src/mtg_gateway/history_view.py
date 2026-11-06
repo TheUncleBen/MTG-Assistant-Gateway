@@ -965,7 +965,8 @@ HISTORY_CSS = (
 /* a row is its deck's name, what the entry is on one line (the rest is in its Details) and its
    facts under it, which wrap by word on a narrow phone when they don't fit; links are in the ⋮
    and the Details, never a capsule that wraps onto a line of its own (review 2, L9) */
-.hy-table .title .deck{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the line says all of itself, on more lines where it must, never cut with an ellipsis */
+.hy-table .title .deck{overflow-wrap:anywhere;min-width:0}
 .hy-table .title .sub{min-width:0}
 /* the Details' buttons: one row, each form inline */
 .ui-drawer .ui-actions form{display:contents}

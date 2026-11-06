@@ -131,7 +131,7 @@ def test_the_clone_box_and_a_cards_own_menu(server: Server) -> None:
         box = _box(page, "clone")
         assert box.locator("#clone-name").input_value() == "Copy of - Sample Commander Deck"
         options = [t.strip() for t in box.locator("#clone-folder option").all_inner_texts()]
-        assert options[0] == "Top level (no folder)" and any("Brews" in o for o in options)
+        assert options[0] == "No folder" and any("Brews" in o for o in options)
         box.locator("#clone-folder").select_option("501")
         box.locator(".acts button.primary", has_text="Clone").click()
         page.wait_for_url("**?ok=created", timeout=8000)

@@ -116,7 +116,7 @@ textarea{min-height:72px;resize:vertical}
 .tile .cap b{color:var(--text);font-weight:600}
 .tile.picked{border-color:var(--blue);background:var(--blue-bg)}
 .tile .tick{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--blue);color:#fff;
-  font-size:14px;line-height:22px;text-align:center;display:none}
+  font-size:.875rem;line-height:22px;text-align:center;display:none}
 .tile.picked .tick{display:block}
 .row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:7px 10px;
   border-top:1px solid var(--border);background:var(--bg);min-height:56px}

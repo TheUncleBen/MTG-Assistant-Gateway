@@ -671,7 +671,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     p = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     assert p["ok"] and p["kind"] == "details" and p["risk"] == "high", p
     diff = p["diff"]
-    assert "Folder: Top level (no folder) → Cube" in diff, diff
+    assert "Folder: No folder → Cube" in diff, diff
     assert "Deck tags: none → budget, Spicy (adds budget, Spicy)" in diff, diff
     assert f"Cover image: automatic → {cover_name}" in diff  # Archidekt picks it now: said so
     tags_row = next(r for r in p["rows"] if r.get("field") == "tags")

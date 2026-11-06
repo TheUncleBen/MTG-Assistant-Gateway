@@ -284,10 +284,11 @@ SETTINGS_CSS = """
 form > .set-row:first-of-type{border-top:0}
 .set-row .sl{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem}
 .set-label{display:inline;margin:0;font-weight:700}
-.set-row .sl .ui-lbl{height:22px;font-size:.78rem}
+.set-row .sl .ui-lbl{min-height:22px;font-size:.78rem}
 .set-help{margin:.3rem 0 0;color:var(--text-muted);font-size:.88rem;line-height:1.4}
 .set-src{margin:.3rem 0 0;font-size:.86rem}
 .set-src code{font-size:.8rem}
+.set-ctl .set-src.def{margin:0;color:var(--text-muted);font-size:.84rem}
 .set-lock code{overflow-wrap:break-word}
 .set-err{margin:.35rem 0 0;color:var(--danger-text);font-weight:700;font-size:.88rem}
 .set-row.bad input:not([type=checkbox]):not([type=radio]),.set-row.bad select{border-color:var(--danger-text)}
@@ -625,9 +626,13 @@ def _row(d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when:
             if help_text
             else f"<span id='{help_id}' hidden></span>"
         )
-        + f"<p class='set-src' id='s-{key}'>{src}</p>"
+        + ("" if src == "Default." else f"<p class='set-src' id='s-{key}'>{src}</p>")
         + (f"<p class='set-err' id='e-{key}' role='alert'>{html.escape(err)}</p>" if err else "")
-        + f"</div><div class='set-ctl'>{control}{reset}</div>{confirm}</div>"
+        + f"</div><div class='set-ctl'>{control}{reset}"
+        # at its default, the word sits under the control (final polish P-10: a lone "Default."
+        # line under every name)
+        + (f"<p class='set-src def' id='s-{key}'>Default</p>" if src == "Default." else "")
+        + f"</div>{confirm}</div>"
     )
 
 

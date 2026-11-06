@@ -491,7 +491,7 @@ def hub_html(
 
 
 HUB_CSS = """
-.lp-hub{max-width:62rem;margin:0 auto}
+.lp-hub{max-width:62rem;margin:0}
 /* the name box narrows the rows (QG-25): a hidden row or group is gone, the count line only shows
    with words */
 .lp-hub .ygrp[hidden],.lp-hub .yrow[hidden]{display:none}
@@ -1754,6 +1754,33 @@ CSS = """
   .lp-img{grid-template-columns:minmax(0,1fr)}
 }
 .lp-defpick .main{min-height:44px} .lp-tagpv input[type=color]{height:44px}
+/* the same folds by the table's own width in em (large text; theme.py folds the shared parts at
+   the same widths): the column heads hide with their columns, the pinned rows take their areas */
+@media (min-width:600px){ @container (max-width:46em){
+  .lp-pin .tr:not(.th){grid-template-columns:var(--cols-md);
+    grid-template-areas:"card copies menu" "notes notes notes"}
+  .lp-pin .tr:not(.th) > .title{grid-area:card} .lp-pin .tr:not(.th) > .lp-copies{grid-area:copies}
+  .lp-pin .tr:not(.th) > .lp-notes{grid-area:notes; margin-top:.4rem}
+  .lp-pin .tr:not(.th) > .act{grid-area:menu}
+  .lp-pin .th .lp-notes-h{display:none}
+  .lp-cc .tr{grid-template-columns:var(--cols-md)} .lp-cc .lp-setnum{display:none}
+} }
+@container (max-width:38em){
+  .lp .ui-table .sm-hide{display:none}
+  .lp .ui-table .tr{padding:.55rem .75rem}
+  .lp .ui-table .sm-only.flags{display:flex; gap:.3rem; flex-wrap:wrap; margin-top:.3rem; font-size:inherit;
+    color:inherit; flex-basis:auto}
+  .lp .ui-table .sm-only{display:block;color:var(--text-muted);font-size:.86rem;font-weight:400}
+  .lp .ui-table .sm-only code{font-size:.84rem}
+  .lp-tagc .sm-only{flex-basis:auto}
+  .lp-cc .tr{grid-template-columns:var(--cols-sm)}
+  .lp-pin .tr:not(.th){grid-template-columns:minmax(0,1fr) 44px;
+    grid-template-areas:"card menu" "copies copies" "notes notes"}
+  .lp-pin .tr:not(.th) > .title{grid-area:card} .lp-pin .tr:not(.th) > .lp-copies{grid-area:copies;
+    margin:.4rem 0 0 calc(34px + .6rem)}
+  .lp-pin .tr:not(.th) > .lp-notes{grid-area:notes; margin:.4rem 0 0 calc(34px + .6rem)}
+  .lp-pin .tr:not(.th) > .act{grid-area:menu}
+}
 """
 
 

@@ -231,7 +231,9 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .ybox .ylist .pick.all{display:flex}
 /* the box is narrow everywhere: the count on its own row, Apply and Reject side by side under it */
 .ybox .wbar .wtop{flex-basis:100%}
-.ybox .wbar button[name=action]{flex:1 1 0;min-width:0}
+/* each button at least its own word wide: a row each when both can't share one (final polish P-6:
+   "Appl/y" at 320 px and 200% text) */
+.ybox .wbar button[name=action]{flex:1 1 7em;min-width:min-content}
 .propbox .yall{display:flex;align-items:center;justify-content:space-between;min-height:44px;margin:.5rem 0 0;
   padding:0 .75rem;border-radius:14px;border:1px solid var(--border-soft);background:var(--surface);
   color:var(--text);text-decoration:none;font-weight:700}
@@ -246,7 +248,7 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
   /* the count and Clear on one row, Apply and Reject side by side on the next: two rows at
      200% text too */
   .wbar:not(.inline) .wtop{flex-basis:100%}
-  .wbar button[name=action]{flex:1 1 0;min-width:0}
+  .wbar button[name=action]{flex:1 1 7em;min-width:min-content}
   .pick .by{flex-basis:100%;padding-left:1.85rem}
   .wrow .review{padding:0 .4rem}
 }

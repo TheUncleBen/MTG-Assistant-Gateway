@@ -100,8 +100,15 @@ def test_the_box_look_is_rounder_and_softer_than_the_panels_in_both_themes() -> 
         "@media (prefers-reduced-motion:reduce){\n  .mtgbox-scrim,.mtgbox-scrim > .mtgbox{transition:none}"
         in css
     )
-    # the header: the title and a 44 px round ×, on every box
-    assert ".mtgbox .bh{display:flex;align-items:center" in css
+    # the header: the title and a 44 px round × at its top right, on every box; the title's first
+    # line leaves the ×'s room and a second line takes the whole width (a long name moves down
+    # whole instead of breaking beside the ×)
+    assert ".mtgbox .bh{--th:1.25rem;" in css and "position:relative;min-height:44px" in css
+    centred = (
+        ".mtgbox .bh > .bx{position:absolute;top:max(0px, calc(var(--tp) + .65 * var(--th) - 22px));right:0}"
+    )
+    assert centred in css
+    assert '.mtgbox .bh h2::before{content:"";float:right;width:calc(44px + .5rem);height:1.3em}' in css
     assert re.search(
         r"\.mtgbox \.bx,\.mtgbox a\.bx\{[^}]*width:44px;\s*height:44px;min-height:44px;min-width:44px", css
     )

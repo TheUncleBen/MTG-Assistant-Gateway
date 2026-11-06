@@ -42,7 +42,7 @@ def test_deck_details_read_as_deck_settings_names_them() -> None:
     assert line("private", "no", "yes") == "Private: no → yes"
     assert line("unlisted", "no", "yes") == "Unlisted: no → yes"
     assert line("name", "“Old”", "“New”") == "Deck name: “Old” → “New”"
-    assert line("folder", "Top level (no folder)", "Cube") == "Folder: Top level (no folder) → Cube"
+    assert line("folder", "No folder", "Cube") == "Folder: No folder → Cube"
     assert line("cover", "automatic", "Sol Ring") == "Cover image: automatic → Sol Ring"
     assert line("tags", "none", "budget", added=["budget"]) == "Deck tags: none → budget (adds budget)"
     assert row_line({"kind": "description", "after_len": 0}) == "Description: cleared"

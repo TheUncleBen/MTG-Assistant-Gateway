@@ -1426,7 +1426,10 @@ WATCH_PAGE_CSS = (
 .watch-page .wx[hidden]{display:none}
 .watch-page .wx-chg{grid-column:1 / -1;display:none;flex-wrap:wrap;gap:.25rem 1rem;margin:0;font-size:.88rem;
   color:var(--text-muted)}
-@media (max-width:899.98px){.watch-page .wx{grid-template-columns:1fr}.watch-page .wx-chg{display:flex}}
+/* one column on a phone and a Fold: minmax(0,1fr), as 1fr alone let the price table's width set the
+   column and the panel ran 34 px out of a 320 px window at 200% text */
+@media (max-width:899.98px){.watch-page .wx{grid-template-columns:minmax(0,1fr)}
+  .watch-page .wx-chg{display:flex}}
 .watch-page .wx h3{font-size:1rem;margin:0}
 .watch-page .wx-h{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.4rem .75rem;

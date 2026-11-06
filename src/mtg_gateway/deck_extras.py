@@ -537,7 +537,7 @@ def package_box_html(
         f"<div class='ui-chips' role='group' aria-label='Which packages'>{chips}</div>"
         "<div class='dx-pkf'>"
         "<div class='field'><label for='dx-pkq'>Package name</label>"
-        "<input id='dx-pkq' type='search' placeholder='Package name' autocomplete='off' maxlength='100'>"
+        "<input id='dx-pkq' type='search' placeholder='Name' autocomplete='off' maxlength='100'>"
         "</div>"
         "<div class='field'><label for='dx-pkfmt'>Intended format</label><span class='sel'>"
         f"<select id='dx-pkfmt'>{fmt_opts}</select></span></div>"

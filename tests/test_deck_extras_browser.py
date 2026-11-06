@@ -737,7 +737,7 @@ def test_the_new_deck_and_new_package_boxes_pick_a_folder(server: Server, width:
             box.wait_for(state="visible")
             page.wait_for_timeout(300)
             sel = box.locator(f"#{sel_id}")
-            assert sel.locator("option").all_inner_texts() == ["Top level (no folder)", "Brews"]
+            assert sel.locator("option").all_inner_texts() == ["No folder", "Brews"]
             assert sel.input_value() == ""
             sel.select_option(fid)
             page.wait_for_timeout(100)

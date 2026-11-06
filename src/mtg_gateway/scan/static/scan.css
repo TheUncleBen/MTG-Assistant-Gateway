@@ -184,11 +184,13 @@ body.picker-open{overflow:hidden}
   border:3px solid var(--orange);pointer-events:none}
 .scan .camera .guide::before{left:-3px;top:-3px;border-right:0;border-bottom:0;border-top-left-radius:6px}
 .scan .camera .guide::after{right:-3px;bottom:-3px;border-left:0;border-top:0;border-bottom-right-radius:6px}
-.scan .camera .guide .title{position:absolute;left:4%;right:4%;top:4%;height:8.5%;
+.scan .camera .guide .title{position:absolute;left:4%;right:4%;top:4%;height:8.5%;container-type:size;
   border:2px dashed var(--orange);border-radius:var(--radius-panel);background:var(--orange-tint)}
-/* the label stays on one line inside the name box, which is a share of the viewfinder, at any text size */
+/* the label stays on one line inside the name box, which is a share of the viewfinder, at any text
+   size: sized by the box itself (final polish AC4: by the window, it was cut to "CARD NA") */
 .scan .camera .guide .title::after{content:"card name";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
-  text-align:center;color:var(--navbar-text);font-weight:700;font-size:min(.8rem,3vw);letter-spacing:.08em;text-transform:uppercase;
+  text-align:center;color:var(--navbar-text);font-weight:700;font-size:min(.8rem,11cqi,60cqb);letter-spacing:.08em;
+  text-transform:uppercase;
   white-space:nowrap;overflow:hidden;
   text-shadow:0 1px 2px var(--navbar-bg);opacity:.9}
 .scan .cam-hint{margin:0;text-align:center;font-size:.9rem;font-weight:700}
