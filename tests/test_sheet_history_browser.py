@@ -834,3 +834,40 @@ def test_the_app_and_chromium_on_android_keep_no_history_entry_for_a_layer(
             page.wait_for_url(f"{server.base}{PREV}")
         assert errors == [], errors
         browser.close()
+
+
+@pytest.mark.parametrize("name,path,kind", [LIVE[0], LIVE[3]], ids=["cards", "search"])
+def test_a_slow_back_over_the_sheet_still_lands_on_the_filtered_address(
+    server: Server,  # noqa: F811
+    name: str,
+    path: str,
+    kind: str,
+) -> None:
+    """Under load the sheet's own history.back() can take longer than the layers' 1.5 s wait
+    (static/layers.js settled): the filter's address was then set on the sheet's entry, and the
+    back landed on the page's entry with the address from before the filter (the full suite's
+    "search-select-widen" run). The address waits for the landing however long it takes."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360, "light", exe)
+        _arrive(page, server.base, path)
+        _open_sheet(page)
+        here = page.url
+        _tick(page, kind)
+        page.wait_for_url(lambda u: u != here)
+        _settle(page)
+        filtered = page.url
+        # a busy machine: the browser takes 2.5 s to step back
+        page.evaluate(
+            "() => { const back = history.back.bind(history); history.back = () => setTimeout(back, 2500); }"
+        )
+        page.set_viewport_size({"width": 1280, "height": 860})  # the sheet closes as the window widens
+        page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        page.wait_for_function(PLAIN, timeout=10_000)  # the sheet's entry is gone: the back landed
+        quiet(page)
+        assert page.url == filtered, (name, page.url)
+        assert errors == [], errors
+        browser.close()

@@ -121,6 +121,7 @@
     shownForm = formSerial();
   }
   var landed = false;  // the layers' back() has landed: an address set now goes on the entry it landed on
+  var lateHref = null;  // an address for the entry a back() that was slow to land lands on
   // a page script's own entry (static/search.js, decks.js push one): the page shows that address
   function showing() { shownAddr = here(); shownForm = formSerial(); }
   // Back or Forward landed on an entry of this page with another address than the page shows:
@@ -170,10 +171,14 @@
   function giveBack(layer, then) {
     var href = sheetHref;
     var go = function () {
+      // the layers' wait for a back() that is slow to land ran out (a busy machine): the address
+      // goes on the entry showing now and again on the one the back lands on (popstate below)
+      var early = !!(Layers && Layers.inFlight());
       landed = true;
       if (href) address(href);
       if (carry) { address(carry); carry = null; }
       landed = false;
+      if (early) lateHref = here();
       if (then) then();
     };
     if (layer && Layers) Layers.release(layer, go); else go();
@@ -258,6 +263,15 @@
   // it. The layers' own back() (the sheet's, a menu's) is not a Back press. The sheet's own Back
   // is the layers' (static/layers.js), which closes it; Forward never brings a layer back
   window.addEventListener("popstate", function () {
+    var late = lateHref;
+    lateHref = null;  // for that landing only, never a later Back press
+    if (late && Layers && Layers.landing()) {
+      // the slow back() of the sheet's layer has landed (layers.js handled its popstate first)
+      landed = true;
+      address(late);
+      landed = false;
+      return;
+    }
     if (backPending()) return;
     if (!shownHere()) redraw();
   });
