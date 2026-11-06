@@ -639,7 +639,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<template class='tpl-icon'>{icon('tag')}</template>"
             f"<p class='muted small'>{icon('history')} A snapshot of the deck is kept first; one category is "
             "created per template, then the deck is read back. "
-            "<a href='/lists/templates'>Manage templates</a></p></form>"
+            + ui.cap_link("Manage templates", "/lists/templates")
+            + "</p></form>"
             + (ui.notice(error, "error", role="alert", cls="boxnote") if error else "")
         )
         return ui.box(

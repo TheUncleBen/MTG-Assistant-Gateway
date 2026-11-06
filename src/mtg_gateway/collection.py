@@ -1962,7 +1962,8 @@ def _tag_boxes(all_tags: list[str], on: list[str], colors: dict[str, str] | None
     if not all_tags:
         return (
             "<div class='field tags'><span>Tags</span><span class='muted small'>No binder tags yet. "
-            "<a href='/lists/btags'>Make one</a></span></div>"
+            + ui.cap_link("Make one", "/lists/btags")
+            + "</span></div>"
         )
     ticks = "".join(
         tag_tick(t, colors, field=f"tag:{t}", checked=any(collection_tags.same_name(t, x) for x in on))

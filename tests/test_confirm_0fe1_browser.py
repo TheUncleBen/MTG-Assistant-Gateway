@@ -398,3 +398,192 @@ def test_the_in_binder_pill_keeps_to_one_line(server: Server, site, width: int) 
         assert lines and all(n == 1 for n in lines), lines
         ctx.close()
         browser.close()
+
+
+# -- P-15: a dot (or a count's spaced slash) between two facts never ends or starts a line -------
+
+# Every "·" and every " / " drawn as text under ``root``: the nearest letter before it and the
+# nearest after it (in its block, across inline elements) must sit on its own line. The site
+# crawl (test_site_checks_browser) runs the same function on every page.
+DANGLING = r"""(root) => {
+  const out = [];
+  const SKIP = 'code,pre,kbd,script,style,noscript,textarea,option,svg,.sr-only,[hidden],[aria-hidden=true]';
+  const blockOf = (el) => {
+    while (el && el !== root && getComputedStyle(el).display.startsWith('inline')) el = el.parentElement;
+    return el || root;
+  };
+  const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const done = new Set();
+  for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+    if (!/·| \/ /.test(n.textContent)) continue;
+    const p = n.parentElement;
+    if (!p || p.closest(SKIP) || !p.getClientRects().length) continue;
+    const block = blockOf(p);
+    if (done.has(block)) continue;
+    done.add(block);
+    // the block's characters in order, each with its text node and offset (shown text only)
+    const chars = [];
+    const bw = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    for (let m = bw.nextNode(); m; m = bw.nextNode()) {
+      const mp = m.parentElement;
+      if (!mp || mp.closest(SKIP) || !mp.getClientRects().length) continue;
+      if (blockOf(mp) !== block) continue;
+      for (let i = 0; i < m.textContent.length; i++) chars.push([m, i, m.textContent[i]]);
+    }
+    const box = (k) => {
+      const r = document.createRange(); r.setStart(chars[k][0], chars[k][1]); r.setEnd(chars[k][0], chars[k][1] + 1);
+      const rs = [...r.getClientRects()].filter(x => x.width > 0 || x.height > 0);
+      return rs.length ? rs[0] : null;
+    };
+    for (let k = 0; k < chars.length; k++) {
+      const c = chars[k][2];
+      const slash = c === '/' && k > 0 && k < chars.length - 1 && /\s/.test(chars[k - 1][2]) &&
+        /\s/.test(chars[k + 1][2]);
+      if (c !== '·' && !slash) continue;
+      const me = box(k);
+      if (!me) continue;
+      let a = k - 1, b = k + 1;
+      while (a >= 0 && /\s/.test(chars[a][2])) a--;
+      while (b < chars.length && /\s/.test(chars[b][2])) b++;
+      const half = me.height / 2;
+      const ra = a >= 0 ? box(a) : null, rb = b < chars.length ? box(b) : null;
+      const around = (j) => chars.slice(Math.max(0, j - 14), j + 14).map(x => x[2]).join('').replace(/\s+/g, ' ');
+      if (ra && Math.abs(ra.top - me.top) > half)
+        out.push('"' + c + '" starts a line: "' + around(k).trim() + '"');
+      else if (rb && Math.abs(rb.top - me.top) > half)
+        out.push('"' + c + '" ends a line: "' + around(k).trim() + '"');
+    }
+  }
+  return out;
+}"""
+
+DOT_PLACES = [
+    "/",
+    "/account",
+    "/account/details",
+    "/collection",
+    "/collection/lists",
+    "/collection/wants",
+    "/decks/42/contest",
+    "/watchlist",
+    "/decks/42",
+    "/history",
+]
+
+
+@pytest.mark.parametrize("variant", ["320 root", "320 text", "360 text", "360 app root", "412 root", "412 app text"])
+def test_no_dot_between_facts_dangles_at_a_line_end_or_start(server: Server, site, variant: str) -> None:  # noqa: F811
+    """P-15: a "·" between facts was left at a line's end or start in seven places ("Archidekt:
+    alice ·" on Account, "alice@example.test ·", "10 entries ·", "English ·", "· next expir…" on
+    Home) and the counters "0 / 150" and "0 / 5000" broke after their slash."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    width = int(variant.split()[0])
+    root, app, zoom = "root" in variant, "app" in variant, "text" if "text" in variant else None
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = _ctx(browser, server, sid, width, root=root, app=app)
+        page = ctx.new_page()
+        for path in DOT_PLACES:
+            _goto(page, server, path, zoom)
+            problems += [f"{path}: {f}" for f in page.evaluate(f"() => ({DANGLING})(document.body)")]
+        ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)
+
+
+# -- P-10: the admin settings as a settings list -------------------------------------------------
+
+# A block whose whole text is "Default" (a lone status line under a setting), and each On/Off
+# setting whose control is not at the end of its name's row
+SETTINGS_LIST = """() => {
+  const out = [];
+  for (const e of document.querySelectorAll('main *')) {
+    if (!e.getClientRects().length || e.closest('.sr-only')) continue;
+    if (getComputedStyle(e).display.startsWith('inline')) continue;
+    if (/^Default\\.?$/.test((e.innerText || '').trim())) out.push('a lone "Default" line in ' + e.className);
+  }
+  for (const row of document.querySelectorAll('.set-row')) {
+    if (!row.getClientRects().length || row.closest('details:not([open])')) continue;
+    const sw = row.querySelector('input[type=checkbox][name^=v_], input[type=radio][value=off]');
+    if (!sw) continue;
+    const lab = row.querySelector('.set-label').getBoundingClientRect();
+    const ctl = (sw.closest('label') || sw).getBoundingClientRect();
+    if (ctl.top > lab.bottom || ctl.left < lab.right) out.push(row.id + ': its On/Off is not at the end of its row');
+  }
+  return out;
+}"""
+
+
+def test_the_admin_settings_are_a_settings_list(server: Server, site) -> None:  # noqa: F811
+    """P-10: /admin/settings was form panels with 35 lone "Default" lines; it is the deck settings'
+    style: each setting's name and help with its control beside them, an On/Off one a switch at
+    the end of its row, and no line saying "Default"."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for width in (412, 1280):
+            ctx = _ctx(browser, server, sid, width)
+            page = ctx.new_page()
+            _goto(page, server, "/admin/settings")
+            problems += [f"@{width}: {f}" for f in page.evaluate(SETTINGS_LIST)]
+            ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems[:20])
+
+
+# -- P-16: the deck header meets the top bar on a phone ----------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/decks/42", "/decks/42?view=grid", "/decks/44"])
+def test_the_deck_header_meets_the_top_bar_on_a_phone(server: Server, site, path: str) -> None:  # noqa: F811
+    """P-16: a 14 px band of the page's colour sat between the top bar and the deck header on a
+    360 px phone (gone at 717 and 1280)."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for width in (360, 412, 717, 1280):
+            ctx = _ctx(browser, server, sid, width)
+            page = ctx.new_page()
+            _goto(page, server, path)
+            gap = page.evaluate(
+                "() => document.querySelector('main .banner').getBoundingClientRect().top -"
+                " document.querySelector('.topbar').getBoundingClientRect().bottom"
+            )
+            assert abs(gap) <= 1, (width, gap)
+            ctx.close()
+        browser.close()
+
+
+# -- P-11: an action link in a line of help is a 44 px target ------------------------------------
+
+
+def test_the_inline_action_links_are_44_px_targets(server: Server, site) -> None:  # noqa: F811
+    """P-11: "Manage templates" in the deck settings' Add template box was 105x15 px, and "Make
+    one" in the Binder card's Details box is the same markup; every such action closing a line of
+    help is a capsule with a 44 px tap area."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = _ctx(browser, server, sid, 360)
+        page = ctx.new_page()
+        _goto(page, server, "/decks/42/settings")
+        page.evaluate(
+            "() => { const a = document.querySelector('a[href=\"/lists/templates\"]');"
+            " const b = a.closest('.ui-box'); if (b && window.MtgBox) window.MtgBox.openElement(b.id); }"
+        )
+        page.wait_for_selector(".mtgbox a[href='/lists/templates']")
+        redrawn(page)
+        r = page.locator(".mtgbox a[href='/lists/templates']").bounding_box()
+        assert r and r["height"] >= 43.5 and r["width"] >= 43.5, r
+        ctx.close()
+        browser.close()

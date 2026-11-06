@@ -13,3 +13,12 @@ def test_all_shown_names_one_alone() -> None:
     assert ui.all_shown(1, "deck") == "1 deck shown."
     assert ui.all_shown(2, "deck") == "All 2 decks shown."
     assert ui.all_shown(1234, "entry", "entries") == "All 1,234 entries shown."
+
+
+def test_make_one_is_a_capsule() -> None:
+    """P-11: "Make one" in the Binder card's Details box (no binder tags yet) was a bare 15 px
+    link; it is a capsule with a 44 px tap area."""
+    from mtg_gateway import collection
+
+    html = collection._tag_boxes([], [])
+    assert "<a class='ui-cap' href='/lists/btags'>Make one</a>" in html

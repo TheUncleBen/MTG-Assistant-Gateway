@@ -3023,7 +3023,9 @@ def deck_list_html(
             return (
                 f"<div class='panel'><p>No decks in the folder “{esc(folder)}”"
                 + (f" matching “{esc(q)}”" if q else "")
-                + ". <a href='/decks'>Show every folder</a>.</p></div>"
+                + ". "
+                + ui.cap_link("Show every folder", "/decks")
+                + "</p></div>"
             )
         return (
             "<div class='panel'><p>No decks yet"
@@ -3259,9 +3261,9 @@ DECK_CSS = (
     """
 /* deck banner (cardBanner / deckHeaderInfo) */
 .banner{position:relative;margin:0 calc(-1 * var(--gutter)) 1rem;color:#fff;isolation:isolate;z-index:2}
-/* from 600 px the banner meets the top bar (the 0.7.46 Fold mockup; a phone's header is a card
-   with the page's colour above it, mockup screen 5): it takes back the page's top padding */
-@media (min-width:600px){ .banner{margin-top:calc(-1 * var(--main-top,1rem))} }
+/* the banner meets the top bar at every width (the 0.7.46 Fold mockup): it takes back the page's
+   top padding (on a phone too: a 14 px band of the page's colour sat above it, confirmation P-16) */
+.banner{margin-top:calc(-1 * var(--main-top,1rem))}
 /* the toolbar below is positioned too; while a banner menu is open the banner must win */
 .banner:has(details[open]){z-index:6}
 /* no featured art: no empty grey band on phones */

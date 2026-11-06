@@ -1598,7 +1598,8 @@ def _users_body(
     else:
         table = (
             "<div class='ui-card'><p>Nobody matches these filters. "
-            f"<a href='{path}'>Show everyone</a></p></div>"
+            + ui.cap_link("Show everyone", path)
+            + "</p></div>"
         )
     newer = (
         _href(path, chip=chip, app=app, seen=seen, q=q, offset=max(0, offset - PER_PAGE))
@@ -1948,7 +1949,8 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
     else:
         table = (
             "<div class='ui-card'><p>Nothing counted matches these filters. "
-            f"<a href='{path}'>Show everything</a></p></div>"
+            + ui.cap_link("Show everything", path)
+            + "</p></div>"
         )
     newer = (
         _href(path, kind=kind, days=days if days != DAYS else "", q=q, offset=max(0, offset - PER_PAGE))
@@ -2147,7 +2149,7 @@ def _models_body(
             + "</div>"
         )
     else:
-        table = f"<div class='ui-card'><p>No card models match. <a href='{path}'>Show all</a></p></div>"
+        table = f"<div class='ui-card'><p>No card models match. {ui.cap_link('Show all', path)}</p></div>"
     newer = (
         _href(path, q=q, member=member, changed=changed, offset=max(0, offset - PER_PAGE))
         if offset > 0

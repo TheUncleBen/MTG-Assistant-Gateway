@@ -198,7 +198,8 @@ async def test_a_number_keeps_its_unit_inside_the_box(gw: Harness) -> None:
         assert "<span class='set-num has-u'><input type='number' id='f-proposal_expiry_days'" in row
         assert "u-proposal_expiry_days r-proposal_expiry_days'" in row
         assert "<span class='unit' id='u-proposal_expiry_days'>days</span></span>" in row
-        assert "class='set-num'><input" in r.text.split("id='s-row-auto_apply_max_rows'", 1)[1][:400]
+        row = r.text.split("id='s-row-auto_apply_max_rows'", 1)[1].split("id='s-row-", 1)[0]
+        assert "class='set-num'><input" in row
         assert "<span class='ui-hint unsaved' aria-live='polite'></span>" in r.text
     finally:
         await b.aclose()
