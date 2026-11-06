@@ -154,7 +154,35 @@
     n.classList.toggle("more-start", over && n.scrollLeft > 1);
     n.classList.toggle("more-end", over && n.scrollLeft + n.clientWidth < n.scrollWidth - 1);
   }
+  // a switch's parts are all as wide as its widest one, in rows that hold as many each (one apart
+  // at most): as many a row as fit whole, then spread evenly over the rows needed, so no part sits
+  // alone under a full row ("Card models" at 412 px) and none is cut (confirmation NA4, P-9)
+  function balance(n) {
+    if (!n.matches(".hubseg") || !n.getClientRects().length) return;
+    var kids = Array.prototype.filter.call(n.children, function (k) {
+      return k.getClientRects().length && getComputedStyle(k).position !== "absolute";
+    });
+    if (kids.length < 2) return;
+    // the room: the line the switch sits on (its parent's width, less its own padding)
+    var cs = getComputedStyle(n), ps = getComputedStyle(n.parentElement), gap = parseFloat(cs.columnGap) || 0;
+    var room = Math.min(n.parentElement.clientWidth - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight),
+      document.documentElement.clientWidth) - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) -
+      parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth), w = 0;
+    // each part measured on one line at its own width
+    n.classList.remove("seg-grid");
+    n.classList.add("seg-measure");
+    kids.forEach(function (k) { w = Math.max(w, k.getBoundingClientRect().width); });
+    n.classList.remove("seg-measure");
+    var len = kids.length;
+    var cols = Math.max(1, Math.min(len, Math.floor((room + gap) / (w + gap) + 0.001)));
+    cols = Math.ceil(len / Math.ceil(len / cols));
+    // a last row of one part under fuller rows is a part alone: fewer a row until none is
+    while (cols > 1 && len % cols === 1) cols--;
+    n.style.setProperty("--seg-cols", String(cols));
+    n.classList.add("seg-grid");
+  }
   function show(n) {
+    balance(n);
     var cur = n.querySelector("[aria-current=page], [aria-selected=true]");
     if (cur && n.scrollWidth > n.clientWidth + 1) {
       var r = n.getBoundingClientRect(), c = cur.getBoundingClientRect();
@@ -170,7 +198,13 @@
     show(n);
     // the phone's text size can change after this runs: follow the parts' own size
     if (window.ResizeObserver) {
-      var ro = new ResizeObserver(function () { show(n); });
+      // in the next frame: the switch laid out again by show() is not measured in this one
+      var queued = false;
+      var ro = new ResizeObserver(function () {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(function () { queued = false; show(n); });
+      });
       ro.observe(n);
       Array.prototype.forEach.call(n.children, function (k) { ro.observe(k); });
     }

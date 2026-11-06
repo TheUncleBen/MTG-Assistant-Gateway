@@ -1489,8 +1489,15 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg a .cn{display:inline-grid;place-items:center;min-width:20px;min-height:20px;height:auto;padding:0 6px;
   border-radius:10px;background:var(--surface-3);color:var(--text);font-size:.78rem;font-weight:700}
 .hubseg a,.hubseg > button{min-height:44px}
+/* static/topbar.js: the parts in equal columns, as many a row as fit whole, the rows evenly filled
+   (confirmation NA4: parts of their own widths, and "Card models" alone on a second row). Without
+   scripts the parts wrap as above. seg-measure is the one-row layout the script measures in */
+.hubseg.seg-grid{display:inline-grid;grid-template-columns:repeat(var(--seg-cols),minmax(0,1fr))}
+.hubseg.seg-measure{display:flex!important;flex-wrap:nowrap!important}
+.hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
+.hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
-@media (max-width:599.98px){ .hubseg{display:flex;width:100%}
+@media (max-width:599.98px){ .hubseg{display:flex;width:100%} .hubseg.seg-grid{display:grid}
   .hubbar{display:block}
   /* large text on a narrow phone: a part keeps its name on one line and moves to the next row
      whole when the row is full (final polish AC9: "My / Decks" beside a one-line "Packages") */

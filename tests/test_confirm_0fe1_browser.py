@@ -250,7 +250,8 @@ SEG_ROWS = """() => {
     if (s.scrollWidth > s.clientWidth + 1) out.push('scrolls sideways');
     const counts = [...rows.values()].map(r => r.length);
     const name = (s.getAttribute('aria-label') || s.className) + ' (' + kids.map(k => k.textContent.trim()).join('|') + ')';
-    if (Math.max(...counts) - Math.min(...counts) > 1) out.push(name + ' rows of ' + counts.join('+'));
+    if (Math.max(...counts) - Math.min(...counts) > 1 || (Math.max(...counts) > 1 && counts[counts.length - 1] === 1))
+      out.push(name + ' rows of ' + counts.join('+'));
     const ws = kids.map(k => k.getBoundingClientRect().width);
     if (Math.max(...ws) - Math.min(...ws) > 2) out.push(name + ' parts of ' + ws.map(Math.round).join('/') + ' px');
   }
