@@ -138,7 +138,8 @@ def test_the_back_key_asks_only_a_gateway_page_and_a_new_page_starts_with_no_lay
     main = _kt("MainActivity.kt")
     back = main.split("override fun handleOnBackPressed")[1].split("private val windowInfo")[0]
     asks = back.index("evaluateJavascript(BACK_KEY)")
-    assert re.search(r"if \(gatewayPage\)[^\n]*\{\s*\n?\s*web\.evaluateJavascript\(BACK_KEY\)", back[: asks + 40])
+    asked_on_gateway = r"if \(gatewayPage\)[^\n]*\{\s*\n?\s*web\.evaluateJavascript\(BACK_KEY\)"
+    assert re.search(asked_on_gateway, back[: asks + 40])
     started = main.split("override fun onPageStarted")[1].split("override fun")[0]
     finished = main.split("override fun onPageFinished")[1].split("override fun")[0]
     assert "layerOpen = false" in started

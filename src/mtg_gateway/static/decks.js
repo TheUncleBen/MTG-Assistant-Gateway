@@ -48,7 +48,12 @@
     var opts = { credentials: "same-origin", headers: { Accept: "application/json" } };
     if (ctl) opts.signal = ctl.signal;
     return fetch(src, opts)
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(String(r.status))); })
+      .then(function (r) {
+        if (r.ok) return r.json();
+        var err = new Error(String(r.status));
+        err.wait = (r.status === 429 || r.status === 503) ? parseInt(r.headers.get("Retry-After") || "", 10) : NaN;
+        return Promise.reject(err);
+      })
       .then(function (data) {
         if (!data || typeof data.html !== "string") throw new Error("bad answer");
         if (mine !== seq) return null;  // a newer load is on its way: this one says nothing
@@ -63,8 +68,34 @@
       });
   }
 
+  // A cold list can take Archidekt a while (the gateway waits up to 25 s): after a few seconds the
+  // placeholder says so in words, not only grey bars; an answer that Archidekt is busy (429 or 503
+  // with Retry-After) is asked again once, after the wait it names (polish AD4).
+  var STILL_MS = 3000, BUSY_WAIT_MAX = 30;
+  function still(box) {
+    if (!box.hasAttribute("aria-busy")) return;
+    var say = box.querySelector("[role=status]");
+    if (!say) {
+      say = document.createElement("p");
+      say.setAttribute("role", "status");
+      box.appendChild(say);
+    }
+    say.className = "muted";
+    say.textContent = "Still reading your decks from Archidekt.";
+  }
   boxes.forEach(function (box) {
-    load(box, box.getAttribute("data-decks-src")).catch(function () { failed(box); });
+    var src = box.getAttribute("data-decks-src");
+    var timer = setTimeout(function () { still(box); }, STILL_MS);
+    function done() { clearTimeout(timer); }
+    load(box, src).then(done, function (err) {
+      var wait = err && err.wait;
+      if (wait > 0 && wait <= BUSY_WAIT_MAX && box.hasAttribute("aria-busy")) {
+        still(box);
+        return new Promise(function (go) { setTimeout(go, wait * 1000); })
+          .then(function () { return load(box, src); });
+      }
+      throw err;
+    }).then(done, function () { done(); failed(box); });
   });
 
   // -- My decks: the filter panel refreshes the list in place --------------------------------------
