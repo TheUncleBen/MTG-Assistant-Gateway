@@ -1156,8 +1156,12 @@ body .tabbar:has(details.more[open]){z-index:25}
    fixed 18 px box, or a line of 1, left the glyphs' area pushing out of it), and sitting 4 px
    from the tab's top and 5 px right of its middle it covers the icon's top-right corner only,
    never its centre; the bell's count is laid out the same way */
+/* the count grows with the text; its padding and its gap to the top give way as it grows (4 px at
+   14 px text, 1 px and 0 at 200%), so a two-digit count stays inside its tab and off the icon's
+   centre (W2) */
 .tabbar > a .nb,.tabbar > a.bell .n{font-size:.72rem;display:inline-grid;place-items:center;
-  line-height:normal;height:auto;min-height:18px}
+  line-height:normal;height:auto;min-height:18px;top:max(0px, calc(14px - .72rem));
+  padding-left:max(1px, calc(14px - .72rem));padding-right:max(1px, calc(14px - .72rem))}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
@@ -1809,8 +1813,10 @@ main.wrap.ui-wide{max-width:1200px}
 
 /* a line of short facts with a dot between them ("Last check today · Prices from Scryfall"): the
    dot is drawn before each item but the line's first, in the gap, and a wrapped line's first item
-   loses its dot at the clipped edge, so no dot is ever left dangling at a line end (polish C1) */
-.ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;overflow:hidden}
+   loses its dot at the clipped edge, so no dot is ever left dangling at a line end (polish C1).
+   Only the left edge is clipped: a capsule's transparent hang (.ui-cap's --hang, part of its tap
+   area) may reach past the other edges, where overflow:hidden cut it off */
+.ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;clip-path:inset(-8px -8px -8px 0)}
 .ui-dots > *{position:relative;min-width:0}
 .ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}
 /* no dot before a chip, a label or a button (or the item that wraps one): drawn at the top of a
@@ -1845,10 +1851,12 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-bar.slim > .btn{min-width:var(--ctl)}
 /* a narrow bar (a phone, or large text) keeps the red action's icon and drops its word; the
    narrowest (a 360 px phone) keeps the count's number and leaves its word to screen readers
-   (zero-size text stays in the line and in the accessibility tree). The sizes are the bar's
-   content box. */
+   (drawn out of sight as .sr-only is, so it stays in the accessibility tree; a zero font size
+   kept it there too but read as text that does not grow with the text size). The sizes are the
+   bar's content box. */
 @container (max-width:29em){ .ui-bar.slim > .btn .lbl{display:none} }
-@container (max-width:23.5em){ .ui-bar.slim .count .lbl{font-size:0} }
+@container (max-width:23.5em){ .ui-bar.slim .count .lbl{position:absolute;width:1px;height:1px;padding:0;
+  margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0} }
 /* it stays above the phone's bottom tab bar (--tab-room: its real height, static/topbar.js; 4rem
    without scripts covers it at 200% text) */
 .has-tabbar .ui-bar{bottom:calc(var(--tab-room,0px) + .75rem)}
@@ -2159,10 +2167,17 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
   transition:transform .22s cubic-bezier(.2,.8,.3,1)}
 .mtgbox-scrim.in > .mtgbox{transform:none}
 .mtgbox.wide{width:min(100%,56rem)}
-/* the header: the title, and the × at its right on every box (44 px, round) */
-.mtgbox .bh{display:flex;align-items:center;gap:.5rem;margin:0 -.5rem .5rem 0}
-.mtgbox .bh h2{flex:1;min-width:0;margin:0;font-size:1.25rem;line-height:1.3;overflow-wrap:anywhere;
-  padding:.45rem 0}
+/* the header: the title, and the × at its top right on every box (44 px, round). The title's
+   first line leaves the ×'s room (a float in the title) and a second line takes the whole width,
+   so a long name moves down whole instead of breaking inside beside the × (a 31-letter card name
+   in "Price alert: …" on a 360 px phone) */
+.mtgbox .bh{--th:1.25rem;--tp:max(.45rem, calc((44px - 1.3 * var(--th)) / 2));position:relative;
+  min-height:44px;margin:0 -.5rem .5rem 0}
+.mtgbox .bh h2{margin:0;font-size:var(--th);line-height:1.3;overflow-wrap:break-word;
+  padding:var(--tp) 0 .45rem}
+.mtgbox .bh h2::before{content:"";float:right;width:calc(44px + .5rem);height:1.3em}
+/* the × centred on the title's first line, however large the text */
+.mtgbox .bh > .bx{position:absolute;top:max(0px, calc(var(--tp) + .65 * var(--th) - 22px));right:0}
 .mtgbox .bx,.mtgbox a.bx{display:inline-flex;align-items:center;justify-content:center;flex:none;width:44px;
   height:44px;min-height:44px;min-width:44px;padding:0;margin:0;border:0;border-radius:50%;
   background:transparent;color:var(--text-muted);box-shadow:none;cursor:pointer;text-decoration:none}
@@ -2586,7 +2601,7 @@ html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,
    letter (last, after the headings' own sizes above; the same bounds as the headings' own, so a
    412 px phone at 200% keeps "Preconstructed" whole too, batch 10 AB5) */
 @media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.5rem,7vw)}
-  .home .hero h1{font-size:min(1.6rem,8vw)} .mtgbox .bh h2{font-size:min(1.25rem,9vw)}}
+  .home .hero h1{font-size:min(1.6rem,8vw)} .mtgbox .bh{--th:min(1.25rem,9vw)}}
 """
 
 
