@@ -295,18 +295,32 @@ BADGE = """() => {
   if (cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom) out.push("the count covers the icon's centre");
   const ox = Math.max(0, Math.min(b.right, i.right) - Math.max(b.left, i.left));
   const oy = Math.max(0, Math.min(b.bottom, i.bottom) - Math.max(b.top, i.top));
+  // a capped size: no taller than the 22 px icon's corner allows (NA5: 25 px at a 28 px root);
+  // under a text-only zoom (which scales px text too) its box follows its own line
+  const fs = parseFloat(getComputedStyle(nb).fontSize);
+  if (b.height > Math.max(20.5, fs * 1.25)) out.push('the count is ' + Math.round(b.height) + 'px tall');
   if (ox * oy > 0.3 * i.width * i.height) out.push('the count covers ' + Math.round(100 * ox * oy / (i.width * i.height)) +
     '% of the icon');
   return out;
 }"""
 
 
-def test_the_tab_bar_count_stays_inside_its_tab_and_off_the_icon(server: Server, site) -> None:  # noqa: F811
+@pytest.mark.parametrize("waiting", [1, 15, 120])
+def test_the_tab_bar_count_stays_inside_its_tab_and_off_the_icon(
+    server: Server,  # noqa: F811
+    site,
+    waiting: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """NA5: at a 28 px root the Assistant tab's count grew over most of its icon. AD2: with the
     bar showing icons alone at 200% on a phone, the red count rose half over the bar's top edge,
-    over the page. The count keeps a capped size inside its tab, on the icon's corner only."""
+    over the page. The count keeps a capped size inside its tab, on the icon's corner only, for
+    one digit, two and "99+"."""
     from playwright.sync_api import sync_playwright
 
+    from mtg_gateway import theme
+
+    monkeypatch.setattr(theme, "WAITING_COUNT", lambda sub: waiting)
     exe, sid, _ = site
     problems: list[str] = []
     with sync_playwright() as p:

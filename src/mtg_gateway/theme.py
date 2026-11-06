@@ -1169,9 +1169,15 @@ body .tabbar:has(details.more[open]){z-index:25}
 /* the count grows with the text; its padding and its gap to the top give way as it grows (4 px at
    14 px text, 1 px and 0 at 200%), so a two-digit count stays inside its tab and off the icon's
    centre (W2) */
-.tabbar > a .nb,.tabbar > a.bell .n{font-size:.72rem;display:inline-grid;place-items:center;
+/* capped at 12 px (confirmation NA5, AD2: at 200% text a 20 px count, 25 px tall, covered the
+   Assistant icon and "99+" ran out of its tab): 18 px tall, on the icon's corner and inside its tab
+   (a text-only zoom, which scales px text too, still makes it taller by its own line) */
+.tabbar > a .nb,.tabbar > a.bell .n{font-size:min(.72rem, 12px);display:inline-grid;place-items:center;
   line-height:normal;height:auto;min-height:18px;top:max(0px, calc(14px - .72rem));
-  padding-left:max(1px, calc(14px - .72rem));padding-right:max(1px, calc(14px - .72rem))}
+  left:min(calc(50% + 5px), calc(100% - 1.7em - 3px));
+  padding-left:max(2px, calc(14px - .72rem));padding-right:max(2px, calc(14px - .72rem))}
+/* "99+" (.w3) is wider: it moves left as far as it must to stay inside its tab */
+.tabbar > a .nb.w3{left:min(calc(50% + 5px), calc(100% - 2.1em - 5px))}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
@@ -3107,9 +3113,10 @@ def render(
         more_open = cur in {href for _h, links in groups for href, _l, _i in links}
 
         def badge(n: int, label: str) -> str:
-            # the count in the bell's orange; read out with the place's name
+            # the count in the bell's orange; read out with the place's name ("99+" is .w3, wider)
+            cls = "nb" if n < 100 else "nb w3"
             return (
-                f"<span class='nb' aria-hidden='true'>{n if n < 100 else '99+'}</span>"
+                f"<span class='{cls}' aria-hidden='true'>{n if n < 100 else '99+'}</span>"
                 f"<span class='sr-only'>, {n} {label}</span>"
                 if n
                 else ""
