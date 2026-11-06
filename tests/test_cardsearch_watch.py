@@ -20,6 +20,7 @@ from .test_cardsearch_browser import CATALOG, _chromium
 from .test_deck_menu_browser import PNG
 from .test_suggest_browser import Server
 from .test_watchlist import Clock, _browser, _options
+from .waits import quiet
 
 stack_options = stack_with(_options())
 
@@ -220,7 +221,7 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         for _ in range(2):  # on a phone the first Escape closes the preview sheet
             if page.locator(".printpick.open").count():
                 page.keyboard.press("Escape")
-                page.wait_for_timeout(150)
+                quiet(page)
         page.wait_for_function("() => !document.querySelector('.printpick.open')")
         pic.focus()
         page.keyboard.press("Shift+F10")

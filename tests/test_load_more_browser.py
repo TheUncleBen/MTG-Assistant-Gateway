@@ -58,7 +58,7 @@ def test_load_more_adds_rows_in_place(server: Server, width: int, scheme: str) -
                 for _ in range(100):
                     if rows.count() > before:
                         break
-                    page.wait_for_timeout(50)
+                    page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
                 assert rows.count() > before and page.url == url, path
                 days = page.locator(f"{table} > .daygroup").all_inner_texts()
                 plain = [d.split("·")[0].strip() for d in days]
@@ -108,7 +108,9 @@ def test_the_pages_loaded_come_back_after_back_and_a_reload_with_the_scroll(serv
             n = page.evaluate(f"() => {ROWS}")
             assert page.evaluate("() => history.state && history.state.mtgmore") == 1
             page.evaluate("() => window.scrollTo(0, 500)")
-            page.wait_for_timeout(500)  # the place is noted once the scrolling settles
+            page.wait_for_function(
+                "() => window.scrollY > 0 && history.state && history.state.mtgscroll === window.scrollY"
+            )  # the place is noted once the scrolling settles (loadmore.js)
             y = page.evaluate("() => window.scrollY")
             assert y > 0
             # away and Back: the rows and the place are back

@@ -15,6 +15,7 @@ from .test_cardsearch_browser import _chromium, _page
 from .test_overflow_sweep_browser import CARDS, MEASURE, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import BROWSER_200, ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -92,7 +93,7 @@ def test_the_watchlist_tables_keep_their_name_column_from_the_fold_to_a_desktop(
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
         if zoom != "none":
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-            page.wait_for_timeout(200)
+            redrawn(page)
         got = page.evaluate(WATCH_ROWS)
         assert got["rows"] >= 3 and len(got["names"]) == got["rows"], got  # cards and a deck
         assert min(got["names"]) >= 180, (width, zoom, got["names"])
@@ -166,7 +167,7 @@ def test_the_watched_rows_labels_fit_a_phone_at_200_percent_text(
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
         if zoom != "none":
             page.evaluate({"browser": BROWSER_200, "root": ROOT_200, "text": TEXT_200}[zoom])
-            page.wait_for_timeout(200)
+            redrawn(page)
         labels = page.evaluate(LABELS)
         owned = [lb for lb in labels if lb["text"].startswith("In binder")]
         assert len(owned) == 2 and all(lb["text"].endswith("you own\u00a01") for lb in owned), labels
@@ -244,7 +245,7 @@ def test_the_tab_bars_assistant_count_never_covers_its_icon(server: Server, zoom
         page.goto(f"{server.base}/collection", wait_until="networkidle")
         if zoom != "none":
             page.evaluate({"browser": BROWSER_200, "root": ROOT_200, "text": TEXT_200}[zoom])
-            page.wait_for_timeout(200)
+            redrawn(page)
         got = page.evaluate(TAB_BADGE)
         assert got and len(got["text"]) == 2, got
         assert got["fits"], got

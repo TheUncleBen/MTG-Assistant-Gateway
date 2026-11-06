@@ -12,9 +12,11 @@ from pathlib import Path
 
 import pytest
 
+from .test_card_search_filters_browser import MORE_SETTLED
 from .test_cardsearch_browser import CATALOG, _chromium
 from .test_deck_menu_browser import PNG
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -94,7 +96,7 @@ def test_add_to_deck_buttons_share_a_row_bottom_edge_on_a_computer(server: Serve
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, 1280, exe)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
-        page.wait_for_timeout(600)
+        page.wait_for_function(MORE_SETTLED, timeout=5000)  # the screen's fill has ended
         before = page.evaluate(ADDS_JS)
         assert len(before) % 7  # the last row is part-filled, so Load more adds cards to it
         page.locator("#cs-more [data-more]").click()
@@ -125,7 +127,7 @@ def test_card_search_fills_the_screen_then_waits_for_load_more(server: Server, w
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, width, exe)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
-        page.wait_for_timeout(800)
+        page.wait_for_function(MORE_SETTLED, timeout=5000)  # the screen's fill has ended
         shown = page.locator("#cardgrid .cc").count()
         assert shown > 6  # more than the first page: the screen was filled
         more = page.locator("#cs-more [data-more]")
@@ -134,11 +136,13 @@ def test_card_search_fills_the_screen_then_waits_for_load_more(server: Server, w
         assert page.evaluate("document.querySelector('#cs-more').getBoundingClientRect().top") > 860
         for _ in range(6):
             page.mouse.wheel(0, 5000)
+            # fixed wait: a negative check: each scroll loads nothing within 250 ms
             page.wait_for_timeout(250)
         page.wait_for_load_state("networkidle")
         assert page.locator("#cardgrid .cc").count() == shown  # scrolling never loads
         more.click()
         page.wait_for_function(f"() => document.querySelectorAll('#cardgrid .cc').length === {shown + 6}")
+        # fixed wait: a negative check: one page, nothing more by itself within 600 ms
         page.wait_for_timeout(600)
         assert page.locator("#cardgrid .cc").count() == shown + 6  # one page, nothing more by itself
         assert errors == []
@@ -237,7 +241,7 @@ def test_a_phone_shows_two_cards_a_row_at_the_default_size(server: Server, width
         for zoom in (None, TEXT_200):
             if zoom:
                 page.evaluate(zoom)
-                page.wait_for_timeout(100)
+                redrawn(page)
             got = page.evaluate(
                 "() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]"
             )

@@ -15,6 +15,7 @@ import pytest
 from .test_cardsearch_browser import _page
 from .test_menus_browser import _exe, _items, _menu, _seed_rows, _server
 from .test_text_zoom_browser import TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -216,7 +217,7 @@ def test_a_history_row_on_a_phone_is_its_title_its_words_and_its_facts(tmp_path:
             assert "The change it was taken before" in _items(page), _items(page)
             page.keyboard.press("Escape")
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(100)
+            redrawn(page)
             page.evaluate(long_time)
             for r in page.evaluate(HISTORY_ROWS):
                 assert r["links"] == [] and r["deck_lines"] == 1, r
@@ -250,7 +251,7 @@ def test_at_200_percent_text_the_rows_hold_their_line(tmp_path: Path) -> None:
                 for path, sel in ROWS.items():
                     page.goto(f"{server.base}{path}", wait_until="networkidle")
                     page.evaluate(TEXT_200)
-                    page.wait_for_timeout(50)
+                    redrawn(page)
                     assert page.evaluate(NO_SIDEWAYS), f"{path} @{width}px 200%"
                     for b in page.evaluate(BOXES, sel):
                         assert _on_the_title_line(b), (path, width, b)

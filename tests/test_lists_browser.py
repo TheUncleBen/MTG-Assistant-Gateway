@@ -17,6 +17,7 @@ from .test_lists_page import _seed
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import LIFT_WATCH, expect, lifted, quiet
 
 TEXT = (
     ".lp .ui-table .t, .lp .ui-table .s, .lp .ui-table .sm-only, .lp .list-head, .lp .ui-sub, .lp .btn, "
@@ -79,17 +80,21 @@ def test_every_tab_fits_and_its_menu_opens_three_ways(server: Server, width: int
         assert page.evaluate(MEASURE) == []
         page.keyboard.press("Escape")
         assert menu.count() == 0
-        page.wait_for_timeout(500)
+        quiet(page)
         row.click(button="right")
         assert page.locator(".ctxmenu").is_visible()
         page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         if width < 900:
+            page.evaluate(LIFT_WATCH)
             page.evaluate(HOLD, ".lp .ui-table .tr[data-row] .title")
-            page.wait_for_timeout(900)
+            expect(page.locator(".ctxmenu")).to_be_visible()  # the hold opened the menu
+            lifted(page)  # and the finger lifted (HOLD, 600 ms)
             assert page.locator(".ctxmenu").is_visible()
             page.keyboard.press("Escape")
-            page.wait_for_timeout(500)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
+            quiet(page)
         # Delete… fills the box from the row and ends on the solid red button
         row.locator(".kebab").click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Delete…").click()
@@ -220,7 +225,7 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
         assert box.locator("[data-face=b]").get_attribute("aria-selected") == "true"
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
-        page.wait_for_timeout(500)
+        quiet(page)
         page.locator(".lp .ui-table .tr[data-row] .kebab").first.click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Edit…").click()
         box.wait_for(state="visible")
@@ -245,7 +250,7 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
         assert box.locator(".lp-crop[data-crop=f]").inner_text().strip() == "Picture set"
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
-        page.wait_for_timeout(500)
+        quiet(page)
         # the delete box: the tick unlocks the solid red button
         page.locator(".lp .ui-table .tr[data-row] .kebab").first.click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Delete…").click()

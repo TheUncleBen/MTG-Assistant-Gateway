@@ -80,6 +80,7 @@ def test_the_keys_wait_behind_the_card_viewer_and_work_from_a_ticked_box(server:
             card.click()
             page.wait_for_selector(".cardview.open", timeout=3000)
             page.keyboard.press("/")
+            # fixed wait: a negative check: "/" moves no focus to the search within 250 ms
             page.wait_for_timeout(250)
             assert page.evaluate("() => document.activeElement && document.activeElement.id") != "site-q"
             assert page.locator(".cardview.open").count() == 1
@@ -121,6 +122,7 @@ def test_the_keys_do_nothing_under_a_sheet_a_menu_or_a_drop_down_list(server: Se
             def nothing(where: str) -> None:
                 for key in ("/", "?"):
                     page.keyboard.press(key)
+                    # fixed wait: a negative check: the key opens no search within 200 ms
                     page.wait_for_timeout(200)
                     focus = page.evaluate("() => document.activeElement && document.activeElement.id")
                     assert focus != "site-q", (where, key)

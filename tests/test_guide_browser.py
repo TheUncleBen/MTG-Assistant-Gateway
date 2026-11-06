@@ -22,6 +22,7 @@ from mtg_gateway.oidc import OIDCClient
 
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, make_settings
 from .test_scan_browser import _chromium_path, _free_port, _serve
+from .waits import frame, settled
 
 pytest.importorskip("playwright")
 
@@ -49,7 +50,7 @@ class Server:
                 if httpx.get(f"{self.base}/healthz", timeout=1).status_code == 200:
                     return
             except httpx.HTTPError:
-                time.sleep(0.1)
+                time.sleep(0.1)  # fixed wait: poll interval of the start-up loop (100 tries)
         raise RuntimeError("gateway did not start")
 
     def stop(self) -> None:
@@ -153,7 +154,8 @@ def test_contents_topic_old_anchor_search_and_drawer(server: Server) -> None:
             page.goto(f"{server.base}/guide/ref-keys", wait_until="networkidle")
             assert not page.locator(".gtop").is_visible()
             page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(200)
+            frame(page)  # the scroll's handler ran
+            settled(page)
             tall = page.evaluate("() => document.body.scrollHeight > 2 * window.innerHeight")
             assert page.locator(".gtop").is_visible() == tall
             browser.close()

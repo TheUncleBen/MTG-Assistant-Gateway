@@ -17,6 +17,7 @@ import pytest
 from .test_editor_browser import _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import poll
 
 pytest.importorskip("playwright")
 
@@ -61,7 +62,7 @@ def _until(page, expression: str, timeout: float) -> None:  # noqa: ANN001
                 return
         except Exception:  # noqa: BLE001, S110 - the page is between two documents
             pass
-        time.sleep(0.05)
+        time.sleep(0.05)  # fixed wait: poll interval of a loop with a deadline
     raise AssertionError(f"not true within {timeout} s: {expression}")
 
 
@@ -118,9 +119,20 @@ def test_the_bell_and_watched_names_are_asked_once_across_pages(server: Server) 
                 else None
             ),
         )
+        done: list[str] = []
+
+        def ended(r) -> None:  # noqa: ANN001
+            if "/notifications/count" in r.url or "/watchlist/api/names" in r.url:
+                done.append(r.url)
+
+        page.on("requestfinished", ended)
+        page.on("requestfailed", ended)
         for path in ("/", "/decks", "/decks/42", "/collection"):
             page.goto(f"{server.base}{path}", wait_until="load")
-            page.wait_for_timeout(600)  # the bell asks once the page is idle
+            page.evaluate(
+                "() => new Promise(r => requestIdleCallback(() => r(), {timeout: 2000}))"
+            )  # the bell asks once the page is idle
+            poll(page, lambda: len(done) == len(asked))  # and its answers are in
         assert sum("/notifications/count" in u for u in asked) == 1, asked
         assert sum("/watchlist/api/names" in u for u in asked) == 1, asked
         browser.close()

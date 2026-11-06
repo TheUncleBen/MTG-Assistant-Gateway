@@ -12,6 +12,7 @@ from .test_admin_card_models_browser import _models
 from .test_cardsearch_browser import _chromium, _page
 from .test_settings_page_browser import _admin
 from .test_suggest_browser import Server
+from .waits import quiet
 
 pytest.importorskip("playwright")
 
@@ -57,7 +58,10 @@ def test_a_menu_link_on_a_phone_goes_once_the_menus_back_has_landed(server: Serv
         page.locator(".ctxmenu [role=menuitem]", has_text="Remove…").click()
         page.locator("#remove").wait_for(state="visible")
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(300)
+        page.wait_for_function(
+            "() => (sessionStorage.getItem('log') || '').split('|').filter(Boolean).length >= 2"
+        )
+        quiet(page)
         log = page.evaluate("() => sessionStorage.getItem('log')").strip("|").split("|")
         assert log[0] == "pop" and log[1].startswith("go ?remove=opt"), log
         assert "remove=opt" in page.url

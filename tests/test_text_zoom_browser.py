@@ -20,6 +20,7 @@ from .test_editor_browser import PNG
 from .test_overflow_sweep_browser import FOLDERS, MEASURE, MENUS, _seed, server  # noqa: F401
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -113,7 +114,7 @@ def test_main_pages_hold_together_at_200_percent_text(server: Server, zoom: str)
                 r = page.goto(f"{server.base}{path}", wait_until="networkidle")
                 assert r is not None and r.status == 200, (path, r and r.status)
                 page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-                page.wait_for_timeout(30)
+                redrawn(page)
                 found = page.evaluate(MEASURE) + page.evaluate(MENUS)
                 problems += [f"{path} @{w}px {zoom}: {f}" for f in found]
         browser.close()
@@ -172,7 +173,7 @@ def test_pages_hold_together_at_320_with_the_browser_font_doubled(server: Server
             r = page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert r is not None and r.status == 200, (path, r and r.status)
             page.evaluate(BROWSER_200)
-            page.wait_for_timeout(30)
+            redrawn(page)
             found = page.evaluate(MEASURE) + page.evaluate(MENUS)
             problems += [f"{path} @{NARROWEST}px browser 200%: {f}" for f in found]
         browser.close()
@@ -225,7 +226,7 @@ def test_the_scan_preview_keeps_its_shape_and_the_card_guide_inside_it(
                 page.goto(f"{server.base}/scan", wait_until="networkidle")
                 if zoom != "none":
                     page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-                page.wait_for_timeout(30)
+                redrawn(page)
                 for m in page.evaluate(SCAN_PREVIEW):
                     where = f"{w}px {zoom} {'with' if m['result'] else 'without'} a result"
                     if m["cols"] == "grid":
@@ -330,7 +331,7 @@ def test_names_and_headings_keep_whole_words_at_200_percent_on_narrow_phones(ser
                 r = page.goto(f"{server.base}{path}", wait_until="networkidle")
                 assert r is not None and r.status == 200, (path, r and r.status)
                 page.evaluate(TEXT_200)
-                page.wait_for_timeout(30)
+                redrawn(page)
                 problems += [f"{path} @{w}px: {f}" for f in page.evaluate(MID_WORD_IN_COLUMN, WHOLE_WORDS)]
         browser.close()
     assert errors == []

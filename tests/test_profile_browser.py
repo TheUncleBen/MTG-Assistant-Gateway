@@ -17,6 +17,7 @@ from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import bell_read, expect, form_aged, settled
 
 TEXT = (
     ".acc h2, .acc .ui-row .lab, .acc .ui-row .help, .acc .ui-row label, .acc .btn, .acc button, "
@@ -128,12 +129,14 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
         page.locator("#pr-file").set_input_files(
             {"name": "me.gif", "mimeType": "image/gif", "buffer": _png("GIF")}
         )
-        page.wait_for_timeout(300)
+        expect(page.locator("#pr-err")).to_contain_text("Use a JPEG or PNG picture.")
         assert use.is_disabled() and "Use a JPEG or PNG picture." in page.locator("#pr-err").inner_text()
         page.locator("#pr-file").set_input_files(
             {"name": "me.png", "mimeType": "image/png", "buffer": _png()}
         )
-        page.wait_for_timeout(300)
+        expect(page.locator("#pr-preview img")).to_have_count(1)
+        expect(use).to_be_enabled()
+        settled(page)
         assert use.is_enabled() and page.locator("#pr-preview img").count() == 1
         assert "me.png" in page.locator("#pr-filename").inner_text()
         assert page.evaluate(MEASURE) == []
@@ -157,18 +160,18 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         # the switches on Email and alerts, the drop-downs on New device defaults, the bio on Archidekt
         # profile: each its own page under Account details
         page.goto(f"{server.base}/account/details/email", wait_until="networkidle")
-        page.wait_for_timeout(800)  # the click guard: a press faster than a person reads is refused
+        form_aged(page)  # the click guard: a press faster than a person reads is refused
         page.locator("label[class='switch']:has(#pr-newsletter)").click()
         page.locator(".toast").wait_for(state="visible", timeout=4000)
         assert "Saved on Archidekt." in page.locator(".toast").inner_text()
         assert me["profile"]["newsletterable"] is True
-        page.locator("label[class='switch']:has(#pr-site_notifications)").click()
-        page.wait_for_timeout(500)
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.startswith(server.base)):
+            page.locator("label[class='switch']:has(#pr-site_notifications)").click()
         assert me["accountSettings"]["noArchidektNotifications"] is True
         page.goto(f"{server.base}/account/details/defaults", wait_until="networkidle")
-        page.wait_for_timeout(800)
-        page.select_option("#pr-deck_view", "grid")
-        page.wait_for_timeout(500)
+        form_aged(page)
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.startswith(server.base)):
+            page.select_option("#pr-deck_view", "grid")
         assert me["accountSettings"]["deckView"] == 2
         # a refusal reverts the control and says why
         page.evaluate(
@@ -176,12 +179,13 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
             ".insertAdjacentHTML('beforeend', \"<option value='moon'>Moon</option>\"); }"
         )
         page.select_option("#pr-search_game", "moon")
-        page.wait_for_timeout(500)
+        expect(page.locator(".toast.error")).to_contain_text("takes one of")
+        expect(page.locator("#pr-search_game")).to_have_value("paper")
         assert "takes one of" in page.locator(".toast.error").inner_text()
         assert page.locator("#pr-search_game").input_value() == "paper"
         # the bio and username save with the panel's notice
         page.goto(f"{server.base}/account/details/profile", wait_until="networkidle")
-        page.wait_for_timeout(800)
+        form_aged(page)
         page.fill("#pr-bio", "Commander player in Leeds.")
         page.locator("#pr-f button").click()
         page.wait_for_url("**/account/details/profile?ok=profile*")
@@ -208,7 +212,7 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         # Home's Needs you row: nothing while the count is zero; with new alerts it shows the
         # count, and its Open alerts opens the same box
         page.goto(f"{server.base}/", wait_until="networkidle")
-        page.wait_for_timeout(800)
+        bell_read(page)
         assert page.locator("[data-bell-row]").is_hidden()
         # a count of one, as the script keeps it for a minute between pages (the gateway keeps
         # Archidekt's count for a minute too, so a new note would not show yet)
@@ -233,7 +237,7 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366, "light", exe)
         page.goto(f"{server.base}/collection", wait_until="networkidle")
-        page.wait_for_timeout(800)  # the click guard
+        form_aged(page)  # the click guard
         vis = page.locator("#visibility")
         assert "Private · only you can see it" in vis.inner_text()
         page.locator("[data-box-open='col-vis']").click()
@@ -251,7 +255,7 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
         box.wait_for(state="visible")
         final.click()
         page.wait_for_url("**/collection?ok=public*")
-        page.wait_for_timeout(800)
+        form_aged(page)
         assert me["profile"]["is_collection_public"] is True
         vis = page.locator("#visibility")
         assert "Public · anyone can see it on your Archidekt profile" in vis.inner_text()
@@ -282,7 +286,7 @@ def test_account_holds_together_on_a_phone_at_200_percent_text(server: Server, z
         ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-            page.wait_for_timeout(300)
+            settled(page)
             assert page.evaluate(MEASURE) == [], (path, zoom)
         page.goto(f"{server.base}/account/details/profile", wait_until="networkidle")
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)

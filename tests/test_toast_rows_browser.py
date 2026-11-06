@@ -14,6 +14,7 @@ from .test_deck_toasts_browser import _commander
 from .test_overflow_sweep_browser import _seed, server  # noqa: F401
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -69,7 +70,7 @@ def _zoom(page, zoom: str) -> None:  # noqa: ANN001
     text-only zoom sets it on the body, as Android's font scale does)."""
     if zoom != "none":
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-        page.wait_for_timeout(100)
+        redrawn(page)
 
 
 def _check(where: str, got: dict | None, *, icon: bool) -> None:

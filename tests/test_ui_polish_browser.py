@@ -6,6 +6,7 @@ name, and the Copy button keeps its icon. Skipped without a Chromium build."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from .test_editor_browser import _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import expect
 
 pytest.importorskip("playwright")
 
@@ -76,7 +78,7 @@ def test_editor_new_category_is_inline_and_controls_name_the_card(server: Server
         assert page.evaluate("() => document.activeElement.placeholder") == "New category name"
         field.fill("Ramp spells")
         field.press("Enter")
-        page.wait_for_timeout(200)
+        expect(row.locator(".newcat")).to_have_count(0)
         assert row.locator(".newcat").count() == 0
         assert sel.evaluate("s => s.value") == "Ramp spells"
         assert "Category" in (page.locator(".pending .changes .act").first.text_content() or "")
@@ -120,7 +122,7 @@ def test_skip_link_times_images_and_copy_button(server: Server) -> None:
             page.evaluate("() => document.activeElement.getBoundingClientRect().top") >= 0
         )  # shown while focused
         page.keyboard.press("Enter")
-        page.wait_for_timeout(100)
+        page.wait_for_function("() => document.activeElement && document.activeElement.id === 'main'")
         assert page.evaluate("() => document.activeElement.id") == "main"
         # the text view flows in columns, and the category headings are h2 (no h1 to h4 jump)
         assert (
@@ -154,12 +156,12 @@ def test_skip_link_times_images_and_copy_button(server: Server) -> None:
         page.goto(f"{server.base}/decks/42/export", wait_until="networkidle")
         btn = page.locator(".copybtn").first
         btn.click()
-        page.wait_for_timeout(200)
+        expect(btn.locator(".label")).to_have_text(re.compile(r"^(Copied|Select and copy)$"))
         assert btn.locator("svg").count() == 1 and btn.locator(".label").inner_text() in (
             "Copied",
             "Select and copy",
         )
-        page.wait_for_timeout(1600)
+        expect(btn.locator(".label")).to_have_text("Copy")  # the label comes back after its 1.5 s flash
         assert btn.locator("svg").count() == 1 and btn.locator(".label").inner_text() == "Copy"
         # 0.7.26: with the async clipboard refused (as the app's WebView may), Copy still copies the
         # list through execCommand inside the press
@@ -169,7 +171,7 @@ def test_skip_link_times_images_and_copy_button(server: Server) -> None:
             " window.copied = document.activeElement.value; }); }"
         )
         btn.click()
-        page.wait_for_timeout(200)
+        expect(btn.locator(".label")).to_have_text("Copied")
         assert btn.locator(".label").inner_text() == "Copied"
         area_id = btn.get_attribute("data-copy")
         assert page.evaluate("() => window.copied") == page.locator(f"#{area_id}").input_value()

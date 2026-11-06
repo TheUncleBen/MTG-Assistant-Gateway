@@ -77,7 +77,7 @@ def test_binder_value_prices_and_add_box_fit(server: Server, width: int, theme: 
         for _ in range(100):
             if "$14.79" in page.content():
                 break
-            page.wait_for_timeout(100)
+            page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
             page.reload(wait_until="networkidle")
         widgets = page.locator(".ui-widgets").inner_text()
         assert "$14.79" in widgets and "1 entry has no price" in widgets, widgets
@@ -180,7 +180,7 @@ def test_the_value_being_worked_out_follows_the_read_by_itself(
             for _ in range(100):
                 if "$14.79" in page.locator(".ui-widgets").inner_text():
                     break
-                page.wait_for_timeout(100)
+                page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
             assert "$14.79" in page.locator(".ui-widgets").inner_text()
             assert page.locator("[data-value-reading]").count() == 0
             assert page.evaluate("performance.getEntriesByType('navigation').length") == loads

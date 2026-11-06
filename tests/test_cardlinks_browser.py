@@ -15,6 +15,7 @@ import pytest
 from .test_history_page import store_report
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import expect
 
 pytest.importorskip("playwright")
 
@@ -77,7 +78,7 @@ def test_a_card_name_on_the_report_page_opens_the_card_viewer(server: Server) ->
             assert name in viewer.inner_text()
             assert page.url.endswith("/history/reports/rep_links")  # the page stays
             page.keyboard.press("Escape")
-            page.wait_for_timeout(150)
+            expect(page.locator(".cardview.open")).to_have_count(0)
             assert page.locator(".cardview.open").count() == 0
             # the card menu's Open card shows it too
             link.click(button="right")

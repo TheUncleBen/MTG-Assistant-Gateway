@@ -18,6 +18,7 @@ from .test_editor_browser import _link
 from .test_proposal_review_browser import CONTRAST
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import settled
 
 pytest.importorskip("playwright")
 
@@ -193,6 +194,7 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
             # the page, so the guard can't unlock between them (it unlocks on its own once the box
             # has been seen and a key was pressed, which the Tabs above may already have done)
             if button.evaluate("e => e.getAttribute('aria-disabled') === 'true' && (e.click(), true)"):
+                # fixed wait: a negative check: the locked press sends nothing within 300 ms
                 page.wait_for_timeout(300)
                 assert "/proposals/applied/" not in page.url and server.ark.patches == []
             page.wait_for_function(
@@ -200,7 +202,7 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
                 ".hasAttribute('aria-disabled')",
                 timeout=10000,
             )
-            page.wait_for_timeout(400)  # the unlocked colours fade in over 0.2 s
+            settled(page)  # the unlocked colours fade in over 0.2 s
             got = button.evaluate(CONTRAST)
             assert got["ratio"] >= 4.5 and got["opacity"] == 1, got
             ring = button.evaluate("e => getComputedStyle(e).outlineStyle")

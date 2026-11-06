@@ -12,6 +12,7 @@ import pytest
 from .test_proposal_review_browser import _proposals
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import SCROLL_WATCH, scrolled
 
 pytest.importorskip("playwright")
 
@@ -61,8 +62,9 @@ def test_apply_is_on_the_first_screen_of_a_phone(server: Server, width: int, hei
                 assert box["height"] >= 44
             assert page.evaluate("() => scrollY") == 0
             # the bar stays at the foot as the page scrolls
+            page.evaluate(SCROLL_WATCH)
             page.mouse.wheel(0, 2000)
-            page.wait_for_timeout(200)
+            scrolled(page)
             box = apply.bounding_box()
             assert box["y"] + box["height"] <= height and box["y"] >= 0, box
             # nothing hides behind it: the page's last line can be scrolled above the bar

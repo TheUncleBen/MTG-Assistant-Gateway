@@ -29,6 +29,7 @@ from .test_deck_categories import _give_categories
 from .test_deck_menu_browser import _EXE, PNG, Server, _chromium
 from .test_overflow_sweep_browser import MEASURE
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -147,7 +148,7 @@ def test_the_category_menu_opens_every_way_and_reads_everywhere(
         k.click()
         menu = page.locator(".ctxmenu[role=menu]")
         menu.wait_for(timeout=3000)
-        page.wait_for_timeout(300)
+        settled(page)
         assert menu.locator(".head").inner_text() == "Ramp"
         assert _items(page) == ITEMS, _items(page)
         assert _checked(page, "Premier") == "false" and _checked(page, "In deck") == "true"
@@ -168,7 +169,8 @@ def test_the_category_menu_opens_every_way_and_reads_everywhere(
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, MENU_TEXT) == []
         _shot(page, f"catmenu-{width}-{theme}")
         page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         assert page.locator(".ctxmenu").count() == 0
         # a right-click (mouse) or a press and hold (touch) on the head opens the same menu
         head = page.locator(".stack[data-group='Ramp'] .stackhead .title")
@@ -178,34 +180,37 @@ def test_the_category_menu_opens_every_way_and_reads_everywhere(
             cdp = page.context.new_cdp_session(page)
             x, y = box["x"] + 20, box["y"] + box["height"] / 2
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-            page.wait_for_timeout(600)
+            menu.wait_for(timeout=3000)  # the hold opened the menu, the finger still down
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         else:
             head.click(button="right")
         menu.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        settled(page)
         assert _items(page) == ITEMS
         # the lift of the finger that held picked nothing in the sheet that rose under it
         assert page.locator(BOX).count() == 0 and menu.count() == 1
         # the Maybeboard (not in the deck) shows it in its ticks; the Commander category is Premier
         page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         _kebab(page, "Maybeboard").click()
         menu.wait_for(timeout=3000)
         assert _checked(page, "In deck") == "false" and _checked(page, "In price") == "false"
         page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         _kebab(page, "Commander").click()
         menu.wait_for(timeout=3000)
         assert _checked(page, "Premier") == "true"
         page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         # 200% text: the page and an open menu never scroll sideways
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(50)
+        settled(page)
         _kebab(page, "Ramp").click()
         menu.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        settled(page)
         assert page.evaluate(MEASURE) == [], page.evaluate(MEASURE)
         _shot(page, f"catmenu-200-{width}-{theme}")
         assert errors == []
@@ -252,12 +257,12 @@ def test_rename_premier_delete_and_add_from_the_deck_page(
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitemcheckbox]", has_text="Premier").click()
         box.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        expect(box.locator("h2")).to_have_text("Change the commander category?")
         assert box.locator("h2").inner_text() == "Change the commander category?"
         assert "Cards in a Premier category are the deck's commanders." in box.locator(".body").inner_text()
         _shot(page, f"premier-ask-{width}-{theme}")
         box.locator(".acts button[data-cancel]").click()
-        page.wait_for_timeout(300)
+        expect(page.locator(BOX)).to_have_count(0)
         assert page.locator(BOX).count() == 0
         assert [p_["name"] for p_ in server.ark.category_patches] == ["Mana", "Ramp"]  # nothing sent
         _kebab(page, "Removal").click()
@@ -276,14 +281,15 @@ def test_rename_premier_delete_and_add_from_the_deck_page(
         menu.wait_for(timeout=3000)
         assert _checked(page, "Premier") == "true"
         page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         # -- Delete…: the red box names where the cards go and what each choice does (review 2,
         # M6), Keep it, then the solid red Delete category; Undo is the restore
         _kebab(page, "Ramp").click()
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Delete…").click()
         box.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        expect(box.locator("h2")).to_have_text("Delete “Ramp”?")
         assert box.locator("h2").inner_text() == "Delete “Ramp”?"
         options = box.locator("select#catmove option").all_inner_texts()
         assert "Ramp" not in options and "No category" in options
@@ -303,7 +309,7 @@ def test_rename_premier_delete_and_add_from_the_deck_page(
         assert final.inner_text().strip() == "Delete category"
         _shot(page, f"delete-{width}-{theme}")
         box.locator(".acts button[data-cancel]").click()
-        page.wait_for_timeout(300)
+        expect(page.locator(BOX)).to_have_count(0)
         assert server.ark.category_deletes == []
         _kebab(page, "Ramp").click()
         menu.wait_for(timeout=3000)
@@ -328,7 +334,8 @@ def test_rename_premier_delete_and_add_from_the_deck_page(
         assert box.locator(".acts button.primary").inner_text().strip() == "Undo: put the deck back"
         _shot(page, f"undo-delete-{width}-{theme}")
         page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
+        expect(page.locator(BOX)).to_have_count(0)
+        quiet(page)
         # -- + Add category: a name and the switches; its empty stack is drawn; Undo takes it off
         add = page.locator(".deckview .addcat")
         add.scroll_into_view_if_needed()
@@ -343,7 +350,7 @@ def test_rename_premier_delete_and_add_from_the_deck_page(
         # a name the deck has (in any case) is refused in the box, nothing sent
         box.locator("input#catname").fill("removal")
         box.locator(".acts button.primary").click()
-        page.wait_for_timeout(300)
+        expect(box.locator(".boxnote")).to_contain_text("already has a category named “removal”")
         assert page.locator(BOX).count() == 1 and server.ark.category_creates == []
         assert "already has a category named “removal”" in box.locator(".boxnote").inner_text()
         box.locator("input#catname").fill("Wincons")
@@ -379,7 +386,7 @@ def test_the_delete_box_never_picks_commander_and_offers_no_category(server: Ser
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Delete…").click()
         box.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        expect(box.locator("select#catmove")).to_have_value("Ramp")
         select = box.locator("select#catmove")
         assert select.input_value() == "Ramp"
         assert "Its 3 cards stay in the deck, in “Ramp”." in box.locator(".body").inner_text()
@@ -408,7 +415,7 @@ def test_the_delete_box_never_picks_commander_and_offers_no_category(server: Ser
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Delete…").click()
         box.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        expect(box.locator("select#catmove")).to_have_value("")
         assert select.input_value() == ""
         select.select_option("Commander")
         assert "Its 2 cards move to “Commander” and become commanders." in box.locator(".body").inner_text()
@@ -416,7 +423,7 @@ def test_the_delete_box_never_picks_commander_and_offers_no_category(server: Ser
         page.wait_for_function(BOX_TITLE, arg="Delete the category “Ramp”?", timeout=6000)
         assert "makes them commanders" in box.locator(".body").inner_text()
         box.locator(".acts button[data-cancel]").click()
-        page.wait_for_timeout(300)
+        quiet(page)
         assert len(server.ark.category_deletes) == 1  # kept
         assert errors == [], errors
         browser.close()
@@ -445,7 +452,7 @@ def test_the_delete_box_says_what_happens_to_cards_out_of_the_deck_and_to_comman
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Delete…").click()
         box.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        expect(box.locator("select#catmove")).to_have_value("Sideboard")
         select = box.locator("select#catmove")
         body = box.locator(".body")
         m = re.match(r"Its (\d+) cards? ", body.inner_text())
@@ -476,14 +483,14 @@ def test_the_delete_box_says_what_happens_to_cards_out_of_the_deck_and_to_comman
         assert f"its {n} card{'' if one else 's'} join{'s' if one else ''} the deck with no category" in words
         assert "stay in the deck" not in words and "stays in the deck" not in words
         box.locator(".acts button[data-cancel]").click()
-        page.wait_for_timeout(300)
+        quiet(page)
         assert server.ark.category_deletes == []
         # Commander (Premier, holding the commander): its cards stop being commanders
         _kebab(page, "Commander").click()
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Delete…").click()
         box.wait_for(timeout=3000)
-        page.wait_for_timeout(200)
+        expect(box.locator("select#catmove")).to_be_visible()
         n = int(page.locator(".stack[data-group='Commander'] li.row").count())
         assert n >= 1
         select.select_option("")

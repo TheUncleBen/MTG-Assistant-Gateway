@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from .test_deck_menu_browser import Server, _chromium, _overflow, _page
+from .waits import expect, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -104,7 +105,8 @@ def test_the_deck_menu_opens_from_more_and_a_right_click(server: Server, width: 
         box.locator("#typed").fill("sample commander deck")
         assert red.is_enabled()
         page.keyboard.press("Escape")
-        page.wait_for_timeout(200)
+        expect(page.locator(".mtgbox-scrim")).to_have_count(0)
+        quiet(page)
         # Rename…: the JSON route, then the page again with the notice
         more.click()
         _menu(page).locator("[role=menuitem]", has_text="Rename…").click()
@@ -205,7 +207,7 @@ def test_goldfish_cards_have_the_shared_menu_with_the_games_moves(server: Server
         assert labels[0] == "Open card" and "Play to the battlefield" in labels and "Copy name" in labels
         assert "Open on Scryfall" in labels and "Add to binder" in labels
         menu.locator("[role=menuitem]", has_text="Play to the battlefield").click()
-        page.wait_for_timeout(100)
+        expect(page.locator("#gf-battlefield .gf-card")).to_have_count(1)
         assert page.locator("#gf-battlefield .gf-card").count() == 1
         assert not errors, errors
         browser.close()
@@ -648,7 +650,7 @@ def test_the_new_deck_fields_line_up_and_the_preview_tile_sits_at_the_top(server
         page.goto(f"{server.base}/decks", wait_until="networkidle")
         page.locator("a[data-box-open='newdeck']").first.click()
         _box(page, "newdeck")
-        page.wait_for_timeout(250)
+        settled(page)
         m = page.evaluate(NEW_DECK_TOPS)
         assert abs(m["name"] - m["format"]) <= 1 and abs(m["nameLabel"] - m["formatLabel"]) <= 1, m
         assert abs(m["tile"] - m["column"]) <= 1 and abs(m["tile"] - m["nameLabel"]) <= 2, m
@@ -825,7 +827,7 @@ def test_the_toasts_cross_stays_on_its_first_line(server: Server, width: int) ->
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitemcheckbox]", has_text="Companion").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
-        page.wait_for_timeout(300)
+        settled(page)
         m = page.evaluate(TOAST_CLOSE)
         assert _overflow(page) == 0
         # the × sits on the message's first line, in the corner, with nothing under it

@@ -13,6 +13,7 @@ import pytest
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import expect
 
 pytest.importorskip("playwright")
 
@@ -202,9 +203,16 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
             "() => { const els = [...document.querySelectorAll('.forge > *, #rep-status > *')];"
             " els.forEach(n => { n.__kept = true; }); window.__nodes = els.length; }"
         )
+        # the answer is read and applied once forge-live.js schedules its next look (a 5 s timer
+        # it sets only then); fetch is not on the page clock, so that is waited on, not the time
+        page.evaluate(
+            "() => { window.__rescheduled = false; const st = window.setTimeout;"
+            " window.setTimeout = function (f, ms) { if (ms === 5000) window.__rescheduled = true;"
+            " return st.apply(this, arguments); }; }"
+        )
         with page.expect_response(lambda r: r.url.endswith("/api/v1/reports/rep_forge/forge")):
             page.clock.run_for(6000)
-        time.sleep(0.5)  # the answer is read and applied (fetch is not on the page clock)
+        page.wait_for_function("() => window.__rescheduled === true")
         kept = page.evaluate(
             "() => [...document.querySelectorAll('.forge > *, #rep-status > *')].filter(n => n.__kept).length"
         )
@@ -841,6 +849,6 @@ def test_each_compare_row_has_a_menu_button_beside_the_card(server: Server, widt
         assert name in menu.inner_text()
         assert "Copy name" in [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
         page.keyboard.press("Escape")
-        page.wait_for_timeout(100)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0
         browser.close()

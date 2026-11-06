@@ -99,7 +99,11 @@ def _unlock(page) -> None:
     """The click guard: the pointer moves, then the dwell and settle times pass."""
     page.mouse.move(100, 100)
     page.mouse.move(130, 150)
-    page.wait_for_timeout(1300)
+    page.wait_for_function(
+        "() => { const b = [...document.querySelectorAll('form.guarded button[data-guard],"
+        " .ui-box button[data-guard]')];"
+        " return b.length > 0 && b.every(x => !x.disabled && x.getAttribute('aria-disabled') !== 'true'); }"
+    )  # unlocked: the dwell and settle times have passed
 
 
 def _open(page):
@@ -125,7 +129,7 @@ def _wait_state(server: Server, pid: str, want: str) -> None:
     for _ in range(100):
         if _state(server, pid) == want:
             return
-        time.sleep(0.1)
+        time.sleep(0.1)  # fixed wait: poll interval of a loop with a deadline
     assert _state(server, pid) == want
 
 

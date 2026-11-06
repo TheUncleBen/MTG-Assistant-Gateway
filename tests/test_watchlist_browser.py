@@ -12,6 +12,7 @@ import pytest
 from .test_cardview_browser import PNG
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -198,7 +199,7 @@ def test_watchlist_rows_open_in_place_and_draw_the_full_history(server: Server, 
             for zoom in (None, TEXT_200):
                 if zoom:
                     page.evaluate(zoom)
-                    page.wait_for_timeout(100)
+                    redrawn(page)
                 out = page.evaluate(
                     """() => [document.documentElement.scrollWidth, innerWidth,
                       [...document.querySelectorAll('main *')].filter(e => e.getClientRects().length

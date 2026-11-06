@@ -241,7 +241,6 @@ def test_the_add_box_tabs_the_filter_and_load_more(server: Server) -> None:
         page.wait_for_function("() => document.getElementById('col-add').hidden")
         # the name box narrows the list as you type
         page.locator("#col-q").fill("cultiv")
-        page.wait_for_timeout(100)
         shown = page.locator("#cards > li[data-id]:visible")
         assert shown.count() >= 1 and all(
             "cultivate" in n

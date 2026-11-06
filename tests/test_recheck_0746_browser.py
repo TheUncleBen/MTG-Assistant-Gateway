@@ -21,6 +21,7 @@ from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_polish_geometry_browser import RECT, _muted
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, redrawn
 
 pytest.importorskip("playwright")
 
@@ -168,12 +169,12 @@ def test_the_goldfish_status_wraps_without_a_dangling_dot_or_a_lone_fact(
         if width == 360:
             assert len(lines) >= 2, lines  # the phone does wrap this line: the check is real
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(50)
+        redrawn(page)
         _balanced_facts(page, "#gf-status")
         assert page.evaluate(MEASURE) == []
         # the game keeps the line up to date through the same spans
         page.locator(".gf-controls [data-act=keep]").click()
-        page.wait_for_timeout(100)
+        expect(status).to_contain_text("Turn 1")
         assert "Turn 1" in status.inner_text()
         _balanced_facts(page, "#gf-status")
         assert errors == []
@@ -211,10 +212,14 @@ def test_the_binders_clear_filters_hides_until_a_filter_is_set(
         # typing a name shows it, clearing the box hides it again
         page.goto(f"{server.base}/collection", wait_until="networkidle")
         page.locator("#col-q").fill("Sol")
-        page.wait_for_timeout(50)
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('.spanel .sp-clear')].every(c => !c.hidden)"
+        )
         assert not any(c.evaluate("e => e.hidden") for c in page.locator(".spanel .sp-clear").all())
         page.locator("#col-q").fill("")
-        page.wait_for_timeout(50)
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('.spanel .sp-clear')].every(c => c.hidden)"
+        )
         assert all(c.evaluate("e => e.hidden") for c in page.locator(".spanel .sp-clear").all())
         assert errors == []
         browser.close()
@@ -496,7 +501,7 @@ def test_the_binders_unknown_prices_say_so_in_words(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
-        page.wait_for_timeout(2500)  # the Value tile follows the binder read (collection.js)
+        expect(page.locator("[data-value-reading]")).to_have_count(0)  # the Value tile followed the read
         dashes = page.evaluate(
             "() => [...document.querySelectorAll('main *')]"
             ".filter(e => !e.children.length && e.textContent.trim() === '–' && e.getClientRects().length)"

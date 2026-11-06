@@ -15,6 +15,7 @@ from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -58,7 +59,7 @@ def test_pages_hold_together_at_200_percent_on_the_narrowest_screens(server: Ser
         for path in ZOOM_PAGES:
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             page.evaluate(ROOT_200)
-            page.wait_for_timeout(80)
+            redrawn(page)
             # the Goldfish hand scrolls sideways on purpose; nothing else may
             found = [f for f in page.evaluate(MEASURE) if "gf-card" not in f]
             problems += [f"{path} @{width}px 200%: {f}" for f in found]
@@ -279,7 +280,7 @@ def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(se
             page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
             if zoom:
                 page.evaluate(ROOT_200)
-                page.wait_for_timeout(100)
+                redrawn(page)
             # the main deck's Sol Ring, from the stack under Commander: the Maybeboard copy sits
             # below every stack that counts now (0.7.46 audit D-14), a drag of thousands of pixels.
             # The page is scrolled so the Commander stack's head sits clear of the sticky top bar

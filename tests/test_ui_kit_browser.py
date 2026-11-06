@@ -17,6 +17,7 @@ from mtg_gateway import theme, ui
 
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import SCROLL_WATCH, scrolled
 
 pytest.importorskip("playwright")
 
@@ -379,8 +380,9 @@ def test_side_panel_beside_the_list_from_1100_and_its_own_page_below(kit: KitSer
             assert page.evaluate("document.documentElement.scrollWidth") <= width
         # the panel stays in view while the list scrolls
         page.set_viewport_size({"width": 1280, "height": 800})
+        page.evaluate(SCROLL_WATCH)
         page.mouse.wheel(0, 1500)
-        page.wait_for_timeout(200)
+        scrolled(page)
         top = page.locator(".ui-drawer").bounding_box()["y"]
         assert 0 <= top < 120, top
         # narrower: the item is its own page, with a way back

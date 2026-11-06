@@ -15,6 +15,7 @@ import pytest
 from .test_editor_browser import PNG, _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import expect
 
 pytest.importorskip("playwright")
 
@@ -250,6 +251,7 @@ def test_the_top_bar_menu_has_no_watch_with_watchlists_off(tmp_path: Path) -> No
             deck_row = page.locator("#site-q-list li.go").first
             deck_row.wait_for(timeout=3000)
             deck_row.click(button="right")
+            # fixed wait: a negative check: a right-click on a suggestion opens no card menu within 300 ms
             page.wait_for_timeout(300)
             assert page.locator(".ctxmenu.cs-menu").count() == 0
             browser.close()
@@ -287,6 +289,7 @@ def test_a_pen_hold_opens_the_menu_and_a_slide_or_a_later_key_does_not_stick(ser
         pic.dispatch_event("pointerdown", {**pointer, "pointerType": "touch"})
         for i in (1, 2, 3):
             pic.dispatch_event("pointermove", {**pointer, "clientY": y + 4 * i, "pointerType": "touch"})
+        # fixed wait: a negative check: a slow slide is no hold: no menu within 800 ms (the hold is 450)
         page.wait_for_timeout(800)
         assert menu.count() == 0
         pic.dispatch_event("pointerup", {**pointer, "clientY": y + 12, "pointerType": "touch"})
@@ -296,6 +299,8 @@ def test_a_pen_hold_opens_the_menu_and_a_slide_or_a_later_key_does_not_stick(ser
         pic.dispatch_event("pointerup", {**pointer, "pointerType": "touch"})
         page.keyboard.press("Escape")
         assert menu.count() == 0
+        # fixed wait: the hold's lift swallows the next click in the grid for 400 ms (cardmenu.js's
+        # swallow timer, which the page does not show); Enter's click must come after it
         page.wait_for_timeout(500)
         pic.focus()
         page.keyboard.press("Enter")
@@ -339,12 +344,14 @@ def test_the_list_stays_open_when_the_box_gets_its_focus_back_at_once(tmp_path: 
             page.locator("#site-q-list li.go").first.wait_for(timeout=3000)
             # the focus leaves and comes back within one task, before the deferred close runs
             page.evaluate("() => { const q = document.getElementById('site-q'); q.blur(); q.focus(); }")
+            # fixed wait: a negative check: the list's deferred close (a timer of sitesearch.js) does not
+            # close it within 300 ms when the focus came back
             page.wait_for_timeout(300)
             assert page.locator("#site-q-list").is_visible()
             assert page.locator("#site-q-list li.go").first.is_visible()
             # a real move away still closes it
             page.evaluate("() => document.getElementById('site-q').blur()")
-            page.wait_for_timeout(300)
+            expect(page.locator("#site-q-list")).to_be_hidden()
             assert not page.locator("#site-q-list").is_visible()
             browser.close()
     finally:

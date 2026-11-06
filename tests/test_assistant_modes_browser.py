@@ -21,6 +21,7 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -145,7 +146,7 @@ def test_the_assistant_pages_hold_at_200_percent_text(server: Server, zoom: str)
         for name, path in [PAGES[-1], *PAGES[:-1]]:
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-            page.wait_for_timeout(100)
+            redrawn(page)
             assert page.evaluate(MEASURE) == [], (path, zoom)
             assert page.evaluate(TAPS, True) == [], (path, zoom)
             _shot(page, f"{name}-375-200pct-{zoom}.png")

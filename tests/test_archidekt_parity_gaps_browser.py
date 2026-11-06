@@ -19,6 +19,7 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -103,7 +104,7 @@ def test_the_parity_pages_fit_each_surface(
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             if zoom:
                 page.evaluate(TEXT_200)
-                page.wait_for_timeout(300)
+                redrawn(page)
             assert page.locator("main h1").count() == 1, path
             assert page.evaluate(MEASURE) == [], path
             assert page.evaluate(CONTRAST, TEXT) == [], path

@@ -58,7 +58,7 @@ class Server:
                 if httpx.get(f"{self.base}/healthz", timeout=1).status_code == 200:
                     return
             except httpx.HTTPError:
-                time.sleep(0.1)
+                time.sleep(0.1)  # fixed wait: poll interval of the start-up loop (100 tries)
         raise RuntimeError("gateway did not start")
 
     def stop(self) -> None:
@@ -120,6 +120,7 @@ def test_like_on_someone_elses_deck_confirms_then_votes(server: Server) -> None:
         assert "Like this deck on Archidekt?" in chip.inner_text()
         assert server.ark.votes == {}  # nothing sent before the confirmation
         chip.locator("button").last.click()  # "No" puts the button back, nothing sent
+        # fixed wait: a negative check: "No" sends no vote within 100 ms
         page.wait_for_timeout(100)
         assert page.locator(".banner .social .confirm").count() == 0 and server.ark.votes == {}
         like.click()

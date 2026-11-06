@@ -14,6 +14,7 @@ import pytest
 
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -248,7 +249,10 @@ def test_a_picture_that_fails_keeps_the_editor_rows_layout(server: Server, width
         box.click()
         box.press_sequentially("oathsw", delay=30)
         page.locator("[role=option] .rich .ty").first.wait_for(timeout=3000)
-        page.wait_for_timeout(300)  # the suggestion pictures fail
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('[role=option] img')].every(i => i.complete)"
+        )
+        settled(page)  # the suggestion pictures failed
         rich = page.locator("[role=option] .rich").first
         assert rich.evaluate(_OVERLAPS) == []
         assert page.locator("[role=option] img.img-broken:visible").count() == 0
@@ -530,7 +534,7 @@ def test_the_phone_save_bar_keeps_its_controls_tall_and_the_status_on_its_own_li
         assert page.evaluate("() => document.documentElement.scrollWidth") <= 390
         # wide: back in the bar
         page.set_viewport_size({"width": 1366, "height": 900})
-        page.wait_for_timeout(200)
+        redrawn(page)
         assert bar.locator(".cardsize").count() == 1 and bar.locator(".backup").count() == 1
         assert page.locator(".editopts").count() == 0
         assert not errors, errors

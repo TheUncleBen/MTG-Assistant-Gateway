@@ -16,6 +16,7 @@ from .test_cardsearch_browser import _chromium
 from .test_cardview_browser import PNG
 from .test_editor_browser import _link
 from .test_suggest_browser import Server, server  # noqa: F401
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -348,7 +349,6 @@ def test_a_press_and_hold_opens_the_cards_menu_and_leaves_nothing_stuck(server: 
         x, y = box["x"] + 20, box["y"] + box["height"] / 2
         cdp = page.context.new_cdp_session(page)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(700)
         row.evaluate(
             """(r) => { const dt = new DataTransfer();
                  const ev = new DragEvent("dragstart", {bubbles: true, cancelable: true, dataTransfer: dt});
@@ -563,7 +563,7 @@ def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> N
     for _ in range(50):  # the save goes out after the page acts
         if server.db.get_pref("user-1", "scan.intro") == "seen":
             break
-        page.wait_for_timeout(100)
+        page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
     assert server.db.get_pref("user-1", "scan.intro") == "seen"
     # The second visit: folded to its title, and the camera view starts above 450 px.
     visit()
@@ -590,7 +590,7 @@ def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> N
     for _ in range(50):
         if server.db.get_pref("user-1", "scan.intro") is True:
             break
-        page.wait_for_timeout(100)
+        page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
     visit()
     assert page.locator("#intro").count() == 0
     how.click()
@@ -789,7 +789,7 @@ def test_the_folded_intro_has_no_boxes_and_got_it_never_meets_how_it_works(
         browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
         if zoom == "text":
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(200)
+            redrawn(page)
         page.locator("#how-it-works").click()  # open, whatever the visit
         got_it = page.locator("#intro .list-actions button", has_text="Got it")
         assert page.locator("#intro").evaluate("e => e.open") is True
@@ -859,7 +859,7 @@ def test_the_tabs_keep_their_names_whole_and_apart_at_200_percent_text(
         browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
         if zoom == "root":
             page.evaluate("() => { document.documentElement.style.fontSize = '200%'; }")
-            page.wait_for_timeout(200)
+            redrawn(page)
         got = page.evaluate(TAB_RECTS)
         tabs = got["tabs"]
         assert [t["name"] for t in tabs] == ["Camera", "Type", "List", "Sessions"]

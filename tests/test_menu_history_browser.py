@@ -17,6 +17,7 @@ import pytest
 from .test_editor_browser import PNG, _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import frame, quiet
 
 pytest.importorskip("playwright")
 
@@ -36,6 +37,12 @@ OPEN = "() => [...document.querySelectorAll('details.dd[open]')].map(d => d.quer
 # the entry (either script's) and how many menus are open
 STATE = "() => ({ menu: !!(history.state && history.state.mtglayer), open: document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length })"  # noqa: E501
 
+# the state a Back with one menu open lands on: no menu open, and no menu's entry
+CLOSED = (
+    "() => !(history.state && history.state.mtglayer)"
+    " && !document.querySelector('details.dd[open], .ctxmenu[role=menu]')"
+)
+
 
 def _two_menus(page):
     """Two menus with a visible button on the page (the deck page's first category ⋮, the shared
@@ -51,8 +58,13 @@ def _two_menus(page):
 
 def _tap(page, locator):
     box = locator.bounding_box()
+    page.evaluate(
+        "() => { window.__tapped = false;"
+        " addEventListener('click', () => { window.__tapped = true; }, {once: true, capture: true}); }"
+    )
     page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-    page.wait_for_timeout(120)
+    page.wait_for_function("() => window.__tapped")  # the tap's click came
+    frame(page)  # and what it queued (a drop-down's toggle event) has run
 
 
 def _open(server: Server):
@@ -110,13 +122,19 @@ def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server
         # the category menu is a sheet over the page and the tab bar: a tap above it (on its
         # scrim) closes it, and B's button, there again, is tapped at once, before A's back() lands
         assert page.evaluate("() => document.querySelector('.ctxmenu').getBoundingClientRect().top") > 160
-        page.touchscreen.tap(195, 120)
         box = b.bounding_box()
+        page.evaluate(  # counts the two taps' clicks (set before them: B's comes at once)
+            "() => { window.__clicks = 0; addEventListener('click', () => { window.__clicks++; }, true); }"
+        )
+        page.touchscreen.tap(195, 120)
         page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-        page.wait_for_timeout(200)  # A's back() lands and B takes the entry again
+        page.wait_for_function("() => window.__clicks >= 2")  # B's tap's click came
+        frame(page)  # and its drop-down's toggle event (which takes the layer) has run
+        quiet(page)  # A's back() lands and B takes the entry again
         assert page.evaluate(STATE) == {"menu": True, "open": 1}, page.evaluate(OPEN)
         page.go_back(wait_until="commit")
-        page.wait_for_timeout(200)
+        page.wait_for_function(CLOSED)  # the Back landed: no menu, no entry
+        quiet(page)
         assert page.url == url, "Back left the page"
         assert page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
@@ -139,11 +157,12 @@ def test_closing_one_menu_and_opening_another_quickly_goes_back_once(server: Ser
         _tap(page, a)
         assert page.evaluate(STATE) == {"menu": True, "open": 1}
         assert page.evaluate(RACE, [0, 1]) == 1, "B did not open in the same instant A closed"
-        page.wait_for_timeout(300)  # A's back() lands; B takes the entry again
+        quiet(page)  # A's back() lands; B takes the entry again
         assert page.url == url, "the page was left while a menu was opening"
         assert page.evaluate(STATE) == {"menu": True, "open": 1}, page.evaluate(OPEN)
         page.go_back(wait_until="commit")
-        page.wait_for_timeout(200)
+        page.wait_for_function(CLOSED)  # the Back landed: no menu, no entry
+        quiet(page)
         assert page.url == url, "Back left the page"
         assert page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
@@ -227,7 +246,8 @@ def test_back_with_a_menu_open_closes_it_and_stays(server: Server) -> None:
         a, _b = _two_menus(page)
         _tap(page, a)
         page.go_back(wait_until="commit")
-        page.wait_for_timeout(200)
+        page.wait_for_function(CLOSED)  # the Back landed: no menu, no entry
+        quiet(page)
         assert page.url == url and page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
         assert page.url.endswith("/account/details"), "closing by Back gave nothing back a second time"

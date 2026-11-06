@@ -263,6 +263,8 @@ def test_the_offline_page_reloads_itself_once_the_connection_is_back(served) -> 
         page.goto(f"{base}/history")
         assert _offline(page)
         shown = time.monotonic()
+        # fixed wait: a window that counts the page's own timed checks (every CHECK_EVERY s): two or
+        # three in it, and still the offline page
         page.wait_for_timeout(2 * CHECK_EVERY * 1000 + 1500)
         assert _offline(page), page.title()  # nothing answered: still the offline page
         assert 2 <= len(checks) <= 3, [round(t - shown, 1) for t in checks]
@@ -272,6 +274,7 @@ def test_the_offline_page_reloads_itself_once_the_connection_is_back(served) -> 
         relay.restore()
         _wait_for_title(page, "Assistant: History", int((CHECK_EVERY + 6) * 1000))
         after = len(checks)
+        # fixed wait: a negative check: no further check in one CHECK_EVERY interval and a second
         page.wait_for_timeout(CHECK_EVERY * 1000 + 1000)
         assert len(checks) == after, "the checks went on after the page had loaded"
 
@@ -343,10 +346,11 @@ def test_a_page_that_keeps_failing_is_reloaded_three_times_at_most(served) -> No
         # gateway up and loads the page again; 3 tries take about 30 s
         deadline = time.monotonic() + 4 * 2 * (CHECK_EVERY + 1) + 10
         while len(loads) < 4 and time.monotonic() < deadline:
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(500)  # fixed wait: poll interval of a loop with a deadline
         assert len(loads) == 4, len(loads)  # the first offline page and 3 reloads
         page.wait_for_function("() => document.readyState === 'complete'")
-        page.wait_for_timeout(2 * (CHECK_EVERY + 1) * 1000 + 2000)  # long enough for another try
+        # fixed wait: a negative check: no further try within one try's length (the page's timers)
+        page.wait_for_timeout(2 * (CHECK_EVERY + 1) * 1000 + 2000)
         assert len(loads) == 4, len(loads)
         assert _offline(page), page.title()
         steps.now = "Try again once the page loads"

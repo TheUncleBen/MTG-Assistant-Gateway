@@ -17,6 +17,7 @@ from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_recheck_0746_browser import TOOL_ROWS, _balanced_facts
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import expect, redrawn
 
 pytest.importorskip("playwright")
 
@@ -66,7 +67,7 @@ def test_the_reports_deck_tile_facts_never_break_inside_a_fact(
         assert words[:3] == ["34 lands", "Avg MV 3.2", "0 game changers"], words
         _balanced_facts(page, ".ui-widgets .wdg .det .ui-dots.balanced")
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(150)
+        redrawn(page)
         _balanced_facts(page, ".ui-widgets .wdg .det .ui-dots.balanced")
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()
@@ -127,7 +128,7 @@ def test_a_price_nobody_knows_reads_the_same_way_everywhere(
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         # the Binder: the Value tile and the list's Price column
         page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
-        page.wait_for_timeout(2500)  # the Value tile follows the binder read (collection.js)
+        expect(page.locator("[data-value-reading]")).to_have_count(0)  # the Value tile followed the read
         fold = page.locator("label.glance-lbl").first
         if fold.count() and fold.is_visible():
             fold.click()
@@ -351,7 +352,7 @@ def test_the_activity_toolbars_wrap_as_every_list_does(
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             if zoom == "root":
                 page.evaluate(ROOT_200)
-                page.wait_for_timeout(150)
+                redrawn(page)
             assert page.evaluate(MEASURE) == [], (path, width, zoom)
             tools = page.evaluate(TOOL_ROWS)
             search = page.locator(".ui-tools .search input").bounding_box()
@@ -381,7 +382,7 @@ def test_historys_three_filters_never_leave_one_stretched_alone(
         page.goto(f"{server.base}/history", wait_until="networkidle")
         if zoom == "root":
             page.evaluate(ROOT_200)
-            page.wait_for_timeout(150)
+            redrawn(page)
         tools = page.evaluate(TOOL_ROWS)
         assert _rows_balanced(tools["rows"]), (BALANCED, tools)
         if zoom == "none":
@@ -422,7 +423,7 @@ def test_the_activity_tables_fold_their_columns_at_200_percent_text(
         for path in ("/admin/activity", "/activity"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             page.evaluate(ROOT_200)
-            page.wait_for_timeout(150)
+            redrawn(page)
             assert page.locator(".act-table .tr.ev").count() >= 1, path
             assert page.evaluate(MEASURE) == [], (path, width)
             width_now = page.evaluate("() => document.documentElement.scrollWidth")
@@ -648,7 +649,7 @@ def test_a_button_in_a_notice_stays_whole_and_goes_under_the_words(
                 page.goto(f"{server.base}{path}", wait_until="networkidle")
                 if zoom == "text":
                     page.evaluate(TEXT_200)
-                    page.wait_for_timeout(150)
+                    redrawn(page)
                 got = page.evaluate(NOTICE_BUTTONS, ".notice.held .btn")
                 assert [g["text"] for g in got] == ["Try again"], (path, got)
                 for g in got:
@@ -720,7 +721,7 @@ def test_a_notices_words_keep_their_room_beside_or_above_its_button(
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             if zoom == "root":
                 page.evaluate(ROOT_200)
-                page.wait_for_timeout(150)
+                redrawn(page)
             got = page.evaluate(NOTICE_ROOM, ".notice.held")
             assert len(got) == 1, (path, got)
             assert page.evaluate(MEASURE) == [], (path, width, zoom)
@@ -776,6 +777,7 @@ def test_a_tap_on_the_sheets_backdrop_closes_it_and_reaches_nothing_under_it(
         # a tap over Add cards lands on the backdrop
         page.mouse.click(target["x"] + target["width"] / 2, target["y"] + target["height"] / 2)
         page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        # fixed wait: a negative check: within 300 ms the tap neither follows Add cards nor opens its box
         page.wait_for_timeout(300)
         assert page.url == url, page.url  # Add cards (a link to ?add=1) was not followed...
         assert page.locator(".mtgbox[role=dialog]:not([hidden])").count() == 0  # ...nor its box opened
@@ -845,7 +847,7 @@ def test_a_tiles_facts_never_leave_a_dot_at_the_end_of_a_line(
                 fold.click()
             if zoom == "root":
                 page.evaluate(ROOT_200)
-                page.wait_for_timeout(200)
+                redrawn(page)
             dets = page.evaluate(TILE_FACTS)
             assert all(d["right"] > d["left"] for d in dets), (path, dets)  # shown, with a size
             assert all("·" not in d["own"] for d in dets), (path, [d for d in dets if "·" in d["own"]])

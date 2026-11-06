@@ -35,6 +35,7 @@ from .test_overflow_sweep_browser import CARDS, _seed
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_ui_pass_c_browser import _seed as _parity_seed
+from .waits import expect, frame, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -188,7 +189,7 @@ class Driver:
 
     def goto(self, path: str) -> None:
         self.page.goto(self.server.base + path, wait_until="load")
-        self.page.wait_for_timeout(300)  # the deferred scripts have run and the first frame is up
+        frame(self.page)  # the deferred scripts ran before load; the first frame is up
 
     def measure(self, do, *, tries: int = 2, reset=None, budget: int | None = None) -> int:
         """The best of ``tries`` runs of ``do`` (input to the frame after the first change on the
@@ -201,7 +202,7 @@ class Driver:
             if not first[0] and reset:
                 reset()
                 # on a phone the close goes back over the box's own history entry; that lands later
-                self.page.wait_for_timeout(700)
+                quiet(self.page)
             first[0] = False
             self.perf.clear()
             self.page.evaluate("() => window.__arm()")
@@ -209,6 +210,7 @@ class Driver:
             for _ in range(60):  # the response, within 3 s at most
                 if self.perf:
                     break
+                # fixed wait: poll interval (perf fills as console events land)
                 self.page.wait_for_timeout(50)
             assert self.perf, "nothing on the page changed after the input"
             return self.perf[0]
@@ -241,7 +243,7 @@ class Driver:
         assert b is not None
         x, y = b["x"] + b["width"] / 2, b["y"] + min(b["height"] / 2, 30)
         self.cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        self.page.wait_for_timeout(HOLD_MS + 150)
+        self.page.locator(".ctxmenu").first.wait_for(timeout=5000)  # held past the hold: the menu opened
         self.cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
 
 
@@ -256,12 +258,16 @@ class _Held:
     def __exit__(self, *exc):
         return False
 
-    def release(self) -> None:
-        for _ in range(100):  # until the request has reached the route (5 s at most)
+    def reached(self) -> None:
+        """Until the request has reached the route (5 s at most)."""
+        for _ in range(100):
             if self.routes:
                 break
-            self.page.wait_for_timeout(50)
+            self.page.wait_for_timeout(50)  # fixed wait: poll interval (routes fill as events land)
         assert self.routes, "the input sent no request"
+
+    def release(self) -> None:
+        self.reached()
         self.routes[0].continue_()
         self.page.unroute(self.pattern)
         self.page.wait_for_url(self.pattern)
@@ -294,7 +300,7 @@ def test_menus_open_within_one_beat(server: Server) -> None:
             assert d.menu().is_visible()
             slow.append(("decks ⋮", d.width, ms))
             d.escape()
-            page.wait_for_timeout(250)
+            quiet(page)
             right = partial(tile.click, button="right", position={"x": 20, "y": 20}, no_wait_after=True)
             ms = d.measure(right, reset=d.escape, budget=MENU_MS)
             assert d.menu().is_visible()
@@ -362,13 +368,15 @@ def _box_from_menu(d: Driver, item: str) -> int:
     ms = d.measure(partial(entry.click, no_wait_after=True), tries=1)
     assert d.box().is_visible(), item
     d.escape()
-    d.page.wait_for_timeout(300)
+    quiet(d.page)
     return ms
 
 
 def _longest_task(d: Driver, path: str) -> int:
     """Load ``path``: the longest task in ms, from the start of the page."""
     d.page.goto(d.server.base + path, wait_until="load")
+    # fixed wait: the measure's window: the long tasks of the first 700 ms after load are what
+    # counts (a time window to measure in, not a guess at a condition)
     d.page.wait_for_timeout(700)
     tasks = d.page.evaluate("() => window.__perf.longtasks")
     return max(tasks or [0])
@@ -390,14 +398,14 @@ def test_boxes_open_within_one_beat(server: Server) -> None:
             assert d.box().is_visible() and "New deck" in d.box().inner_text()
             slow.append(("New deck", d.width, ms))
             d.escape()
-            page.wait_for_timeout(300)
+            quiet(page)
             # New folder: built by a script; the box shows at once with its loading line
             new_folder = page.locator("[data-new-folder]").first
             ms = d.measure(partial(new_folder.click, no_wait_after=True), reset=d.escape, budget=BOX_MS)
             assert d.box().is_visible()
             slow.append(("New folder", d.width, ms))
             d.escape()
-            page.wait_for_timeout(300)
+            quiet(page)
             # a deck's menu → Export… and Delete… (the box comes before the answer from the gateway)
             for item in ("Export", "Delete"):
                 slow.append((f"menu {item}", d.width, best_within(BOX_MS, partial(_box_from_menu, d, item))))
@@ -459,23 +467,25 @@ def test_chips_filters_sizes_and_searches_respond_at_once(server: Server) -> Non
             d.goto("/decks")
             q = page.locator("#listform #q")  # the name field sits in the toolbar at every width
             q.click()
-            page.wait_for_timeout(200)
+            settled(page)
+            frame(page)  # the focus's own changes are drawn before the measure is armed
             ms = d.measure(partial(page.keyboard.type, "s"), tries=1)
             assert page.locator("#decks-list[aria-busy=true]").count() == 1
             slow.append(("decks search letter", d.width, ms))
-            page.wait_for_timeout(800)
+            expect(page.locator("#decks-list[aria-busy=true]")).to_have_count(0)  # the search after the pause
             # the card search page: the same pending look (static/cardsearch.js)
             d.goto("/cards?q=sol")
             cq = page.locator("#cs-form input[name=q]").first
             if not cq.is_visible():  # on a phone the field may sit in the Filters sheet
                 page.locator(".sp-open").first.click()
-                page.wait_for_timeout(300)
+                expect(cq).to_be_visible()
             cq.click()
-            page.wait_for_timeout(200)
+            settled(page)
+            frame(page)  # the focus's own changes are drawn before the measure is armed
             ms = d.measure(partial(page.keyboard.type, "a"), tries=1)
             assert page.locator(".cs-results[aria-busy=true]").count() == 1
             slow.append(("card search letter", d.width, ms))
-            page.wait_for_timeout(800)
+            expect(page.locator(".cs-results[aria-busy=true]")).to_have_count(0)  # the search after the pause
             # a chip that is a link to another address shows the navigation bar at once; the
             # answer is held until the measure has been read, so the page is still there to ask
             d.goto("/proposals")
@@ -649,6 +659,7 @@ def _loading_looks(d: Driver) -> None:
         asked.clear()
         page.evaluate(WATCH)
         do()
+        # fixed wait: a negative check: no request and no loading look within 400 ms of the control
         page.wait_for_timeout(400)
         looks = page.evaluate("() => window.__looks")
         # the bell's count is the page's own read after it loads (static/bell.js, when the browser
@@ -661,7 +672,7 @@ def _loading_looks(d: Driver) -> None:
         assert waits == [] and looks == [], (name, d.width, asked, looks)
         if undo:
             undo()
-            page.wait_for_timeout(400)
+            quiet(page)
 
     d.goto("/decks")
     tile = page.locator("li.deck[data-deck-id]").first
@@ -695,7 +706,8 @@ def _loading_looks(d: Driver) -> None:
         d.menu().wait_for()
         d.menu().locator("[role=menuitem]", has_text="Delete").first.click()
         d.box().wait_for()
-        page.wait_for_timeout(200)
+        held.reached()
+        expect(d.box().locator(".loading")).to_have_count(1)
         assert held.routes, "Delete… read nothing from the gateway"
         assert d.box().locator(".loading").count() == 1
         assert page.evaluate("() => window.__looks"), "no loading look while it waited"
@@ -731,7 +743,7 @@ def test_category_boxes_and_the_companion_switch_respond_at_once(server: Server)
                 assert d.box().is_visible(), what
                 slow.append((what, d.width, ms, BOX_MS))
                 d.escape()
-                page.wait_for_timeout(300)
+                quiet(page)
             d.goto("/decks/42")
             card = page.locator(".deckview li[data-card]").first
 
@@ -746,7 +758,7 @@ def test_category_boxes_and_the_companion_switch_respond_at_once(server: Server)
                 item = d.menu().locator("[role=menuitemcheckbox]", has_text="Companion").first
                 ms = d.measure(partial(item.click, no_wait_after=True), tries=1)
                 assert card.get_attribute("data-companion") == (None if was else "1"), was
-                page.wait_for_timeout(700)  # the save lands before the next press
+                expect(page.locator(".histtools button", has_text="Undo")).to_be_enabled()  # the save landed
                 return ms
 
             slow.append(("Companion switch", d.width, best_within(CHIP_MS, press, least=2), CHIP_MS))

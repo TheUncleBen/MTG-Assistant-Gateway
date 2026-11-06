@@ -28,7 +28,7 @@ def container_of(service: str) -> str:
         out = sh("docker", "ps", "-q", "--filter", f"name={service}.", "--filter", "status=running").split()
         if out:
             return out[0]
-        time.sleep(2)
+        time.sleep(2)  # fixed wait: poll interval of a loop with a deadline
     raise AssertionError(f"no running container for {service}")
 
 
@@ -215,7 +215,7 @@ def test_state_survives_a_service_restart(http: httpx.Client, alice_tokens):
     before = container_of(GATEWAY)
     sh("docker", "service", "update", "--force", "--detach", GATEWAY)
     for _ in range(90):
-        time.sleep(2)
+        time.sleep(2)  # fixed wait: poll interval of a loop with a deadline
         try:
             if container_of(GATEWAY) != before and http.get("/healthz").status_code == 200:
                 break

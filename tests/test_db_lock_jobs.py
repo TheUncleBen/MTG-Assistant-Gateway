@@ -51,7 +51,7 @@ HOLD_WHEN_TOLD = textwrap.dedent(
     sys.stdin.readline()
     c.execute("BEGIN IMMEDIATE")
     print("held", flush=True)
-    time.sleep(float(sys.argv[2]))
+    time.sleep(float(sys.argv[2]))  # fixed wait: holds the write lock for the time the test gives
     c.execute("COMMIT")
     """
 )

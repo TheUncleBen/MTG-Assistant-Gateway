@@ -617,6 +617,7 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
         assert page.evaluate("() => document.activeElement.textContent") == GO
         _shot(page, f"edhplay-loading-{width}-{scheme}")
         go.click(force=True)  # not ready: nothing opens, nothing is copied, the box stays
+        # fixed wait: a negative check: the press before the list is ready opens nothing within 300 ms
         page.wait_for_timeout(300)
         assert opened == [] and len(page.context.pages) == 1 and page.locator(".edhplay-dialog").count() == 1
         held.pop().continue_()

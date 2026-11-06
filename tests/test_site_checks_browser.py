@@ -53,6 +53,7 @@ from .test_overflow_sweep_browser import (
     server,  # noqa: F401
 )
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -772,6 +773,7 @@ def _goto(page, url: str):  # noqa: ANN001, ANN202
     for attempt in range(5):
         r = page.goto(url, wait_until="networkidle")
         if r is not None and r.status in (429, 503) and attempt < 4:
+            # fixed wait: the server's busy answer (429/503) asks for a pause before the next try
             page.wait_for_timeout(1500)
             continue
         return r
@@ -833,7 +835,7 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
                 seen: dict[str, int] = {}
                 for w in widths:
                     page.set_viewport_size({"width": w, "height": 860})
-                    page.wait_for_timeout(40)
+                    redrawn(page)
                     opts = {
                         "touch": touch,
                         "app": touch,

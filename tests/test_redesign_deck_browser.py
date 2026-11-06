@@ -27,6 +27,7 @@ import pytest
 from .test_card_search_filters_browser import CONTRAST
 from .test_overflow_sweep_browser import MEASURE
 from .test_printing_picker_browser import Server, _chromium, _page
+from .waits import expect, redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -104,12 +105,12 @@ def _open_card_menu(page, width: int) -> None:
         cdp = page.context.new_cdp_session(page)
         x, y = box["x"] + 60, box["y"] + box["height"] / 2
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(500)
+        page.locator(".ctxmenu[role=menu]").wait_for(timeout=3000)  # the hold opened the menu
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
     else:
         card.click(button="right")
     page.locator(".ctxmenu[role=menu]").wait_for(timeout=3000)
-    page.wait_for_timeout(200)
+    settled(page)
 
 
 @pytest.mark.parametrize("width,theme", [(1280, "dark"), (840, "light")])
@@ -212,7 +213,8 @@ def test_on_a_phone_the_card_menu_is_a_sheet_that_scrolls(server: Server) -> Non
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, MENU_TEXT) == []
         # the scrim closes it
         page.mouse.click(10, 10)
-        page.wait_for_timeout(400)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        expect(page.locator(".cs-scrim")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0 and page.locator(".cs-scrim").count() == 0
         assert errors == []
         browser.close()
@@ -242,7 +244,8 @@ def test_a_tap_opens_the_viewer_whose_printing_row_opens_the_printings_sheet(
         card.click()
         view = page.locator(".cardview.open")
         view.wait_for(timeout=3000)
-        page.wait_for_timeout(300)
+        expect(view.locator(".printrow .lbl")).to_have_text("Printing")
+        settled(page)
         # the Printing row names the printing and opens the sheet (F3)
         row = view.locator(".printrow")
         assert row.locator(".lbl").inner_text() == "Printing"
@@ -278,7 +281,9 @@ def test_a_tap_opens_the_viewer_whose_printing_row_opens_the_printings_sheet(
         assert not any(c.startswith(("YMID", "FUT", "STA")) for c in all_codes), all_codes
         # Different art: one printing of each other picture; the deck's own stays, marked Current
         chips.nth(1).click()
-        page.wait_for_timeout(200)
+        page.wait_for_function(
+            "(n) => document.querySelectorAll('.printpick .pptile').length === n", arg=all_n - 1, timeout=4000
+        )
         # SLD 1075 (the same picture as the deck's) is left out; the deck's own stays, and so
         # does a printing whose summary has no picture id (LEA 270): it counts as its own art
         art = codes()
@@ -293,7 +298,7 @@ def test_a_tap_opens_the_viewer_whose_printing_row_opens_the_printings_sheet(
         assert set(codes()) == {"CMR #472", "SLD #1074"}, codes()
         assert chips.nth(2).get_attribute("aria-pressed") == "true"
         chips.first.click()
-        page.wait_for_timeout(200)
+        expect(page.locator(".printpick .pptile")).to_have_count(all_n)
         assert page.locator(".printpick .pptile").count() == all_n
         if width < 600:
             assert (
@@ -432,7 +437,7 @@ def test_the_phone_deck_page_starts_with_the_cards_near_the_top(server: Server) 
         # the text view has no card size; the picture views add a Card size row
         assert labels == ["Layout", "Group by", "Sort by", "Filter", "Select cards"], labels
         sheet.locator("#vs-q").fill("sol")
-        page.wait_for_timeout(300)
+        expect(page.locator("#q")).to_have_value("sol")
         assert page.locator("#q").input_value() == "sol"
         assert page.locator(ROW).first.is_visible()
         sheet.locator(".viewsheet .switch").click()
@@ -450,7 +455,7 @@ def test_the_phone_deck_page_starts_with_the_cards_near_the_top(server: Server) 
         page.locator(".mtgbox-scrim").wait_for(state="detached")
         # 200% text: nothing scrolls sideways, the toolbar wraps
         page.evaluate("() => { document.documentElement.style.fontSize = '200%'; }")
-        page.wait_for_timeout(200)
+        redrawn(page)
         assert page.evaluate(MEASURE) == []
         assert errors == []
         browser.close()

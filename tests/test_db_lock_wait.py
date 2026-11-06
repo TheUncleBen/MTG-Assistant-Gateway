@@ -26,7 +26,7 @@ HOLD = textwrap.dedent(
     c = sqlite3.connect(sys.argv[1], isolation_level=None)
     c.execute("BEGIN IMMEDIATE")
     print("held", flush=True)
-    time.sleep(float(sys.argv[2]))
+    time.sleep(float(sys.argv[2]))  # fixed wait: holds the write lock for the time the test gives
     c.execute("COMMIT")
     """
 )

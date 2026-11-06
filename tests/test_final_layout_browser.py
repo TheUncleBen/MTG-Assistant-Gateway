@@ -26,6 +26,7 @@ from .test_history_page import store_report
 from .test_overflow_sweep_browser import MEASURE
 from .test_social_browser import Server as ReportsServer
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, settled
 
 pytest.importorskip("playwright")
 
@@ -155,7 +156,7 @@ def _open_delete_box(page, name: str):
     menu.locator("[role=menuitem]", has_text="Delete…").click()
     box = page.locator(BOX)
     box.wait_for(timeout=3000)
-    page.wait_for_timeout(200)
+    settled(page)
     return box
 
 
@@ -178,7 +179,7 @@ def test_the_delete_box_wraps_a_long_unbroken_category_name(
         box = _open_delete_box(page, "Removal")
         select = box.locator("select#catmove")
         select.select_option(LONG)
-        page.wait_for_timeout(100)
+        expect(box.locator(".body p").first).to_have_text(f"Its 3 cards stay in the deck, in “{LONG}”.")
         sentence = box.locator(".body p").first.inner_text()
         assert sentence == f"Its 3 cards stay in the deck, in “{LONG}”.", sentence
         fit = page.evaluate(BOX_FIT)

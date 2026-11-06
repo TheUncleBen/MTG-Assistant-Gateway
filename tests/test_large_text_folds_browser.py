@@ -23,6 +23,7 @@ from .test_editor_browser import PNG
 from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import BROWSER_200, ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -82,7 +83,7 @@ SHORT = """(sel) => [...document.querySelectorAll(sel)]
 def _zoom(page, zoom: str) -> None:  # noqa: ANN001
     if zoom != "none":
         page.evaluate({"root": ROOT_200, "text": TEXT_200, "browser": BROWSER_200}[zoom])
-        page.wait_for_timeout(150)
+        redrawn(page)
 
 
 def _contexts(p, srv: Server, sid: str, theme: str, exe: str | None):  # noqa: ANN001

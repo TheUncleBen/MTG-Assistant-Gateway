@@ -25,6 +25,7 @@ from .test_cards_browser import DECK, LINK, ROWS, _calls, _open, _shot, png
 from .test_cards_pickers_browser import RESULT, _long_list, _tiles
 from .test_consent_browser import _chromium_or_skip, _launch
 from .test_track_a_cards_browser import WAITING, WAITING_META
+from .waits import expect, settled
 
 pytest.importorskip("playwright")
 
@@ -90,7 +91,7 @@ def _frame_follows(page, timeout: float = 5.0) -> tuple[float, float]:
             return frame, body
         if time.monotonic() >= deadline:
             raise AssertionError(f"the frame never followed the card: frame {frame}, card {body}")
-        page.wait_for_timeout(20)
+        page.wait_for_timeout(20)  # fixed wait: poll interval of a loop with a deadline
 
 
 def _height(card, selector: str) -> float:
@@ -205,7 +206,9 @@ def test_printings_card_shows_a_page_of_even_tiles_and_grows_with_show_more_not_
                 for theme in ("light", "dark"):
                     card = _open(page, "printings-card", RESULT, width=360, theme=theme, host_extra=extra)
                     card.locator("#more").wait_for()
-                    page.wait_for_timeout(300)
+                    expect(card.locator("#grid .tile img")).to_have_count(8)
+                    settled(page.frames[1])
+                    _frame_follows(page)
                     # a page of tiles, not all 78, and nothing in the card scrolls on its own
                     tiles = _tiles(card)
                     assert len(tiles) == 8, (host, theme, len(tiles))
@@ -227,7 +230,9 @@ def test_printings_card_shows_a_page_of_even_tiles_and_grows_with_show_more_not_
                     assert re.search(r"Show \d+ more", more.inner_text()) and "70 left" in more.inner_text()
                     assert _height(card, "#more") >= 44
                     more.click()
-                    page.wait_for_timeout(300)
+                    expect(card.locator("#grid .tile img")).to_have_count(2 * len(tiles))
+                    settled(page.frames[1])
+                    _frame_follows(page)
                     assert len(_tiles(card)) == 2 * len(tiles)
                     frame2, body2 = _frame_and_body(page)
                     assert abs(frame2 - body2) <= 2, (frame, body, frame2, body2)
@@ -237,14 +242,14 @@ def test_printings_card_shows_a_page_of_even_tiles_and_grows_with_show_more_not_
                     _shot(page, f"audit-printings-{host}-{theme}-360")
             # the filter starts the paging over, and a list that fits has no Show more
             card.locator("#filter").fill("legends")
-            page.wait_for_timeout(200)
+            expect(card.locator("#more")).to_contain_text("18 left")
             assert len(_tiles(card)) == 8 and "18 left" in card.locator("#more").inner_text()
             card.locator("#filter").fill("")
             card.locator("#finish button[data-finish=foil]").click()
-            page.wait_for_timeout(200)
+            expect(card.locator("#more")).to_contain_text("44 left")
             assert len(_tiles(card)) == 8 and "44 left" in card.locator("#more").inner_text()
             card.locator("#filter").fill("100")
-            page.wait_for_timeout(200)
+            expect(card.locator("#more")).to_have_count(0)
             assert card.locator("#more").count() == 0 and len(_tiles(card)) == 1
             assert not errors, errors
         finally:
@@ -274,7 +279,8 @@ def test_printings_card_has_a_bigger_pictures_switch_and_a_readable_detail_witho
             for host, extra in HOSTS.items():
                 card = _open(page, "printings-card", RESULT, width=412, theme="light", host_extra=extra)
                 card.locator(".tile img").nth(5).wait_for()
-                page.wait_for_timeout(300)
+                settled(page.frames[1])
+                _frame_follows(page)
                 # Expand only where the host can do it; the card's own switch everywhere
                 expand = card.locator("#expand")
                 assert expand.is_visible() == (host == "claude"), host
@@ -285,7 +291,8 @@ def test_printings_card_has_a_bigger_pictures_switch_and_a_readable_detail_witho
                 before = _tiles(card)
                 assert len({round(t["x"]) for t in before}) == 2
                 big.click()
-                page.wait_for_timeout(300)
+                expect(big).to_have_text("Smaller pictures")
+                settled(page.frames[1])
                 after = _tiles(card)
                 assert len({round(t["x"]) for t in after}) == 1, host
                 # one whole card across the card: wider than 300 px on a 412 px phone, still 5:7
@@ -297,7 +304,8 @@ def test_printings_card_has_a_bigger_pictures_switch_and_a_readable_detail_witho
                 assert _no_inner_scroll(page) == []
                 _shot(page, f"audit-printings-bigger-{host}-412")
                 big.click()
-                page.wait_for_timeout(200)
+                expect(big).to_have_text("Bigger pictures")
+                settled(page.frames[1])
                 assert len({round(t["x"]) for t in _tiles(card)}) == 2
                 # a tap: the picture at the card's width, and the words of the card as text
                 card.locator(".tile").nth(1).click()
@@ -310,6 +318,7 @@ def test_printings_card_has_a_bigger_pictures_switch_and_a_readable_detail_witho
                 assert _height(card, "#back") >= 44
                 assert _no_inner_scroll(page) == []
                 _shot(page, f"audit-printings-detail-{host}-412")
+                # fixed wait: a negative check: the tap sends no model context update within 200 ms
                 page.wait_for_timeout(200)
                 assert _calls(page, "ui/update-model-context") == []
                 card.locator("#back").click()
@@ -534,10 +543,14 @@ def test_every_card_uses_one_button_shape_per_role_at_44px() -> None:
             ]
             for name, result in cases:
                 card = _open(page, name, result, width=320, theme="light")
-                page.wait_for_timeout(600)
+                settled(page.frames[1])
+                _frame_follows(page)
                 if name == "waiting-card":
                     card.locator("#apply-all").wait_for()
-                    page.wait_for_timeout(800)  # the arm delay: buttons drawn in their resting look
+                    expect(
+                        card.locator("#apply-all")
+                    ).to_be_enabled()  # armed: the buttons in their resting look
+                    settled(page.frames[1])
                 if name == "printings-card":
                     card.locator(".tile").first.click()
                     card.locator("#use").wait_for()
@@ -576,7 +589,8 @@ def test_cards_fit_every_width_light_and_dark_on_both_hosts() -> None:
                             page, "printings-card", RESULT, width=width, theme=theme, host_extra=extra
                         )
                         card.locator("#more").wait_for()
-                        page.wait_for_timeout(250)
+                        settled(page.frames[1])
+                        _frame_follows(page)
                         assert not _sideways(page), (host, theme, width)
                         assert _no_inner_scroll(page) == [], (host, theme, width)
                         _frame_follows(page)
@@ -584,7 +598,8 @@ def test_cards_fit_every_width_light_and_dark_on_both_hosts() -> None:
                             assert len({round(t["x"]) for t in _tiles(card)}) <= 3
                         card = _open(page, "picker-card", picker, width=width, theme=theme, host_extra=extra)
                         card.locator("#rows > .row").nth(2).wait_for()
-                        page.wait_for_timeout(250)
+                        settled(page.frames[1])
+                        _frame_follows(page)
                         assert not _sideways(page) and _no_inner_scroll(page) == [], (host, theme, width)
             assert not errors, errors
         finally:

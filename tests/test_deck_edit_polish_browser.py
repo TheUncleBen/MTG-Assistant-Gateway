@@ -133,6 +133,7 @@ def test_the_packages_tab_shows_one_empty_state_under_its_heading(server: Server
 from mtg_gateway import decks as decks_mod  # noqa: E402
 
 from .test_deck_views_browser import _error, _held, _menu_page, _open_menu  # noqa: E402
+from .waits import quiet  # noqa: E402
 
 
 def test_a_save_archidekt_took_unanswered_is_saved(server: Server) -> None:
@@ -239,6 +240,8 @@ def test_a_slow_save_ends_on_the_deck_page_with_undo(server: Server, monkeypatch
             menu.locator(".qtyrow .step").nth(1).click()
             saying = page.locator(".deck-toast .msg", has_text=f"Saving Cultivate: {n + 1} copies…")
             saying.wait_for(timeout=5000)
+            # fixed wait: a negative check: past the gateway's 0.5 s wait and the page's reads after it,
+            # 2.5 s of a held save bring no Review page link and keep the Saving note
             page.wait_for_timeout(2500)
             assert page.locator(".deck-toast a", has_text="Review page").count() == 0
             assert "Saving Cultivate" in page.locator(".deck-toast .msg").inner_text()
@@ -268,9 +271,10 @@ def test_a_reload_during_a_slow_save_shows_the_strip_then_the_result(server: Ser
         held = _held(server)
         try:
             menu = _open_menu(page, row)
-            menu.locator(".qtyrow .step").nth(1).click()
+            # the gateway's answer after its 0.5 s wait: the save carries on behind, as the server knows
+            with page.expect_response(lambda r: r.url.endswith("/api/v1/decks/42/edit")):
+                menu.locator(".qtyrow .step").nth(1).click()
             page.locator(".deck-toast .msg", has_text="Saving Cultivate").wait_for(timeout=5000)
-            page.wait_for_timeout(1500)
             page.reload(wait_until="networkidle")
             strip = page.locator("p.notice.saving[data-busy]")
             assert strip.is_visible() and "Saving 1 change…" in strip.inner_text()
@@ -350,7 +354,7 @@ def test_deck_settings_save_each_change_at_once_with_undo(server: Server, width:
         box.wait_for(timeout=5000)
         assert "Change the commander category?" in box.locator("h2").inner_text()
         box.locator("button", has_text="Cancel").click()
-        page.wait_for_timeout(300)
+        quiet(page)  # the box closed
         assert not ramp.locator(f"input[name='premier_{cid}']").is_checked()
         assert len(server.ark.updates) == updates
         assert errors == []
@@ -411,7 +415,7 @@ def test_leaving_deck_settings_while_a_save_runs_asks_first(server: Server) -> N
         for _ in range(40):
             if held:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert held, "the save never left the page"
         assert page.evaluate(asks) is True
         held[0].continue_()

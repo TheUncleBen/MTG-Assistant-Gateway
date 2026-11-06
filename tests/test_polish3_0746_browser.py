@@ -19,6 +19,7 @@ from .test_card_search_filters_browser import CONTRAST
 from .test_overflow_sweep_browser import MEASURE
 from .test_printing_picker_browser import Server, _chromium, _page
 from .test_text_zoom_browser import TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -265,7 +266,7 @@ def test_the_list_view_holds_together_at_200_percent_text_on_a_desktop(server: S
         browser, page, errors = _page(p, server, sid, 1280, theme=theme)
         page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(300)
+        redrawn(page)
         assert page.evaluate(MEASURE) == []
         # the table folded to its two-column layout: the name has room, the Set column is gone
         name = page.locator("#cards .tr.row .name").first.bounding_box()

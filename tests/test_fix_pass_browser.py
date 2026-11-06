@@ -23,6 +23,7 @@ from .test_editor_browser import _link
 from .test_menus_browser import _box, _exe, _items, _menu, _pick
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, poll, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -137,7 +138,7 @@ def test_a_late_deck_list_answer_never_overwrites_a_newer_one(server: Server) ->
         page.goto(f"{server.base}/decks?folder=501", wait_until="networkidle")
         box = page.locator("#q")
         box.fill("ur")
-        page.wait_for_timeout(400)  # past the 250 ms pause: the "ur" request is out and held
+        poll(page, lambda: len(held) >= 1)  # past the 250 ms pause: the "ur" request is out and held
         assert len(held) == 1
         box.fill("urza")
         page.wait_for_function(
@@ -148,6 +149,7 @@ def test_a_late_deck_list_answer_never_overwrites_a_newer_one(server: Server) ->
             held[0].continue_()  # the older answer lands late (or was cut off by the page)
         except Exception:  # noqa: BLE001
             pass
+        # fixed wait: a negative check: the late answer to "ur" does not replace the list within 800 ms
         page.wait_for_timeout(800)
         names = page.locator("ul.decklist .deck .name").all_inner_texts()
         assert names == ["Urza's workshop"], names  # not the wider "ur" matches
@@ -167,6 +169,7 @@ def test_load_more_decks_keeps_the_search_the_results_are_of(server: Server) -> 
         page.goto(f"{server.base}/search?format=3", wait_until="networkidle")
         assert page.locator("ul.decklist li.deck").count() == 12
         page.locator(".spanel .tog input[value=U]").check()  # not sent: no search runs
+        # fixed wait: a negative check: no search runs within 300 ms of the tick
         page.wait_for_timeout(300)
         assert page.locator("ul.decklist li.deck").count() == 12
         page.locator("#s-more [data-more]").click()
@@ -200,6 +203,7 @@ def test_the_delete_folder_box_stays_until_its_job_ends(server: Server) -> None:
         # Esc and a press on the scrim do nothing while the job runs
         page.keyboard.press("Escape")
         page.mouse.click(5, 5)
+        # fixed wait: a negative check: Esc and the scrim press change nothing within 200 ms
         page.wait_for_timeout(200)
         assert page.locator(".mtgbox[role=dialog]:not([hidden])").count() == 1
         assert page.locator(".mtgbox[role=dialog]:not([hidden]) [data-cancel]").count() == 0
@@ -225,7 +229,8 @@ def test_back_closes_a_menu_in_the_app_and_on_a_tablet(server: Server, width: in
         page.locator("li.deck[data-deck-id='42'] button.kebab").click()
         _menu(page)
         page.go_back()
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         assert page.locator(".ctxmenu").count() == 0
         assert urlparse(page.url).path == "/decks", page.url  # still on My decks
         # the deck page's own card menu
@@ -234,7 +239,8 @@ def test_back_closes_a_menu_in_the_app_and_on_a_tablet(server: Server, width: in
         card.click(button="right")
         page.locator(".ctxmenu[role=menu]").wait_for(timeout=3000)
         page.go_back()
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         assert page.locator(".ctxmenu").count() == 0
         assert urlparse(page.url).path == "/decks/42", page.url
         assert errors == [], errors
@@ -507,7 +513,7 @@ def test_card_search_controls_read_at_200_percent_text_on_a_desktop(server: Serv
         page.locator(".sp-open").click()  # the filters wait folded on a desktop
         page.locator("#p-t").wait_for(state="visible", timeout=3000)
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(200)
+        settled(page)
         got = page.evaluate(ZOOM_1280)
         assert got["sideways"] <= 0, got
         assert len(got["mv"]) == 2 and all(w >= 4 for w in got["mv"]), got  # room for "From" and "To"
@@ -541,7 +547,7 @@ def test_phone_text_at_200_percent_keeps_tab_labels_whole_and_controls_readable(
         browser, page, errors = _open(p, server, sid, 390, app=True, touch=True)
         page.goto(f"{server.base}/decks?folder=501", wait_until="networkidle")
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(200)
+        settled(page)
         got = page.evaluate(ZOOM_390)
         assert got["sideways"] <= 0, got
         # 7: a one-word label never breaks mid-word; the sort drop-down shows its words
@@ -550,7 +556,7 @@ def test_phone_text_at_200_percent_keeps_tab_labels_whole_and_controls_readable(
         # 8: the Scan page's Set box can be typed in
         page.goto(f"{server.base}/scan", wait_until="networkidle")
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(200)
+        settled(page)
         got = page.evaluate(ZOOM_390)
         assert got["sideways"] <= 0, got
         assert got["setW"] is not None and got["setW"] >= 3, got
@@ -594,7 +600,7 @@ def test_a_drop_down_keeps_its_chevron_while_hovered(server: Server) -> None:
         page.locator("#p-t").wait_for(state="visible", timeout=3000)
         btn = page.locator(".spanel .colors .msel-btn").first
         btn.hover()
-        page.wait_for_timeout(300)
+        settled(page)
         image = btn.evaluate("b => getComputedStyle(b).backgroundImage")
         assert "chevron" in image, image
         assert errors == [], errors
@@ -761,7 +767,7 @@ def test_rapid_filters_from_the_sheet_leave_one_entry_and_the_address_the_list_s
             )
             page.locator("#sp-filters .sp-show").click()
             page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
-            page.wait_for_timeout(1200)  # the held back() and its popstate
+            quiet(page)  # the held back() and its popstate
             _settle(page)
             assert page.evaluate("() => history.length") == depth + 1, (
                 i,

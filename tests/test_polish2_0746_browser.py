@@ -16,6 +16,7 @@ from .test_history_page import store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -91,7 +92,7 @@ def test_a_rows_menu_button_sits_at_the_right_of_its_title_line(chromium, server
     with _page(chromium, server, sid, 390) as page:
         page.goto(f"{server.base}{path}", wait_until="networkidle")
         page.evaluate(ZOOMS[zoom])
-        page.wait_for_timeout(30)
+        redrawn(page)
         got = page.evaluate(KEBABS, table)
         assert len(got) >= 3, got
         assert all(g["firstLine"] and g["right"] and g["inside"] for g in got), got
@@ -148,7 +149,7 @@ def test_the_grid_view_keeps_a_long_category_name_inside_the_screen(chromium, se
     with _page(chromium, server, sid, 344) as page:
         page.goto(f"{server.base}/decks/50?view=grid", wait_until="networkidle")
         page.evaluate(ZOOMS[zoom])
-        page.wait_for_timeout(30)
+        redrawn(page)
         assert page.evaluate(SCROLLS) == 0
         heads = page.locator(".deckview .stackhead .title")
         assert heads.count() >= 2

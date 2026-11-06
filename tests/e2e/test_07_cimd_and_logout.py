@@ -56,7 +56,7 @@ async def wait_for(hits: list[str], page) -> dict[str, str]:
     for _ in range(60):
         if hits:
             return {k: v[0] for k, v in parse_qs(urlparse(hits[0]).query).items()}
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(500)  # fixed wait: poll interval of a loop with a deadline
     raise AssertionError(f"the browser never reached the client's redirect; it is at {page.url!r}")
 
 
