@@ -150,9 +150,9 @@ VIZ_CSS = """
 /* the labels (the axes' "0%" and "T1", the values over the columns) grow with the text size as the
    words around the chart do (confirmation AD1: 11 px at every size): .chart svg's font-size is the
    size static/topbar.js gives them on screen, in the chart's own units, making room for them
-   (NC2); without scripts they are 11 of the chart's units, as before */
+   (NC2); without scripts they are that size in the chart's units, scaled with it */
 .chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:.786rem;overflow:visible}
-.chart text{fill:currentColor;font-size:11px} .chart .grid{stroke:var(--border-soft);stroke-width:1}
+.chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
 .chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)}
 .chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
 .chart .s4{stroke:var(--purple)} .chart polyline{fill:none;stroke-width:2.5;stroke-linejoin:round;
