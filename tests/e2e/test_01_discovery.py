@@ -82,7 +82,7 @@ def test_health_and_landing_page_leak_nothing(http: httpx.Client):
         health = http.get("/healthz").json()
         if health.get("status") == "ok":
             break
-        time.sleep(2)
+        time.sleep(2)  # fixed wait: poll interval of a loop with a deadline
     assert health == {"status": "ok"}  # no version or service names: they would name the project
     landing = http.get("/")
     assert landing.status_code == 302 and landing.headers["location"] == "/login?next=/"

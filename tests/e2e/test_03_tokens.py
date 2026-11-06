@@ -54,7 +54,7 @@ async def browser_authorize(env: Env, username: str, authorize_url: str) -> dict
         for _ in range(60):
             if captured:
                 break
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(500)  # fixed wait: poll interval of a loop with a deadline
         await browser.close()
     assert captured, "browser never reached the loopback redirect"
     return {k: v[0] for k, v in parse_qs(urlparse(captured[0]).query).items()}

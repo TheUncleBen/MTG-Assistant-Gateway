@@ -194,6 +194,6 @@ import sqlite3, sys, time
 c = sqlite3.connect(sys.argv[1], isolation_level=None, timeout=30)
 c.execute("BEGIN IMMEDIATE")
 print("held", flush=True)
-time.sleep(float(sys.argv[2]))
+time.sleep(float(sys.argv[2]))  # fixed wait: holds the write lock for the time the test gives
 c.execute("COMMIT")
 """

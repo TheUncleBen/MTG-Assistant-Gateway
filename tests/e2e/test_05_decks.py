@@ -78,7 +78,7 @@ def set_writes(writes: str) -> None:
                     return
         except (httpx.HTTPError, subprocess.CalledProcessError):
             pass
-        time.sleep(3)
+        time.sleep(3)  # fixed wait: poll interval of a loop with a deadline
     raise AssertionError("gateway did not come back after the service update")
 
 

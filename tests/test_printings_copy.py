@@ -518,7 +518,6 @@ async def test_a_damaged_copy_is_logged_once_without_a_traceback(
     assert said[0].levelno == logging.WARNING and said[0].exc_info is None
     assert service.copy.due()  # a copy that can't be read is replaced at the next download
     # another damaged file: said once more
-    time.sleep(0.01)
     service.copy.path.write_bytes(b"not a database at all")
     for _open in range(3):
         with pytest.raises(ScanError):
