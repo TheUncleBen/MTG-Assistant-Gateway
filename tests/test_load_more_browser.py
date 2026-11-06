@@ -171,3 +171,39 @@ def test_a_page_that_could_not_be_loaded_says_so_in_the_one_wording(server: Serv
             assert errors == [], errors
         finally:
             browser.close()
+
+
+def test_a_reload_with_a_layer_open_keeps_the_pages_loaded(server: Server) -> None:
+    """Audit NB3 (0fe11813): in the history way (Safari, Firefox, a touch screen), a layer's entry
+    held only its own mark, so a reload with a layer open lost the pages Load more had added (46 rows
+    went back to the first 25). The layer's entry carries the page's own state (static/layers.js)
+    and a reload on it drops only the layer's mark."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    seed_history(server.db, "user-1", now=int(time.time()))
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        try:
+            ctx = browser.new_context(viewport={"width": 390, "height": 800}, has_touch=True)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(f"{server.base}/history", wait_until="networkidle")
+            assert page.evaluate("() => MtgLayers.mode") == "history"
+            page.locator(".loadmore [data-load-more]").click()
+            page.wait_for_function(f"() => {ROWS} > 25", timeout=5000)
+            n = page.evaluate(f"() => {ROWS}")
+            page.evaluate("() => MtgLayers.open({name: 'probe', close: function () {}})")
+            assert page.evaluate("() => !!(history.state && history.state.mtglayer)")
+            page.reload(wait_until="networkidle")
+            page.wait_for_function(f"() => {ROWS} === {n}", timeout=5000)
+            assert page.evaluate("() => !(history.state && history.state.mtglayer)")
+            assert page.evaluate("() => history.state && history.state.mtgmore") == 1
+            assert errors == [], errors
+        finally:
+            browser.close()
