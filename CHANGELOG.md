@@ -584,6 +584,20 @@ name per thing.
   more chips fades its edge instead of cutting a chip.
 
 ### Fixed
+- Pages no longer fade in from the browser's own grey for a moment before their colours load.
+- At large text, a tall pop-up box keeps its title above its content, the shortcuts box keeps each
+  key beside its own words, text boxes grow with their text, and a hint too long for its box
+  shows a shorter version instead of being cut.
+- The tab bar fits its labels again when the text size changes, and its count stays inside its
+  tab. Switches split into equal parts in balanced rows.
+- A dot between facts, or the "/" in a count, never starts or ends a line. Long emails, paths and
+  names break only at "_", "@", "." or "/", and chart labels grow with the text.
+- Admin settings use the same rows and switches as deck settings.
+- My decks says in words when it is still reading a long deck list from Archidekt.
+- In the Android app, Back closes a menu or box opened while the page was still loading, and
+  only gateway pages are asked to close one.
+- A reload with a menu or box open keeps the rows Load more had added.
+- Unknown card names are looked up quickly on the first day after an upgrade, too.
 - After an edit on the deck page (an add, a removal, a count, Undo), the banner's date and Salt sum
   read as they do after a reload. Salt sum shows one decimal.
 - A change whose apply failed keeps its number (“#1”) in its review page's heading while no other
