@@ -235,9 +235,18 @@
      between the button's two sides. */
 (function () {
   "use strict";
+  // text cut on purpose (an ellipsis, a clipped box) is already held in its place
+  function clipped(e, top) {
+    for (; e && e !== top; e = e.parentElement) {
+      var c = getComputedStyle(e);
+      if (c.textOverflow === "ellipsis" || c.overflowX !== "visible") return true;
+    }
+    return false;
+  }
   function widestWord(el) {
     var w = 0, tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n, m, re = /\S+/g;
     while ((n = tw.nextNode())) {
+      if (clipped(n.parentElement, el)) continue;
       re.lastIndex = 0;
       while ((m = re.exec(n.textContent))) {
         var r = document.createRange(), sum = 0, rs;
@@ -251,7 +260,8 @@
   }
   function fitHeading(h) {
     if (h.style.zoom) h.style.removeProperty("zoom");
-    if (!h.getClientRects().length) return;
+    // a heading that holds its own controls keeps them at their full size
+    if (!h.getClientRects().length || h.querySelector("button, summary, a, input, select")) return;
     var cs = getComputedStyle(h);
     var room = h.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     var w = widestWord(h);
@@ -310,8 +320,30 @@
       if (!hit) return;
     }
   }
+  // a text box's hint: the longest of its hints (ui.hint_attrs: data-ph lists the shorter ones)
+  // that fits the box at its size, the shortest where none does (P-5, P-19)
+  var ctx = document.createElement("canvas").getContext("2d");
+  var hintRO = window.ResizeObserver ? new ResizeObserver(function (es) {
+    for (var i = 0; i < es.length; i++) fitHint(es[i].target);
+  }) : null;
+  function fitHint(el) {
+    if (!el.hasAttribute("data-ph-full")) el.setAttribute("data-ph-full", el.getAttribute("placeholder") || "");
+    var hints = [el.getAttribute("data-ph-full")].concat(el.getAttribute("data-ph").split("|"));
+    if (!el.getClientRects().length) return;
+    var cs = getComputedStyle(el);
+    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    var room = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), pick = hints[hints.length - 1];
+    for (var i = 0; i < hints.length; i++) if (ctx.measureText(hints[i]).width <= room) { pick = hints[i]; break; }
+    if (el.getAttribute("placeholder") !== pick) el.setAttribute("placeholder", pick);
+  }
   function fitIn(root) {
-    var cs2 = root.querySelectorAll(".chart svg"), k;
+    var ph = root.querySelectorAll("input[data-ph]"), k;
+    for (k = 0; k < ph.length; k++) {
+      fitHint(ph[k]);
+      // shown later (a sheet, a box) or resized: its own size tells
+      if (hintRO) hintRO.observe(ph[k]);
+    }
+    var cs2 = root.querySelectorAll(".chart svg");
     for (k = 0; k < cs2.length; k++) { thin(cs2[k], "text.x"); thin(cs2[k], "text.v"); }
     var hs = root.querySelectorAll("h1, h2, h3"), i;
     for (i = 0; i < hs.length; i++) fitHeading(hs[i]);
@@ -342,7 +374,8 @@
       for (var i = 0; i < muts.length; i++) {
         for (var j = 0; j < muts[i].addedNodes.length; j++) {
           var n = muts[i].addedNodes[j];
-          if (n.nodeType === 1 && (n.matches("h1, h2, h3, button, .btn") || n.querySelector("h1, h2, h3, button, .btn"))) {
+          var FIT = "h1, h2, h3, button, .btn, input[data-ph], .chart";
+          if (n.nodeType === 1 && (n.matches(FIT) || n.querySelector(FIT))) {
             later();
             return;
           }

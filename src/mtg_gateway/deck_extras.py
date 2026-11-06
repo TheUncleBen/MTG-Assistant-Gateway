@@ -137,7 +137,7 @@ def field(
     attrs: str = "",
 ) -> str:
     extra = (f" maxlength='{limit}'" if limit else "") + (" required" if required else "")
-    ph = f" placeholder='{esc(placeholder)}'" if placeholder else ""
+    ph = ui.hint_attrs(placeholder)
     return (
         f"<div class='field'><label for='{esc(fid)}'>{esc(label)}</label>"
         f"<input id='{esc(fid)}' type='text' name='{esc(name)}' value='{esc(value)}' autocomplete='off'"
@@ -673,7 +673,7 @@ def contest_box_html(
             "contest",
             "Contest link or ID",
             v.get("contest", ""),
-            placeholder="https://archidekt.com/contest/discussion/…",
+            placeholder="https://archidekt.com/contest/discussion/…|Contest link|Link",
             required=True,
         )
         + "<div class='field'><label for='dx-es'>Summary of the deck (required)</label>"
@@ -724,7 +724,7 @@ def withdraw_box_html(
             "contest",
             "Contest link or ID",
             v.get("contest", ""),
-            placeholder="https://archidekt.com/contest/discussion/…",
+            placeholder="https://archidekt.com/contest/discussion/…|Contest link|Link",
             required=True,
         )
         + f"<p>{esc(WITHDRAW_TEXT)}</p>"

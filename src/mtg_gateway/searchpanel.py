@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from . import ui
 from .mana import pip_html
 from .theme import card_size_control, esc, icon
 
@@ -90,7 +91,7 @@ def name_row(
     return (
         f"<div class='srow'><div class='sp-name'><label for='{esc(input_id)}'>{esc(label)}</label>"
         f"<span class='search'><input id='{esc(input_id)}' type='search' name='{esc(name)}' "
-        f"value='{esc(value)}' placeholder='{esc(placeholder)}' autocomplete='off' "
+        f"value='{esc(value)}'{ui.hint_attrs(placeholder)} autocomplete='off' "
         f"enterkeyhint='search'{attrs}>"
         f"<button type='submit' aria-label='{esc(search_label)}' title='{esc(search_label)}'>{icon('search')}"
         f"</button></span><div class='under'>{under_html}</div></div>{fbtn}{cross_html}</div>"
@@ -196,7 +197,7 @@ def text_group(
 ) -> str:
     box = (
         f"<input id='{esc(input_id)}' type='text' name='{esc(name)}' value='{esc(value)}' "
-        f"placeholder='{esc(placeholder)}' autocomplete='off'{attrs}>"
+        f"{ui.hint_attrs(placeholder)} autocomplete='off'{attrs}>"
     )
     return group(label, box, for_id=input_id, cls=cls)
 

@@ -337,7 +337,7 @@ def search_form_html(
             label="Deck name, or an Archidekt link or deck ID",
             name="name",
             value=query["name"],
-            placeholder="Name or link",
+            placeholder="Name or link|Name",
             input_id="s-name",
             search_label="Search decks",
             cross_html=sp.cross_link("Search cards instead", cards_link, "image"),

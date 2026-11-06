@@ -726,6 +726,17 @@ def pager(
     )
 
 
+def hint_attrs(hint: str) -> str:
+    """A text box's ``placeholder`` attribute (with its leading space; "" for no hint). ``hint`` may
+    list shorter hints after the full one, separated by "|" ("Set name or code|Set or code|Set"):
+    static/topbar.js shows the longest that fits the box at its size, so a hint is never cut at
+    large text on a phone (confirmation P-5, P-19)."""
+    if not hint:
+        return ""
+    full, *shorter = hint.split("|")
+    return f" placeholder='{esc(full)}'" + (f" data-ph='{esc('|'.join(shorter))}'" if shorter else "")
+
+
 def breakable(text: str) -> str:
     """``text`` escaped, with a break opportunity after each "_", "@", "." and "/" inside it (a
     variable's name, an e-mail address, a file's path): where it does not fit its line it breaks

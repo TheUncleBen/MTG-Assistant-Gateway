@@ -403,7 +403,10 @@ pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(-
 /* forms: phatInput / phatButton */
 label{display:block;margin:.9rem 0 .3rem;font-weight:700}
 input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],
-input[type=url],select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:var(--radius);
+/* height:auto from 44 px: the box grows with its text (at 200% a fixed 44 px box left the words
+   touching its edges, confirmation AD3) */
+input[type=url],select{width:100%;height:auto;min-height:var(--ctl);padding:.3em 1rem;font:inherit;
+  border-radius:var(--radius);
   border:1px solid var(--control-border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
 /* a field inside a <label> keeps its normal weight: only the label's own text is bold */
@@ -970,7 +973,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
   .addbox button.tchip,.popular a,.cardview .chip{min-height:44px}
   .switch{min-height:44px;min-width:44px}
-  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:44px}
+  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:auto}
   /* kept a list item (a flex summary loses its native fold-out marker in Chromium); the padding
      and the minimum make the 44 px */
   details > summary{min-height:44px;padding:.6rem 0}
@@ -2335,7 +2338,7 @@ _TOPSEARCH_CSS = """
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
   background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
-.topbar .topsearch .box input{height:44px;border-radius:22px}
+.topbar .topsearch .box input{height:auto;min-height:44px;padding-top:.3em;padding-bottom:.3em;border-radius:22px}
 .topbar .topsearch .box input::placeholder{color:var(--navbar-muted)}
 .topbar .topsearch .box input:focus{background:var(--surface);color:var(--text);
   border-color:var(--orange);outline-offset:1px}
@@ -2430,7 +2433,10 @@ SEARCH_PANEL_CSS = """
 .spanel .fg input,.spanel .fg select{margin:0}
 .spanel .range{display:flex;gap:8px;align-items:center}
 .spanel .range span{color:var(--text-muted)}
-.spanel .range input{flex:1 1 0;min-width:0;width:auto}
+/* each box at least as wide as its hint ("From", "To") with its padding; at large text on a phone
+   the second goes under the first (P-5: "From" was cut in a 53 px box) */
+.spanel .range{flex-wrap:wrap}
+.spanel .range input{flex:1 1 0;min-width:calc(3.2em + 2rem);width:auto}
 /* the Colours group: today's colour buttons (a pill with the mana symbol and the colour name), then
    the match drop-down 10 px after them, taking a little of the group's spare width */
 .spanel .colors{container:colors/inline-size;--gw:var(--cw,50em)}
@@ -3181,7 +3187,7 @@ def render(
             "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
             "<label for='site-q' class='sr-only'>Search cards and decks</label>"
             f"<span class='box'>{icon('search')}<input id='site-q' type='search' name='q' maxlength='100' "
-            "placeholder='Cards and decks' data-suggest='cards' data-suggest-site='/cards?q=' "
+            "placeholder='Cards and decks' data-ph='Search' data-suggest='cards' data-suggest-site='/cards?q=' "
             "data-suggest-menu autocomplete='off' enterkeyhint='search'></span></form>"
         )
         # The bell (parity release 2): Archidekt's unseen count, read after the page has loaded

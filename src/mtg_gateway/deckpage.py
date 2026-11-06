@@ -4562,7 +4562,7 @@ html.printpick-open{overflow:hidden}
   .deck-toast .acts button,.deck-toast .acts .btn{min-height:44px}
   .deck-toast .close{width:44px;height:44px;min-height:44px}
   .printpick .close{width:max(44px,2.4rem);min-height:44px;height:max(44px,2.4rem)}
-  .printpick input[type=search],.printpick select{height:44px;min-height:44px}
+  .printpick input[type=search],.printpick select{height:auto;min-height:44px}
   .printpick .msel-btn{min-height:44px}
   .printpick .ppfiltbtn,.printpick .ppacts button,.printpick .ppmore .btn,.printpick .ppempty .btn,
   .printpick .ppstatus .btn{min-height:44px}

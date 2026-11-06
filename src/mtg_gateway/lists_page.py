@@ -1688,7 +1688,8 @@ CSS = """
 .lp-box .body .segc.lp-faces{margin:0 0 .75rem}
 .lp-face{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem}
 .lp-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.25rem 12px}
-.lp-three{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6rem),1fr));gap:.25rem 12px}
+/* 8rem: a box holds its hint whole ("Legendary" was cut in a 6rem box on a 320 px phone, P-19) */
+.lp-three{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8rem),1fr));gap:.25rem 12px}
 .mtgbox.lp-box .body textarea{min-height:5rem;font-family:inherit;font-size:.95rem;line-height:1.4}
 .mtgbox .body .lp-two .field + .field,.mtgbox .body .lp-three .field + .field{margin-top:0}
 .lp-two .field,.lp-three .field{margin-bottom:.5rem}

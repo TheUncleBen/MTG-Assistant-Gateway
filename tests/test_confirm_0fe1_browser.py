@@ -76,6 +76,8 @@ def _goto(page, server: Server, path: str, zoom: str | None = None) -> None:  # 
     page.wait_for_function(SHEETS_LOADED)
     if zoom == "text":
         page.evaluate(TEXT_200)
+    elif zoom == "browser":  # the browser's own 16 px default doubled
+        page.evaluate("() => document.documentElement.style.setProperty('font-size', '200%', 'important')")
     redrawn(page)
 
 
@@ -758,3 +760,66 @@ def test_the_report_charts_labels_grow_with_the_text(server: Server, site) -> No
                 # width then)
                 assert all(b / a >= 1.8 for a, b in zip(small, large, strict=True)), (width, small, large)
         browser.close()
+
+
+# -- P-5, P-19, AD3: text boxes grow with their text, and their hints fit ------------------------
+
+# Every shown text box whose text would touch or pass its edges: less room inside than its
+# font's line (a fixed 44 px box at 200% text)
+BOX_ROOM = """() => {
+  const out = [];
+  const sel = 'input:not([type]),input[type=text],input[type=search],input[type=email],input[type=number],' +
+    'input[type=url],input[type=password],select';
+  for (const el of document.querySelectorAll(sel)) {
+    if (!el.getClientRects().length || el.closest('[hidden],.sr-only') || el.classList.contains('msel-native')) continue;
+    const cs = getComputedStyle(el);
+    if (cs.opacity === '0' || cs.visibility === 'hidden') continue;
+    // the inside of the box against its text's line and some air over and under it
+    const room = el.clientHeight;
+    const line = parseFloat(cs.fontSize) * 1.5;
+    if (room < line - 1) out.push((el.name || el.id || el.placeholder || el.tagName) + ': ' + Math.round(room) +
+      'px for a ' + Math.round(line) + 'px line');
+  }
+  return out;
+}"""
+
+HINT_PLACES = [
+    ("320 root", 320, True, None, False, ["/cards", "/search", "/decks/42/contest", "/lists/custom?new=1"]),
+    ("320", 320, False, None, False, ["/decks/42/contest", "/lists/custom?new=1", "/cards"]),
+    ("412 text", 412, False, "text", False, ["/cards", "/search", "/decks/42/contest", "/lists/custom?new=1"]),
+    ("717 app root", 717, True, None, True, ["/", "/decks", "/cards"]),
+    ("900 browser", 900, False, "browser", False, ["/search", "/cards", "/decks"]),
+]
+
+
+@pytest.mark.parametrize("place", HINT_PLACES, ids=[p[0] for p in HINT_PLACES])
+def test_text_boxes_hold_their_text_and_hints_at_every_size(server: Server, site, place: tuple) -> None:  # noqa: F811
+    """P-5, P-19: hints were cut at 200% text ("Creature, Goblir" in the card search's filters,
+    "From", the set and Is boxes, the search box, the contest's link and words, /search's "Name or
+    link") and at 320 px ("Legendary" in a custom card, the contest's link), and the top bar's
+    search at 717 px in the app. AD3: a text box was 44 px tall at every size, so at 200% its text
+    touched or passed its edges. Each box grows with its text from 44 px, and each hint fits."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_ui_standard_0746_browser import PLACEHOLDERS
+
+    tag, width, root, zoom, app, paths = place
+    exe, sid, _ = site
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = _ctx(browser, server, sid, width, root=root, app=app)
+        page = ctx.new_page()
+        for path in paths:
+            _goto(page, server, path, zoom)
+            problems += [f"{path}: {f}" for f in page.evaluate(PLACEHOLDERS) + page.evaluate(BOX_ROOM)]
+            if page.locator(".sp-open").first.is_visible():  # the filter sheet on a phone, opened
+                page.locator(".sp-open").first.click()
+                redrawn(page)
+                if page.locator(".sp-filters.open").count():
+                    found = page.evaluate(PLACEHOLDERS) + page.evaluate(BOX_ROOM)
+                    problems += [f"{path} sheet: {f}" for f in found]
+                    page.keyboard.press("Escape")
+        ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)
