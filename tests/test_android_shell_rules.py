@@ -128,3 +128,18 @@ def test_the_gateways_busy_page_shows_in_the_app_not_the_apps_own_error_box() ->
     handler = main.split("override fun onReceivedHttpError")[1].split("override fun")[0]
     assert "BUSY_HEADER" in handler
     assert handler.index("BUSY_HEADER") < handler.index("errorBox.visibility = View.VISIBLE")
+
+
+def test_the_back_key_asks_only_a_gateway_page_and_a_new_page_starts_with_no_layer() -> None:
+    """The Back key asks the page to close its top layer (static/layers.js) only on a gateway page:
+    a sign-in provider's page could otherwise answer the hook and keep Back for itself. A new page
+    forgets an open layer as it starts, not as it finishes, so a layer opened before the page has
+    finished loading keeps its Back."""
+    main = _kt("MainActivity.kt")
+    back = main.split("override fun handleOnBackPressed")[1].split("private val windowInfo")[0]
+    asks = back.index("evaluateJavascript(BACK_KEY)")
+    assert re.search(r"if \(gatewayPage\)[^\n]*\{\s*\n?\s*web\.evaluateJavascript\(BACK_KEY\)", back[: asks + 40])
+    started = main.split("override fun onPageStarted")[1].split("override fun")[0]
+    finished = main.split("override fun onPageFinished")[1].split("override fun")[0]
+    assert "layerOpen = false" in started
+    assert "layerOpen = false" not in finished
