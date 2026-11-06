@@ -70,7 +70,7 @@ def _settle(page, script: bool) -> None:
     """topbar.js measures again in a ResizeObserver callback after the zoom: wait two frames."""
     if script:
         page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
-    settled(page)
+    settled(page, scripts=script)
 
 
 @pytest.mark.parametrize("script", [True, False], ids=["script", "noscript"])
@@ -101,7 +101,8 @@ def test_tab_never_hides_a_control_under_the_bars_at_the_foot(
                 seen = 0
                 for _ in range(45):
                     page.keyboard.press("Tab")
-                    frame(page)  # the focus moved and the page scrolled it into view
+                    if script:  # the page's scripts answer the focus in the next frame
+                        frame(page)
                     g = page.evaluate(FOCUS_AT_FOOT)
                     if g is None:
                         continue

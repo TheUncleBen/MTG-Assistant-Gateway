@@ -24,8 +24,13 @@ QUIET_JS = (
 )
 
 
-def settled(page, timeout: float = 5000) -> None:  # noqa: ANN001
-    page.wait_for_function(SETTLED_JS, timeout=timeout)
+def settled(page, timeout: float = 5000, scripts: bool = True) -> None:  # noqa: ANN001
+    """``scripts=False`` on a page with scripts off: its timers and animation frames never call
+    back, so the test looks again from its own side."""
+    if scripts:
+        page.wait_for_function(SETTLED_JS, timeout=timeout)
+    else:
+        poll(page, lambda: page.evaluate(SETTLED_JS), timeout=timeout)
 
 
 def quiet(page, timeout: float = 5000) -> None:  # noqa: ANN001
