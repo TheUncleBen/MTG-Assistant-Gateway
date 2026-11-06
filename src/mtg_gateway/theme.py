@@ -147,7 +147,9 @@ VIZ_CSS = """
 .pips i{font-style:normal;color:var(--text-muted);font-size:.86rem}
 /* SVG charts drawn on the server: lines and columns take their colours from the theme */
 .chart{min-width:0} .chart h3{margin:0 0 .4rem}
-.chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:11px;overflow:visible}
+/* the labels (the axes' "0%" and "T1", the values over the columns) in rem: they grow with the
+   text size as the words around the chart do (confirmation AD1: 11 px at every size) */
+.chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:.786rem;overflow:visible}
 .chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
 .chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)}
 .chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
@@ -1839,6 +1841,10 @@ main.wrap.ui-wide{max-width:1200px}
    loses its dot at the clipped edge, so no dot is ever left dangling at a line end (polish C1).
    Only the left edge is clipped: a capsule's transparent hang (.ui-cap's --hang, part of its tap
    area) may reach past the other edges, where overflow:hidden cut it off */
+/* ui.breakable: a long value breaks at its marks (its <wbr>), inside a piece only when the piece
+   alone is wider than the line; under a box's overflow-wrap:anywhere its narrowest size was one
+   letter, so it broke anywhere (confirmation P-14: "alice@example.tes/t") */
+.brk{overflow-wrap:break-word;word-break:normal}
 .ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;clip-path:inset(-8px -8px -8px 0)}
 .ui-dots > *{position:relative;min-width:0}
 .ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}

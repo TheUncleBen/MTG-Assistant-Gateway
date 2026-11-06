@@ -226,6 +226,132 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { navs.forEach(show); });
 })();
 
+/* Fitting to the text (confirmation P-1, P-13), again whenever the window, the text size or the
+   page changes:
+   - a heading word wider than the heading's whole line (a phone's font scale: "Preconstructed"
+     424 px in a 288 px line) broke bare; the heading is zoomed down until its widest word fits;
+   - a button with an icon whose label wraps kept its lines against the icon but sat left of
+     centre (the label's lines take the whole width left): the room its lines leave is split
+     between the button's two sides. */
+(function () {
+  "use strict";
+  function widestWord(el) {
+    var w = 0, tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n, m, re = /\S+/g;
+    while ((n = tw.nextNode())) {
+      re.lastIndex = 0;
+      while ((m = re.exec(n.textContent))) {
+        var r = document.createRange(), sum = 0, rs;
+        r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        rs = r.getClientRects();
+        for (var i = 0; i < rs.length; i++) sum += rs[i].width;
+        if (sum > w) w = sum;
+      }
+    }
+    return w;
+  }
+  function fitHeading(h) {
+    if (h.style.zoom) h.style.removeProperty("zoom");
+    if (!h.getClientRects().length) return;
+    var cs = getComputedStyle(h);
+    var room = h.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    var w = widestWord(h);
+    if (room > 0 && w > room + 0.5) h.style.zoom = String(Math.floor(room / w * 1000) / 1000);
+  }
+  function lineRights(b) {
+    var tops = {}, right = -Infinity, lines = 0;
+    for (var c = b.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 1 && (c.tagName !== "SPAN" || c.classList.contains("sr-only"))) continue;
+      if (c.nodeType !== 1 && c.nodeType !== 3) continue;
+      var r = document.createRange();
+      r.selectNodeContents(c);
+      var rs = r.getClientRects();
+      for (var i = 0; i < rs.length; i++) {
+        if (!rs[i].width) continue;
+        var t = Math.round(rs[i].top);
+        if (!tops[t]) { tops[t] = 1; lines++; }
+        if (rs[i].right > right) right = rs[i].right;
+      }
+    }
+    return { lines: lines, right: right };
+  }
+  function centre(b) {
+    if (b.hasAttribute("data-fit-pad")) {
+      b.style.removeProperty("padding-left");
+      b.style.removeProperty("padding-right");
+      b.removeAttribute("data-fit-pad");
+    }
+    var svg = b.querySelector(":scope > svg");
+    if (!svg || !b.getClientRects().length || !svg.getBoundingClientRect().width ||
+      getComputedStyle(svg).position === "absolute") return;
+    var got = lineRights(b);
+    if (got.lines < 2) return;
+    var cs = getComputedStyle(b), br = b.getBoundingClientRect();
+    var pl = parseFloat(cs.paddingLeft), pr = parseFloat(cs.paddingRight);
+    var left = svg.getBoundingClientRect().left - br.left - parseFloat(cs.borderLeftWidth) - pl;
+    var slack = br.right - parseFloat(cs.borderRightWidth) - pr - got.right - left;
+    if (slack < 4) return;
+    var half = Math.floor(slack / 2) - 1;
+    b.setAttribute("data-fit-pad", "");
+    b.style.paddingLeft = pl + half + "px";
+    b.style.paddingRight = pr + half + "px";
+  }
+  // a chart's labels along its axis (and the values over its columns) that run into each other at
+  // a large text size: every other one is left out, the first and last kept (AD1)
+  function thin(svg, sel) {
+    var ts = svg.querySelectorAll(sel), i;
+    for (i = 0; i < ts.length; i++) ts[i].removeAttribute("display");
+    for (var step = 2; step < ts.length; step++) {
+      var shown = [], hit = false;
+      for (i = 0; i < ts.length; i++) {
+        if (i % (step - 1) && i !== ts.length - 1) ts[i].setAttribute("display", "none");
+        else { ts[i].removeAttribute("display"); shown.push(ts[i].getBoundingClientRect()); }
+      }
+      for (i = 1; i < shown.length; i++) if (shown[i].left < shown[i - 1].right + 2) { hit = true; break; }
+      if (!hit) return;
+    }
+  }
+  function fitIn(root) {
+    var cs2 = root.querySelectorAll(".chart svg"), k;
+    for (k = 0; k < cs2.length; k++) { thin(cs2[k], "text.x"); thin(cs2[k], "text.v"); }
+    var hs = root.querySelectorAll("h1, h2, h3"), i;
+    for (i = 0; i < hs.length; i++) fitHeading(hs[i]);
+    var bs = root.querySelectorAll("button, .btn");
+    for (i = 0; i < bs.length; i++) if (bs[i].querySelector(":scope > svg")) centre(bs[i]);
+  }
+  var queued = false;
+  function later() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; fitIn(document.body); });
+  }
+  fitIn(document.body);
+  window.addEventListener("resize", later);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+  if (window.ResizeObserver) {
+    // a text size changed in place (no reload, no resize): a box 1em square tells it
+    var em = document.createElement("span");
+    em.setAttribute("aria-hidden", "true");
+    em.style.cssText = "position:absolute;left:-9999px;top:0;width:1em;height:1em;visibility:hidden";
+    document.body.appendChild(em);
+    var first = true;
+    new ResizeObserver(function () { if (first) { first = false; return; } later(); }).observe(em);
+  }
+  // a box, a sheet or a list drawn after this ran
+  if (window.MutationObserver) {
+    new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        for (var j = 0; j < muts[i].addedNodes.length; j++) {
+          var n = muts[i].addedNodes[j];
+          if (n.nodeType === 1 && (n.matches("h1, h2, h3, button, .btn") || n.querySelector("h1, h2, h3, button, .btn"))) {
+            later();
+            return;
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+})();
+
 /* Pull to refresh in the Android app (0.7.46, screen 9). The app's pull layer knows nothing of the
    page's layout, so the page says, at each touch, whether that touch may start a pull: not while
    the page is scrolled, not while a box, sheet, viewer or menu is open, not from a part of the page

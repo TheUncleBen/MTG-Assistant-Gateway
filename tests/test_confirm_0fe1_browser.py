@@ -587,3 +587,174 @@ def test_the_inline_action_links_are_44_px_targets(server: Server, site) -> None
         assert r and r["height"] >= 43.5 and r["width"] >= 43.5, r
         ctx.close()
         browser.close()
+
+
+# -- P-14: a long value breaks only at a sensible point -----------------------------------------
+
+# Every word of letters joined by "_", "@" or "." (a variable's name, an e-mail address) drawn on
+# more than one line: each break must come right after one of those marks
+TOKEN_BREAKS = r"""() => {
+  const out = [];
+  const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+    const p = n.parentElement;
+    if (!p || !p.getClientRects().length || p.closest('.sr-only,[hidden],script,style')) continue;
+    const re = /[A-Za-z0-9]+(?:[_@.][A-Za-z0-9]+)+/g;
+    let m;
+    while ((m = re.exec(n.textContent))) {
+      let top = null;
+      for (let i = 0; i < m[0].length; i++) {
+        const r = document.createRange(); r.setStart(n, m.index + i); r.setEnd(n, m.index + i + 1);
+        const b = [...r.getClientRects()].find(x => x.width > 0);
+        if (!b) continue;
+        if (top !== null && Math.abs(b.top - top) > 2 && !/[_@.]/.test(m[0][i - 1]))
+          out.push('"' + m[0] + '" breaks at "' + m[0].slice(0, i) + '|' + m[0].slice(i) + '"');
+        top = b.top;
+      }
+    }
+  }
+  return out;
+}"""
+
+
+def test_long_values_break_only_after_a_mark(server: Server, site) -> None:  # noqa: F811
+    """P-14: /admin broke "MTG_BACKUP_C/OPY_DIR" and Account details "alice@example.tes/t" at 320 px
+    with 200% text; a variable's name breaks only after "_", an address after "@" or "."."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for tag, width, root, zoom in (("320 root", 320, True, None), ("360 text", 360, False, "text"),
+                                       ("320 text", 320, False, "text"), ("412 root", 412, True, None)):
+            ctx = _ctx(browser, server, sid, width, root=root)
+            page = ctx.new_page()
+            for path in ("/admin", "/account/details", "/admin/users", "/account"):
+                _goto(page, server, path, zoom)
+                problems += [f"{path} @{tag}: {f}" for f in page.evaluate(TOKEN_BREAKS)]
+            ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)
+
+
+# -- P-1: a heading word wider than its whole line shrinks to fit ---------------------------------
+
+HEADING_WORDS = r"""() => {
+  const out = [];
+  for (const h of document.querySelectorAll('h1, h2, h3')) {
+    if (!h.getClientRects().length || h.closest('.sr-only,[hidden]')) continue;
+    const tw = document.createTreeWalker(h, NodeFilter.SHOW_TEXT);
+    for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+      const re = /\S+/g; let m;
+      while ((m = re.exec(n.textContent))) {
+        const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        const rs = [...r.getClientRects()].filter(x => x.width > 0);
+        if (rs.length > 1 && Math.abs(rs[0].top - rs[rs.length - 1].top) > 2) out.push('"' + m[0] + '" breaks');
+      }
+    }
+  }
+  return out;
+}"""
+
+
+def test_a_heading_word_wider_than_its_line_shrinks_to_fit(server: Server, site) -> None:  # noqa: F811
+    """P-1: with every font doubled (a phone's font scale) a heading word wider than its whole line
+    ("Preconstructed" 424 px in a 288 px line on /precons) broke bare; the heading shrinks to fit
+    it, with no hyphen."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for width in (320, 412):
+            ctx = _ctx(browser, server, sid, width)
+            page = ctx.new_page()
+            for path in ("/precons", "/account/details", "/account/assistants", "/notifications"):
+                _goto(page, server, path, "text")
+                problems += [f"{path} @{width}: {f}" for f in page.evaluate(HEADING_WORDS)]
+            ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)
+
+
+# -- P-13: a wrapped icon button's content sits in its middle -------------------------------------
+
+ICON_BUTTONS = r"""() => {
+  const out = [];
+  for (const b of document.querySelectorAll('button, .btn')) {
+    const svg = b.querySelector(':scope > svg');
+    // (an icon hidden at large text leaves a label alone, centred as any)
+    if (!svg || !svg.getBoundingClientRect().width || !b.getClientRects().length || b.closest('[hidden]')) continue;
+    const tops = [], rights = [];
+    for (const n of b.childNodes) {
+      if (n.nodeType !== 3 && !(n.nodeType === 1 && n.tagName === 'SPAN' && !n.classList.contains('sr-only'))) continue;
+      const r = document.createRange(); r.selectNodeContents(n);
+      for (const x of r.getClientRects()) if (x.width > 0) { tops.push(Math.round(x.top)); rights.push(x.right); }
+    }
+    if (new Set(tops).size < 2) continue;  // a one-line label
+    const cs = getComputedStyle(b), br = b.getBoundingClientRect();
+    const left = svg.getBoundingClientRect().left - br.left - parseFloat(cs.borderLeftWidth);
+    const right = br.right - parseFloat(cs.borderRightWidth) - Math.max(...rights);
+    if (Math.abs(left - right) > 6)
+      out.push('"' + b.textContent.trim().slice(0, 30) + '" ' + Math.round(left) + ' left, ' + Math.round(right) + ' right');
+  }
+  return out;
+}"""
+
+
+def test_a_wrapped_icon_buttons_content_is_centred(server: Server, site) -> None:  # noqa: F811
+    """P-13: a button whose label wraps kept its icon by the label but sat left of centre ("Open on
+    Archidekt" 29 px left, 123 px right); the icon and label are centred together."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for tag, width, root, zoom in (("320 root", 320, True, None), ("360 text", 360, False, "text"),
+                                       ("412 text", 412, False, "text")):
+            ctx = _ctx(browser, server, sid, width, root=root)
+            page = ctx.new_page()
+            for path in ("/decks/42", "/forum", "/watchlist", "/decks/42/edit", "/collection", "/decks"):
+                _goto(page, server, path, zoom)
+                problems += [f"{path} @{tag}: {f}" for f in page.evaluate(ICON_BUTTONS)]
+            ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)
+
+
+# -- AD1: the report charts' labels grow with the text ---------------------------------------------
+
+CHART_TEXT = """() => [...document.querySelectorAll('.chart svg')].filter(s => s.getClientRects().length).map(s => {
+  const vb = s.viewBox.baseVal, scale = s.getBoundingClientRect().width / vb.width;
+  return [...s.querySelectorAll('text')].map(t => parseFloat(getComputedStyle(t).fontSize) * scale);
+})"""
+
+
+def test_the_report_charts_labels_grow_with_the_text(server: Server, site) -> None:  # noqa: F811
+    """AD1: the report charts' axis and bar labels ("0%", "T1", "T10", the values) were 11 px in the
+    chart's own units, so at 200% text they stayed small beside 32 px words; they grow with it."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for width in (360, 1024):
+            sizes = {}
+            for root in (False, True):
+                ctx = _ctx(browser, server, sid, width, root=root)
+                page = ctx.new_page()
+                _goto(page, server, "/history/reports/r1")
+                page.evaluate("() => document.querySelectorAll('details').forEach(d => { d.open = true; })")
+                redrawn(page)
+                sizes[root] = page.evaluate(CHART_TEXT)
+                ctx.close()
+            assert sizes[False] and len(sizes[False]) == len(sizes[True]), sizes
+            for small, large in zip(sizes[False], sizes[True], strict=True):
+                assert small and len(small) == len(large)
+                # each label at a 28 px root is 1.8 times its size at 14 px and more (at the chart's
+                # width then)
+                assert all(b / a >= 1.8 for a, b in zip(small, large, strict=True)), (width, small, large)
+        browser.close()

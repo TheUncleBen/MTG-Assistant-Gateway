@@ -726,6 +726,18 @@ def pager(
     )
 
 
+def breakable(text: str) -> str:
+    """``text`` escaped, with a break opportunity after each "_", "@", "." and "/" inside it (a
+    variable's name, an e-mail address, a file's path): where it does not fit its line it breaks
+    there, never mid-word (confirmation P-14: "MTG_BACKUP_C/OPY_DIR", "alice@example.tes/t")."""
+    out = esc(text)
+    for mark in ("_", "@", ".", "/"):
+        out = out.replace(mark, mark + "<wbr>")
+    # a mark that ends the text, or one before a space, needs no break after it; .brk (theme)
+    # breaks inside a piece only when the piece alone is wider than the line
+    return "<span class='brk'>" + out.replace("<wbr> ", " ").removesuffix("<wbr>") + "</span>"
+
+
 def all_shown(n: int, one: str, many: str = "") -> str:
     """The line under a list loaded whole: "All 12 entries shown.", and "1 entry shown." for one
     (never "All 1", confirmation P-6). ``many`` defaults to ``one`` with an "s"; with no ``one``,

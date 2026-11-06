@@ -23,10 +23,9 @@ KEEP_PX = {
     ("theme.py", "html{font-size:14px"),
     # a report exported as one file: its own root, the site's 14 px
     ("report_view.py", "html{font-size:14px"),
-    # the server-drawn charts: SVG user units, scaled with the chart's drawn width (a viewBox), so a
-    # label is sized for the chart, not for the page's text
-    ("theme.py", ".chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:11px"),
-    ("report_page.py", ".rv-page .rv-chart svg{font-size:18px"),
+    # the tab bar's count: it grows with the text up to 12 px, so it stays on its icon's corner and
+    # inside its tab (confirmation NA5)
+    ("theme.py", "font-size:min(.72rem, 12px)"),
     # the mana symbols: a glyph drawn inside a 16 px circle, part of the icon
     ("theme.py", ".pip b{font-size:10px"),
     ("theme.py", ".pip.big b{font-size:8px"),

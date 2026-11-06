@@ -2054,7 +2054,7 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-chart h3{margin:.5rem 0 .2rem}
 .rv-page .rv-chart .ui-hint{margin:0 0 .35rem}
 .rv-page .rv-chart svg{max-height:15rem}
-@media (max-width:599.98px){.rv-page .rv-chart svg{font-size:18px;padding-left:1.25rem}}
+@media (max-width:599.98px){.rv-page .rv-chart svg{font-size:1.286rem;padding-left:1.25rem}}
 .rv-page .ask{margin:.5rem 0 .75rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .rv-page .ask button{display:inline-flex;align-items:center;gap:.4rem;margin:0}
 .rv-page .kept .names button{min-height:44px;margin:0}

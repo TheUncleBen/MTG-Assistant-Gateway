@@ -995,13 +995,13 @@ def _overview_body(state: Any, now: float | None = None) -> str:
     ]
     # the System panel: every row as today, the same wording
     if not sysd["backups_enabled"]:
-        backup: Any = "off (MTG_BACKUP_DIR not set)"
+        backup: Any = _Html(f"off ({ui.breakable('MTG_BACKUP_DIR')} not set)")
     elif sysd["last_backup_at"]:
         backup = _Html(ui.when(sysd["last_backup_at"], now=now))
     else:
         backup = "none yet"
     if not sysd["backup_copies_enabled"]:
-        copies: Any = "off (MTG_BACKUP_COPY_DIR not set)"
+        copies: Any = _Html(f"off ({ui.breakable('MTG_BACKUP_COPY_DIR')} not set)")
     elif sysd["last_backup_copy_at"]:
         copies = _Html(ui.when(sysd["last_backup_copy_at"], now=now))
     else:
@@ -1219,7 +1219,7 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
         "upgrades the database, the gateway saves a copy of it in the before-upgrade folder, inside "
         "your backup folder.</p>"
         "<p><strong>Portainer (Swarm stack)</strong>: copy your values into the newest "
-        f"<code>deploy/stack.env.example</code> (with <code>MTG_TAG</code> at <code>{tag}</code>, or "
+        f"<code>deploy/<wbr>stack.<wbr>env.<wbr>example</code> (with <code>MTG_TAG</code> at <code>{tag}</code>, or "
         "<code>latest</code>), and create any secret <code>docs/<wbr>DEPLOY.md</code> step 4 lists that you "
         "don't have "
         "yet. Then Stacks, your stack, Editor: replace the text with the newest "
@@ -1230,14 +1230,14 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
         "sure?”, make sure <strong>Re-pull image and redeploy</strong> is on, then click "
         "<strong>Update</strong>.</p>"
         "<p><strong>Swarm without Portainer</strong>: <code>git pull</code> in your copy of the "
-        "repository, copy your values into a new copy of <code>deploy/stack.env.example</code>, "
+        "repository, copy your values into a new copy of <code>deploy/<wbr>stack.<wbr>env.<wbr>example</code>, "
         "create any missing secret (<code>docs/<wbr>DEPLOY.md</code> step 4), load the variables into a new "
         "shell as in <code>docs/<wbr>DEPLOY.md</code>, then run "
         "<code>docker stack deploy -c deploy/portainer-stack.yml "
         "mtg</code> again (your stack's name in place of <code>mtg</code>).</p>"
         "<p><strong>docker compose</strong>: in the folder with <code>docker-compose.yml</code>, get "
         "the newest <code>docker-compose.yml</code>, <code>make-secrets.sh</code> and "
-        "<code>.env.example</code> (<code>docs/<wbr>UPGRADING.md</code> has the commands), copy your values "
+        "<code>.env.<wbr>example</code> (<code>docs/<wbr>UPGRADING.md</code> has the commands), copy your values "
         "from "
         f"<code>.env</code> into the example and save it as <code>.env</code> (<code>MTG_TAG={tag}</code> "
         "or <code>latest</code>), run <code>./make-secrets.sh</code>, then "
@@ -1645,11 +1645,8 @@ def _users_body(
 
 
 def _email_html(email: str) -> str:
-    """The address with a break opportunity after its @ and before each dot of its domain."""
-    user, at, domain = email.partition("@")
-    if not at:
-        return html.escape(email)
-    return html.escape(user) + "@<wbr>" + html.escape(domain).replace(".", "<wbr>.")
+    """The address with a break opportunity after its @ and each dot (ui.breakable)."""
+    return ui.breakable(email)
 
 
 def _user_panel(

@@ -2017,7 +2017,7 @@ async def details_html(
             return _yfold(title, ic, folds[section], value=value, rid=section)
         return _yrow(title, ic, href=section_href(section), value=value)
 
-    who = html.escape(user.get("email") or user.get("preferred_username") or sub)
+    who = ui.breakable(user.get("email") or user.get("preferred_username") or sub)
     writes = "on" if info["writes_enabled"] else "off"
     me = (
         "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
@@ -2404,7 +2404,7 @@ def _identity_details(user: dict[str, Any]) -> str:
         ("Email", user.get("email")),
         ("Groups", ", ".join(groups) if groups else None),
     ]
-    facts = "".join(f"<dt>{k}</dt><dd>{html.escape(str(v))}</dd>" for k, v in rows if v)
+    facts = "".join(f"<dt>{k}</dt><dd>{ui.breakable(str(v))}</dd>" for k, v in rows if v)
     return (
         f"<dl class='meta'>{facts or '<dt>Nothing</dt><dd></dd>'}</dl>"
         "<p class='muted small'>The gateway uses your groups only to check you may use it. "
