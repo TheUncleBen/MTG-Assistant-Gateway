@@ -22,7 +22,16 @@ and width class (final polish, B-13), and every check runs in one evaluation:
 - overlapping controls and badges (AC3);
 - tap targets under 44 px on a touch screen (P-11), except a link inside running text;
 - a box's or sheet's close × alone on a line of its own (P-12);
-- anything off the right or left edge of the window, and a page that scrolls sideways.
+- anything off the right or left edge of the window, and a page that scrolls sideways;
+- a dot between facts, or the "/" of a count, at the end of a line or the start of one (P-15);
+- a text box lower than its text and some air, or a hint wider than its box (P-5, P-19, AD3);
+- a pill or label on two lines at 100% text (P-8);
+- a switch with a part cut off or scrolled away, parts of unequal widths or rows of unequal
+  counts (P-9, NA4);
+- a band of the page between the top bar and a page's header (P-16), and a line saying only
+  "Default" (P-10);
+- a box's title running under its content (NA1), and in the shortcuts box a key not beside or
+  above its own words, or beside the next pair's (NA2, P-7).
 
 A name seeded without any break opportunity (forty letters and more) breaks anywhere by design
 and is not counted, nor is a word in a code box. A word wider than its box has nowhere else to
@@ -32,9 +41,11 @@ twice). Sharded by page group so the crawl runs in parallel."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
+import time
 from pathlib import Path
 
 import pytest
@@ -42,6 +53,7 @@ import pytest
 from .test_cardsearch_browser import _chromium
 from .test_editor_browser import PNG
 from .test_overflow_sweep_browser import (
+    CARDS,
     FOLDERS,
     LONG64,
     LONG_CATS,
@@ -64,7 +76,8 @@ ZOOMS = ["none", "root", "browser", "text"]
 # shortcuts box, the filter sheet with its pick-lists) are opened and measured: the audit's four
 # variants (a phone at 100%, at a 28 px root and with every font doubled, and a computer)
 LAYERS_AT = {320: ["root"], 360: ["none"], 412: ["text"], 1280: ["none"]}
-SHARDS = 4
+SHARDS = 12
+FAMILY_RUN = 8  # the most pages of one family (_family) in a row on one shard
 
 # the names seeded without a break opportunity: they break anywhere by design
 HOSTILE = [LONGUSER, UNBROKEN, UNBROKEN_2, FOLDERS[1], LONG64, LONG_CATS[0]]
@@ -213,6 +226,40 @@ def _site(pending: str) -> list[tuple[str, str]]:
     return out
 
 
+def _family(page: tuple[str, str]) -> tuple[str, str]:
+    """The pages that share their layers (a deck's views and boxes, the guide, the install
+    pages): the same session and the path's first two parts (the first alone for the guide's and
+    the install pages)."""
+    path, state = page
+    parts = path.split("?")[0].split("/")
+    return state, "/".join(parts[:2] if parts[1] in ("guide", "install") else parts[:3])
+
+
+def _shards(pending: str, n: int = SHARDS) -> list[list[tuple[str, str]]]:
+    """Every page, in shards of about equal work. A family's pages go to one shard, in runs of
+    at most FAMILY_RUN, so a layer they share (a box, a menu at the same place) is measured once
+    there (CHECKS' layerKey, B-13): a run's first page costs about twice what each later one does,
+    and a deck's page (its views, menus and boxes) about three times another page. The costliest
+    runs are placed first, each on the shard with the least work so far."""
+    runs: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for page in _site(pending):
+        runs.setdefault(_family(page), []).append(page)
+    chunks = [fam[i : i + FAMILY_RUN] for fam in runs.values() for i in range(0, len(fam), FAMILY_RUN)]
+
+    def cost(chunk: list[tuple[str, str]]) -> float:
+        deck = 3 if re.match(r"/decks/\d", chunk[0][0]) else 1
+        return deck * (1 + 0.5 * (len(chunk) - 1))
+
+    chunks.sort(key=cost, reverse=True)  # a stable sort: the site's order among runs as costly
+    shards: list[list[tuple[str, str]]] = [[] for _ in range(n)]
+    work = [0.0] * n
+    for chunk in chunks:
+        i = min(range(n), key=lambda k: (work[k], k))
+        shards[i] += chunk
+        work[i] += cost(chunk)
+    return shards
+
+
 def _member(server: Server) -> str:  # noqa: F811
     """A second member's session: no admin group, linked to Archidekt's amy."""
     import httpx
@@ -288,6 +335,9 @@ CHECKS = r"""async ([o]) => {
   const INTER = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],' +
     '[role=menuitem]';
   const BADGE = '.ui-lbl,.cn,.views,.badge,.pill,.chip,.avatar,.count,.cnt,.tag,kbd';
+  const FIELD = 'input:not([type]),input[type=text],input[type=search],input[type=email],' +
+    'input[type=number],input[type=url],input[type=password],select';
+  const PILL = '.ui-lbl,.pill,.chip,.badge';
   const CLOSE = '.bx,.close,[aria-label="Close"],[aria-label="Close menu"]';
   const OVERLAY = '.mtgbox-scrim,details.dd[open] > .menu,.menu.ctxmenu,.sp-filters.open,.toast,.cardview,' +
     '[popover]';
@@ -304,7 +354,13 @@ CHECKS = r"""async ([o]) => {
     const r = rect(el);
     return r.width > 0 && r.height > 0 && (!el.checkVisibility || el.checkVisibility());
   };
-  const cs = (el) => getComputedStyle(el);
+  // an element's computed style: a live object, so one per element serves every later read (B-13)
+  const styles = new WeakMap();
+  const cs = (el) => {
+    let st = styles.get(el);
+    if (!st) { st = getComputedStyle(el); styles.set(el, st); }
+    return st;
+  };
   // the part of an element's rectangle that is in view: what its scrolling or clipping ancestors show
   const visRect = (el) => {
     let { left, top, right, bottom } = rect(el);
@@ -360,14 +416,21 @@ CHECKS = r"""async ([o]) => {
     }
     // (1) whole words
     let t0 = performance.now();
+    const rooms = new Map();  // each text's parent: its box and the room the box leaves it
     for (const [n, p, ps] of texts) {
-      const box = p.closest(o.boxSel) || document.body;
-      let room = box.clientWidth - px(cs(box).paddingLeft) - px(cs(box).paddingRight);
-      for (let e = p; e && e !== box; e = e.parentElement) {
-        const es = cs(e);
-        room -= px(es.paddingLeft) + px(es.paddingRight) + px(es.borderLeftWidth) + px(es.borderRightWidth) +
-          px(es.marginLeft) + px(es.marginRight);
+      let br = rooms.get(p);
+      if (!br) {
+        const bx = p.closest(o.boxSel) || document.body;
+        let rm = bx.clientWidth - px(cs(bx).paddingLeft) - px(cs(bx).paddingRight);
+        for (let e = p; e && e !== bx; e = e.parentElement) {
+          const es = cs(e);
+          rm -= px(es.paddingLeft) + px(es.paddingRight) + px(es.borderLeftWidth) + px(es.borderRightWidth) +
+            px(es.marginLeft) + px(es.marginRight);
+        }
+        br = [bx, rm];
+        rooms.set(p, br);
       }
+      const [box, room] = br;
       const font = px(ps.fontSize);
       const scale = v.zoom !== 'text' && p.closest('h1,h2,h3,.ui-head') && font > body ? body / font : 1;
       // a word: between spaces, hyphens, dashes and slashes; a mana cost's {G}{U} breaks after a }
@@ -568,7 +631,161 @@ CHECKS = r"""async ([o]) => {
       add('edge', nm(e), nm(e) + ' "' + txt(e) + '" runs past the window (' + Math.round(r.left) + '..' +
         Math.round(r.right) + ' of ' + vw + ')');
     }
-    timed('edge', t0);
+    timed('edge', t0); t0 = performance.now();
+    // (9) a dot between facts, or the "/" of a count, left at the end of a line or the start of
+    // one (P-15): each block holding one is read once, its shown characters in order
+    const blockOf = (el) => {
+      while (el && el !== root && cs(el).display.startsWith('inline')) el = el.parentElement;
+      return el || root;
+    };
+    const dotted = new Set(), textOf = new Set(texts.map(([n]) => n));
+    // (a control's chosen value, a drop-down's or a button's, is one value, not a line of facts)
+    const CONTROL = 'button,select,[role=button],.msel-btn';
+    for (const [n, p] of texts) {
+      if (!/·| \/ /.test(n.textContent) || p.closest(CONTROL)) continue;
+      const block = blockOf(p);
+      if (dotted.has(block)) continue;
+      dotted.add(block);
+      const chars = [], bw = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      for (let m = bw.nextNode(); m; m = bw.nextNode()) {
+        if (!textOf.has(m) || blockOf(m.parentElement) !== block) continue;
+        for (let i = 0; i < m.textContent.length; i++) chars.push([m, i, m.textContent[i]]);
+      }
+      const at = (k) => {
+        const r = document.createRange(); r.setStart(chars[k][0], chars[k][1]);
+        r.setEnd(chars[k][0], chars[k][1] + 1);
+        return [...r.getClientRects()].find(x => x.width > 0 || x.height > 0) || null;
+      };
+      for (let k = 0; k < chars.length; k++) {
+        const c = chars[k][2];
+        const slash = c === '/' && k > 0 && k < chars.length - 1 && /\s/.test(chars[k - 1][2]) &&
+          /\s/.test(chars[k + 1][2]);
+        if (c !== '·' && !slash) continue;
+        const me = at(k);
+        if (!me) continue;
+        let a = k - 1, b = k + 1;
+        while (a >= 0 && /\s/.test(chars[a][2])) a--;
+        while (b < chars.length && /\s/.test(chars[b][2])) b++;
+        const ra = a >= 0 ? at(a) : null, rb = b < chars.length ? at(b) : null;
+        const around = chars.slice(Math.max(0, k - 14), k + 14).map(x => x[2]).join('').replace(/\s+/g, ' ')
+          .trim();
+        const where = !ra ? '' : Math.abs(ra.top - me.top) > me.height / 2 ? 'starts' :
+          rb && Math.abs(rb.top - me.top) > me.height / 2 ? 'ends' : '';
+        if (where) add('dot', nm(block) + '|' + c, '"' + c + '" ' + where + ' a line in ' + nm(block) + ' "' +
+          around + '"');
+      }
+    }
+    timed('dot', t0); t0 = performance.now();
+    // (10) a text box too low for its text, or a hint (placeholder) wider than the box (P-5,
+    // P-19, AD3): the box grows with its text from 44 px, and a long hint gives way to a short one
+    const canvas = document.createElement('canvas').getContext('2d');
+    for (const el of q(FIELD, root)) {
+      if (!shown(el) || el.closest(SKIP) || el.classList.contains('msel-native')) continue;
+      const es = cs(el);
+      if (px(es.opacity) === 0 || es.visibility === 'hidden') continue;
+      const fs = px(es.fontSize);
+      if (el.clientHeight < fs * 1.5 - 1)
+        add('field', nm(el), nm(el) + ' "' + (el.name || el.placeholder) + '" is ' + el.clientHeight +
+          'px inside for its ' + Math.round(fs) + 'px text');
+      if (!el.placeholder || el.value) continue;
+      canvas.font = es.fontStyle + ' ' + es.fontWeight + ' ' + es.fontSize + ' ' + es.fontFamily;
+      const need = canvas.measureText(el.placeholder).width;
+      const avail = el.clientWidth - px(es.paddingLeft) - px(es.paddingRight);
+      if (need > avail + 1)
+        add('hint', nm(el) + '|' + el.placeholder, 'the hint "' + el.placeholder + '" of ' + nm(el) +
+          ' is cut (' + Math.round(need) + ' of ' + Math.round(avail) + 'px)');
+    }
+    timed('field', t0); t0 = performance.now();
+    // (11) a pill or label on two lines at 100% text (P-8: "In binder · you own 3" at 412 px)
+    if (v.zoom === 'none') {
+      for (const e of q(PILL, root)) {
+        if (!shown(e) || e.closest(SKIP) || e.parentElement.closest(PILL)) continue;
+        const tops = [];
+        const tw = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+        for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+          if (!n.textContent.trim() || n.parentElement.closest(SKIP)) continue;
+          const rg = document.createRange(); rg.selectNodeContents(n);
+          for (const r of rg.getClientRects()) if (r.width > 0 && !tops.some(t => Math.abs(t - r.top) < 4))
+            tops.push(r.top);
+        }
+        if (tops.length > 1)
+          add('pill', nm(e) + '|' + txt(e), nm(e) + ' "' + txt(e) + '" takes ' + tops.length +
+            ' lines at 100% text');
+      }
+    }
+    timed('pill', t0); t0 = performance.now();
+    // (12) a switch (P-9, NA4): no part cut off or scrolled out of view, the parts of one width,
+    // and the rows of as many parts each (one apart at most, never one alone under a full row)
+    for (const s of q('.hubseg', root)) {
+      if (!shown(s)) continue;
+      const kids = [...s.children].filter(k => k.getClientRects().length && cs(k).position !== 'absolute');
+      if (kids.length < 2) continue;
+      const sr = rect(s), rows = [];
+      const name = 'the switch ' + (s.getAttribute('aria-label') || nm(s)) + ' (' + kids.map(txt).join('|') +
+        ')';
+      for (const k of kids) {
+        const r = rect(k);
+        if (r.left < sr.left - 1 || r.right > sr.right + 1) add('seg', name + '|cut', name + ': "' + txt(k) +
+          '" is cut off');
+        const row = rows.find(x => Math.abs(x.top - r.top) < 3);
+        if (row) row.n++; else rows.push({ top: r.top, n: 1 });
+      }
+      if (s.scrollWidth > s.clientWidth + 1) add('seg', name + '|scroll', name + ' scrolls sideways');
+      const counts = rows.map(r => r.n), most = Math.max(...counts);
+      if (most - Math.min(...counts) > 1 || (most > 1 && counts[counts.length - 1] === 1))
+        add('seg', name + '|rows', name + ' has rows of ' + counts.join('+'));
+      const ws = kids.map(k => rect(k).width);
+      if (Math.max(...ws) - Math.min(...ws) > 2)
+        add('seg', name + '|widths', name + ' has parts of ' + ws.map(Math.round).join('/') + 'px');
+    }
+    timed('seg', t0); t0 = performance.now();
+    // (13) a band of the page between the top bar and a page's header (P-16: 14 px on a phone's
+    // deck page), and (14) a line saying only "Default" (P-10: 35 on the admin settings)
+    if (root === document.body) {
+      const bar = document.querySelector('.topbar'), head = document.querySelector('main .banner');
+      if (bar && head && shown(head) && scrollY === 0) {
+        const gap = rect(head).top - rect(bar).bottom;
+        if (Math.abs(gap) > 1) add('band', '', 'a ' + Math.round(gap) + 'px band between the top bar and ' +
+          nm(head));
+      }
+    }
+    for (const [n, p] of texts) {
+      if (!/^\(?Default\)?\.?$/.test(n.textContent.trim()) || p.closest(CONTROL)) continue;
+      const block = blockOf(p);
+      if (block !== root && /^\(?Default\)?\.?$/.test((block.textContent || '').trim()))
+        add('default', nm(block), 'a line saying only "' + n.textContent.trim() + '" in ' + nm(block));
+    }
+    timed('band', t0); t0 = performance.now();
+    // (15) a box's title kept above its content (NA1: under it at 200% text in a tall box)
+    for (const b of root.matches('.mtgbox') ? [root] : q('.mtgbox', root)) {
+      const bh = b.querySelector(':scope > .bh'), h = bh && bh.querySelector('h2');
+      if (!h || !shown(h)) continue;
+      let next = bh.nextElementSibling;
+      while (next && !next.getClientRects().length) next = next.nextElementSibling;
+      if (next && rect(h).bottom > rect(next).top + 1)
+        add('title', nm(b), 'the box title "' + txt(h) + '" runs ' +
+          Math.round(rect(h).bottom - rect(next).top) + 'px under ' + nm(next));
+    }
+    // (16) the shortcuts box: each key beside its own words or above them, the words beside a key
+    // 12em wide at least (P-7), and the next key on lines of its own (NA2)
+    for (const dl of q('dl.keys', root)) {
+      if (!shown(dl)) continue;
+      const dts = q('dt', dl), em = px(cs(dl).fontSize);
+      dts.forEach((dt, i) => {
+        const dd = dt.nextElementSibling, key = txt(dt);
+        if (!dd || dd.tagName !== 'DD') return;
+        const k = rect(dt), d = rect(dd);
+        const beside = Math.abs(k.top - d.top) < 0.6 * em && d.left >= k.right - 1;
+        const under = d.top >= k.bottom - 1 && d.left <= k.left + 1;
+        if (!beside && !under) add('keys', key, 'the key "' + key + '" is not beside or above its words');
+        if (beside && d.width < 12 * em - 1) add('keys', key + '|w', 'the words of the key "' + key +
+          '" are squeezed to ' + Math.round(d.width) + 'px');
+        const nx = dts[i + 1];
+        if (nx && rect(nx).top < Math.max(k.bottom, d.bottom) - 1)
+          add('keys', key + '|next', 'the key "' + txt(nx) + '" sits beside the words of "' + key + '"');
+      });
+    }
+    timed('title', t0);
     return out;
   };
 
@@ -587,6 +804,33 @@ CHECKS = r"""async ([o]) => {
   const dots = (el) => el.tagName === 'BUTTON' && el.type === 'button' &&
     /…\s*$/.test((el.textContent || '').trim());
   const labels = (menu) => q('a,button', menu).map(txt).join('|');
+  // a layer measured before on another page of this crawl: the same opener (its markup, and for a
+  // menu drawn at its button that button's place) on a page drawn from the same style sheets and
+  // scripts, at the same width, height, text size, theme and shell, opens the same layer, laid out
+  // the same; its findings were taken there (B-13). Each key is hashed (FNV-1a).
+  const layerSeen = new Set(o.layerSeen || []), layerNew = [];
+  const hash = (str) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(36) + '.' + str.length.toString(36);
+  };
+  const pageSig = (v) => [o.state, o.touch, innerWidth, innerHeight, v.zoom, v.theme, v.app,
+    [...document.documentElement.attributes].map(a => a.name + '=' + a.value).join(' '),
+    document.body.className, (document.querySelector('.mtgbox-scrim .mtgbox') || {}).id,
+    q('link[rel=stylesheet],script[src]').map(e => e.href || e.src).join(' ')]
+    .join('|');
+  // the form tokens a page draws afresh each time it loads (csrf, the clickguard's "shown" stamp)
+  const untokened = (html) => html
+    .replace(/(<input[^>]*name="(?:csrf|shown)"[^>]*value=")[^"]*/g, '$1')
+    .replace(/(<input[^>]*value=")[^"]*("[^>]*name="(?:csrf|shown)")/g, '$1$2');
+  const layerKey = (v, what) => hash(pageSig(v) + '|' + untokened(what));
+  const measuredBefore = (key, kind) => {
+    const hit = layerSeen.has(key);
+    T[(hit ? 'hit-' : 'new-') + kind] = (T[(hit ? 'hit-' : 'new-') + kind] || 0) + 1000;  // counted, as ms
+    if (hit) return true;
+    layerSeen.add(key); layerNew.push(key);
+    return false;
+  };
   const layers = async (v) => {
     const out = [], kinds = new Set();
     // what is being opened, kept in window.name: it outlives a click that leaves the page
@@ -598,6 +842,8 @@ CHECKS = r"""async ([o]) => {
     for (const d of q('details.dd')) {
       const sm = d.querySelector(':scope > summary'), panel = d.querySelector(':scope > .menu');
       if (!sm || !panel || !shown(sm)) continue;
+      const dr = rect(sm), at = [dr.x, dr.y, dr.width, dr.height].map(Math.round).join(',');
+      if (measuredBefore(layerKey(v, 'dd|' + d.outerHTML + '|' + at), 'dd')) continue;
       const label = 'menu ' + (sm.getAttribute('aria-label') || txt(sm) || d.className).slice(0, 24);
       mark(label); sm.click(); await tick();
       if (!d.open) d.open = true;
@@ -620,9 +866,13 @@ CHECKS = r"""async ([o]) => {
       if (d.open) d.removeAttribute('open');
       await quiet();
     }
+    let tl = performance.now(); timed('L-dd', t0);
     // the script-built menus (a row's or card's ⋮), each kind once
     for (const k of q('button[aria-haspopup=menu]')) {
       if (!shown(k) || k.closest('details.dd') || k.type !== 'button') continue;
+      const kr = rect(k);
+      const at = [kr.x, kr.y, kr.width, kr.height].map(Math.round).join(',');
+      if (measuredBefore(layerKey(v, 'ctx|' + k.outerHTML + '|' + at), 'ctx')) continue;
       const label = 'menu ' + (k.getAttribute('aria-label') || txt(k) || nm(k)).slice(0, 30);
       mark(label); k.click(); await tick();
       const m = document.querySelector('.menu.ctxmenu');
@@ -648,9 +898,11 @@ CHECKS = r"""async ([o]) => {
       }
       if (window.MtgMenu && window.MtgMenu.isOpen()) { window.MtgMenu.close(false); await quiet(); }
     }
+    timed('L-ctx', tl); tl = performance.now();
     // the boxes the page holds (ui.box), and the buttons that build one
     for (const el of q('.ui-box')) {
       if (!window.MtgBox) break;
+      if (measuredBefore(layerKey(v, 'box|' + el.outerHTML), 'box')) continue;
       mark('box #' + el.id); window.MtgBox.openElement(el.id); await settle();
       const b = box();
       if (b) {
@@ -658,19 +910,23 @@ CHECKS = r"""async ([o]) => {
         await closeBox();
       }
     }
+    timed('L-box', tl); tl = performance.now();
     for (const bt of q('button').filter(dots)) {
       if (!shown(bt) || bt.closest('details.dd, .menu, .mtgbox, .sp-filters')) continue;
       if (kinds.has('btn|' + txt(bt))) continue;
       kinds.add('btn|' + txt(bt));
+      if (measuredBefore(layerKey(v, 'btn|' + bt.outerHTML), 'btn')) continue;
       mark('button ' + txt(bt)); bt.click(); await settle();
       const b = box();
       if (b) { for (const f of measure(b, v)) tag('box ' + txt(bt), f); await closeBox(); }
     }
+    timed('L-btn', tl); tl = performance.now();
     // the keyboard shortcuts box
     mark('the shortcuts box');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true }));
     await settle();
     if (box()) { for (const f of measure(box(), v)) tag('shortcuts box', f); await closeBox(); }
+    timed('L-keys', tl); tl = performance.now();
     // the filter sheet (a phone), with each of its pick-lists opened
     const open = document.querySelector('.sp-open');
     if (open && shown(open)) {
@@ -689,6 +945,7 @@ CHECKS = r"""async ([o]) => {
     }
     await quiet();
     window.name = '';
+    timed('L-sheet', tl);
     timed('layers', t0);
     return out;
   };
@@ -720,9 +977,13 @@ CHECKS = r"""async ([o]) => {
   }).join(';');
   const theme0 = html.getAttribute('data-theme');
   const all = [];
+  // each text size goes straight to the next (the one before taken off in the same step, with no
+  // frame drawn between them): the page lays out once per size (B-13)
+  let undo = () => {};
   for (const zoom of o.zooms) {
     let t0 = performance.now();
-    const undo = zoomOn(zoom);
+    undo();
+    undo = zoomOn(zoom);
     const v = { zoom, theme: 'light', app: false };
     // a text size set in place changes no element's size, so the scripts that size themselves to
     // the text (the tab bar's icons mode) hear a resize, as a real change (a reload) reaches them
@@ -734,8 +995,11 @@ CHECKS = r"""async ([o]) => {
     if (o.layers.includes(zoom)) found.push(...await layers(v));
     all.push(...found.map(f => zoom + ' light: ' + f));
     t0 = performance.now();
-    html.setAttribute('data-theme', 'dark'); await tick();
-    const dark = fingerprint() !== fp;
+    // the dark theme laid out as the light one (most pages): no element changed its size, so no
+    // script that sizes itself hears of it and there is no frame to wait for (B-13)
+    html.setAttribute('data-theme', 'dark');
+    let dark = fingerprint() !== fp;
+    if (dark) { await tick(); dark = fingerprint() !== fp; }
     timed('fp', t0);
     if (dark) all.push(...measure(document.body, { ...v, theme: 'dark' }).map(f => zoom + ' dark: ' + f));
     if (o.app) {
@@ -746,11 +1010,14 @@ CHECKS = r"""async ([o]) => {
       if (app) all.push(...measure(document.body, { ...v, app: true }).map(f => zoom + ' app: ' + f));
       document.body.classList.remove('app');
     }
+  }
+  {
+    const t0 = performance.now();
     if (theme0 === null) html.removeAttribute('data-theme'); else html.setAttribute('data-theme', theme0);
-    t0 = performance.now();
     undo(); window.dispatchEvent(new Event('resize')); await tick();
     timed('zoom', t0);
   }
+  all.push(...layerNew.map(k => 'layer: ' + k));
   if (o.profile) {
     const ms = Object.fromEntries(Object.entries(T).map(([k, t]) => [k, Math.round(t)]));
     all.push('time: ' + JSON.stringify(ms));
@@ -780,6 +1047,12 @@ def _goto(page, url: str):  # noqa: ANN001, ANN202
     return r
 
 
+def test_the_shards_hold_every_page_once() -> None:
+    every = sorted(_site("p01"))
+    held = sorted(page for shard in _shards("p01") for page in shard)
+    assert held == every and len(set(every)) == len(every)
+
+
 @pytest.mark.parametrize("shard", range(SHARDS))
 def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, shard: int) -> None:  # noqa: F811
     from playwright.sync_api import Error as PlaywrightError
@@ -787,6 +1060,14 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
 
     exe = _chromium()
     sid, pending = _seed(server)
+    # the Binder as last read whole, holding the watched cards: the watchlist's "You own" labels
+    with server.db.tx() as c:
+        for i, name in enumerate(CARDS[-2:]):
+            c.execute(
+                "INSERT INTO binder_records (sub, rid, scryfall_id, name, finish, quantity, row_json) "
+                "VALUES ('user-1', ?, '', ?, 'nonfoil', 3, '{}')",
+                (900 + i, name),
+            )
     sids = {"admin": sid, "member": _member(server), "out": ""}
     # the pace cap and a member's Archidekt budget are for members' pages, not for a crawl of every
     # page at once
@@ -794,9 +1075,17 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
     pacer.max_per_minute = 0
     pacer.page_reserve = 0
     server.app.state.gateway.decks.archidekt_budget.per_window = 10**6
-    pages = _site(pending)[shard::SHARDS]
+    pages = _shards(pending)[shard]
+    if os.environ.get("CRAWL_PAGES"):  # a part of the site, to time a change to the crawl
+        pages = [(path, state) for path, state in pages if re.search(os.environ["CRAWL_PAGES"], path)]
     problems: list[str] = []
     errors: list[str] = []
+    # CRAWL_PROFILE=1 (with SWEEP_OUT): each check's time in the page, summed over the shard, and
+    # each page's load and checks' wall time, written beside the findings
+    profile = bool(os.environ.get("CRAWL_PROFILE"))
+    spent: dict[str, float] = {}
+    layer_seen: set[str] = set()  # the layers measured on an earlier page (CHECKS' layerKey)
+    walls: list[tuple[str, str, float, float]] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         contexts: dict[tuple[str, bool], object] = {}
@@ -825,6 +1114,7 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
             for touch, widths in ((True, PHONE_WIDTHS), (False, DESKTOP_WIDTHS)):
                 page = page_for(state, touch)
                 server.db.delete_prefs("user-1", prefixes=("view.",))
+                started = time.perf_counter()
                 r = _goto(page, f"{server.base}{path}")
                 assert r is not None and r.status == 200, (path, state, r and r.status)
                 page.wait_for_function(SHEETS_LOADED, timeout=10_000)
@@ -832,6 +1122,7 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
                     "() => parseFloat(getComputedStyle(document.documentElement).fontSize)"
                 )
                 page.evaluate(OPEN_FOLDS)
+                loaded = time.perf_counter()
                 seen: dict[str, int] = {}
                 for w in widths:
                     page.set_viewport_size({"width": w, "height": 860})
@@ -849,6 +1140,9 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
                         "zooms": ZOOMS,
                         "layers": LAYERS_AT.get(w, []),
                         "rootNone": root_none,
+                        "state": state,
+                        "layerSeen": sorted(layer_seen),
+                        "profile": profile,
                     }
                     try:
                         found = page.evaluate(CHECKS, [opts])
@@ -864,6 +1158,13 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
                         page.goto(f"{server.base}{path}", wait_until="networkidle")
                         continue
                     for f in found:
+                        if f.startswith("layer: "):
+                            layer_seen.add(f[7:])
+                            continue
+                        if f.startswith("time: "):
+                            for k, ms in json.loads(f[6:]).items():
+                                spent[k] = spent.get(k, 0) + ms
+                            continue
                         variant, _, what = f.partition(": ")
                         key = re.sub(r"\d+(\.\d+)?", "#", what)  # the same defect, whatever its size
                         if key in seen:
@@ -871,9 +1172,16 @@ def test_every_page_holds_its_text_and_controls_at_every_size(server: Server, sh
                             continue
                         seen[key] = 1
                         problems.append(f"{path} [{state}] @{w}px {variant}: {what}")
+                walls.append(
+                    (path, "phone" if touch else "computer", loaded - started, time.perf_counter() - loaded)
+                )
         browser.close()
     if os.environ.get("SWEEP_OUT"):
         Path(f"{os.environ['SWEEP_OUT']}-{shard}.txt").write_text("\n".join(problems))
+        if profile:
+            Path(f"{os.environ['SWEEP_OUT']}-{shard}.json").write_text(
+                json.dumps({"checks": spent, "pages": walls})
+            )
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 80 else ""
     assert problems == [], "\n".join(problems[:80]) + more

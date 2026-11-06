@@ -623,6 +623,15 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
+# the longest tests, started first: under pytest-xdist each worker takes the next test in this
+# order, so the site crawl's shards run beside the short tests instead of after them all
+FIRST = {"test_site_checks_browser.py"}
+
+
+def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config, items: list) -> None:
+    items.sort(key=lambda it: it.path.name not in FIRST)  # a stable sort: the rest keep their order
+
+
 @pytest.fixture(autouse=True)
 def _deck_check_default(request: pytest.FixtureRequest):
     DECK_CHECK_LIVE[0] = request.node.get_closest_marker("deck_check_live") is not None
