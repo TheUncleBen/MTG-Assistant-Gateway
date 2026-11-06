@@ -40,10 +40,11 @@ def _open(p, exe, server: Server, *, fresh: bool, width: int = 390):
     # loading: the parsed page is what is looked at)
     page.goto(f"{server.base}{RETURN_PATH}?code={code}", wait_until="commit")
     page.locator("footer.site").wait_for(state="attached", timeout=10_000)
-    page.wait_for_load_state("domcontentloaded")  # the page's script has run
     if fresh:
-        poll(page, lambda: len(tried) >= 1)  # its try of the app's link
+        # its try of the app's link (the page then follows it, so its own load never reports)
+        poll(page, lambda: len(tried) >= 1)
     else:
+        page.wait_for_load_state("domcontentloaded")  # the page's script has run
         # fixed wait: a negative check: an unmarked page tries no link within 400 ms
         page.wait_for_timeout(400)
     return browser, page, tried
@@ -73,7 +74,6 @@ def test_the_return_page_is_drawn_whole_and_opens_the_app_only_when_marked(
             # a reload never tries again
             page.reload(wait_until="commit")
             page.locator("footer.site").wait_for(state="attached", timeout=10_000)
-            page.wait_for_load_state("domcontentloaded")  # the page's script has run
             # fixed wait: a negative check: the reload tries no link within 300 ms
             page.wait_for_timeout(300)
             assert len(tried) == (1 if fresh else 0), tried
