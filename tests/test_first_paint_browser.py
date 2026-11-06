@@ -44,7 +44,8 @@ def test_nothing_fades_in_from_the_browsers_own_colours(idp_server, scheme: str)
             page = ctx.new_page()
 
             def late(route, _request=None) -> None:
-                time.sleep(0.3)  # the stylesheet arrives after the page's first style
+                # fixed wait: the delay is the point: the stylesheet lands after the first style
+                time.sleep(0.3)
                 route.continue_()
 
             page.route("**/static/site.css*", late)

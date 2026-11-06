@@ -273,16 +273,18 @@ async def test_each_page_keeps_its_own_card_size(stack: Stack) -> None:
         r = await api(b, "POST", "/api/v1/prefs", {"set": {"card.size.nowhere": "s", "card.size.deck": "xl"}})
         assert r.json()["refused"] == ["card.size.nowhere", "card.size.deck"]
         page = (await b.http.get("/decks/42")).text
-        assert "data-card-size=s data-card-size-page=deck data-card-size-printings=l>" in page
+        assert "data-card-size=s data-card-size-page=deck data-card-size-printings=l class='preload'>" in page
         # a page with no choice of its own: M, or the size chosen once for every page before
         page = (await b.http.get("/cards", params={"q": "sol"})).text
         assert (
-            "data-card-size=m data-card-size-page=search data-card-size-unset data-card-size-printings=l>"
-            in page
+            "data-card-size=m data-card-size-page=search data-card-size-unset data-card-size-printings=l "
+            "class='preload'>" in page
         )
         db.set_pref(SUB, "card.size", "l")
         page = (await b.http.get("/cards", params={"q": "sol"})).text
-        assert "data-card-size=l data-card-size-page=search data-card-size-printings=l>" in page
+        assert "data-card-size=l data-card-size-page=search data-card-size-printings=l class='preload'>" in (
+            page
+        )
         assert "data-card-size=s data-card-size-page=deck" in (await b.http.get("/decks/42")).text
         assert "data-card-size-page=editor" in (await b.http.get("/decks/42/edit")).text
         assert "data-card-size-page=collection" in (await b.http.get("/collection")).text
