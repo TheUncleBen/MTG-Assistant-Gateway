@@ -10,6 +10,20 @@
    which the Apply bar sits on. */
 (function () {
   "use strict";
+  // The page's transitions may run once the shared stylesheet is in and has been applied with
+  // them off (theme.py html.preload): a deferred script can run before a late stylesheet lands.
+  (function () {
+    var root = document.documentElement, link = document.querySelector("link[href^='/static/site.css']");
+    function lift() {
+      void document.body.offsetWidth; // the page's style with the stylesheet, transitions still off
+      root.classList.remove("preload");
+    }
+    if (!link || link.sheet) lift();
+    else {
+      link.addEventListener("load", lift);
+      link.addEventListener("error", lift);
+    }
+  })();
   var bar = document.querySelector(".topbar");
   if (!bar) return;
   var root = document.documentElement;

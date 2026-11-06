@@ -229,6 +229,10 @@ html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 var(--foot-room,max(12
   html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(45rem + 20px - 100vw) * 1000,9.5rem)))} }
 @media (width >= 900px){
   html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(58rem + 20px - 100vw) * 1000,9.5rem)))} }
+/* Until the page is in (html.preload, lifted by static/topbar.js) nothing transitions: a browser that
+   worked out a style before this stylesheet arrived would otherwise fade the buttons, fields and the
+   body in from its own grey and canvas. Without scripts the page simply never fades. */
+html.preload *,html.preload *::before,html.preload *::after{transition:none !important}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
   font:inherit;font-size:1rem;line-height:1.35;transition:background-color .25s ease-in}
 a{color:var(--link)} a:hover{color:var(--orange-text)}
@@ -3236,8 +3240,9 @@ def render(
     )
     description = f"{site}: a private gateway to your Magic: The Gathering decks on Archidekt."
     doc = (
+        # class preload: no transitions until the stylesheet is in (static/topbar.js lifts it)
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}"
-        f"{card_size_attrs() if signed_in else ''}>"
+        f"{card_size_attrs() if signed_in else ''} class='preload'>"
         "<head><meta charset='utf-8'>"
         f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
