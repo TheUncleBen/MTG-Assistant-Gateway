@@ -18,7 +18,8 @@ pytest.importorskip("playwright")
 # -- AD1, NC2: the report charts' labels at large text -------------------------------------------
 
 # Every chart's shown labels: none over another, none outside the chart's own box or cut at its
-# edge, the turn labels under the axis line, and none larger than the words around the chart
+# edge, the turn labels under the axis line, none larger than the words around the chart, and none
+# smaller than the chart's own label size (or those words, when they are smaller)
 CHART_LABELS = """() => {
   const out = [];
   const cut = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
@@ -42,6 +43,8 @@ CHART_LABELS = """() => {
       if (r.left < cr.left - 1 || r.right > cr.right + 1) out.push(name + ' is cut at the edge');
       const px = parseFloat(getComputedStyle(ts[i]).fontSize) * ts[i].getScreenCTM().a;
       if (px > body + 0.5) out.push(name + ' is ' + Math.round(px) + 'px beside ' + body + 'px words');
+      const want = Math.min(parseFloat(getComputedStyle(s).fontSize), body);
+      if (px < want - 0.5) out.push(name + ' is ' + px.toFixed(1) + 'px, under its ' + want + 'px size');
     }
     const axis = s.querySelector('line.axis');
     if (axis) {
@@ -60,10 +63,14 @@ CHART_PLACES = [
     ("320", 320, False, None),
     ("320 root", 320, True, None),
     ("320 text", 320, False, "text"),
+    ("320 browser", 320, False, "browser"),
     ("412 root", 412, True, None),
     ("412 text", 412, False, "text"),
     ("1024 root", 1024, True, None),
     ("1024", 1024, False, None),
+    ("717", 717, False, None),
+    ("1280", 1280, False, None),
+    ("1440", 1440, False, None),
 ]
 
 
@@ -76,7 +83,11 @@ def test_the_report_charts_labels_hold_together_at_every_text_size(
     """NC2 (from AD1): at 200% text the report charts' axis labels ran into each other ("0%" over
     "25%", "0%" over "T1"), were cut at the chart's left edge ("00%"), sat on the axis line, and
     were larger than the words around them (36 px at 1024 px). The chart makes room for its
-    labels, leaves out what has no room, and caps their size at its words' size."""
+    labels, leaves out what has no room, and caps their size at its words' size.
+
+    NC3: on a desktop or the Fold at 100% text the labels then shrank to 7-9 px, because the size
+    was worked out from the chart's width while its height is capped. The labels keep their size
+    at every width."""
     from playwright.sync_api import sync_playwright
 
     exe, sid, _ = site

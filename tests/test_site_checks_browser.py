@@ -815,7 +815,8 @@ CHECKS = r"""async ([o]) => {
     }
     timed('title', t0); t0 = performance.now();
     // (17) a chart's labels: none over another, none out of the chart's box or past its edge, the
-    // turn labels under the axis line, none larger than the words around it (NC2)
+    // turn labels under the axis line, none larger than the words around it (NC2), none smaller
+    // than the chart's own label size or those words, when they are smaller (NC3)
     const meet = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
       Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
     for (const sv of q('.chart svg', root)) {
@@ -836,6 +837,9 @@ CHECKS = r"""async ([o]) => {
         const size = px(getComputedStyle(t).fontSize) * t.getScreenCTM().a;
         if (size > body + 0.5) add('chart', title + '|' + t.textContent + '|size', name + ' is ' +
           Math.round(size) + 'px beside ' + body + 'px words');
+        const want = Math.min(px(cs(sv).fontSize), body);
+        if (size < want - 0.5) add('chart', title + '|' + t.textContent + '|small', name + ' is ' +
+          size.toFixed(1) + 'px, under its ' + want + 'px size');
         if (ar && t.classList.contains('x') && r.top < ar.bottom + 1)
           add('chart', title + '|' + t.textContent + '|axis', name + ' sits on the axis line');
       });

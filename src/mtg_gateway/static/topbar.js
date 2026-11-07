@@ -365,15 +365,25 @@
   function thin(svg, sel) {
     var ts = svg.querySelectorAll(sel), i;
     for (i = 0; i < ts.length; i++) ts[i].removeAttribute("display");
-    for (var step = 2; step < ts.length; step++) {
+    var near = function (a, b) { return b.left < a.right + 2; };
+    // every 1st, 2nd, 3rd … label and the last one; the one before the last is left out when it is
+    // too near the last (T9 beside T10)
+    for (var step = 2; step <= ts.length; step++) {
       var shown = [], hit = false;
       for (i = 0; i < ts.length; i++) {
         if (i % (step - 1) && i !== ts.length - 1) ts[i].setAttribute("display", "none");
-        else { ts[i].removeAttribute("display"); shown.push(ts[i].getBoundingClientRect()); }
+        else { ts[i].removeAttribute("display"); shown.push([ts[i], ts[i].getBoundingClientRect()]); }
       }
-      for (i = 1; i < shown.length; i++) if (shown[i].left < shown[i - 1].right + 2) { hit = true; break; }
+      var n = shown.length;
+      if (n > 2 && near(shown[n - 2][1], shown[n - 1][1])) {
+        shown[n - 2][0].setAttribute("display", "none");
+        shown.splice(n - 2, 1);
+      }
+      for (i = 1; i < shown.length; i++) if (near(shown[i - 1][1], shown[i][1])) { hit = true; break; }
       if (!hit) return;
     }
+    // no room for even the first and the last side by side: the first alone
+    for (i = 1; i < ts.length; i++) ts[i].setAttribute("display", "none");
   }
   // a chart's labels at the size of the words around it (.chart svg's font-size, .786rem, and never
   // more than the chart's own words), not the chart's: the chart is drawn in its own units and
@@ -386,7 +396,6 @@
     if (!svg.hasAttribute("data-vb")) svg.setAttribute("data-vb", svg.getAttribute("viewBox") || "");
     var o = svg.getAttribute("data-vb").split(/[\s,]+/).map(Number);
     if (o.length !== 4 || !(o[2] > 0)) return;
-    var W = svg.getBoundingClientRect().width;
     var want = Math.min(parseFloat(getComputedStyle(svg).fontSize),
       parseFloat(getComputedStyle(svg.parentNode).fontSize));
     var ts = svg.querySelectorAll("text"), ys = svg.querySelectorAll("text.y"), i, k;
@@ -397,8 +406,11 @@
     svg.setAttribute("viewBox", vb.join(" "));
     // the size in the chart's units depends on its box, and its box on the labels' size: a few
     // rounds settle it (each one widens the box less)
-    for (var round = 0; round < 4; round++) {
-      var f = want * vb[2] / W;
+    for (var round = 0; round < 6; round++) {
+      // the chart's real drawn scale: a capped height can make it smaller than its width says
+      var sc = svg.getScreenCTM();
+      if (!sc || !(sc.a > 0)) return;
+      var f = want / sc.a;
       for (i = 0; i < ts.length; i++) ts[i].style.setProperty("font-size", f + "px", "important");
       // every 1st, 2nd or 4th y label, as many as have a line's room between them
       var every = 1;
@@ -417,6 +429,10 @@
       svg.setAttribute("viewBox", vb.map(function (v) { return Math.round(v * 100) / 100; }).join(" "));
       if (k === 4) break;
     }
+    // the last box's own scale, should the rounds have run out before the box stopped moving
+    sc = svg.getScreenCTM();
+    if (k !== 4 && sc && sc.a > 0)
+      for (i = 0; i < ts.length; i++) ts[i].style.setProperty("font-size", want / sc.a + "px", "important");
     thin(svg, "text.x");
     thin(svg, "text.v");
   }

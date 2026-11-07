@@ -786,9 +786,11 @@ def test_a_wrapped_icon_buttons_content_is_centred(server: Server, site) -> None
 
 # -- AD1: the report charts' labels grow with the text ---------------------------------------------
 
+# each label's drawn size: its font size times the chart's real scale on screen (not its width over
+# its box's width, which a capped height makes wrong: NC3)
 CHART_TEXT = """() => [...document.querySelectorAll('.chart svg')]
   .filter(s => s.getClientRects().length).map(s => {
-  const vb = s.viewBox.baseVal, scale = s.getBoundingClientRect().width / vb.width;
+  const scale = s.getScreenCTM().a;
   return [...s.querySelectorAll('text')].map(t => parseFloat(getComputedStyle(t).fontSize) * scale);
 })"""
 
