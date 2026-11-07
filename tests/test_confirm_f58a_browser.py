@@ -255,11 +255,14 @@ def test_a_guarded_buttons_lock_grows_with_its_words(server: Server, site) -> No
         assert s["icon"] >= 0.8 * s["text"], sizes
 
 
-# Each shown button with words whose icon is under .85 of its words' size (AE2)
-SMALL_ICONS = """() => [...document.querySelectorAll('button, .btn, [role=tab]')]
-  .filter(b => b.getClientRects().length && b.textContent.trim() && b.querySelector(':scope > svg.i'))
-  .map(b => [b.textContent.trim(), b.querySelector(':scope > svg.i').getBoundingClientRect().height,
-    parseFloat(getComputedStyle(b).fontSize)])
+# Each shown control with words (a button, a tab, a fold's summary, a label that works one) whose
+# icon is under .85 of its words' size (AE2)
+SMALL_ICONS = """() => [...document.querySelectorAll(
+    'button, .btn, [role=tab], [role=button], summary, label')]
+  .filter(b => b.getClientRects().length && b.textContent.trim())
+  .flatMap(b => [...b.querySelectorAll(':scope > svg.i')].map(i => [
+    b.textContent.trim().replace(/\\s+/g, ' '), i.getBoundingClientRect().height,
+    parseFloat(getComputedStyle(b).fontSize)]))
   .filter(([, h, fs]) => h > 0 && h < 0.85 * fs - 0.5)
   .map(([t, h, fs]) => t + ': ' + h.toFixed(1) + 'px icon beside ' + fs + 'px words')"""
 
@@ -268,14 +271,17 @@ SMALL_ICONS = """() => [...document.querySelectorAll('button, .btn, [role=tab]')
 def test_a_buttons_icon_grows_with_its_words(server: Server, site, zoom) -> None:  # noqa: F811
     """AE2 (polish): at 320 px and 200% text the "+" of the New deck box's "Create deck" stayed
     18 px beside 28 px words, as did the icons of other buttons a page gave a fixed size (Sign
-    out, Import a list, Fit the screen). A button's icon grows with its words."""
+    out, Import a list, Fit the screen). A button's icon grows with its words. So does a control's
+    that is not a button: the Binder's "10 entries · 10 added this week", a label for its fold's
+    tick box, kept an 18 px chart icon at 200% (AE2-rest), as did folds' summaries and search
+    boxes' magnifiers."""
     from playwright.sync_api import sync_playwright
 
     exe, sid, _ = site
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        for path in ("/decks/new", "/account", "/collection/lists"):
+        for path in ("/decks/new", "/account", "/collection/lists", "/collection", "/history/reports/r1"):
             ctx = _ctx(browser, server, sid, 320, root=zoom is None)
             page = ctx.new_page()
             _goto(page, server, path, zoom)

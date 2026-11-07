@@ -872,14 +872,18 @@ CHECKS = r"""async ([o]) => {
       if (Math.abs(l - r) > 6) add('centre', txt(b), 'the button "' + txt(b) + '" sits ' + Math.round(l) +
         'px from its left and ' + Math.round(r) + 'px from its right');
     }
-    // (19) a button's icon beside its words grows with them: at least .6 of their size (AE2: the "+"
-    // of "Create deck" 18 px beside 28 px words; AD2: the lock of a locked Apply)
-    for (const b of q('button, .btn', root)) {
-      const sv = b.querySelector(':scope > svg, :scope > .lk > svg');
-      if (!sv || !shown(b) || b.closest('[hidden]') || !txt(b)) continue;
-      const fs = px(cs(b).fontSize), ih = rect(sv).height;
-      if (ih > 0 && ih < fs * 0.6 - 0.5) add('icon', txt(b), 'the button "' + txt(b) + '" has a ' +
-        Math.round(ih) + 'px icon beside ' + fs + 'px words');
+    // (19) a control's icons beside its words grow with them: each at least .6 of their size (AE2:
+    // the "+" of "Create deck" 18 px beside 28 px words; AD2: the lock of a locked Apply). A control
+    // is a button, a tab, a fold's summary or a label that works one (AE2: the Binder's "10
+    // entries · 10 added this week", a label for its fold's tick box)
+    for (const b of q('button, .btn, [role=tab], [role=button], summary, label', root)) {
+      if (!shown(b) || b.closest('[hidden]') || !txt(b)) continue;
+      const fs = px(cs(b).fontSize);
+      for (const sv of b.querySelectorAll(':scope > svg, :scope > .lk > svg')) {
+        const ih = rect(sv).height;
+        if (ih > 0 && ih < fs * 0.6 - 0.5) add('icon', txt(b), 'the control "' + txt(b) + '" has a ' +
+          Math.round(ih) + 'px icon beside ' + fs + 'px words');
+      }
     }
     timed('chart', t0);
     return out;

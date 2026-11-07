@@ -1968,7 +1968,11 @@ REPORT_PAGE_CSS = (
 .rv-page .ig-more[open] > summary{display:none}
 .rv-page .ig-more > ul{border-top:1px solid var(--border-soft)}
 .rv-page .ig-dis:first-child > summary{border-top:0}
-.rv-page .ig-dis > summary .nm{flex:1;min-width:0;font-weight:600}
+/* the name keeps its longest word whole: where the count and the chevron leave it no room for
+   it (a narrow phone at 200%, the chevron growing with the words) they go on the line under it */
+.rv-page .ig-dis > summary{flex-wrap:wrap;column-gap:.75rem;row-gap:0}
+.rv-page .ig-dis > summary .nm{flex:1 1 0;min-width:min-content;font-weight:600}
+.rv-page .ig-dis > summary .v{margin-left:auto}
 .rv-page .ig-dis > ul li{padding-left:28px}
 .rv-page .ig-dis > summary .v{color:var(--text-muted);font-size:.9rem}
 .rv-page .ig-dis svg{width:16px;height:16px;color:var(--text-muted);transform:rotate(-90deg);

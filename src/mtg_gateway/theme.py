@@ -265,9 +265,11 @@ img.img-broken{display:none !important}
 .img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
-/* a button's icon grows with its words whatever fixed size a page gives it (AE2: the "+" of "Create
-   deck" stayed 18 px beside 28 px words; AD2: the lock of a locked Apply) */
-:is(button, .btn, [role=tab]) > svg.i{min-width:.85em;min-height:.85em}
+/* a control's icon grows with its words whatever fixed size a page gives it (AE2: the "+" of
+   "Create deck" stayed 18 px beside 28 px words; AD2: the lock of a locked Apply): a button, a tab,
+   a fold's summary, or a label that works one (the Binder's "10 entries · …" fold, a search box's
+   magnifier) */
+:is(button, .btn, [role=tab], [role=button], summary, label) > svg.i{min-width:.85em;min-height:.85em}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
 
 /* global toolbar (navbar): flat, 50px, links bold white turning orange */
@@ -539,6 +541,9 @@ summary:hover .disc,details > summary.fold-btn:hover{background:var(--surface-3)
 summary:focus-visible .disc,details > summary.fold-btn:focus-visible{outline:2px solid var(--focus);
   outline-offset:-2px}
 details > summary.fold-btn svg.i{width:16px;height:16px;flex:none}
+/* at large text the capsule's sides give way to its words (its icon grows with them, AE2): 14 px
+   up to 125% text, less above it, so a long word ("archidekt.com:") keeps its line at 320 px */
+details > summary.fold-btn{padding-inline:min(14px, max(8px, calc(24px - .5em)))}
 /* Account › Approval mode: a tight list, one row per mode (radio and name) with the same fixed
    padding, its meaning in a fold opened by the chevron at the row's end. The radio, the name and
    the chevron share the first line at any text size; the fold's text lines up with the name. */

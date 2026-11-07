@@ -275,7 +275,8 @@ SETTINGS_CSS = """
 .set-group details > summary{list-style:none;display:flex;align-items:center;justify-content:space-between;
   gap:.75rem;min-height:44px;cursor:pointer;margin:-.25rem 0 .5rem}
 .set-group details > summary::-webkit-details-marker{display:none}
-.set-group details > summary .sum{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .75rem}
+.set-group details > summary .sum{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .75rem;
+  min-width:0}
 .set-group details > summary .sum .ui-sub{margin:0}
 .set-group details > summary > svg.i{width:20px;height:20px;flex:none}
 .set-group details[open] > summary > svg.i{transform:rotate(180deg)}

@@ -589,7 +589,8 @@ name per thing.
   width. A column chart keeps every column's value and turn: where they have no room side by
   side, it scrolls sideways as the deck's mana curve does.
 - A button's icon grows with its words at large text, such as the "+" of Create deck and the
-  icons of Sign out and Import a list.
+  icons of Sign out and Import a list, and so do the icons of folds, of the Binder's entries
+  summary and of search boxes.
 - A switch whose parts fit on one row stays on one row on a small phone, such as the Binder's
   Cards, Lists and Watchlist and the Scan page's tabs.
 - The tab bar's count keeps a small gap under the bar's top edge and its capped size when the
