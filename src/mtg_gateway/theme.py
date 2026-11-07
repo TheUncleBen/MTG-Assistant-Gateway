@@ -529,11 +529,14 @@ details > summary.fold-btn{margin-inline-start:-4px} /* the capsule's edge lines
 /* a heading as the capsule's words keeps its longest word whole: the capsule grows to it */
 details > summary.fold-btn > h2{overflow-wrap:break-word;min-width:0}
 details > summary.fold-btn::-webkit-details-marker{display:none}
-.disc::after,details > summary.fold-btn::after{content:"";flex:none;width:6px;height:6px;
-  margin-left:auto;border:solid currentColor;border-width:0 2px 2px 0;
-  transform:translateY(-2px) rotate(45deg);transition:transform .15s}
+/* the chevron grows with the words (polish AG1: 6 px beside 29 px words at 200% text): 6 px and
+   a 2 px line up to about 100% text */
+.disc::after,details > summary.fold-btn::after{content:"";flex:none;width:max(6px, .36em);
+  height:max(6px, .36em);margin-left:auto;border:solid currentColor;
+  border-width:0 max(2px, .12em) max(2px, .12em) 0;
+  transform:translateY(min(-2px, -.15em)) rotate(45deg);transition:transform .15s}
 [open] > summary .disc::after,details[open] > summary.fold-btn::after{
-  transform:translateY(2px) rotate(-135deg)}
+  transform:translateY(max(2px, .15em)) rotate(-135deg)}
 .disc{gap:6px;padding:6px 10px} /* beside a count: a little narrower, so it stays on the line */
 .disc.round{width:44px;padding:0;justify-content:center}
 .disc.round::after{margin:0}
@@ -541,9 +544,10 @@ summary:hover .disc,details > summary.fold-btn:hover{background:var(--surface-3)
 summary:focus-visible .disc,details > summary.fold-btn:focus-visible{outline:2px solid var(--focus);
   outline-offset:-2px}
 details > summary.fold-btn svg.i{width:16px;height:16px;flex:none}
-/* at large text the capsule's sides give way to its words (its icon grows with them, AE2): 14 px
-   up to 125% text, less above it, so a long word ("archidekt.com:") keeps its line at 320 px */
-details > summary.fold-btn{padding-inline:min(14px, max(8px, calc(24px - .5em)))}
+/* at large text the capsule's sides give way to its words (its icon and chevron grow with them,
+   AE2, AG1): 14 px up to 100% text, 8 px from about 200%, so a long word ("archidekt.com:") keeps
+   its line at 320 px */
+details > summary.fold-btn{padding-inline:min(14px, max(8px, calc(22px - .5em)))}
 /* Account › Approval mode: a tight list, one row per mode (radio and name) with the same fixed
    padding, its meaning in a fold opened by the chevron at the row's end. The radio, the name and
    the chevron share the first line at any text size; the fold's text lines up with the name. */
@@ -1205,7 +1209,7 @@ __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
 .search input{flex:1;border-radius:var(--radius) 0 0 var(--radius);border-right:0}
-.search button{margin:0;width:auto;border-radius:0 var(--radius) var(--radius) 0}
+.search button{margin:0;width:auto;border-radius:0 var(--radius) var(--radius) 0;align-self:stretch}
 .openform button{margin-top:.6rem}
 
 footer.site{color:#fff;background:var(--navbar-bg);text-align:center;padding:20px 20px 24px;
@@ -2429,8 +2433,9 @@ SEARCH_PANEL_CSS = """
 .spanel .sp-name > label{display:block;font-weight:700;margin:0 0 .35rem}
 .spanel .sp-name .search{margin:0}
 .spanel .sp-name .search > input{flex:1 1 auto;min-width:0}
-.spanel .sp-name .search button{height:var(--ctl);min-height:var(--ctl);width:var(--ctl);padding:0;flex:none;
-  display:inline-flex;align-items:center;justify-content:center}
+/* the search button is as tall as its box at every text size (polish AG2: 44 px beside 64 px) */
+.spanel .sp-name .search button{height:auto;align-self:stretch;min-height:var(--ctl);width:var(--ctl);
+  padding:0;flex:none;display:inline-flex;align-items:center;justify-content:center}
 .spanel .sp-name .under:empty{display:none}
 .spanel .openhint{display:flex;align-items:center;gap:.6rem;margin-top:.5rem;padding:.35rem .35rem
   .35rem .7rem;

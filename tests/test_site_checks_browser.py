@@ -885,6 +885,28 @@ CHECKS = r"""async ([o]) => {
           Math.round(ih) + 'px icon beside ' + fs + 'px words');
       }
     }
+    // (20) a fold's drawn chevron (a summary's or a Details capsule's ::after) grows with its words:
+    // at least .3 of their size (polish AG1: 6 px beside 29 px words at 200% text)
+    for (const el of q('summary, .disc', root)) {
+      if (!shown(el) || el.closest('[hidden]')) continue;
+      const a = getComputedStyle(el, '::after');
+      if (a.content === 'none' || a.display === 'none' || a.borderRightStyle !== 'solid') continue;
+      const w = px(a.width), fs = px(cs(el).fontSize);
+      if (w > 0 && w < fs * 0.3 - 0.5) add('chevron', txt(el), 'the fold "' + txt(el) + '" has a ' +
+        Math.round(w) + 'px chevron beside ' + fs + 'px words');
+    }
+    // (21) a text box and the button joined to its end (a search box's button) are one height
+    // (polish AG2: the Binder's 44 px search button beside its 64 px box at 200% text)
+    for (const inp of q('input', root)) {
+      // a text box (not a tick box, nor one hidden for screen readers or behind a picker)
+      if (!/^(text|search|email|number|url|password|tel)$/.test(inp.type) || rect(inp).height < 20) continue;
+      const b = inp.nextElementSibling;
+      if (!b || !b.matches('button, .btn') || !shown(inp) || !shown(b)) continue;
+      const ir = rect(inp), br = rect(b);
+      if (Math.abs(br.left - ir.right) > 1.5 || br.bottom < ir.top || br.top > ir.bottom) continue;
+      if (Math.abs(ir.height - br.height) > 2) add('pair', nm(inp), 'the box ' + nm(inp) + ' is ' +
+        Math.round(ir.height) + 'px tall beside its ' + Math.round(br.height) + 'px button');
+    }
     timed('chart', t0);
     return out;
   };

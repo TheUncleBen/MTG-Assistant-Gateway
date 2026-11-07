@@ -348,3 +348,50 @@ def test_an_icon_button_shown_after_the_page_loaded_is_centred(server: Server, s
             ctx.close()
         browser.close()
     assert problems == [], "\n".join(problems)
+
+
+# -- AG1, AG2: a fold's chevron and a search box's button at large text ---------------------------
+
+# Each shown fold (a summary or a Details capsule) whose drawn chevron is under .3 of its words'
+# size, and each text box whose joined button is not its height
+SMALL_CHEVRONS = """() => {
+  const out = [];
+  for (const el of document.querySelectorAll('summary, .disc')) {
+    if (!el.getClientRects().length) continue;
+    const a = getComputedStyle(el, '::after');
+    if (a.content === 'none' || a.borderRightStyle !== 'solid') continue;
+    const w = parseFloat(a.width), fs = parseFloat(getComputedStyle(el).fontSize);
+    if (w > 0 && w < 0.3 * fs - 0.5)
+      out.push(el.textContent.trim().slice(0, 30) + ': ' + w.toFixed(1) + 'px chevron beside ' + fs +
+        'px words');
+  }
+  for (const inp of document.querySelectorAll('input[type=search], input[type=text]')) {
+    const b = inp.nextElementSibling;
+    if (!b || !b.matches('button') || !inp.getClientRects().length) continue;
+    const ih = inp.getBoundingClientRect().height, bh = b.getBoundingClientRect().height;
+    if (Math.abs(ih - bh) > 2) out.push('#' + inp.id + ': ' + Math.round(ih) + 'px box beside a ' +
+      Math.round(bh) + 'px button');
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("zoom", [None, "text"], ids=["root", "text"])
+def test_a_folds_chevron_and_a_search_button_grow_with_the_words(server: Server, site, zoom) -> None:  # noqa: F811
+    """AG1 (polish): the chevrons of folds and of "Details" stayed 6 px, about half the words'
+    height, at 200% text. AG2: the Binder's name filter's search button stayed 44 px beside its
+    64 px box. The chevron grows with the words, and the button is as tall as its box."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for path in ("/collection", "/history/reports/r1", "/decks"):
+            ctx = _ctx(browser, server, sid, 320, root=zoom is None)
+            page = ctx.new_page()
+            _goto(page, server, path, zoom)
+            problems += [f"{path}: {f}" for f in page.evaluate(SMALL_CHEVRONS)]
+            ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)

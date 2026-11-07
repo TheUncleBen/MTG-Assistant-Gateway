@@ -2491,9 +2491,10 @@ details > summary{list-style:none;cursor:pointer;display:inline-flex;align-items
   border-radius:22px;background:var(--surface-2) padding-box;color:var(--text);font-weight:600;
   font-size:.9rem;line-height:1.2}
 details > summary::-webkit-details-marker{display:none}
-details > summary::after{content:"";flex:none;width:6px;height:6px;margin-left:auto;border:solid currentColor;
-  border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg)}
-details[open] > summary::after{transform:translateY(2px) rotate(-135deg)}
+details > summary::after{content:"";flex:none;width:max(6px, .36em);height:max(6px, .36em);margin-left:auto;
+  border:solid currentColor;border-width:0 max(2px, .12em) max(2px, .12em) 0;
+  transform:translateY(min(-2px, -.15em)) rotate(45deg)}
+details[open] > summary::after{transform:translateY(max(2px, .15em)) rotate(-135deg)}
 details > summary:hover{background:var(--surface-3) padding-box}
 /* a saved file never updates, so a run that was going when it was saved keeps a still ring */
 .ui-spin{display:inline-block;box-sizing:border-box;width:14px;height:14px;flex:none;border-radius:50%;
