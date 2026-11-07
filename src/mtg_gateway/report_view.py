@@ -2472,9 +2472,10 @@ a:hover{color:var(--orange-text);text-decoration-color:currentColor}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
 /* the big headings keep their size until the text is large for the window, then come down towards
-   the body's size, so a long word ("opponents") keeps its line at 320 px and 200% (polish AI2) */
-h1{font-size:min(2rem, max(1rem, 10vw));margin:.25rem 0 .75rem;overflow-wrap:anywhere}
-h2{font-size:min(1.5rem, max(1rem, 7.5vw));margin:0 0 .6rem}
+   the body's size, so a long word ("opponents") keeps its line at 320 px and 200% (polish AI2), but
+   never below the next level: h1 1.3, h2 1.2, h3 1.1 and h4 1 times the text at the least (AK1) */
+h1{font-size:min(2rem, max(1.3rem, 10vw));margin:.25rem 0 .75rem;overflow-wrap:anywhere}
+h2{font-size:min(1.5rem, max(1.2rem, 7.5vw));margin:0 0 .6rem}
 h3{font-size:1.1rem;margin:.75rem 0 .4rem} h4{font-size:1rem;margin:.6rem 0 .2rem} p{margin:.5rem 0}
 h3 small,h4 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margin-left:.4rem}
 .muted{color:var(--text-muted)} .small{font-size:.86rem} .b{font-weight:700}
@@ -2528,6 +2529,17 @@ EXPORT_THEME_CSS = """
 """
 
 
+# after the site's disclosure rules: their list indent grew with the text (1.25rem), which at 320 px
+# and 200% left a list's words too little room (AI2); and a fold that is a card of the file keeps
+# the card's own frame (the fold's rule above it would recolour the card's top edge and take its
+# padding and gap)
+DISCLOSURE_FILE_RULES = (
+    ".disclosure ul{padding-left:min(1.25rem, 6vw)}\n"
+    "details.card.disclosure{margin:0 0 1rem;border-top:1px solid var(--card-border);"
+    "padding-top:min(1rem, 4vw)}\n"
+)
+
+
 def export_css() -> str:
     """The theme's colour sets (dark, the light one for a light system setting) and its label
     rules, then the export's own page styles: the HTML export follows the site's look."""
@@ -2535,7 +2547,10 @@ def export_css() -> str:
 
     tokens = theme.CSS[theme.CSS.index(":root{") : theme.CSS.index("*{box-sizing:border-box}")]
     labels = "\n".join(re.findall(r"(?m)^\.ui-lbl[^{]*\{[^}]*\}", theme.UI_CSS))
-    return tokens + EXPORT_CSS + labels + "\n"
+    # the site's rules for a disclosure's content (its headings, lists, lines, and the fold's
+    # rule above it), the same in the file; its list keeps the file's indent, capped by the window
+    disclosure = "\n".join(re.findall(r"(?m)^(?:details)?\.disclosure(?: [^{]*)?\{[^}]*\}", theme.CSS))
+    return tokens + EXPORT_CSS + labels + "\n" + disclosure + "\n" + DISCLOSURE_FILE_RULES
 
 
 def report_export_html(

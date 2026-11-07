@@ -195,13 +195,11 @@ def test_the_html_files_words_stay_whole_on_a_small_phone_at_large_text() -> Non
             browser.close()
 
 
-# the file's markup hooks that carry no style of their own, in the file or as a utility on the site:
-# section names (report-head, forge, forge-tiles, unmodeled, coverage), the results tables'
-# (qty, seats, rate; styled through .forge-results table), the chart's text parts (v, x, y) and the
-# folds' (disclosure; the file's details have their own capsule)
+# the file's markup hooks that carry no style of their own, in the file or on the site: section
+# names (report-head, forge, forge-tiles, unmodeled, coverage), the results tables' (qty, seats,
+# rate; styled through .forge-results table) and the chart's text parts (v, x, y)
 HOOKS = {
     "coverage",
-    "disclosure",
     "forge",
     "forge-tiles",
     "qty",
@@ -227,8 +225,16 @@ def test_the_html_file_defines_every_class_it_uses() -> None:
         used |= set(value.split())
     defined = set(re.findall(r"\.([A-Za-z_][\w-]*)", css))
     assert used - defined - HOOKS == set()
+    # no site rule starts at a hook: not ".hook", "tag.hook", ".other.hook", nor ".hook h3" (polish
+    # on c0b79f8d: ".disclosure h3" and "details.disclosure" were missed); ".changes .qty", another
+    # part's own rule for a hook inside it, is not about the file's markup
+    site = theme.CSS + theme.UI_CSS
     for hook in HOOKS:
-        assert not re.search(rf"(?m)^\.{re.escape(hook)}\s*[{{,]", theme.CSS), hook
+        starts = rf"(?:^|[,}}]\s*)[a-z]*(?:\.[\w-]+)*\.{re.escape(hook)}(?![\w-])"
+        assert not re.search(starts, site, re.M), hook
+    # the site's rules for a disclosure's content are in the file, the same
+    for rule in re.findall(r"(?m)^(?:details)?\.disclosure(?: [^{]*)?\{[^}]*\}", theme.CSS):
+        assert rule in css, rule
 
 
 STACK_SPILL = """() => {
@@ -275,3 +281,74 @@ def test_the_html_files_stacked_results_keep_their_values_in_the_card() -> None:
             ctx.close()
         finally:
             browser.close()
+
+
+HEADING_SIZES = """() => ['h1', 'h2', 'h3'].map(t => [...document.querySelectorAll(t)]
+  .filter(e => e.getClientRects().length).map(e => parseFloat(getComputedStyle(e).fontSize)))"""
+
+
+@pytest.mark.parametrize("width", [320, 412, 600, 900, 1280])
+def test_the_html_files_headings_keep_their_order_at_every_size(width: int) -> None:
+    """Polish AK1: at 320 px with 200% text the file's h1 and h2 came down to 32 px each and h3 was
+    35 px. Each level stays larger than the next at every width and text size."""
+    from .test_consent_browser import _chromium_or_skip, _launch
+
+    pytest.importorskip("playwright")
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    doc = _html(_report())
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            ctx = browser.new_context(viewport={"width": width, "height": 800})
+            page = ctx.new_page()
+            for size in ("100%", "150%", "200%"):
+                page.set_content(doc)
+                page.evaluate(
+                    "(z) => { document.documentElement.style.setProperty('font-size', z, 'important');"
+                    " document.querySelectorAll('details').forEach(d => { d.open = true; }); }",
+                    size,
+                )
+                h1, h2, h3 = page.evaluate(HEADING_SIZES)
+                assert h1 and h2 and h3, (size, h1, h2, h3)
+                assert min(h1) > max(h2) and min(h2) > max(h3), (size, h1, h2, h3)
+            ctx.close()
+        finally:
+            browser.close()
+
+
+FOLD_RULES = """() => {
+  const css = e => getComputedStyle(e), size = e => parseFloat(css(e).fontSize);
+  const body = size(document.body);
+  const h = document.querySelector('.disclosure h3'), li = document.querySelector('.disclosure li');
+  const cards = [...document.querySelectorAll('details.card.disclosure')].map(css);
+  return [h && size(h) / body, li && parseFloat(css(li).lineHeight) / size(li), cards.length,
+    cards.every(s => s.borderTopColor === s.borderLeftColor)];
+}"""
+
+
+def test_the_html_files_folds_follow_the_sites_rules_and_cards_keep_their_frame() -> None:
+    """Polish on c0b79f8d: the file had none of the site's rules for a disclosure's content, so its
+    heading was 1.1 of the text (the site's 1) and its lines 1.35 high (the site's 1.45). They are
+    the site's; a fold that is a card keeps the card's frame, its top edge the colour of the rest."""
+    from .test_consent_browser import _chromium_or_skip, _launch
+
+    pytest.importorskip("playwright")
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    doc = _html(_report())
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 412, "height": 900})
+            page.set_content(doc)
+            page.evaluate("() => document.querySelectorAll('details').forEach(d => { d.open = true; })")
+            got = page.evaluate(FOLD_RULES)
+        finally:
+            browser.close()
+    h3, line, cards, framed = got
+    assert h3 is not None and abs(h3 - 1) < 0.01, got
+    assert line is not None and abs(line - 1.45) < 0.01, got
+    assert cards and framed, got
