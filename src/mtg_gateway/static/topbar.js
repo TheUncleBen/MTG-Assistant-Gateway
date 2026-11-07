@@ -385,8 +385,8 @@
     // no room for even the first and the last side by side: the first alone
     for (i = 1; i < ts.length; i++) ts[i].setAttribute("display", "none");
   }
-  // a chart's labels at the size of the words around it (.chart svg's font-size, .786rem, and never
-  // more than the chart's own words), not the chart's: the chart is drawn in its own units and
+  // a chart's labels at the size of the words around it (the chart's own font size), not the
+  // chart's: the chart is drawn in its own units and
   // scaled to its width, so at 200% text its labels were 36 px beside 32 px words, ran out of its
   // left edge ("00%") and into each other ("0%" over "25%" and "T1") (NC2). The chart's box is
   // widened to hold its labels whole (the plot gives way), a y label is left out where the next
@@ -396,8 +396,53 @@
     if (!svg.hasAttribute("data-vb")) svg.setAttribute("data-vb", svg.getAttribute("viewBox") || "");
     var o = svg.getAttribute("data-vb").split(/[\s,]+/).map(Number);
     if (o.length !== 4 || !(o[2] > 0)) return;
-    var want = Math.min(parseFloat(getComputedStyle(svg).fontSize),
-      parseFloat(getComputedStyle(svg.parentNode).fontSize));
+    // the labels at the size of the chart's words, at every width (AF2: 11.8 px beside 14 px words
+    // at 900 px, from .chart svg's .786rem)
+    var want = parseFloat(getComputedStyle(svg.closest(".chart") || svg.parentNode).fontSize);
+    var wrap = svg.parentNode.classList.contains("chart-x") ? svg.parentNode : null;
+    var props = ["width", "max-width", "max-height"], j;
+    if (wrap) for (j = 0; j < props.length; j++) svg.style.removeProperty(props[j]);
+    sizeChart(svg, o, want);
+    // a column chart keeps every column's value and turn: where they have no room side by side it
+    // is drawn wider and scrolls sideways, as the deck's mana curve does (AF1: at 412 px and 200%
+    // the 20, 17 and 5 columns had neither)
+    if (!svg.querySelector("rect.col")) return;
+    for (var round = 0; round < 3; round++) {
+      var r = crowded(svg);
+      if (!(r > 1.005)) return;
+      if (!wrap) {
+        wrap = document.createElement("div");
+        wrap.className = "chart-x";
+        svg.parentNode.insertBefore(wrap, svg);
+        wrap.appendChild(svg);
+      }
+      var sc = svg.getScreenCTM(), vbw = svg.viewBox.baseVal.width;
+      svg.style.setProperty("max-width", "none", "important");
+      svg.style.setProperty("max-height", "none", "important");
+      // its drawing that much wider (its box also holds its padding)
+      var bw = svg.getBoundingClientRect().width;
+      svg.style.setProperty("width", Math.ceil(bw + vbw * sc.a * (r - 1) + 1) + "px", "important");
+      sizeChart(svg, o, want);
+    }
+  }
+  // how much wider a column chart must be drawn for its values, and its turns, to stand side by
+  // side with room between them (1 or less: they do)
+  function crowded(svg) {
+    var need = 1, groups = ["text.v", "text.x"], g, i;
+    for (g = 0; g < groups.length; g++) {
+      var ts = svg.querySelectorAll(groups[g]), was = [], rs = [];
+      for (i = 0; i < ts.length; i++) { was.push(ts[i].getAttribute("display")); ts[i].removeAttribute("display"); }
+      for (i = 0; i < ts.length; i++) rs.push(ts[i].getBoundingClientRect());
+      for (i = 0; i < ts.length; i++) if (was[i] !== null) ts[i].setAttribute("display", was[i]);
+      rs.sort(function (a, b) { return a.left + a.right - b.left - b.right; });
+      for (i = 1; i < rs.length; i++) {
+        var apart = (rs[i].left + rs[i].right - rs[i - 1].left - rs[i - 1].right) / 2;
+        if (apart > 0) need = Math.max(need, (rs[i - 1].width / 2 + rs[i].width / 2 + 4) / apart);
+      }
+    }
+    return need;
+  }
+  function sizeChart(svg, o, want) {
     var ts = svg.querySelectorAll("text"), ys = svg.querySelectorAll("text.y"), i, k;
     for (i = 0; i < ts.length; i++) ts[i].removeAttribute("display");
     // the gridlines' spacing in the chart's units (the y labels sit on them)

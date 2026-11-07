@@ -815,8 +815,9 @@ CHECKS = r"""async ([o]) => {
     }
     timed('title', t0); t0 = performance.now();
     // (17) a chart's labels: none over another, none out of the chart's box or past its edge, the
-    // turn labels under the axis line, none larger than the words around it (NC2), none smaller
-    // than the chart's own label size or those words, when they are smaller (NC3)
+    // turn labels under the axis line, each at the size of the words around it (NC2, NC3, AF2), and
+    // a column chart's every value and turn shown (AF1); a chart drawn wider than its place scrolls
+    // sideways (.chart-x), its labels reached so
     const meet = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
       Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
     for (const sv of q('.chart svg', root)) {
@@ -832,17 +833,22 @@ CHECKS = r"""async ([o]) => {
           if (meet(r, rs[j])) add('chart', title + '|' + t.textContent + '|' + ts[j].textContent,
             name + ' runs into "' + ts[j].textContent + '"');
         if (r.left < sr.left - 1 || r.right > sr.right + 1 || r.top < sr.top - 1 ||
-          r.bottom > sr.bottom + 1 || r.left < cr.left - 1 || r.right > cr.right + 1)
+          r.bottom > sr.bottom + 1 ||
+          (!sv.closest('.chart-x') && (r.left < cr.left - 1 || r.right > cr.right + 1)))
           add('chart', title + '|' + t.textContent + '|out', name + ' is cut at its edge');
         const size = px(getComputedStyle(t).fontSize) * t.getScreenCTM().a;
         if (size > body + 0.5) add('chart', title + '|' + t.textContent + '|size', name + ' is ' +
           Math.round(size) + 'px beside ' + body + 'px words');
-        const want = Math.min(px(cs(sv).fontSize), body);
-        if (size < want - 0.5) add('chart', title + '|' + t.textContent + '|small', name + ' is ' +
-          size.toFixed(1) + 'px, under its ' + want + 'px size');
+        if (size < body - 0.5) add('chart', title + '|' + t.textContent + '|small', name + ' is ' +
+          size.toFixed(1) + 'px beside ' + body + 'px words');
         if (ar && t.classList.contains('x') && r.top < ar.bottom + 1)
           add('chart', title + '|' + t.textContent + '|axis', name + ' sits on the axis line');
       });
+      if (sv.querySelector('rect.col'))
+        for (const t of q('text.v, text.x', sv))
+          if (getComputedStyle(t).display === 'none')
+            add('chart', title + '|' + t.textContent + '|gone', 'the chart "' + title + '": the column ' +
+              (t.classList.contains('v') ? 'value' : 'turn') + ' "' + t.textContent + '" is left out');
     }
     // (18) a button with an icon whose label wraps: its icon and label in its middle (P-13); a
     // button laid out from its start (a menu's rows) is not centred by design
@@ -865,6 +871,15 @@ CHECKS = r"""async ([o]) => {
       const r = br.right - px(bs.borderRightWidth) - Math.max(rect(sv).right, ...rights);
       if (Math.abs(l - r) > 6) add('centre', txt(b), 'the button "' + txt(b) + '" sits ' + Math.round(l) +
         'px from its left and ' + Math.round(r) + 'px from its right');
+    }
+    // (19) a button's icon beside its words grows with them: at least .6 of their size (AE2: the "+"
+    // of "Create deck" 18 px beside 28 px words; AD2: the lock of a locked Apply)
+    for (const b of q('button, .btn', root)) {
+      const sv = b.querySelector(':scope > svg, :scope > .lk > svg');
+      if (!sv || !shown(b) || b.closest('[hidden]') || !txt(b)) continue;
+      const fs = px(cs(b).fontSize), ih = rect(sv).height;
+      if (ih > 0 && ih < fs * 0.6 - 0.5) add('icon', txt(b), 'the button "' + txt(b) + '" has a ' +
+        Math.round(ih) + 'px icon beside ' + fs + 'px words');
     }
     timed('chart', t0);
     return out;

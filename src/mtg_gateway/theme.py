@@ -148,10 +148,13 @@ VIZ_CSS = """
 /* SVG charts drawn on the server: lines and columns take their colours from the theme */
 .chart{min-width:0} .chart h3{margin:0 0 .4rem}
 /* the labels (the axes' "0%" and "T1", the values over the columns) grow with the text size as the
-   words around the chart do (confirmation AD1: 11 px at every size): .chart svg's font-size is the
-   size static/topbar.js gives them on screen, in the chart's own units, making room for them
-   (NC2); without scripts they are that size in the chart's units, scaled with it */
+   words around the chart do (confirmation AD1: 11 px at every size): static/topbar.js gives them
+   the chart's words' size on screen, in the chart's own units, making room for them (NC2, AF2), and
+   draws a column chart wider in a .chart-x that scrolls sideways where its values and turns have
+   no room side by side (AF1); without scripts they are .chart svg's font-size in the chart's
+   units, scaled with it */
 .chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:.786rem;overflow:visible}
+.chart-x{overflow-x:auto;scrollbar-width:thin}
 .chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
 .chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)}
 .chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
@@ -262,6 +265,9 @@ img.img-broken{display:none !important}
 .img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
+/* a button's icon grows with its words whatever fixed size a page gives it (AE2: the "+" of "Create
+   deck" stayed 18 px beside 28 px words; AD2: the lock of a locked Apply) */
+:is(button, .btn, [role=tab]) > svg.i{min-width:.85em;min-height:.85em}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
 
 /* global toolbar (navbar): flat, 50px, links bold white turning orange */

@@ -585,8 +585,11 @@ name per thing.
 
 ### Fixed
 - At large text, report charts make room for their labels: the labels no longer overlap, get cut
-  at the edge or sit on the axis line, and they are never larger than the text around them. They
-  also keep their size on a wide screen, where the chart's height is capped.
+  at the edge or sit on the axis line, and they are the size of the text around them at every
+  width. A column chart keeps every column's value and turn: where they have no room side by
+  side, it scrolls sideways as the deck's mana curve does.
+- A button's icon grows with its words at large text, such as the "+" of Create deck and the
+  icons of Sign out and Import a list.
 - A switch whose parts fit on one row stays on one row on a small phone, such as the Binder's
   Cards, Lists and Watchlist and the Scan page's tabs.
 - The tab bar's count keeps a small gap under the bar's top edge and its capped size when the

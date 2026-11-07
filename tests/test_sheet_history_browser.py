@@ -177,6 +177,10 @@ def _close(page, way: str) -> None:  # noqa: ANN001
 
 def _closed_on(page, here: str, name: str, way: str) -> None:  # noqa: ANN001
     page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+    # the sheet's own back() has landed, and the address it carries is on the entry it landed on
+    # (a slow back() still in flight on a busy machine: a reload then landed on the entry under
+    # the sheet, without the filter)
+    page.wait_for_function("() => !window.MtgLayers || !window.MtgLayers.backPending()")
     assert page.url == here, (name, way, page.url)
     got = page.evaluate(FREE)
     assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (name, way, got)

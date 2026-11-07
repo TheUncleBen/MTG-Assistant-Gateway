@@ -301,6 +301,9 @@ def test_the_scan_result_card_keeps_room_for_the_name_at_large_text(chromium, se
             "() => { window.__scan.state.pending = {status: 'exact', quantity: 1, card: " + SCAN_CARD + "};"
             " window.__scan.showTab('camera'); }"
         )
+        # the page fits itself (the Scan tabs, the result card) in the frame after the text size
+        # changed in place: measured once it has (CI: 41 px of sideways scroll in between)
+        redrawn(page)
         got = page.evaluate(RESULT)
         assert got["name"] >= 1.5 * got["img"] and got["name"] >= got["card"] * 0.4, got
         assert got["img"] <= got["card"] / 3 + 1, got

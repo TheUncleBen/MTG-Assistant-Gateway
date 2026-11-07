@@ -18,8 +18,8 @@ pytest.importorskip("playwright")
 # -- AD1, NC2: the report charts' labels at large text -------------------------------------------
 
 # Every chart's shown labels: none over another, none outside the chart's own box or cut at its
-# edge, the turn labels under the axis line, none larger than the words around the chart, and none
-# smaller than the chart's own label size (or those words, when they are smaller)
+# edge, the turn labels under the axis line, each at the size of the words around the chart (NC3,
+# AF2), and a column chart's every value and turn shown (AF1)
 CHART_LABELS = """() => {
   const out = [];
   const cut = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
@@ -40,12 +40,18 @@ CHART_LABELS = """() => {
         if (cut(r, rs[j])) out.push(name + ' runs into "' + ts[j].textContent + '"');
       if (r.left < sr.left - 1 || r.right > sr.right + 1 || r.top < sr.top - 1 || r.bottom > sr.bottom + 1)
         out.push(name + ' runs out of its chart');
-      if (r.left < cr.left - 1 || r.right > cr.right + 1) out.push(name + ' is cut at the edge');
+      // a chart drawn wider than its place scrolls sideways (.chart-x): its labels are reached so
+      if (!s.closest('.chart-x') && (r.left < cr.left - 1 || r.right > cr.right + 1))
+        out.push(name + ' is cut at the edge');
       const px = parseFloat(getComputedStyle(ts[i]).fontSize) * ts[i].getScreenCTM().a;
       if (px > body + 0.5) out.push(name + ' is ' + Math.round(px) + 'px beside ' + body + 'px words');
-      const want = Math.min(parseFloat(getComputedStyle(s).fontSize), body);
-      if (px < want - 0.5) out.push(name + ' is ' + px.toFixed(1) + 'px, under its ' + want + 'px size');
+      if (px < body - 0.5) out.push(name + ' is ' + px.toFixed(1) + 'px beside ' + body + 'px words');
     }
+    if (s.querySelector('rect.col'))
+      for (const t of s.querySelectorAll('text.v, text.x'))
+        if (getComputedStyle(t).display === 'none')
+          out.push(title + ': the column ' + (t.classList.contains('v') ? 'value' : 'turn') + ' "' +
+            t.textContent + '" is left out');
     const axis = s.querySelector('line.axis');
     if (axis) {
       const ar = axis.getBoundingClientRect();
@@ -68,6 +74,8 @@ CHART_PLACES = [
     ("412 text", 412, False, "text"),
     ("1024 root", 1024, True, None),
     ("1024", 1024, False, None),
+    ("900", 900, False, None),
+    ("900 root", 900, True, None),
     ("717", 717, False, None),
     ("1280", 1280, False, None),
     ("1440", 1440, False, None),
@@ -87,7 +95,11 @@ def test_the_report_charts_labels_hold_together_at_every_text_size(
 
     NC3: on a desktop or the Fold at 100% text the labels then shrank to 7-9 px, because the size
     was worked out from the chart's width while its height is capped. The labels keep their size
-    at every width."""
+    at every width.
+
+    AF2: at 900-1024 px they were still 11.8-13.6 px beside 14 px words; they are the words' size.
+    AF1: at 412 px and 200% the thinning left the 20, 17 and 5 columns of "When the commander comes
+    down" with neither a value nor a turn; a column chart scrolls sideways instead."""
     from playwright.sync_api import sync_playwright
 
     exe, sid, _ = site
@@ -241,6 +253,36 @@ def test_a_guarded_buttons_lock_grows_with_its_words(server: Server, site) -> No
         assert 13.5 <= s["icon"] <= s["text"] + 0.5, sizes
     for s in sizes[True]:
         assert s["icon"] >= 0.8 * s["text"], sizes
+
+
+# Each shown button with words whose icon is under .85 of its words' size (AE2)
+SMALL_ICONS = """() => [...document.querySelectorAll('button, .btn, [role=tab]')]
+  .filter(b => b.getClientRects().length && b.textContent.trim() && b.querySelector(':scope > svg.i'))
+  .map(b => [b.textContent.trim(), b.querySelector(':scope > svg.i').getBoundingClientRect().height,
+    parseFloat(getComputedStyle(b).fontSize)])
+  .filter(([, h, fs]) => h > 0 && h < 0.85 * fs - 0.5)
+  .map(([t, h, fs]) => t + ': ' + h.toFixed(1) + 'px icon beside ' + fs + 'px words')"""
+
+
+@pytest.mark.parametrize("zoom", [None, "text"], ids=["root", "text"])
+def test_a_buttons_icon_grows_with_its_words(server: Server, site, zoom) -> None:  # noqa: F811
+    """AE2 (polish): at 320 px and 200% text the "+" of the New deck box's "Create deck" stayed
+    18 px beside 28 px words, as did the icons of other buttons a page gave a fixed size (Sign
+    out, Import a list, Fit the screen). A button's icon grows with its words."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for path in ("/decks/new", "/account", "/collection/lists"):
+            ctx = _ctx(browser, server, sid, 320, root=zoom is None)
+            page = ctx.new_page()
+            _goto(page, server, path, zoom)
+            problems += [f"{path}: {f}" for f in page.evaluate(SMALL_ICONS)]
+            ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)
 
 
 # -- P-13: a wrapped icon button's content centred -----------------------------------------------
