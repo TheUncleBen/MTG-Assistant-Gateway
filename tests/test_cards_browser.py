@@ -6,25 +6,44 @@ widths in light and dark."""
 
 from __future__ import annotations
 
-import base64
 import json
 import os
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
 
 from mtg_gateway.cards import card_html
 from mtg_gateway.modes import MODE_LABELS
+from mtg_gateway.scan.bulk import as_of_line
 
 from .test_consent_browser import _chromium_or_skip, _launch
+from .waits import settled
 
 pytest.importorskip("playwright")
 
 LINK = "https://mtg.test/cards/data/tok-1"
+
+
+def png(width: int, height: int) -> bytes:
+    """A grey PNG of the given size, made here so a picture has a real size without any network
+    (the one this file carried before was cut short, so every picture quietly failed to load)."""
+    raw = b"".join(b"\x00" + b"\x80" * (3 * width) for _ in range(height))
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
 # A 5x7 grey PNG, so pictures have a size without any network.
-PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAIAAAAbd2raAAAAFElEQVR4nGNgYGD4z8DAwMDAwMAAAAwAA/8BpYQAAAAASUVORK5CYII="
-)
+PNG = png(5, 7)
 
 HOST = """<!DOCTYPE html><html><body style="margin:0;background:%s">
 <iframe id="f" sandbox="allow-scripts" style="width:%dpx;height:10px;border:0"></iframe>
@@ -322,8 +341,10 @@ def test_printings_card_lists_pictures_filters_and_sends_the_pick_to_the_assista
             assert card.locator(".tile").count() == 1
             card.locator("#finish button[data-finish='']").click()
             assert card.locator(".tile").count() == 3
-            # Tap one: it is marked, the status says so, and the assistant hears the pick.
+            # Tap one: it shows big, and Use this printing picks it; it is marked, the status says
+            # so, and the assistant hears the pick (test_cards_pickers_browser has the detail view).
             card.locator(".tile").nth(0).click()
+            card.locator("#use").click()
             card.locator("#status.ok").wait_for()
             assert "Picked: Sol Ring" in card.locator("#status").inner_text()
             assert card.locator(".tile.picked").count() == 1
@@ -334,8 +355,10 @@ def test_printings_card_lists_pictures_filters_and_sends_the_pick_to_the_assista
             assert (
                 'set_code "cmm"' in told and 'collector_number "411"' in told and "Commander Masters" in told
             )
-            assert card.locator("a.link", has_text="Open the picked printing on Scryfall").count() == 1
-            card.locator("a.link").first.click()
+            assert (
+                card.locator("#actions a.link", has_text="Open the picked printing on Scryfall").count() == 1
+            )
+            card.locator("#actions a.link").click()
             page.wait_for_function("() => window.log.some(m => m.method === 'ui/open-link')", timeout=5_000)
             assert _calls(page, "ui/open-link")[0]["params"] == {"url": "https://scryfall.com/card/cmm/411"}
             # A host that offers fullscreen gets an Expand button that asks for it.
@@ -659,7 +682,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                     )
                     card.locator(".tile").nth(2).wait_for()
                     card.locator(".tile").first.click()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"printings-{theme}-{label}")
                     card = _open(
                         page,
@@ -669,7 +692,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                         theme=theme,
                     )
                     card.locator(".row").nth(2).wait_for()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"picker-{theme}-{label}")
                     page.unroute("https://mtg.test/cards/data/*")
                     _route(page, deck=DECK)
@@ -684,7 +707,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                         theme=theme,
                     )
                     card.locator(".row.cardrow").nth(3).wait_for()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"deck-{theme}-{label}")
                     card.locator(".row.cardrow").first.click()
                     card.locator("#dtext", has_text="Add").wait_for()
@@ -704,7 +727,7 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                         theme=theme,
                     )
                     card.locator("#open").wait_for()
-                    page.wait_for_timeout(200)
+                    settled(page.frames[1])
                     _shot(page, f"account-{theme}-{label}")
                     page.close()
         finally:
@@ -770,7 +793,7 @@ STATS = {
         "nonland_count": 63,
         "average_mana_value": 3.12,
         "mana_curve": {"0": 1, "1": 8, "2": 14, "3": 15, "4": 11, "5": 7, "6": 4, "7+": 3},
-        "colour_pips": {"G": 30, "U": 22},
+        "color_pips": {"G": 30, "U": 22},
         "mana_sources": {"G": 20, "U": 16, "C": 3},
         "price_total": 412.5,
         "priced_cards": 64,
@@ -781,7 +804,7 @@ STATS = {
         "mass_land_denial": 0,
         "salt_total": 12.4,
         "commanders": ["Aesi " + HOSTILE],
-        "colour_identity": ["G", "U"],
+        "color_identity": ["G", "U"],
         "bracket_estimate": {"bracket": 3, "kind": "estimate", "basis": ["1 game changer"]},
         "archidekt_bracket": 2,
         "checks": {
@@ -902,7 +925,7 @@ def _display_card(name: str, result: dict, ready: str, check) -> None:
                 _route(page)
                 card = _open(page, name, result, width=320, theme=theme)
                 card.locator(ready).first.wait_for(timeout=10_000)
-                page.wait_for_timeout(150)
+                settled(page.frames[1])
                 _fits(card)
                 check(page, card)
                 _fits(card)
@@ -1001,6 +1024,39 @@ def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
     _display_card("stats-card", {"structuredContent": STATS}, "#curve .col", check)
 
 
+def test_stats_card_says_unknown_for_a_deck_nobody_priced_and_keeps_a_part_sum() -> None:
+    """A deck with no prices at all read "Price $0.00 (0 of 64 priced)" on the chat's stats card
+    (audit P4): it says "unknown", muted and plain as the site does, at 4.5:1 in both themes. A
+    partly priced deck keeps its sum and "(n of m priced)"."""
+    from .test_card_search_filters_browser import CONTRAST
+
+    def unpriced(page, card) -> None:
+        facts = card.locator("#facts").inner_text()
+        assert "$0.00" not in facts and "0 of 64" not in facts, facts
+        price = card.locator("#facts li", has_text="Price")
+        assert price.count() == 1 and price.inner_text().split() == ["Price", "unknown"], facts
+        got = price.locator("b").evaluate(
+            "e => { const cs = getComputedStyle(e), ps = getComputedStyle(e.parentElement);"
+            " return {weight: cs.fontWeight, size: parseFloat(cs.fontSize), around: parseFloat(ps.fontSize),"
+            " color: cs.color, muted: getComputedStyle(e.parentElement.firstElementChild).color}; }"
+        )
+        assert got["weight"] == "400" and got["size"] <= got["around"] + 0.01, got
+        assert got["color"] == got["muted"], got  # the label's muted grey, not the value's black
+        assert page.frames[1].evaluate(CONTRAST, "#facts li b") == []
+
+    none = {**STATS["stats"], "price_total": 0.0, "priced_cards": 0}
+    _display_card("stats-card", {"structuredContent": {**STATS, "stats": none}}, "#curve .col", unpriced)
+
+    def part(page, card) -> None:
+        price = card.locator("#facts li", has_text="Price")
+        words = price.inner_text().split()
+        assert words == ["Price", "$412.50", "(48", "of", "64", "priced)"], words
+        assert price.locator("b").evaluate("e => getComputedStyle(e).fontWeight") != "400"
+
+    some = {**STATS["stats"], "priced_cards": 48}
+    _display_card("stats-card", {"structuredContent": {**STATS, "stats": some}}, "#curve .col", part)
+
+
 def test_deck_list_card_lists_decks_with_covers_and_links_at_320px() -> None:
     def check(page, card) -> None:
         rows = card.locator("#list .row.deck")
@@ -1012,7 +1068,10 @@ def test_deck_list_card_lists_decks_with_covers_and_links_at_320px() -> None:
         assert cover.get_attribute("src").startswith("https://api.scryfall.com/")
         assert rows.nth(1).locator("img").count() == 0
         assert _keyboard_open(page, card, "Open in the app") == "https://mtg.test/decks/42"
-        assert _keyboard_open(page, card, "Archidekt") == "https://archidekt.com/decks/42"
+        # one link a deck: the page here (it has the Archidekt link), not Archidekt as a second
+        # pill under every deck (re-audit D26)
+        assert rows.first.locator(".links a").count() == 1
+        assert card.locator("a.link", has_text="Archidekt").count() == 0
 
     _display_card("deck-list-card", {"structuredContent": MY_DECKS}, "#list .row.deck", check)
 
@@ -1093,8 +1152,114 @@ def test_deck_card_curve_labels_read_against_their_background(theme: str) -> Non
                     "() => [...document.querySelectorAll('.curve b')].map(b => b.offsetHeight)"
                 )
                 assert heights == [2, 28, 2, 28, 2, 2, 28, 2], heights  # curve 1, 3 and 6: one card each
-                page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
+                from .test_cards_audit_browser import _frame_follows
+
+                _frame_follows(page)  # the frame takes the card's height (size-changed)
                 _shot(page, f"l14-deckcard-curve-{width}-{theme}")
                 page.close()
+        finally:
+            browser.close()
+
+
+AS_OF = "2026-11-03T22:00:00+00:00"  # late on 3 Nov in UTC: already 4 Nov east of UTC+2
+FAR_EAST = "Pacific/Kiritimati"  # UTC+14: the day after, so the page must name the UTC day
+# the gateway's own line when the day can't be read: no "and prices" (audit A2)
+AS_OF_NOTE = as_of_line("soon")
+
+
+def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None:
+    """While Scryfall isn't answering, card_printings answers from the gateway's daily copy
+    (``from_local_copy`` and ``as_of`` on the tool result, and on the link's JSON): the card says so
+    over the list, with the copy's day in the viewer's locale, or the gateway's own line when the
+    day can't be read; a live list shows nothing there (audit N15)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    summary = {"ok": True, "oracle_id": "o-1", "name": "Sol Ring", "total_cards": 3, "has_more": False}
+    meta = {"_meta": {"mtg/card": {"link": LINK, "name": "Sol Ring", "oracle_id": "o-1", "total": 3}}}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(timezone_id=FAR_EAST)
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            # the tool result says it: the day, formatted on the card
+            _route(page, printings=PRINTINGS)
+            copy = {**summary, "from_local_copy": True, "as_of": AS_OF}
+            card = _open(page, "printings-card", {"structuredContent": copy, **meta})
+            card.locator(".tile").nth(2).wait_for()
+            # the UTC day, as the tools say it (audit 43b8 low): never the viewer's own day
+            day = page.evaluate(
+                "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeZone: 'UTC'})"
+                ".format(new Date(iso))",
+                AS_OF,
+            )
+            local = page.evaluate(
+                "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(iso))",
+                AS_OF,
+            )
+            assert local != day  # the browser sits a day ahead of UTC here
+            note = card.locator("#asof")
+            assert note.is_visible() and note.get_attribute("role") == "status"
+            # the picker's short line, word for word (audit P8); the card never says "and prices"
+            said = f"As of {day} \u00b7 Scryfall can't be reached right now"
+            assert note.inner_text().strip() == said
+            assert note.bounding_box()["y"] < card.locator("#grid").bounding_box()["y"]  # over the list
+            # the day can't be read: the gateway's own line, from the link's JSON
+            page.unroute("https://mtg.test/cards/data/*")
+            unread = {**PRINTINGS, "from_local_copy": True, "as_of": "soon", "as_of_note": AS_OF_NOTE}
+            _route(page, printings=unread)
+            card = _open(page, "printings-card", {"structuredContent": summary, **meta})
+            card.locator(".tile").nth(2).wait_for()
+            assert card.locator("#asof").inner_text().strip() == AS_OF_NOTE
+            assert AS_OF_NOTE == "From the gateway's own copy \u00b7 Scryfall can't be reached right now"
+            # a live list: nothing there
+            page.unroute("https://mtg.test/cards/data/*")
+            _route(page, printings=PRINTINGS)
+            card = _open(page, "printings-card", {"structuredContent": summary, **meta})
+            card.locator(".tile").nth(2).wait_for()
+            assert not card.locator("#asof").is_visible()
+            assert errors == [], errors
+        finally:
+            browser.close()
+
+
+def test_stats_card_treats_a_missing_or_unreadable_total_as_unknown() -> None:
+    """Audit A4: ``price_total`` 0 with no ``priced_cards`` (an older payload) and a missing or
+    non-numeric total with cards priced read "$0.00 …"; both are a price nobody knows. A real total
+    without a priced count, or a true 0 with cards priced, is still shown."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    base = {k: v for k, v in STATS["stats"].items() if k not in ("price_total", "priced_cards")}
+    cases = [
+        ({"price_total": 0}, "Price unknown"),
+        ({"price_total": 0.0, "priced_cards": 0}, "Price unknown"),
+        ({"price_total": None, "priced_cards": 48}, "Price unknown"),
+        ({"price_total": "n/a", "priced_cards": 48}, "Price unknown"),
+        ({"price_total": 412.5}, "Price $412.50"),
+        ({"price_total": 0, "priced_cards": 48}, "Price $0.00 (48 of 64 priced)"),
+        # only a finite number or a string that is wholly a number counts (audit 43b8 low)
+        ({"price_total": True, "priced_cards": 48}, "Price unknown"),
+        ({"price_total": [5], "priced_cards": 48}, "Price unknown"),
+        ({"price_total": "12abc", "priced_cards": 48}, "Price unknown"),
+        ({"price_total": "0", "priced_cards": 48}, "Price $0.00 (48 of 64 priced)"),
+        ({"price_total": "412.5", "priced_cards": 48}, "Price $412.50 (48 of 64 priced)"),
+    ]
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            _route(page)
+            for extra, said in cases:
+                card = _open(page, "stats-card", {"structuredContent": {**STATS, "stats": {**base, **extra}}})
+                card.locator("#curve .col").first.wait_for(timeout=10_000)
+                price = card.locator("#facts li", has_text="Price")
+                assert " ".join(price.inner_text().split()) == said, (extra, price.inner_text())
+                plain = price.locator("b").evaluate("e => getComputedStyle(e).fontWeight") == "400"
+                assert plain == (said == "Price unknown"), (extra, said)
+            assert errors == [], errors
         finally:
             browser.close()

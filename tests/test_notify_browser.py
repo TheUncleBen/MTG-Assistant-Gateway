@@ -67,10 +67,53 @@ def test_each_app_button_reaches_the_app() -> None:
 
 
 @pytest.mark.parametrize(
+    ("answer", "shown"),
+    [("auto", "Comes back by itself"), ("tap", "May need a tap in the browser"), (None, None)],
+)
+def test_the_sign_in_line_shows_only_what_the_app_says(answer: str | None, shown: str | None) -> None:
+    """Account › This app's Sign-in line (review F2): the app's answer picks the words; an app
+    without signInReturn (older than 0.7.46) leaves the whole row out."""
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway import account_hub
+
+    rows = "".join(
+        account_hub._row_html(r) for g in account_hub.groups("x", admin=False, app=True) for r in g[2]
+    )
+    body = (
+        f"<style>{account_hub.HUB_CSS}</style><section class='ygrp'><div class='rows'>{rows}</div></section>"
+    )
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        page = browser.new_page()
+        bridge = BRIDGE
+        if answer is not None:
+            bridge += (
+                "window.MtgNative.signInReturn = function () {"
+                " if (this !== window.MtgNative) throw new Error('not called on the bridge');"
+                f" return {answer!r}; }};"
+            )
+        page.add_init_script(bridge)
+        html = f"<!doctype html><style>{theme.CSS}</style><main>{body}</main><script>{FEEDBACK_JS}</script>"
+        page.route("https://mtg.test/**", lambda route: route.fulfill(content_type="text/html", body=html))
+        page.goto("https://mtg.test/account")
+        try:
+            row = page.locator("[data-native-state='signInReturn']")
+            assert row.is_visible() is (answer is not None)
+            vals = [t.inner_text() for t in row.locator(".val").all() if t.is_visible()]
+            assert vals == ([shown] if shown else [])
+            if shown:
+                assert row.bounding_box()["height"] >= 44
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
     ("state", "button", "shown"),
     [
         ("connected", False, "Always connected"),
-        ("off", True, "doesn't get your notifications yet"),
+        ("off", True, "doesn't get your push notifications yet"),
         ("blocked", True, "turned off for this app"),
         (None, False, "Update the app"),  # an app from before 0.7.30
     ],
@@ -92,12 +135,13 @@ def test_the_phone_part_shows_only_what_applies(
     with sync_playwright() as p:
         browser, page = _page(p, exe, html, state)
         try:
-            assert page.get_by_role("button", name="Get notifications on this phone").is_visible() is button
+            get = page.get_by_role("button", name="Get push notifications on this phone")
+            assert get.is_visible() is button
             assert page.get_by_text(shown, exact=False).first.is_visible()
             visible = [t for t in page.locator(".phone > p").all() if t.is_visible()]
             assert len(visible) == 1
             if button:
-                page.get_by_role("button", name="Get notifications on this phone").click()
+                page.get_by_role("button", name="Get push notifications on this phone").click()
                 assert page.evaluate("window.calls") == [f"startNotifications:{key}"]
         finally:
             browser.close()

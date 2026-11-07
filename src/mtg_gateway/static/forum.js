@@ -39,10 +39,13 @@
         wrap.appendChild(el("p", "muted", d.done));
       }
       if (first && first.focus) first.focus({ preventScroll: true });
-    }).catch(function () {
+      if (window.MtgLoadMore) window.MtgLoadMore.loaded();
+    }).catch(function (err) {
       a.removeAttribute("aria-busy");
       a.removeAttribute("aria-disabled");
-      toast("No connection; the threads could not be read. Try again.", { error: true });
+      // the one wording every Load more uses (static/loadmore.js)
+      if (window.MtgLoadMore) window.MtgLoadMore.failed(err);
+      else toast("No connection; nothing more could be loaded. Try again.", { error: true });
     });
   }
   document.addEventListener("click", function (e) {
@@ -113,7 +116,7 @@
   var Box = window.MtgBox;
   function countChars(ta) {
     var id = ta.getAttribute("data-count"), c = id ? document.getElementById(id) : null;
-    if (c) c.textContent = ta.value.length + " / " + (ta.getAttribute("maxlength") || "");
+    if (c) c.textContent = ta.value.length + "\u00a0/\u00a0" + (ta.getAttribute("maxlength") || "");
   }
   function noteIn(box, text) {
     var b = Box && Box.current ? Box.current() : null;
@@ -199,4 +202,26 @@
     }
     if (box) busy(box, true);
   }, true);
+
+  // -- the hub: the sections narrow as you type (0.7.46 audit QG-25) -----------------------------
+  var hubSearch = $(".fm .ui-tools input[type=search]");
+  if (hubSearch && $(".fm .fm-group")) {
+    var narrow = function () {
+      var q = hubSearch.value.trim().toLowerCase(), n = 0;
+      Array.prototype.forEach.call(document.querySelectorAll(".fm .fm-group"), function (g) {
+        var shown = 0;
+        Array.prototype.forEach.call(g.querySelectorAll(".tr[data-q]"), function (tr) {
+          var on = !q || tr.getAttribute("data-q").indexOf(q) >= 0;
+          tr.hidden = !on;
+          if (on) shown++;
+        });
+        g.hidden = !shown;
+        n += shown;
+      });
+      var status = $("[data-filter-count]");
+      if (status) status.textContent = !q ? "" : n ? n + " shown." : "No section matches.";
+    };
+    hubSearch.addEventListener("input", narrow);
+    if (hubSearch.value) narrow();
+  }
 })();

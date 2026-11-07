@@ -50,7 +50,7 @@ def _goto_held(page, url: str, skeleton: str, while_held=None) -> None:
     for _ in range(200):
         if held:
             break
-        page.wait_for_timeout(50)
+        page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
     assert held, "the page never asked for the deck list"
     if while_held:
         while_held()
@@ -177,7 +177,7 @@ def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> 
         for _ in range(200):
             if held:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert held, "the panel never asked for the deck list"
         held.pop().continue_()
         page.unroute(re.compile(r".*/api/decks/mine\?shape=recent$"))
@@ -194,5 +194,45 @@ def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> 
         page.wait_for_selector(".recent a", timeout=10_000)
         assert page.locator(".decks-unreadable").count() == 0
         assert "All decks (1)" in page.content()
+        assert errors == [], errors
+        browser.close()
+
+
+def test_a_slow_or_busy_cold_list_says_it_is_still_reading_and_tries_again(server: Server) -> None:
+    """Polish AD4 (0fe11813): on a cold /decks the page frame goes out at once, but while Archidekt
+    takes its time (up to 25 s) the list was only grey bars, and an answer that Archidekt was busy
+    (503 with Retry-After) became "could not be loaded" at once. After a few seconds the placeholder
+    says, in words, that the decks are still being read; a busy answer is asked again once, after
+    the wait it names."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 390, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        held: list = []
+        page.route(DECKS_API, lambda route: held.append(route))
+        page.goto(f"{server.base}/decks", wait_until="commit")
+        page.wait_for_selector("ul.decklist.skeleton", state="attached")
+        still = page.get_by_text("Still reading your decks from Archidekt")
+        still.wait_for(state="visible", timeout=8000)
+        assert held
+        # Archidekt is busy: the answer names a wait, and the page asks again after it
+        asked_again: list[str] = []
+        for route in held:
+            route.fulfill(status=503, headers={"Retry-After": "1"}, body="busy")
+        page.unroute(DECKS_API)  # (the page asks again only after the second it was told)
+        page.route(DECKS_API, lambda route: (asked_again.append(route.request.url), route.continue_()))
+        page.wait_for_selector("ul.decklist li.deck", timeout=10_000)
+        assert len(asked_again) == 1, asked_again
+        assert page.locator("ul.decklist.skeleton").count() == 0
+        assert page.get_by_text("could not be loaded").count() == 0
         assert errors == [], errors
         browser.close()

@@ -24,6 +24,7 @@ import pytest
 from joserfc import jwt
 from joserfc.jwk import OctKey, RSAKey
 from mcp import Client
+from mcp.server.lowlevel import Server
 from mcp.server.mcpserver import MCPServer
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -72,6 +73,12 @@ class FakeIdP:
         # touching userinfo or the default behaviour.
         self.id_token_claims: dict[str, object] = {}
         self.id_token_omit: set[str] = set()
+        # When the person last entered credentials here: set by an authorize request with
+        # prompt=login or max_age=0 (unless honours_prompt_login is off) and sent as the ID token's
+        # auth_time.
+        # None sends no auth_time, as before.
+        self.honours_prompt_login = True
+        self.auth_time: int | None = None
         # "HS256" signs the ID token with the client secret, as Authentik does when the provider
         # has no Signing Key.
         self.id_token_alg = "RS256"
@@ -102,6 +109,10 @@ class FakeIdP:
         self.userinfo_omit: set[str] = set()
         self.refresh_id_token = False
         self.refresh_error: str | None = None
+        # A slow provider: userinfo answers after this many seconds. ``token_status`` makes only the
+        # token endpoint answer with that HTTP status (a 502 from a proxy in front of it, say).
+        self.userinfo_delay = 0.0
+        self.token_status: int | None = None
         self.app = Starlette(
             routes=[
                 Route("/application/o/mtg/.well-known/openid-configuration", self.discovery),
@@ -128,6 +139,8 @@ class FakeIdP:
         assert q["client_id"] == CLIENT_ID
         assert q["code_challenge_method"] == "S256"
         code = secrets.token_urlsafe(16)
+        if (q.get("prompt") == "login" or q.get("max_age") == "0") and self.honours_prompt_login:
+            self.auth_time = int(time.time())
         self.pending[code] = q
         return RedirectResponse(f"{q['redirect_uri']}?{urlencode({'code': code, 'state': q['state']})}", 302)
 
@@ -149,6 +162,8 @@ class FakeIdP:
             form["_auth_method"] = "client_secret_post"
             ok = form.get("client_id") == CLIENT_ID and form.get("client_secret") == CLIENT_SECRET
         self.token_calls.append(form)
+        if self.token_status is not None:
+            return JSONResponse({"error": "temporarily_unavailable"}, status_code=self.token_status)
         if self.down:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         if not ok:
@@ -177,6 +192,7 @@ class FakeIdP:
             "nonce": q["nonce"],
             **{k: v for k, v in self.user.items() if k not in self.id_token_omit},
             **self._uploaded_claims(str(self.user["sub"]), full=False),
+            **({"auth_time": self.auth_time} if self.auth_time is not None else {}),
             **self.id_token_claims,
         }
         if self.id_token_alg == "HS256":
@@ -207,6 +223,8 @@ class FakeIdP:
 
     async def userinfo(self, req: Request) -> Response:
         self.userinfo_calls += 1
+        if self.userinfo_delay:
+            await asyncio.sleep(self.userinfo_delay)
         if self.down:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         token = req.headers.get("authorization", "").removeprefix("Bearer ")
@@ -454,6 +472,16 @@ def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _empty_speed_log() -> None:
+    """Admin's Speed card reads one module-level log (timing.speed_log) that every test server in
+    the same worker adds to: each test starts with it empty, so what /admin shows never depends on
+    which tests ran before (a loaded run left slow rows behind for the text-zoom test)."""
+    from mtg_gateway import timing
+
+    timing.speed_log._rows.clear()
+
+
+@pytest.fixture(autouse=True)
 def _forget_package_lists() -> None:
     """packages.listing keeps a member's own package list for a minute; tests share member ids,
     so each test starts with that memory empty."""
@@ -555,9 +583,85 @@ if BrowserType is not None and not ONLINE:
         if self.name == "chromium":
             rules = "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"
             kwargs["args"] = [*(kwargs.get("args") or []), "--no-proxy-server", rules]
+            # A machine whose network goes through a proxy anyway (a sandbox's own) resolves names
+            # there, past the rules above: every request not for this machine goes to a proxy
+            # nothing listens on, so it fails here whatever the machine's DNS or proxy does.
+            kwargs.setdefault("proxy", {"server": "http://127.0.0.1:9", "bypass": "localhost,127.0.0.1"})
         return _real_launch(self, **kwargs)
 
     BrowserType.launch = _offline_launch  # type: ignore[method-assign]
+
+
+# The deck page asks /decks/{id}/check, a long-poll held up to 25 s, when it shows a deck as last
+# read while it reads it again (static/feedback.js). A "networkidle" load counts that request, so
+# a deck page load on a starved runner, or with an aged copy, waited out the long-poll (the 0.7.46
+# audits' flake: 195 such loads in 41 browser files). Every browser context the tests make gets
+# that request refused at once, as a failed fetch, which the page takes as "nothing to say" (it
+# hides the strip). It is refused in the page, not through context.route, which would also turn
+# off the browser's HTTP cache in every test. A test of the check itself opts out with
+# ``@pytest.mark.deck_check_live``.
+DECK_CHECK_REFUSED = """(() => {
+  const real = window.fetch;
+  if (!real) return;
+  window.fetch = function (input, init) {
+    let path = "";
+    try { path = new URL(typeof input === "string" ? input : input.url, location.href).pathname; }
+    catch (e) {}
+    if (/^\\/decks\\/[^/]+\\/check$/.test(path)) {
+      return Promise.reject(new TypeError("the tests refuse the deck check long-poll"));
+    }
+    return real.apply(this, arguments);
+  };
+})();"""
+DECK_CHECK_LIVE = [False]  # this test opted out (deck_check_live)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "deck_check_live: the deck page's /decks/{id}/check long-poll is not refused in its browser",
+    )
+
+
+# the longest tests, started first: under pytest-xdist each worker takes the next test in this
+# order, so the site crawl's shards run beside the short tests instead of after them all
+FIRST = {"test_site_checks_browser.py"}
+
+
+def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config, items: list) -> None:
+    items.sort(key=lambda it: it.path.name not in FIRST)  # a stable sort: the rest keep their order
+
+
+@pytest.fixture(autouse=True)
+def _deck_check_default(request: pytest.FixtureRequest):
+    DECK_CHECK_LIVE[0] = request.node.get_closest_marker("deck_check_live") is not None
+    yield
+    DECK_CHECK_LIVE[0] = False
+
+
+try:
+    from playwright.sync_api import Browser as _Browser
+except ImportError:  # the browser tests skip
+    _Browser = None
+
+if _Browser is not None and not E2E:
+    _real_new_context = _Browser.new_context
+    _real_new_page = _Browser.new_page
+
+    def _context_refusing_check(self, *args, **kwargs):
+        ctx = _real_new_context(self, *args, **kwargs)
+        if not DECK_CHECK_LIVE[0]:
+            ctx.add_init_script(DECK_CHECK_REFUSED)
+        return ctx
+
+    def _page_refusing_check(self, *args, **kwargs):
+        page = _real_new_page(self, *args, **kwargs)
+        if not DECK_CHECK_LIVE[0]:
+            page.context.add_init_script(DECK_CHECK_REFUSED)
+        return page
+
+    _Browser.new_context = _context_refusing_check  # type: ignore[method-assign]
+    _Browser.new_page = _page_refusing_check  # type: ignore[method-assign]
 
 
 @pytest.fixture(autouse=True)
@@ -671,7 +775,7 @@ class StackOptions:
         default_factory=lambda: {"writes_enabled": True, "approval_mode_default": "auto"}
     )
     archidekt: Callable[[], FakeArchidekt] | None = FakeArchidekt
-    mystic_forge: Callable[[], MCPServer] | None = None
+    mystic_forge: Callable[[], MCPServer | Server[Any]] | None = None
     scryfall: bool = False
     started: Callable[[Stack], None] | None = None
 
@@ -743,3 +847,56 @@ def stack_options() -> StackOptions:
 async def stack(tmp_path: Path, idp: FakeIdP, stack_options: StackOptions):
     async with open_stack(tmp_path, idp, stack_options) as st:
         yield st
+
+
+# -- CI: a test may skip only for a reason it is meant to skip for ---------------------------------
+# With MTG_ONLY_EXPECTED_SKIPS=1 (CI's test job) the run fails when any test skips for a reason not
+# listed here, so a missing Chromium, OCR assets, font or tool can never turn the suite green by
+# skipping what needs it. The listed ones are by design: a live service only on request, the card
+# screenshots only on request, and parametrized cases that have nothing to test.
+EXPECTED_SKIPS = (
+    "set SCAN_LIVE=1 to query api.scryfall.com",
+    "screenshots only on request",
+    "the guard stands aside when going online",
+    "the text size is the same in both themes",
+    "no change",
+)
+_SKIPPED: list[tuple[str, str]] = []
+
+
+def _skip_reason(report: Any) -> str:
+    longrepr = report.longrepr
+    reason = longrepr[2] if isinstance(longrepr, tuple) and len(longrepr) == 3 else str(longrepr)
+    return reason.removeprefix("Skipped: ")
+
+
+def _note_skip(report: Any) -> None:
+    if report.skipped and not hasattr(report, "wasxfail"):
+        _SKIPPED.append((report.nodeid, _skip_reason(report)))
+
+
+def unexpected_skips(skipped: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The skips whose reason is none of EXPECTED_SKIPS."""
+    return [(node, why) for node, why in skipped if why not in EXPECTED_SKIPS]
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    _note_skip(report)
+
+
+def pytest_collectreport(report: pytest.CollectReport) -> None:
+    _note_skip(report)  # a whole module skipped (pytestmark skipif, importorskip)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if os.environ.get("MTG_ONLY_EXPECTED_SKIPS") != "1" or hasattr(session.config, "workerinput"):
+        return  # not asked, or a pytest-xdist worker: the controller sees every worker's reports
+    bad = unexpected_skips(_SKIPPED)
+    if not bad:
+        return
+    tr = session.config.pluginmanager.get_plugin("terminalreporter")
+    lines = [f"{len(bad)} test(s) skipped for a reason CI does not allow (tests/conftest.py EXPECTED_SKIPS):"]
+    lines += [f"  {node}: {why}" for node, why in bad]
+    if tr is not None:
+        tr.write_line("\n".join(lines), red=True)
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED

@@ -3,16 +3,18 @@ form behind My decks' folder boxes without scripts (POST /folders)."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, deck_extras, modes, packages, prefs, recheck, ui
+from . import account_lists, deck_extras, modes, packages, prefs, proposals_view, recheck, ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import (
     FORMAT_IDS,
@@ -23,20 +25,33 @@ from .archidekt import (
     Deck,
     featured_scryfall_id,
     format_label,
+    hand_save,
     rich_text,
 )
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
-from .deckpage import card_image, deck_title, delete_box_html
+from .deckpage import (
+    SORTS,
+    UNNAMED_DECK,
+    VIEWS,
+    card_image,
+    cards_html,
+    deck_check_html,
+    deck_title,
+    delete_box_html,
+)
 from .decks import (
     CATEGORY_FLAGS,
     CATEGORY_HAS_CARDS,
     MAX_CATEGORY_CHANGES,
     DeckError,
     category_change_rows,
+    category_keys,
     category_line,
     current_client,
     deck_categories,
+    deletes_categories,
+    one_click,
     parse_category_changes,
     unused_category_changes,
 )
@@ -44,7 +59,7 @@ from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .theme import esc as _esc
@@ -63,6 +78,8 @@ OK_SECTIONS = {
     "categories": "categories",
     "category_created": "categories",
     "category_deleted": "categories",
+    "undone": "categories",
+    "package_differs": "package",
     "categories_unused": "categories",
     "cover": "cover",
     "cover_auto": "cover",
@@ -82,11 +99,11 @@ SETTINGS_CSS = """
 @media (min-width:1100px){.ds-wrap{grid-template-columns:11rem minmax(0,52rem)}
   .ds-nav{display:block;position:sticky;top:12px;align-self:start;margin-top:118px}}
 .ds-nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--border-soft)}
-.ds-nav a{display:flex;align-items:center;min-height:36px;padding:0 .75rem;color:var(--text-muted);
+.ds-nav a{display:flex;align-items:center;min-height:44px;padding:0 .75rem;color:var(--text-muted);
   text-decoration:none;font-weight:700;font-size:.92rem;margin-left:-2px;border-left:2px solid transparent}
 .ds-nav a:hover,.ds-nav a:focus-visible{color:var(--text);border-left-color:var(--border)}
 .ds-nav a.dz{color:var(--danger-text)}
-.ds .back{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;font-weight:700}
+.ds .back{margin-bottom:.25rem}
 .ds .ui-card{margin:0 0 1rem}
 .ds .ui-card h2{display:flex;align-items:center;gap:.5rem}
 .ds .ui-card.danger{border-color:var(--danger-fill)}
@@ -96,7 +113,7 @@ SETTINGS_CSS = """
 .ds .ui-row label{font-weight:700}
 .ds .ui-row.plain .lab{font-weight:400}
 .ds .ui-row.plain .ctl{justify-self:end}
-.ds .ui-row.wctl{grid-template-columns:minmax(0,1fr) minmax(0,26rem)}
+.ds .ui-row.wctl{grid-template-columns:minmax(0,1fr) minmax(0,min(26rem,100% - 9em))}
 .ds .ui-row.full{grid-template-columns:1fr}
 .ds .ui-row.full .ctl{grid-column:1;grid-row:auto}
 .ds .ui-row .ctl input,.ds .ui-row .ctl select:not(.msel-native),.ds .ui-row .ctl textarea{width:100%;
@@ -105,6 +122,8 @@ SETTINGS_CSS = """
 .ds .acts{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;border-top:1px solid var(--border-soft);
   padding-top:.75rem;margin-top:.75rem}
 .ds .acts .btn,.ds .acts button{margin:0;width:auto}
+/* the Save buttons go once the scripts save each change as it is made (static/decksettings.js) */
+.ds .ds-save[hidden]{display:none}
 .ds .foot{margin:.5rem 0 0}
 .ds ul.ds-list{list-style:none;margin:.25rem 0 .25rem;padding:0}
 .ds ul.ds-list li{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem;min-height:44px;
@@ -122,10 +141,12 @@ SETTINGS_CSS = """
    other on a phone; a row without a record stays read-only pills with its reason */
 /* one grid per row at every width (UI review 0.7.42, M5): the name, the count and Delete on the
    first line, the switches under them, so every Delete lines up and no row leaves a near-empty line */
-.ds ul.ds-cats li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.25rem .75rem;
-  align-items:center;padding:.35rem 0}
+/* the count and the Delete slot have fixed widths, so a row without Delete (Sideboard) keeps its
+   name field in line with the others (polish B9) */
+.ds ul.ds-cats li{display:grid;grid-template-columns:minmax(0,1fr) 4.5em 44px;gap:.25rem .75rem;
+  align-items:center;padding:.35rem 0;container-type:inline-size}
 .ds ul.ds-cats li .nm{grid-column:1;grid-row:1;min-width:0}
-.ds .ds-cats .nm input{width:100%;min-height:44px;font-weight:700}
+.ds .ds-cats .nm input{width:100%;min-width:0;min-height:44px;font-weight:700}
 .ds .ds-cats .ds-sw,.ds form.catnew .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;flex:0 1 auto}
 .ds .ds-cats .ds-sw{grid-column:1/-1}
 .ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{min-height:44px;margin:0;padding:0;border:0;
@@ -134,11 +155,17 @@ SETTINGS_CSS = """
   padding:0 .6rem}
 .ds ul.ds-cats li .cnt{grid-column:2;grid-row:1;min-width:4.5em;justify-content:flex-end;
   color:var(--text-muted);font-size:.9rem;min-height:44px;display:inline-flex;align-items:center}
+@container (max-width:16em){
+  .ds ul.ds-cats li{grid-template-columns:minmax(0,1fr) 44px}
+  .ds ul.ds-cats li .del{grid-column:2}
+  .ds ul.ds-cats li .cnt{grid-column:1;grid-row:2;justify-content:flex-start;min-width:0;min-height:0}
+  .ds .ds-cats .ds-sw{grid-row:3} }
 /* Delete unused categories: its own right-aligned line under the list, apart from Save and Undo */
 .ds .acts.ds-unused{justify-content:flex-end;border-top:0;padding-top:0;margin-top:.5rem}
 .ds form.catnew{margin-top:1rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
 .ds form.catnew h3{margin:0 0 .5rem;font-size:1rem}
 .ds form.catnew .row{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center}
+.ds form.catnew{container-type:inline-size}
 .ds form.catnew .row input[type=text]{flex:1 1 14rem;min-height:44px;margin:0}
 .ds form.catnew .row .btn{flex:0 0 auto;width:auto;margin:0}
 .ds .confirmform label.mv{display:block;font-weight:700;margin:.75rem 0 .25rem}
@@ -149,6 +176,10 @@ SETTINGS_CSS = """
 @media (max-width:599.98px){.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}
   .ds form.catnew .ds-sw{width:100%;gap:0 .75rem}
   .ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{margin:-6px 0}}
+/* a row too narrow for the three switches on one line (a phone) has them one under the other,
+   never two and one (polish B9) */
+@container (max-width:26.5em){ .ds .ds-cats .ds-sw,.ds form.catnew .ds-sw{flex-direction:column;
+  align-items:flex-start;gap:0} }
 .ds form.catnew .row .btn{max-width:100%;white-space:normal}
 .ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
 .ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
@@ -168,13 +199,15 @@ SETTINGS_CSS = """
 .ds .follownote p{margin:0;font-weight:400}
 .ds .follownote p.lead{font-weight:700}
 .ds .follownote .btn{color:var(--text)}
-@media (pointer:coarse){.ds .taglist button.mini{width:44px;height:44px}}
+.ds .taglist button.mini{width:44px;height:44px}
 @media (max-width:599.98px){.ds .ui-row.wctl{grid-template-columns:1fr}
   .ds .ui-row.plain .ctl{justify-self:start}
   .ds .ds-cover{grid-template-columns:1fr}.ds .ds-cover .pv{max-width:12rem}
   .ds .ds-inline{flex-wrap:wrap}.ds .ds-inline > *{flex:1 1 100%}
   .ds .ds-inline > .btn,.ds .ds-inline > button{flex:1 1 100%;width:100%}
-  .ds .acts .btn,.ds .acts button{flex:1 1 auto}}
+  /* a button wider than the card (Add template… at large text on 320 px) wraps its words (final
+     audit F02) */
+  .ds .acts .btn,.ds .acts button{flex:1 1 auto;white-space:normal;height:auto;min-width:0}}
 /* the Package panel (packages.py): the budget row and the format pills are deck_extras.PACKAGE_FIELDS_CSS;
    their inputs keep their own size (the row's inputs are otherwise full width) */
 .ds .ds-pkg h2{display:flex;align-items:center;gap:.5rem}
@@ -188,6 +221,21 @@ SETTINGS_CSS = """
 
 
 NOTHING_TO_SAVE = "Nothing to save: no name or switch was changed."
+EXPIRED_WORDS = "This form expired. Reload and try again."
+STILL_SAVING = "Archidekt is still saving this change; the review page shows how far it got."
+
+
+def json_refusal(message: str, status: int = 400) -> JSONResponse:
+    """A refusal of the page's own instant save, in words the page shows in its red note."""
+    return JSONResponse({"ok": False, "message": message}, status_code=status, headers=NO_STORE)
+
+
+def wants_json(data: dict[str, str]) -> bool:
+    """Whether a post is the settings page's own instant save (static/decksettings.js), answered
+    as JSON for the page to draw, rather than a form sent without scripts."""
+    return data.get("json") == "1"
+
+
 COUNTS_TITLE = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_COUNTS_CONFIRM]
 DELETE_TITLE = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_DELETE_CONFIRM]
 
@@ -237,20 +285,6 @@ def posted_main_values(data: dict[str, str]) -> dict[str, str]:
         "theorycrafted": "1" if data.get("theorycrafted") else "",
         "game": data.get("game") or "any",
     }
-
-
-def category_keys(deck: Deck) -> list[tuple[str, dict[str, Any]]]:
-    """Each category of the panel with the key its fields carry: its record id, or ``d1``, ``d2``...
-    in the panel's order for one Archidekt sent without a record (its default Sideboard or
-    Maybeboard until someone creates one; the change gives it its record)."""
-    out, n = [], 0
-    for c in deck_categories(deck):
-        if c["record"]:
-            out.append((str(int(c["id"])), c))
-        else:
-            n += 1
-            out.append((f"d{n}", c))
-    return out
 
 
 def category_baseline_fields(c: dict[str, Any], key: str | None = None) -> str:
@@ -341,8 +375,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         pkg_values: dict[str, str] | None = None,
         templates: list[dict[str, Any]] | None = None,
         template_error: str = "",
+        undo: str = "",
     ) -> str:
-        """The settings page on the shared form rows (F7). ``templates``: the member's category
+        """The settings page on the shared form rows (F7). ``undo``: the Undo button drawn with the
+        notice after a category delete (undo_form). ``templates``: the member's category
         templates, read for the Add template box drawn open (its old address, or a refusal).
         ``error`` shows in the main panel (the main settings form's own refusal) or, with
         ``error_in``, inside that section next to its form, as the ?ok= notices of the section
@@ -353,7 +389,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             if error and error_in == section:
                 return ui.notice(error, "error", role="alert", cls="ds-note", id=f"{section}-msg")
             if not error and ok in SETTINGS_OK_MESSAGES and OK_SECTIONS.get(ok) == section:
-                return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note")
+                return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note") + undo
             return ""
 
         fmt_current = v.get("deck_format", deck.format or "")
@@ -442,9 +478,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         return (
             "<div class='ds-wrap'>"
             + nav
-            + f"<div class='ds'><a class='back' href='/decks/{did}'>← {_esc(title)}</a>"
+            + f"<div class='ds'><a class='back ui-cap' href='/decks/{did}'>← {_esc(title)}</a>"
             + ui.page_head("Deck settings", f"“{title}”" + (" · package" if is_package else ""))
-            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main'>"
+            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main' "
+            f"data-draft='settings:{did}'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + "".join(
                 f"<input type='hidden' name='was_{k}' value='{_esc(was)}'>" for k, was in baseline.items()
@@ -493,10 +530,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 "Where the deck is played: paper, MTGO or Arena.",
                 f"<select id='game' name='game'>{game_opts}</select>",
             )
-            + f"<div class='acts'><button class='btn btn-primary'>{icon('check')} Save changes</button>"
-            f"<a class='btn' href='/decks/{did}'>Cancel</a></div>"
-            "<p class='muted small foot'>Saved to Archidekt when you press Save changes; a snapshot from "
-            "just before is kept under History.</p></form>"
+            # with scripts (static/decksettings.js) each change is saved as it is made, with Undo,
+            # and these buttons are not shown; without them, Save changes sends the form
+            + f"<div class='acts ds-save'><button class='btn btn-primary'>{icon('check')} Save changes"
+            f"</button><a class='btn' href='/decks/{did}'>Cancel</a></div>"
+            "<p class='muted small foot' data-instant='Each change is saved to Archidekt as you make it; a "
+            "snapshot from just before is kept under History.'>Saved to Archidekt when you press Save "
+            "changes; a snapshot from just before is kept under History.</p></form>"
             + (package_section(deck, csrf, note("package"), pkg_values) if is_package else "")
             + categories_section(deck, csrf, note("categories"), cat_values)
             + template_box_html(deck, csrf, templates, open=templates is not None, error=template_error)
@@ -514,8 +554,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             # (ds-delete: the Delete box the page holds is #delete)
             + "<section class='ui-card danger' id='ds-delete'><h2>Delete this deck</h2>"
             + row(
-                f"{icon('history')} A snapshot is kept under History, and a copy in your backup folder on "
-                "Archidekt when backups are on.",
+                f"{icon('history')} A snapshot is kept under History; no copy is made on Archidekt.",
                 "",
                 f"<a class='btn btn-outline-danger' href='/decks/{did}/delete' data-box-open='delete'>"
                 f"{icon('trash')} Delete deck…</a>",
@@ -543,7 +582,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         picked = (
             v.get("formats", "")
             if v
-            else "\n".join(FORMAT_NAMES[i] for i in block.get("intendedFormats") or [] if i in FORMAT_NAMES)
+            else "\n".join(FORMAT_NAMES[i] for i in packages.format_ids(block.get("intendedFormats")))
         )
         return (
             f"<form method='post' action='/decks/{did}/package-settings#package' class='ui-card ds-pkg' "
@@ -600,7 +639,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<template class='tpl-icon'>{icon('tag')}</template>"
             f"<p class='muted small'>{icon('history')} A snapshot of the deck is kept first; one category is "
             "created per template, then the deck is read back. "
-            "<a href='/lists/templates'>Manage templates</a></p></form>"
+            + ui.cap_link("Manage templates", "/lists/templates")
+            + "</p></form>"
             + (ui.notice(error, "error", role="alert", cls="boxnote") if error else "")
         )
         return ui.box(
@@ -708,8 +748,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             f"<ul class='plain ds-list ds-cats'>{items or '<li class=muted>No categories yet.</li>'}</ul>"
             + (
-                f"<div class='acts'><button class='btn' name='action' value='save'>{icon('check')} "
-                "Save categories</button><button type='reset' class='btn'>Undo changes</button>"
+                f"<div class='acts'><span class='ds-save'><button class='btn' name='action' value='save'>"
+                f"{icon('check')} Save categories</button><button type='reset' class='btn'>Undo changes"
+                "</button></span>"
                 f"<a class='btn' href='/decks/{did}/settings?templates=1#categories' data-box-open='tplbox'>"
                 f"{icon('tag')} Add template…</a></div>"
                 # Delete unused is another form's destructive action: its own line, right-aligned
@@ -739,7 +780,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<input type='hidden' name='action' value='create'>"
             "<h3><label for='newcat'>New category</label></h3><div class='row'>"
             "<input id='newcat' type='text' name='category' maxlength='60' required "
-            "placeholder='Name, e.g. Removal'>"
+            f"{ui.hint_attrs('e.g. Removal|Removal')}>"
             "<span class='ds-sw' role='group' aria-label='Switches of the new category'>"
             f"{new_switches}</span>"
             f"<button class='btn'>{icon('plus')} Create category</button></div></form>"
@@ -775,8 +816,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 else "<div class='pv coverart none'><span class='muted small'>Archidekt picks the image"
                 "</span></div>"
             )
-            + "<div class='field'><label for='cover_card'>Card whose art fronts the deck</label>"
-            "<div class='ds-inline'><select id='cover_card' name='card'>"
+            + "<div class='field'><label for='cover_pick'>Art that fronts the deck</label>"
+            "<div class='ds-inline'><select id='cover_pick' name='cover'>"
             f"<option value=''{'' if chosen else ' selected'}>Automatic (Archidekt picks)</option>"
             + "".join(options)
             + f"</select><button class='btn'>{icon('image')} Set cover</button></div></div></form>"
@@ -817,7 +858,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 "<input id='tagname' type='text' name='name' maxlength='40' autocomplete='off' "
                 "data-suggest='tags' data-suggest-src='/decks/api/tags?q=' data-suggest-delay='250' "
                 f"data-suggest-exclude='{_esc(json.dumps(taken, ensure_ascii=False))}' "
-                "data-suggest-none='No Archidekt tag by that name' placeholder='Type to find a tag' "
+                "data-suggest-none='No Archidekt tag by that name' placeholder='Find a tag' "
                 f"value='{_esc(typed)}' "
                 "aria-describedby='tags-help"
                 + (" tags-msg' aria-invalid='true'" if bad else "'")
@@ -853,7 +894,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + row(
                 "<label for='folder_id'>This deck sits in</label>",
-                "Manage folders on <a href='/decks'>My decks</a>.",
+                "Manage folders on " + ui.cap_link("My decks", "/decks") + ".",
                 f"<div class='ds-inline'><select id='folder_id' name='folder_id'>{opts}</select>"
                 f"<button class='btn'>{icon('folder')} Move</button></div>",
                 "wctl",
@@ -914,7 +955,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         if following is not None and not following:
             hint = (
                 "You don't follow anyone on Archidekt yet. To find people, "
-                "<a href='/search'>search decks</a>, open a deck, then its owner's name, and press Follow."
+                + ui.cap_link("search decks", "/search")
+                + ", open a deck, then its owner's name, and press Follow."
             )
         elif following and not people:
             hint = "Everyone you follow on Archidekt is a collaborator already."
@@ -931,7 +973,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "data-suggest-none='Not among the people you follow' "
             "placeholder='Pick someone you follow' "
             if people
-            else "placeholder='Archidekt username' "
+            else "placeholder='Username' "
         )
         # the deck's name and the note for the box the forms ask in first (static/menus.js); the
         # confirmation page does the same without scripts
@@ -964,7 +1006,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         if social is None:
             return None
         try:
-            return await social.collaborators(sub, deck_id, owned=True)  # the page just read it as own
+            # the page read it as own (owned=True); kept briefly, and forgotten by any write the
+            # member sends (a collaborator added or removed is one)
+            return await decks.short_reads.get(
+                sub, ("editors", str(deck_id)), lambda: social.collaborators(sub, deck_id, owned=True)
+            )
         except (DeckError, ArchidektError):
             return None
 
@@ -1010,14 +1056,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
 
     async def folders_or_none(sub: str) -> dict[str, Any] | None:
         try:
-            return await decks.folders(sub)
+            # the folder tree My decks keeps (dropped by every write the member sends); the folder
+            # write itself checks the tree on Archidekt
+            return await decks.folder_view(sub)
         except DeckError:
             return None
 
     def settings_problem(
         request: Request, deck_id: str, exc: DeckError, sub: str, sid: str | None
     ) -> Response:
-        if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+        if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Deck settings"):
             return busy
         return page(
             "Cannot edit this deck",
@@ -1033,31 +1081,68 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/settings")
-        try:
-            deck = await decks.get_own_deck(sub, deck_id)
-        except DeckError as exc:
-            return settings_problem(request, deck_id, exc, sub, sid)
+            return login_redirect_here(request, f"/decks/{deck_id}/settings")
+        # The deck (as its page last read it), the folder tree, the collaborators and the people
+        # followed are independent reads: asked at once, not one after another.
+        got = await asyncio.gather(
+            decks.page_own_deck(sub, deck_id),
+            folders_or_none(sub),
+            collaborators_or_none(sub, deck_id) if deck_id.isdigit() else asyncio.sleep(0, None),
+            following_or_none(sub),
+            return_exceptions=True,
+        )
+        if isinstance(got[0], DeckError):
+            return settings_problem(request, deck_id, got[0], sub, sid)
+        for result in got:
+            if isinstance(result, BaseException):
+                raise result
+        (deck, how), folders, collaborators, following = got
         ok = request.query_params.get("ok") or ""
+        undo = ""
+        if ok == "category_deleted":
+            undo = undo_form(
+                sub, sid, deck, request.query_params.get("undo") or "", back=f"/decks/{deck.id}/settings"
+            )
         templates = None
         if request.query_params.get("templates"):
             try:
                 templates = (await account_lists.read(decks, sub, "templates"))["items"]
             except DeckError as exc:
                 return settings_problem(request, deck_id, exc, sub, sid)
+        checking = deck_check_html(deck.id, how.get("read_at"), reload=False) if how.get("checking") else ""
         return settings_response(
-            settings_form(
+            checking
+            + settings_form(
                 deck,
                 _csrf(s, sid),
-                folders=await folders_or_none(sub),
-                collaborators=await collaborators_or_none(sub, deck.id),
-                following=await following_or_none(sub),
+                folders=folders,
+                collaborators=collaborators,
+                following=following,
                 ok=ok,
                 templates=templates,
+                undo=undo,
             ),
             sub,
             sid,
         )
+
+    def undo_form(sub: str, sid: str | None, deck: Deck, pid: str, *, back: str) -> str:
+        """Undo of the member's category delete (review F10), drawn with its notice: the review
+        page's Undo (POST /proposals/undo, in its box when scripts run), a restore of the snapshot
+        the delete took just before it (decks.deletes_categories), which re-creates the category
+        and moves its cards back. Only the member's own applied delete on this deck has one."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pid):
+            return ""
+        row = state.db.get_proposal(pid, sub)
+        if (
+            row is None
+            or row.get("state") != "applied"
+            or str(row.get("deck_id")) != str(deck.id)
+            or not deletes_categories(row)
+            or not row.get("snapshot_id")
+        ):
+            return ""
+        return proposals_view.undo_box_form(_csrf(s, sid), row, back=back)
 
     def settings_response(body: str, sub: str, sid: str | None, status: int = 200) -> Response:
         return page(
@@ -1071,7 +1156,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             deck_css=True,
             heading=False,
             extra_css=SETTINGS_CSS + deck_extras.PACKAGE_FIELDS_CSS,
-            extra_scripts=("decksettings.js",),
+            extra_scripts=("decksettings.js", "undo-box.js"),
         )
 
     async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
@@ -1083,14 +1168,22 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         confirmation)."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/settings")
+            return login_redirect_here(request, f"/decks/{deck_id}/settings")
         data = await form_with_lists(request)
         if not check_csrf(sid, data):
+            if wants_json(data):
+                return json_refusal(EXPIRED_WORDS, 403)
             return page("Deck settings", EXPIRED, sub=sub, sid=sid, status=403)
         current_client.set(BROWSER_CLIENT_ID)
         try:
             code = await run(sub, data, sid) or ok
         except DeckError as exc:
+            if wants_json(data):
+                return JSONResponse(
+                    {"ok": False, "message": str(exc), "fresh": bool(exc.extra.get("fresh"))},
+                    status_code=400,
+                    headers=NO_STORE,
+                )
             try:
                 deck = await decks.get_own_deck(sub, deck_id)
             except DeckError as again:
@@ -1121,6 +1214,19 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             )
         if isinstance(code, Response):
             return code
+        if wants_json(data):
+            # the page draws the section again from the deck as it is now (a renamed category, a
+            # default one that got its record, the counts), with the notice's words
+            out: dict[str, Any] = {"ok": True, "message": SETTINGS_OK_MESSAGES.get(code, "Saved.")}
+            if anchor == "categories":
+                try:
+                    # the save's own read back (decks.one_click), else the deck read now
+                    kept = one_click.get() or {}
+                    deck = kept.get("verified") or await decks.get_own_deck(sub, deck_id)
+                    out["html"] = categories_section(deck, _csrf(s, sid))
+                except DeckError:
+                    pass  # the page keeps what it has
+            return JSONResponse(out, headers=NO_STORE)
         return RedirectResponse(f"/decks/{_esc(deck_id)}/settings?ok={code}#{anchor}", status_code=303)
 
     def confirm_form(
@@ -1173,7 +1279,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         """Add or remove a collaborator of the member's own deck: one press, then a confirmation,
         then it is sent to Archidekt (0.7.24; before, the form made a proposal to apply on its
         review page). The member's own click with their session and CSRF token, like the delete and
-        new-folder forms; an assistant's propose_collaborator still needs the review page."""
+        new-folder forms; an assistant's collaborator change (propose_account_action) still
+        needs the member's press."""
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
@@ -1212,7 +1319,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
+            # the member's one-click save: this read serves the proposal, its apply and the check
+            # before the write, and the read back draws the panel (decks.one_click); its calls
+            # start from the page burst (archidekt.hand_save)
+            one_click.set({})
+            hand_save.set(True)
             deck = await decks.get_own_deck(sub, deck_id)
+            read_at = time.monotonic()
             action = data.get("action") or "save"
             unused = action == "unused"
             move_field = pick_error = title_name = ""
@@ -1242,11 +1355,21 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 cat = next((c for c in deck_categories(deck) if c["id"] == int(key)), None)
                 if cat is None:
                     raise stale_categories_error()
-                move = " ".join((data.get("move_cards_to") or "").split())
-                changes = [{"action": "delete", "id": int(key), **({"move_cards_to": move} if move else {})}]
+                move = " ".join((data.get("move_to") or data.get("move_cards_to") or "").split())
+                # the deck page's box offers "No category": the cards stay in the deck with none
+                # (the deck page lists such cards by type), as Archidekt allows
+                none = not move and data.get("no_category") == "1"
+                changes = [
+                    {
+                        "action": "delete",
+                        "id": int(key),
+                        **({"move_cards_to": move} if move else {}),
+                        **({"no_category": True} if none else {}),
+                    }
+                ]
                 ok, yes = "category_deleted", f"Delete “{cat['name']}”"
                 title_name, move_n = cat["name"], int(cat["cards"])
-                if cat["cards"] and not move:
+                if cat["cards"] and not move and not none:
                     # Archidekt only deletes an empty category: the member picks where its cards go
                     # (nothing picked to start with, as the first category is often Commander; a
                     # submit without a pick is refused here, said on the page)
@@ -1263,8 +1386,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     )
                     move_field = (
                         f"<p>{_esc(has_cards)}</p>"
-                        "<label class='mv' for='move_cards_to'>Move its cards to</label>"
-                        f"<select id='move_cards_to' name='move_cards_to' required>{targets}</select>"
+                        f"<label class='mv' for='move_to'>Move {'them' if n != 1 else 'it'} to</label>"
+                        f"<select id='move_to' name='move_to' required>{targets}</select>"
                     )
             elif unused:
                 changes = []
@@ -1294,8 +1417,19 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 data.get("confirmed") == "1"
                 or (data.get("move_ok") == "1" and why == modes.CATEGORY_DELETE_CONFIRM)
             )
+            if why and not said_yes and wants_json(data) and action == "save":
+                # the page's own instant save: it asks in its box with these words, then sends
+                # the same change with confirmed=1
+                title = modes.CATEGORY_CONFIRM_TITLES[why]
+                return JSONResponse(
+                    {"ok": False, "needs_confirm": True, "title": title, "text": why}, headers=NO_STORE
+                )
+            if move_field and wants_json(data):
+                # the deck page's own delete always names where the cards go (its box picks one);
+                # a delete without that pick is refused in the box's words, nothing sent
+                raise DeckError("invalid", modes.CATEGORY_WORDS["pick_target"])
             if why and not said_yes:
-                drop = ("csrf", "confirmed", "move_ok") + (("move_cards_to",) if move_field else ())
+                drop = ("csrf", "confirmed", "move_ok") + (("move_to", "move_cards_to") if move_field else ())
                 fields = {k: v for k, v in data.items() if k not in drop}
                 if action != "save":
                     fields["action"] = action
@@ -1320,8 +1454,15 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                         title = modes.category_words("unused_title", name=title_name, n=len(unused_names))
                         notes.append(modes.category_names_line(unused_names))
                     elif not move_field:
-                        notes.append(" ".join(category_line(r).split(" Archidekt tabs")[0] for r in rows))
+                        notes.append(" ".join(category_line(r) for r in rows))
                     note = notes
+                if wants_json(data):
+                    # the deck page's own create, delete or template add (deck.js): the same
+                    # question in its box, then the same post with confirmed=1
+                    text = note if isinstance(note, str) else " ".join(n for n in note if n)
+                    return JSONResponse(
+                        {"ok": False, "needs_confirm": True, "title": title, "text": text}, headers=NO_STORE
+                    )
                 body = confirm_form(
                     f"/decks/{deck.id}/categories#categories",
                     _csrf(s, sid),
@@ -1345,11 +1486,60 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     deck_css=True,
                     status=400 if pick_error else 200,
                 )
-            p = await decks.propose_categories(sub, deck.id, changes, delete_unused=unused)
+            p = await decks.propose_categories(
+                sub, deck.id, changes, delete_unused=unused, read=deck, read_at=read_at
+            )
+            # the member's own save keeps the gateway's snapshot but makes no backup copy on
+            # Archidekt, as the deck page's quick edits (review F1): a copy costs several paced calls
+            decks.keep_no_backup(sub, p["proposal_id"])
+            if wants_json(data):
+                # the page's own instant save: applied here, so a refusal is answered in words
+                # (hand_action) and the page draws the panel again from the answer
+                result = await decks.apply(sub, p["proposal_id"], via="browser")
+                if result.get("state") != "applied":
+                    raise DeckError("applying", STILL_SAVING, review_url=f"/proposals/{p['proposal_id']}")
+                if data.get("page") == "deck":
+                    return await deck_page_answer(
+                        sub, sid, data, p["proposal_id"] if action == "delete" else ""
+                    )
+                return ok
             done = await apply_now(sub, p["proposal_id"], ok="categories", deck_id=deck.id)
             if done.headers.get("location") == f"/decks/{deck.id}?ok=categories":
-                return RedirectResponse(f"/decks/{deck.id}/settings?ok={ok}#categories", status_code=303)
+                # a delete's notice offers its Undo (review F10)
+                undo = f"&undo={p['proposal_id']}" if action == "delete" else ""
+                return RedirectResponse(
+                    f"/decks/{deck.id}/settings?ok={ok}{undo}#categories", status_code=303
+                )
             return done  # Archidekt refused or writes are off: the review page says why
+
+        async def deck_page_answer(
+            sub: str, sid: str | None, data: dict[str, str], undo_pid: str
+        ) -> Response:
+            """The deck page's own category change (deck.js, mockup screen 4): the answer carries the
+            stacks drawn again from the read back (deckpage.cards_html, for the page's view, sort and
+            filter, grouped by category as the menus are), and after a delete the Undo form of its own
+            snapshot (undo_form), which the page's toast offers."""
+            kept = one_click.get() or {}
+            deck = kept.get("verified") or await decks.get_own_deck(sub, deck_id)
+            view = data.get("view") if data.get("view") in VIEWS else "text"
+            sort = data.get("sort") if data.get("sort") in SORTS else "name"
+            # Archidekt marks each card with the copies the member owns (deck page: the green dot)
+            owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} or None
+            out: dict[str, Any] = {
+                "ok": True,
+                "cards_html": cards_html(
+                    deck,
+                    view=view,
+                    group="category",
+                    sort=sort,
+                    q=(data.get("q") or "").strip()[:80],
+                    own=True,
+                    owned=owned,
+                ),
+            }
+            if undo_pid:
+                out["undo_html"] = undo_form(sub, sid, deck, undo_pid, back=f"/decks/{deck.id}")
+            return JSONResponse(out, headers=NO_STORE)
 
         return await hand_action(request, deck_id, run, ok="categories", anchor="categories")
 
@@ -1382,7 +1572,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], _sid: str | None) -> str:
-            uid = (data.get("card") or "").strip() or None
+            uid = (data.get("cover") or data.get("card") or "").strip() or None
             done = await decks.set_cover(sub, deck_id, uid)
             if uid:
                 state.db.save_deck_cover(done["deck_id"], uid.lower(), done["card_name"], owner_sub=sub)
@@ -1446,7 +1636,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/delete")
+            return login_redirect_here(request, f"/decks/{deck_id}/delete")
         return await h.deck_page_response(request, sub, sid, deck_id, box="delete")
 
     @server.custom_route("/decks/{deck_id}/delete", methods=["POST"], include_in_schema=False)
@@ -1454,7 +1644,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/delete")
+            return login_redirect_here(request, f"/decks/{deck_id}/delete")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Delete deck", EXPIRED, sub=sub, sid=sid, status=403)
@@ -1494,7 +1684,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         boxes themselves use companion_folders.py; this stays for a browser without scripts."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Folders", EXPIRED, sub=sub, sid=sid, status=403)
@@ -1533,13 +1723,18 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/settings")
+            return login_redirect_here(request, f"/decks/{deck_id}/settings")
         data = await form(request, limit=100_000)
+        as_json = wants_json(data)  # the page's own instant save (static/decksettings.js)
         if not check_csrf(sid, data):
+            if as_json:
+                return json_refusal(EXPIRED_WORDS, 403)
             return page("Deck settings", EXPIRED, sub=sub, sid=sid, status=403)
         try:
             deck = await decks.get_own_deck(sub, deck_id)
         except DeckError as exc:
+            if as_json:
+                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400, headers=NO_STORE)
             return page(
                 "Deck settings", f"<p class='notice error'>{_esc(exc)}</p>", sub=sub, sid=sid, status=400
             )
@@ -1571,16 +1766,43 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "edh_bracket" in details or deck.edh_bracket is not None
         ):
             details["edh_bracket"] = None
+        nothing = "Nothing to save: nothing on the form was changed."
         if not details:
-            return settings_response(
-                settings_form(deck, _csrf(s, sid), data, "Nothing to save: nothing on the form was changed."),
-                sub,
-                sid,
-                400,
-            )
+            if as_json:
+                return JSONResponse({"ok": False, "message": nothing}, status_code=400, headers=NO_STORE)
+            return settings_response(settings_form(deck, _csrf(s, sid), data, nothing), sub, sid, 400)
         current_client.set(BROWSER_CLIENT_ID)
         try:
             p = await decks.propose_deck_details(sub, deck.id, details)
         except DeckError as exc:
+            if as_json:
+                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400, headers=NO_STORE)
             return settings_response(settings_form(deck, _csrf(s, sid), data, str(exc)), sub, sid, 400)
-        return await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
+        if as_json:
+            # applied at once as the member's own press; the answer carries what the form's fields
+            # are now, the baseline of the next change
+            try:
+                result = await decks.apply(sub, p["proposal_id"], via="browser")
+            except DeckError as exc:
+                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400, headers=NO_STORE)
+            if result.get("state") != "applied":
+                return JSONResponse(
+                    {"ok": False, "message": STILL_SAVING, "review_url": f"/proposals/{p['proposal_id']}"},
+                    status_code=202,
+                    headers=NO_STORE,
+                )
+            was = posted_main_values(data)
+            if details.get("edh_bracket", deck.edh_bracket) is None:
+                was["edh_bracket"] = ""  # cleared with the format, whatever the page sent
+            # the deck's name as the page's own labels say it (the back chip, the line under the
+            # heading): static/decksettings.js draws it there
+            named = (str(was["name"]).strip() if "name" in was else deck.name) or UNNAMED_DECK
+            return JSONResponse(
+                {"ok": True, "message": SETTINGS_OK_MESSAGES["saved"], "was": was, "title": named},
+                headers=NO_STORE,
+            )
+        done = await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
+        # saved: back to the settings page with its note, not off to the deck (0.7.46 audit D-27)
+        if done.headers.get("location") == f"/decks/{deck.id}?ok=saved":
+            return RedirectResponse(f"/decks/{deck.id}/settings?ok=saved#ds-main", status_code=303)
+        return done  # Archidekt refused or writes are off: the review page says why

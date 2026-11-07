@@ -57,6 +57,11 @@ async def mcp_token(h: Harness) -> str:
 
 
 async def call(h: Harness, token: str, name: str, args: dict | None = None) -> dict:
+    return await call_as_sent(h, token, name, args)
+
+
+async def call_as_sent(h: Harness, token: str, name: str, args: dict | None = None) -> dict:
+    """A tool call with exactly these arguments, as an assistant would send it."""
     r = await h.mcp(token, "tools/call", {"name": name, "arguments": args or {}}, rid=7)
     assert r.status_code == 200, r.text
     return sse_json(r)["result"]
@@ -162,7 +167,7 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     h = stack.h
     b = Browser(h)
     await b.login()
-    page = await b.http.get("/account/details")
+    page = await b.http.get("/account/details/archidekt")
     assert "Link your Archidekt account" in page.text
     assert "default-src 'none'" in page.headers["content-security-policy"]
 
@@ -177,6 +182,8 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     # encrypted, no password
     assert "pw-alice" not in row["secret_enc"] and "tok-alice" not in row["secret_enc"]
     page = await b.http.get("/account/details?ok=linked")
+    assert "<span class='val'>alice · linked</span>" in page.text  # the list's row
+    page = await b.http.get("/account/details/archidekt")
     assert "Linked to <strong>alice</strong>" in page.text
 
     token = await mcp_token(h)
@@ -200,6 +207,10 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     out = structured(await call(h, token, "list_my_decks"))
     assert out["ok"] is False and out["error"] == "not_linked"
 
+    # /signed-out while still signed in says nothing false (review F12): it goes on to the page
+    still = await b.http.get("/signed-out", params={"next": "/decks"})
+    assert still.status_code == 303 and still.headers["location"] == "/decks"
+    assert (await b.http.get("/signed-out")).headers["location"] == "/"
     # Logout ends the session and tells the browser to drop cached pages and site storage.
     out_resp = await b.http.post("/logout", data={"csrf": await b.csrf()})
     assert out_resp.status_code == 303
@@ -605,7 +616,7 @@ async def test_archidekt_nodeck_rows_stay_out_of_a_new_deck_count(stack: Stack) 
     )
     assert p["ok"], p
     assert p["diff"].splitlines()[0] == (
-        "New custom deck 'No deck' (1 cards, 1 more in the maybeboard or sideboard, private)"
+        "New custom deck “No deck” (1 card, 1 more in the maybeboard or sideboard, private)"
     )
     assert "+1 Arcane Signet [Maybeboard] (maybeboard/sideboard)" in p["diff"]
     signet = next(c for c in p["changes"]["cards"] if c["name"] == "Arcane Signet")
@@ -634,7 +645,7 @@ async def test_a_new_deck_keeps_a_custom_categorys_switches(stack: Stack) -> Non
     )
     assert p["ok"], p
     assert p["diff"].splitlines()[0] == (
-        "New custom deck 'Flags' (1 cards, 2 more in the maybeboard or sideboard, private)"
+        "New custom deck “Flags” (1 card, 2 more in the maybeboard or sideboard, private)"
     )
     assert "New category “Considering”: Not in deck on, Not in price on." in p["diff"]
     assert not p.get("warnings"), p
@@ -684,7 +695,7 @@ async def test_cmdr_marker_reads_as_the_commander_everywhere(stack: Stack) -> No
     parsed = structured(await call(h, token, "parse_decklist", {"text": text}))
     assert parsed["ok"] and parsed["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait [Commander]\n")
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
-    assert rep["ok"] and rep["stats"]["commanders"] == ["Aesi, Tyrant of Gyre Strait"], rep
+    assert rep["ok"] and rep["stats_brief"]["commanders"] == ["Aesi, Tyrant of Gyre Strait"], rep
     cmp = structured(await call(h, token, "compare_decks", {"a_list": text, "b_list": text}))
     assert cmp["ok"], cmp
     bad = structured(await call(h, token, "parse_decklist", {"text": "1 Sol Ring\n-1 Island"}))
@@ -756,7 +767,7 @@ async def test_propose_new_deck_from_decklist_and_apply(stack: Stack) -> None:
     assert p["ok"] and p["kind"] == "create_deck" and p["deck_id"] == "new" and p["state"] == "pending"
     # the SB: row is created too, but is not a deck card
     assert p["diff"].splitlines()[0] == (
-        "New commander deck 'Test import' (4 cards, 1 more in the maybeboard or sideboard, private)"
+        "New commander deck “Test import” (4 cards, 1 more in the maybeboard or sideboard, private)"
     )
     assert "+1 Sol Ring [Ramp]" in p["diff"] and "+1 Island [Sideboard]" in p["diff"]
     assert len(ark.decks) == 2  # nothing created yet
@@ -832,7 +843,7 @@ async def test_propose_new_deck_from_csv_and_cards(stack: Stack) -> None:
             },
         )
     )
-    assert p2["ok"] and p2["diff"].startswith("New modern deck 'From cards' (4 cards")
+    assert p2["ok"] and p2["diff"].startswith("New modern deck “From cards” (4 cards")
     bad = structured(
         await call(
             h,
@@ -1127,7 +1138,7 @@ async def test_resolve_card_prefers_named_printing() -> None:
     assert (await client.resolve_card("t", "sol ring", set_code="CMR"))["id"] == 2
     assert (await client.resolve_card("t", "Sol Ring", set_code="xxx", collector_number="490"))["id"] == 2
     assert seen[0]["exact"] == "true" and seen[0]["name"] == "Sol Ring"
-    with pytest.raises(Exception, match="no Archidekt printing"):
+    with pytest.raises(Exception, match="Archidekt doesn't have"):
         (await client.resolve_card("t", "Nonexistent Card"))["id"]
     assert seen[-1].get("exact") is None  # the fallback substring search was tried
 
@@ -1218,7 +1229,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"] and r["state"] == "pending" and r["deck_id"] == "42" and r["kind"] == "restore", r
     lines = r["diff"].splitlines()
-    assert lines[0].startswith(f"Restore to snapshot {a['snapshot_id']} taken ")
+    assert lines[0].startswith("Put the deck back as it stood on ") and a["snapshot_id"] not in lines[0]
     assert set(lines[1:]) == {
         "+1 Acidic Slime (cmr 421)",
         "+1 Aesi, Tyrant of Gyre Strait (cmr 365, Foil) [Commander]",
@@ -1419,11 +1430,11 @@ async def test_pinned_printing_that_is_missing_or_another_card_refuses_the_edit(
     for change, message in [
         (
             {"action": "add", "card_name": "Island", "set_code": "m21", "collector_number": "267"},
-            "M21 #267 is Swamp, not 'Island'; nothing was added",
+            "M21 #267 is Swamp, not “Island”; nothing was added.",
         ),
         (
             {"action": "add", "card_name": "Swamp", "set_code": "m21", "collector_number": "9999"},
-            "Archidekt has no printing M21 #9999 of 'Swamp'; nothing was added",
+            "Archidekt doesn't have “Swamp” in that printing (M21 #9999), so nothing was added.",
         ),
     ]:
         p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
@@ -1451,7 +1462,7 @@ async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: St
     bad = [{"action": "add", "card_name": "Islend"}, {"action": "add", "card_name": "Swamp"}]
     out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": bad}))
     assert out["ok"] is False and out["error"] == "unknown_cards", out
-    assert out["unknown_cards"] == ["Islend"] and "'Islend'" in out["message"], out
+    assert out["unknown_cards"] == ["Islend"] and "“Islend”" in out["message"], out
     good = [
         {"action": "add", "card_name": "Delver of Secrets"},
         {"action": "add", "card_name": "Sol Ring"},  # in deck 42, though not in this catalog
@@ -1467,31 +1478,32 @@ async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: St
         )
     )
     assert amended["ok"] is False and amended["error"] == "unknown_cards", amended
-    # a name the catalog lacks (a token, a card from a set newer than the catalog) is asked of
-    # Scryfall before it is refused; an answer other than "not found" refuses nothing
+    # a name the catalog lacks (a token it does not list, a card from a set newer than the
+    # catalog) is asked of Scryfall before it is refused; an answer other than "not found" refuses
+    # nothing. The tokens made most often are in the catalog (names.TOKEN_NAMES): never asked
     scan = stack.h.app.state.gateway.scan
     asked: list[str] = []
 
     async def named(name: str, **_kw: object) -> dict:
         asked.append(name)
-        if name == "Treasure":
-            return {"name": "Treasure"}
+        if name == "Goat":
+            return {"name": "Goat"}
         if name == "Offline Card":
             raise ScryfallError("unavailable", "down")
         raise ScryfallError("not_found", "no card")
 
     scan.scryfall.named = named
-    for name, ok in (("Treasure", True), ("Offline Card", True), ("Islend", False)):
+    for name, ok in (("Treasure", True), ("Goat", True), ("Offline Card", True), ("Islend", False)):
         r = structured(
             await call(
                 h,
                 token,
                 "propose_deck_changes",
-                {"deck_id": "42", "changes": [{"action": "add", "card_name": name}]},
+                {"deck_id": "42", "changes": [{"action": "add", "card_name": name}], "separate": True},
             )
         )
         assert r["ok"] is ok, (name, r)
-    assert asked == ["Treasure", "Offline Card", "Islend"]
+    assert asked == ["Goat", "Offline Card", "Islend"]
     assert names.known("Insectile Aberration") is True  # a back face is a card too
 
 
@@ -1543,14 +1555,17 @@ async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None
     bad = [
         ([{"action": "add", "card_name": "Swamp", "set_code": "m21"}], "go together"),
         ([{"action": "remove", "card_name": "Swamp", "finish": "foil"}], "apply to add only"),
-        ([{"action": "add", "card_name": "Swamp", "finish": "glossy"}], "'nonfoil', 'foil' or 'etched'"),
+        (
+            [{"action": "add", "card_name": "Swamp", "finish": "glossy"}],
+            "finish must be nonfoil, foil or etched",
+        ),
         ([{"action": "add", "card_name": "Swamp", "set_code": "m21!", "collector_number": "1"}], "set code"),
         (
             [
                 {"action": "add", "card_name": "Swamp", "set_code": "m21", "collector_number": "267"},
                 {"action": "add", "card_name": "swamp", "set_code": "m21", "collector_number": "268"},
             ],
-            "one pinned printing per card name",
+            "One pinned printing per card name",
         ),
     ]
     for changes, text in bad:
@@ -1594,7 +1609,7 @@ async def test_new_deck_says_when_a_listed_printing_was_not_found(stack: Stack) 
     assert p["ok"], p
     a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["result"]["verified"], a
-    sent = {e["cardid"] for e in (pt["cards"][0] for pt in ark.patches)}
+    sent = {e["cardid"] for pt in ark.patches for e in pt["cards"]}
     assert {91043, 9008, 9004} <= sent  # CMR 472 pinned; Swamp and Forest by name
     assert a["result"]["printing_notes"] == [
         "Swamp: XYZ 9 not found on Archidekt, added its default printing instead"
@@ -1764,7 +1779,7 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(
     # Pasted lists: 60 cards plays, 40 is refused, a Commander list keeps its commander game.
     sixty = "4 Lightning Bolt\n20 Mountain\n36 Goblin Guide\nSideboard\n2 Smash to Smithereens\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": sixty, "games": 20}))
-    assert rep["ok"] and rep["stored"] is False, rep
+    assert rep["ok"] and rep["stored"] is True and rep["source"]["label"] == "Pasted list", rep
     assert SIM_CALLS[-1][1]["constructed"] is True and "Smash" not in str(SIM_CALLS[-1][1]["deck"])
     assert rep["validation"] is None, rep["validation"]
     short = "4 Lightning Bolt\n20 Mountain\n16 Goblin Guide\n"
@@ -1815,21 +1830,26 @@ async def test_another_users_decks_are_the_public_listing_only(stack: Stack) -> 
     assert set(ark.list_auth_schemes) == {""}
 
 
-async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
+async def test_pasted_lists_are_reported_and_kept_as_pasted_lists(stack: Stack) -> None:
     """run_deck_report and deck_stats take a pasted list as well as a deck: the list gets the same
-    validation and goldfish run and comes back with stored=false, and History stays as it was
-    (0.7.1's goldfish_run could simulate a pasted list; its owner keeps that)."""
+    validation and goldfish run (0.7.1's goldfish_run could simulate a pasted list; its owner keeps
+    that), and since 0.7.46 the run is kept as one of the member's reports, labelled "Pasted
+    list" and filed under no deck (owner feedback F1: every simulation is a report)."""
     h = stack.h
     token = await linked_user(stack)
     before = structured(await call(h, token, "list_deck_reports", {}))["reports"]
     text = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n99 Island\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
-    assert rep["ok"] and rep["stored"] is False and rep["deck"]["id"] is None, rep
-    # A pasted list has no name: it reads "Unnamed deck", like any deck without one.
-    assert rep["deck"]["name"] == "Unnamed deck", rep["deck"]
+    assert rep["ok"] and rep["stored"] is True and rep["report_id"], rep
+    assert rep["deck_id"] == "" and rep["deck_url"] is None, rep
+    assert rep["source"] == {"kind": "list", "label": "Pasted list"}, rep["source"]
+    # A pasted list has no name: it reads as the pasted list of its commander.
+    assert rep["deck_name"] == "Pasted list (Aesi, Tyrant of Gyre Strait)", rep["deck_name"]
+    kept = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
+    assert kept["ok"] and kept["goldfish"]["ok"] and kept["source"]["label"] == "Pasted list", kept
     assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
     assert rep["validation"]["ok"] is True, rep["validation"]
-    assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
+    assert rep["stats_brief"]["card_count"] == 100 and rep["stats_brief"]["card_data"] == "unavailable"
     # Double-faced cards reach the simulator by their front face (Archidekt names both faces;
     # Scryfall's collection lookup, which the research service uses, knows only the front).
     faces = (
@@ -1842,12 +1862,14 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     assert gf["ok"] and "Commander: 1 Enduring Angel [Commander] |" in gf["text"], gf
     assert "Enduring Angel // Angelic Enforcer" in rep["decklist_text"]  # the member's own list keeps both
     after = structured(await call(h, token, "list_deck_reports", {}))["reports"]
-    assert len(after) == len(before)
+    assert len(after) == len(before) + 2 and {r["source"]["kind"] for r in after[:2]} == {"list"}
     # No commander and under 60 cards: the structural checks still come back, the simulation is
     # refused as such (60 or more is a 60-card game, see test_sixty_card_decks_...).
     plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n26 Grizzly Bears\n"}))
     assert plain["ok"] is False and plain["error"] == "simulation_failed", plain
-    assert "Commander" in plain["message"] and plain["stats"]["checks"], plain
+    assert "Commander" in plain["message"] and "legal" in plain["stats_brief"], plain
+    kept = structured(await call(h, token, "get_deck_report", {"report_id": plain["report_id"]}))
+    assert kept["stats"]["checks"], kept
     assert plain["goldfish"]["ok"] is False and "at least 60 cards" in plain["goldfish"]["text"], plain
     stats = structured(
         await call(
@@ -1911,7 +1933,9 @@ async def test_a_busy_research_refusal_says_when_to_retry() -> None:
     until the member's oldest running call is stopped at the latest (the call deadline)."""
     from mtg_gateway.mf_proxy import busy_retry_after, is_busy
 
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
+    proxy = MysticForgeProxy(
+        "http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()), queue_wait=0.2
+    )
     proxy._listed = True
     proxy._in_flight["u1"] = 2
     proxy._started["u1"] = [time.monotonic() - 20, time.monotonic() - 5]
@@ -1919,11 +1943,79 @@ async def test_a_busy_research_refusal_says_when_to_retry() -> None:
     assert is_busy(out) and out.structured_content["error"] == "busy"
     assert 99 <= busy_retry_after(out) <= 100  # 120 s deadline, 20 s gone
     assert out.structured_content["message"].startswith("2 research calls")
+    assert "still running after a short wait" in out.structured_content["message"]
     # a call that ran and ended frees its slot and its start time
     proxy._in_flight.clear()
     proxy._started.clear()
     ok = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
     assert not ok.is_error and proxy._started == {} and proxy._in_flight == {}
+
+
+async def test_a_research_call_past_the_members_share_waits_its_turn_and_says_so() -> None:
+    """AT-38: Claude sends tool calls in parallel, and a third research call was refused at once
+    (2 per member). It now waits, briefly and bounded (queue_wait), for one of the member's calls
+    to finish, runs, and its answer says it waited. The share itself is unchanged."""
+    import anyio
+
+    proxy = MysticForgeProxy(
+        "http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()), queue_wait=5.0
+    )
+    proxy._listed = True
+    proxy._in_flight["u1"] = 2
+    proxy._started["u1"] = [time.monotonic(), time.monotonic()]
+    seen: list[int] = []
+
+    async def finish_one() -> None:
+        await anyio.sleep(1.2)
+        seen.append(proxy._in_flight["u1"])
+        proxy._in_flight["u1"] = 1
+        proxy._started["u1"].pop()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(finish_one)
+        out = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
+    assert seen == [2] and not out.is_error, out  # it ran only once a slot was free
+    text = out.content[0].text
+    assert text.startswith("(This call waited 1 s for your other research calls to finish.)"), text
+    assert proxy._in_flight == {"u1": 1}  # its own slot is given back
+    assert proxy.max_calls_per_user == 2  # never raised
+    # no wait, no note
+    plain = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u2")
+    assert "waited" not in json.dumps(plain.model_dump(mode="json"))
+
+
+async def test_a_queued_research_call_spends_no_archidekt_budget_and_the_queue_has_a_cap() -> None:
+    """Security review 2, R2-06: a research call that reads Archidekt took from the member's
+    Archidekt budget before it waited, so one refused busy after its wait had still spent it; and
+    any number of one member's calls could wait at once. Now the budget is spent once the call has
+    its slot, and past MAX_WAITING_CALLS_PER_USER waiting calls another is refused at once."""
+    from mtg_gateway import mf_proxy
+    from mtg_gateway.mf_proxy import is_busy
+
+    spent: list[str] = []
+    proxy = MysticForgeProxy(
+        "http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()), queue_wait=0.2
+    )
+    proxy._listed = True
+    proxy.archidekt_budget = lambda owner: spent.append(owner)  # None: room left
+    proxy._in_flight["u1"] = 2
+    proxy._started["u1"] = [time.monotonic(), time.monotonic()]
+    out = await proxy.call("archidekt_deck", {"deck_id": 42}, owner="u1", internal=True)
+    assert is_busy(out), out
+    assert spent == []  # refused busy after its wait: nothing taken from the budget
+    # the cap on waiting calls: the next one does not wait at all
+    proxy.queue_wait = 5.0
+    proxy._waiting["u1"] = mf_proxy.MAX_WAITING_CALLS_PER_USER
+    start = time.monotonic()
+    out = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
+    assert is_busy(out) and time.monotonic() - start < 1.0, out
+    assert proxy._waiting["u1"] == mf_proxy.MAX_WAITING_CALLS_PER_USER  # its count is unchanged
+    # a call that gets its slot spends the budget as before, and leaves no waiting count behind
+    proxy._waiting.clear()
+    proxy._in_flight.clear()
+    proxy._started.clear()
+    await proxy.call("archidekt_deck", {"deck_id": 42}, owner="u1", internal=True)
+    assert spent == ["u1"] and proxy._waiting == {} and proxy._in_flight == {}
 
 
 class _ListingDown:
@@ -1981,7 +2073,7 @@ async def test_a_flat_call_is_refused_when_the_tool_listing_failed() -> None:
     assert out.is_error and out.structured_content["error"] == "unavailable", out
     assert out.structured_content["retry_after"] == 60
     assert out.content[0].text == (
-        "the research service is not ready yet and nothing was sent; try again later"
+        "The research service isn't ready yet, so nothing was sent. Try again later."
     )
     assert _ListingDown.forwarded == []
     # once Mystic Forge lists its tools, the same flat call is wrapped and answered

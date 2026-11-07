@@ -17,6 +17,7 @@ from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import bell_read, expect, form_aged, settled
 
 TEXT = (
     ".acc h2, .acc .ui-row .lab, .acc .ui-row .help, .acc .ui-row label, .acc .btn, .acc button, "
@@ -87,16 +88,25 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
         # the bell shows Archidekt's count once the page has loaded, at every width (before the
         # list is opened: reading the list is what clears the count)
         # (the touch rail has it as its Alerts place instead of beside the picture)
-        page.goto(f"{server.base}/account/details", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details/profile", wait_until="networkidle")
         rail = page.evaluate(
             "() => getComputedStyle(document.querySelector('.tabbar')).flexDirection === 'column'"
         )
         bell = page.locator(".tabbar a.bell" if rail else ".topbar .bell")
         badge = bell.locator(".n")
         badge.wait_for(state="visible", timeout=4000)
-        name = "Alerts" if rail else "Notifications"
-        assert badge.inner_text() == "3" and bell.get_attribute("aria-label") == f"{name}, 3 new"
-        for path in ("/account", "/collection", "/", "/notifications"):
+        assert badge.inner_text() == "3" and bell.get_attribute("aria-label") == "Alerts, 3 new"
+        for path in (
+            "/account",
+            "/account/details",
+            "/account/details/archidekt",
+            "/account/details/profile",
+            "/account/details/email",
+            "/account/details/defaults",
+            "/collection",
+            "/",
+            "/notifications",
+        ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert page.evaluate(MEASURE) == [], path
             assert page.evaluate(CONTRAST, TEXT) == [], path
@@ -105,10 +115,10 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
                     page,
                     ".acc .ui-row .switch, .acc .ui-row .msel-btn, .acc .btn, .acc button:not(.inline), "
                     ".col-vis .btn, .col-vis button, .topbar .bell, .tabbar a.bell, .bell-row, "
-                    ".hq .wdg .go .btn, .yhub .yrow, .yhub .ysignout button",
+                    ".hq .wdg .go .btn, .yhub .yrow, .yhub details.yrow > summary, .yhub .ysignout button",
                 )
                 assert sizes and min(sizes) >= 43.5, (path, sizes)
-        page.goto(f"{server.base}/account/details", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details/profile", wait_until="networkidle")
         # the picture box: the words, the file checked here, the preview, the one orange button
         page.locator("[data-box-open='picture']").click()
         box = page.locator("#picture")
@@ -119,18 +129,20 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
         page.locator("#pr-file").set_input_files(
             {"name": "me.gif", "mimeType": "image/gif", "buffer": _png("GIF")}
         )
-        page.wait_for_timeout(300)
+        expect(page.locator("#pr-err")).to_contain_text("Use a JPEG or PNG picture.")
         assert use.is_disabled() and "Use a JPEG or PNG picture." in page.locator("#pr-err").inner_text()
         page.locator("#pr-file").set_input_files(
             {"name": "me.png", "mimeType": "image/png", "buffer": _png()}
         )
-        page.wait_for_timeout(300)
+        expect(page.locator("#pr-preview img")).to_have_count(1)
+        expect(use).to_be_enabled()
+        settled(page)
         assert use.is_enabled() and page.locator("#pr-preview img").count() == 1
         assert "me.png" in page.locator("#pr-filename").inner_text()
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
         use.click()
-        page.wait_for_url("**/account/details?ok=picture*")
+        page.wait_for_url("**/account/details/profile?ok=picture*")
         assert "Picture saved on Archidekt and read back." in page.locator("#profile").inner_text()
         assert server.ark.account.uploads and server.ark.account.uploads[-1][0] == "alice"
         browser.close()
@@ -145,17 +157,21 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
     me = server.ark.account.profile("alice")
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
-        page.goto(f"{server.base}/account/details", wait_until="networkidle")
-        page.wait_for_timeout(800)  # the click guard: a press faster than a person reads is refused
+        # the switches on Email and alerts, the drop-downs on New device defaults, the bio on Archidekt
+        # profile: each its own page under Account details
+        page.goto(f"{server.base}/account/details/email", wait_until="networkidle")
+        form_aged(page)  # the click guard: a press faster than a person reads is refused
         page.locator("label[class='switch']:has(#pr-newsletter)").click()
         page.locator(".toast").wait_for(state="visible", timeout=4000)
         assert "Saved on Archidekt." in page.locator(".toast").inner_text()
         assert me["profile"]["newsletterable"] is True
-        page.locator("label[class='switch']:has(#pr-site_notifications)").click()
-        page.wait_for_timeout(500)
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.startswith(server.base)):
+            page.locator("label[class='switch']:has(#pr-site_notifications)").click()
         assert me["accountSettings"]["noArchidektNotifications"] is True
-        page.select_option("#pr-deck_view", "grid")
-        page.wait_for_timeout(500)
+        page.goto(f"{server.base}/account/details/defaults", wait_until="networkidle")
+        form_aged(page)
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.startswith(server.base)):
+            page.select_option("#pr-deck_view", "grid")
         assert me["accountSettings"]["deckView"] == 2
         # a refusal reverts the control and says why
         page.evaluate(
@@ -163,13 +179,16 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
             ".insertAdjacentHTML('beforeend', \"<option value='moon'>Moon</option>\"); }"
         )
         page.select_option("#pr-search_game", "moon")
-        page.wait_for_timeout(500)
+        expect(page.locator(".toast.error")).to_contain_text("takes one of")
+        expect(page.locator("#pr-search_game")).to_have_value("paper")
         assert "takes one of" in page.locator(".toast.error").inner_text()
         assert page.locator("#pr-search_game").input_value() == "paper"
         # the bio and username save with the panel's notice
+        page.goto(f"{server.base}/account/details/profile", wait_until="networkidle")
+        form_aged(page)
         page.fill("#pr-bio", "Commander player in Leeds.")
         page.locator("#pr-f button").click()
-        page.wait_for_url("**/account/details?ok=profile*")
+        page.wait_for_url("**/account/details/profile?ok=profile*")
         assert "Profile saved on Archidekt: bio. Read back." in page.locator("#profile").inner_text()
         # the bell: the count, then the box with the list; the count clears once the list opened
         badge = page.locator(".topbar .bell .n")
@@ -190,17 +209,18 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert not badge.is_visible()
-        # Home's widget shows the count; on a phone the whole tile leads to the Notifications page,
-        # on a desktop its Open button opens the same box
+        # Home's Needs you row: nothing while the count is zero; with new alerts it shows the
+        # count, and its Open alerts opens the same box
         page.goto(f"{server.base}/", wait_until="networkidle")
-        page.wait_for_timeout(800)
-        assert page.locator("[data-bell-big]").inner_text() == "0"
-        page.locator("[data-bell-widget] .lab").click()
-        page.wait_for_url("**/notifications")
-        assert page.locator(".bell-row").count() == 4
+        bell_read(page)
+        assert page.locator("[data-bell-row]").is_hidden()
+        # a count of one, as the script keeps it for a minute between pages (the gateway keeps
+        # Archidekt's count for a minute too, so a new note would not show yet)
+        page.evaluate("() => sessionStorage.setItem('mtg-bell', JSON.stringify({at: Date.now(), n: 1}))")
         page.set_viewport_size({"width": 1366, "height": 860})
         page.goto(f"{server.base}/", wait_until="networkidle")
-        page.wait_for_timeout(800)
+        page.locator("[data-bell-row]").wait_for(state="visible", timeout=4000)
+        assert page.locator("[data-bell-row] .what").inner_text() == "1 new alert on Archidekt"
         page.locator("[data-bell-open]").click()
         page.locator(".bell-list").wait_for(state="visible", timeout=4000)
         page.keyboard.press("Escape")
@@ -217,13 +237,13 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366, "light", exe)
         page.goto(f"{server.base}/collection", wait_until="networkidle")
-        page.wait_for_timeout(800)  # the click guard
+        form_aged(page)  # the click guard
         vis = page.locator("#visibility")
         assert "Private · only you can see it" in vis.inner_text()
         page.locator("[data-box-open='col-vis']").click()
         box = page.locator("#col-vis")
         box.wait_for(state="visible")
-        assert "Make your collection public?" in box.inner_text()
+        assert "Make your binder public?" in box.inner_text()
         final = box.locator(".acts button").last
         assert final.inner_text().strip() == "Make it public" and "primary" in (
             final.get_attribute("class") or ""
@@ -235,11 +255,11 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
         box.wait_for(state="visible")
         final.click()
         page.wait_for_url("**/collection?ok=public*")
-        page.wait_for_timeout(800)
+        form_aged(page)
         assert me["profile"]["is_collection_public"] is True
         vis = page.locator("#visibility")
         assert "Public · anyone can see it on your Archidekt profile" in vis.inner_text()
-        assert "Your collection is public on Archidekt." in vis.inner_text()
+        assert "Your binder is public on Archidekt." in vis.inner_text()
         vis.locator("button", has_text="Make it private").click()
         page.wait_for_url("**/collection?ok=private*")
         assert me["profile"]["is_collection_public"] is False
@@ -255,12 +275,20 @@ def test_account_holds_together_on_a_phone_at_200_percent_text(server: Server, z
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
-        for path in ("/account", "/collection", "/notifications"):
+        for path in (
+            "/account",
+            "/account/details",
+            "/account/details/archidekt",
+            "/account/details/email",
+            "/account/details/defaults",
+            "/collection",
+            "/notifications",
+        ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-            page.wait_for_timeout(300)
+            settled(page)
             assert page.evaluate(MEASURE) == [], (path, zoom)
-        page.goto(f"{server.base}/account/details", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details/profile", wait_until="networkidle")
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         page.locator("[data-box-open='picture']").click()
         page.locator("#picture").wait_for(state="visible")

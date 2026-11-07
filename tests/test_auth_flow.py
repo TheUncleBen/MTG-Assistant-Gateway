@@ -407,8 +407,8 @@ async def test_refresh_reuse_revokes_the_successor_family(gw: Harness):
 
 async def test_refresh_rechecks_group_and_sign_in_age(tmp_path, idp: FakeIdP):
     """A refresh is refused, and the token family revoked, once the user's recorded groups no
-    longer hold the required group or their last sign-in is older than MTG_REAUTH_INTERVAL."""
-    settings = make_settings(tmp_path, required_group="mtg-users", reauth_interval=3600)
+    longer hold the required group or their last sign-in is older than the Assistant refresh time."""
+    settings = make_settings(tmp_path, required_group="mtg-users", refresh_token_ttl=3600)
     async with running(Harness(settings, idp)) as h:
         client = await h.register()
         t1 = await h.tokens_for(client)
@@ -521,7 +521,7 @@ async def test_account_page_shows_the_person_what_their_sign_in_shares(gw: Harne
     try:
         await b.login()
         page = (await b.http.get("/account/details")).text
-        assert "What your sign-in shares" in page and "alice@example.test" in page
+        assert "What your sign-in shares" in page and "alice@<wbr>example.<wbr>test" in page
         assert "Other &lt;Service&gt; Admins" in page and "<Service>" not in page
         assert "rel='icon' href='/favicon.ico'" in page
     finally:

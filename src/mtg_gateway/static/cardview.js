@@ -80,9 +80,9 @@
     });
     return viewer;
   }
-  /* Opening pushes a history entry so the phone's Back button (and the browser's) closes the
-     viewer instead of leaving the page; closing from the page goes back over that entry. */
-  var pushed = false;
+  /* The open viewer is a layer (static/layers.js): the phone's Back button closes it instead of
+     leaving the page, and closing from the page gives its history entry back where one is held. */
+  var Layers = window.MtgLayers, layer = null;
   function hide() {
     if (!viewer) return;
     viewer.classList.remove("open");
@@ -90,15 +90,13 @@
     document.documentElement.classList.remove("cardview-open");
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
-  function close() {
+  function close(fromBack) {
     if (!viewer || !viewer.classList.contains("open")) return;
-    if (pushed) { pushed = false; history.back(); return; }
+    var l = layer;
+    layer = null;
+    if (l && !fromBack && Layers) Layers.release(l);
     hide();
   }
-  window.addEventListener("popstate", function () {
-    if (history.state && history.state.cardview) return;
-    if (viewer && viewer.classList.contains("open")) { pushed = false; hide(); }
-  });
 
   function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
   // a printing as every screen writes it: "SLD 1074" (the pages' data-set) reads "SLD #1074"
@@ -145,9 +143,7 @@
     var closeBtn = draw(v, card, actions);
     v.classList.add("open");
     document.documentElement.classList.add("cardview-open");
-    if (!pushed) {
-      try { history.pushState({ cardview: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
-    }
+    if (!layer && Layers) layer = Layers.open({ name: "cardview", close: function () { close(true); } });
     closeBtn.focus();
   }
   /* Redraws the open viewer with fuller data (a page that reads the rules text after opening);
@@ -228,7 +224,7 @@
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.setAttribute("title", "Close");
     closeBtn.appendChild(el("span", "x", "×"));
-    closeBtn.addEventListener("click", close);
+    closeBtn.addEventListener("click", function () { close(false); });
     head.appendChild(closeBtn);
     var faces = card.faces && card.faces.length > 1 ? card.faces : [{ type: card.type, text: card.text, pt: card.pt, loyalty: card.loyalty, flavor: card.flavor }];
     var text = el("div", "cardtext");
@@ -241,9 +237,35 @@
     var dl = el("dl", "facts");
     var printing = [printLabel(card.set), card.rarity ? titleCase(card.rarity) : "",
       card.finish && card.finish.toLowerCase() !== "normal" && card.finish.toLowerCase() !== "nonfoil" ? titleCase(card.finish) : ""].filter(Boolean).join(" · ");
-    fact(dl, "Printing", printing);
+    var price = card.price && !isNaN(Number(card.price)) ? money(card.price, "usd") : "";
+    // The Printing row: a button that opens the Printings sheet (every printing, to watch one or,
+    // on your own deck, to use one), so the viewer itself leads to the other printings (the owner:
+    // "the printings button surfaced when you just click on a normal card"). A plain fact where
+    // nothing can open the sheet (a custom card, or no picker on the page).
+    var opener = printingsOpener(card);
+    if (printing && opener) {
+      var prow = el("button", "printrow");
+      prow.type = "button";
+      prow.setAttribute("aria-label", "Printing: " + printing + (price ? " · " + price : "") + ". See every printing");
+      var pic2 = el("span", "pic");
+      pic2.setAttribute("aria-hidden", "true");
+      pic2.innerHTML = "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='8.5' cy='9.5' r='1.5'/><path d='m21 16-5-5-8 8'/></svg>";
+      prow.appendChild(pic2);
+      prow.appendChild(el("span", "lbl", "Printing"));
+      prow.appendChild(el("span", "val", printing + (price ? " · " + price : "")));
+      var chev = el("span", "chev", "›");
+      chev.setAttribute("aria-hidden", "true");
+      prow.appendChild(chev);
+      prow.addEventListener("click", function () {
+        close();
+        setTimeout(opener, 60);  // the sheet opens once the viewer's own history entry has gone
+      });
+      side.appendChild(prow);
+    } else {
+      fact(dl, "Printing", printing);
+      fact(dl, "Price", price);
+    }
     fact(dl, "Artist", card.artist);
-    fact(dl, "Price", card.price && !isNaN(Number(card.price)) ? money(card.price, "usd") : "");
     fact(dl, "Salt", card.salt ? String(card.salt) : "");
     fact(dl, "EDHREC rank", card.rank ? Number(card.rank).toLocaleString() : "");
     if (card.gc) fact(dl, "Note", "Game changer", "gc");
@@ -329,11 +351,16 @@
     var pbtn = document.body.hasAttribute("data-watchlist") ? priceButton(card) : null;
     if (pbtn) more.appendChild(pbtn);
     more.appendChild(outLink("EDHREC", card.links && card.links.edhrec || edhrecUrl(card.name || "")));
+    // Scryfall as a pill with the other sites (no plain link under the actions); TCGplayer, read
+    // with the card's links, goes before it
+    var scryPill = outLink("Scryfall", card.scry || "https://scryfall.com/search?q=" + encodeURIComponent("!\"" + (card.name || "") + "\""));
+    scryPill.setAttribute("data-scry", "1");
+    more.appendChild(scryPill);
     function offerLinks(links) {
       if (links && links.tcgplayer && !more.querySelector("[data-shop]")) {
         var t = outLink("TCGplayer", links.tcgplayer);
         t.setAttribute("data-shop", "tcgplayer");
-        more.appendChild(t);
+        more.insertBefore(t, scryPill);
       }
     }
     if (card.name) {
@@ -361,11 +388,109 @@
     v.appendChild(box);
     return closeBtn;
   }
-  /* Price history: the member's own watches of this card (/watchlist/api/card), the daily prices
-     the gateway stored, newest first; a card not watched yet gets a Watch button. Nothing here
-     asks Scryfall; watching does once (the same as the Watchlist page). */
+  /* What the Printing row opens: the page's own opener (card.onPrintings; the deck page's, which
+     can also put the printing in the deck), or the shared browse-and-watch sheet
+     (static/cardmenu.js) where the gateway has watchlists on. Null for a custom card. */
+  function printingsOpener(card) {
+    if (card.custom) return null;
+    if (typeof card.onPrintings === "function") return card.onPrintings;
+    var CardMenu = window.MtgCardMenu;
+    if (!window.MtgPrintPick || !CardMenu || !CardMenu.artVariants || !document.body.hasAttribute("data-watchlist")) return null;
+    var pr = String(card.set || "").trim().split(/\s+/);
+    var current = pr.length === 2 && pr[0] ? { set: pr[0].toLowerCase(), number: pr[1] } : null;
+    return function () { CardMenu.artVariants(card.name || "", { current: current, returnFocus: lastFocus }); };
+  }
+  /* Price history: the printing on show when the member owns it (in their Binder or a deck of
+     theirs, which the daily price check prices) as a chart and a table, then the member's own
+     watches of this card (/watchlist/api/card), the daily prices the gateway stored, newest first;
+     a card not watched yet gets a Watch button. Nothing here asks Scryfall; watching does once
+     (the same as the Watchlist page). */
+  var UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
+  function printingId(card) {
+    if (card.sid) return card.sid;
+    var m = UUID.exec(card.img || "");  // Scryfall's picture address carries the printing's id
+    return m ? m[1] : "";
+  }
+  function priceTable(rows, cur, label) {
+    var table = el("table");
+    table.setAttribute("aria-label", label);
+    var head = el("tr");
+    head.appendChild(el("th", null, "Day"));
+    head.appendChild(el("th", null, "Price"));
+    head.childNodes.forEach(function (th) { th.setAttribute("scope", "col"); });
+    table.appendChild(head);
+    rows.forEach(function (h) {
+      var tr = el("tr");
+      var th = el("th", null, h.day);
+      th.setAttribute("scope", "row");
+      tr.appendChild(th);
+      tr.appendChild(el("td", null, money(h.price, cur)));
+      table.appendChild(tr);
+    });
+    return table;
+  }
+  // a line of the daily prices, oldest to newest, its first and last price said in words
+  function priceChart(points, cur, what) {
+    if (points.length < 2) return null;
+    var values = points.map(function (p) { return Number(p.price); });
+    var lo = Math.min.apply(null, values), hi = Math.max.apply(null, values), span = (hi - lo) || 1;
+    var w = 300, h = 80, step = w / (values.length - 1);
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "80");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("style", "display:block;color:var(--orange-text);margin:.25rem 0 .5rem");
+    svg.setAttribute("aria-label", what + ": " + money(values[0], cur) + " on " + points[0].day + ", " +
+      money(values[values.length - 1], cur) + " on " + points[points.length - 1].day + ".");
+    var line = document.createElementNS(NS, "polyline");
+    line.setAttribute("points", values.map(function (v, i) {
+      var y = hi === lo ? h / 2 : h - 4 - (v - lo) / span * (h - 8);
+      return (i * step).toFixed(1) + "," + y.toFixed(1);
+    }).join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", "currentColor");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.appendChild(line);
+    return svg;
+  }
+  var WHERE = { binder: "your binder", decks: "your decks" };
+  function ownedBlock(o, name) {
+    var wrap = el("div", "pv-owned");
+    var where = (o.where || []).map(function (k) { return WHERE[k] || k; }).join(" and ");
+    var h = el("h3", null, "This printing, in " + where);
+    h.setAttribute("style", "font-size:1rem;margin:0 0 .25rem");
+    wrap.appendChild(h);
+    var pts = (o.history || []).filter(function (h) { return h.price !== null && h.price !== undefined; });
+    if (!pts.length) {
+      wrap.appendChild(noPriceLine());
+      return wrap;
+    }
+    wrap.appendChild(el("p", null, titleCase(o.finish === "nonfoil" ? "normal" : o.finish) + ": " +
+      money(o.price, o.currency) + (o.day ? " on " + o.day : "")));
+    var chart = priceChart(pts, o.currency, name + ", " + pts.length + " days");
+    wrap.appendChild(chart || el("p", "muted", "The chart shows once there are two days of prices."));
+    var det = el("details");
+    det.setAttribute("style", "margin:.25rem 0 .75rem");
+    det.appendChild(el("summary", "btn small", "Price history table"));
+    det.appendChild(priceTable(pts.slice().reverse(), o.currency, name + ", newest first"));
+    wrap.appendChild(det);
+    return wrap;
+  }
+  // the one wording of a price nobody knows yet (audit A1, B7): the shared muted "unknown" and
+  // when it comes, on one line
+  function noPriceLine(lead) {
+    var p = el("p", "muted", lead || "");
+    p.appendChild(el("span", "muted unpriced", "unknown"));
+    p.appendChild(document.createTextNode(" \u00b7 comes with the next daily check"));
+    return p;
+  }
+  // a day with no price reads "unknown", as every missing price on the site does
   function money(v, cur) {
-    if (v === null || v === undefined) return "no price";
+    if (v === null || v === undefined) return "unknown";
     return (cur === "eur" ? "€" : "$") + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function priceButton(card) {
@@ -380,35 +505,46 @@
     var name = card.name || "";
     var fin = (card.finish || "").toLowerCase();
     fin = fin === "foil" || fin === "etched" ? fin : "nonfoil";
-    function show(watches) {
+    var sid = printingId(card);
+    function show(watches, owned) {
       box.textContent = "";
+      if (owned) box.appendChild(ownedBlock(owned, name));
       if (!watches.length) {
-        box.appendChild(el("p", "muted", "This card is not on your watchlist. Watch it to keep its price once a day."));
+        box.appendChild(el("p", "muted", owned ? "This card is not on your watchlist. Watch it for price alerts." :
+          "This card is not on your watchlist. Watch it to keep its price once a day."));
         var csrf = document.querySelector("input[name=csrf]");
         if (!csrf) return;
         var w = el("button", "btn small", "Watch this card");
         w.type = "button";
         w.addEventListener("click", function () {
           w.disabled = true;
-          fetch("/watchlist/api/watch", { method: "POST", credentials: "same-origin",
-            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.value, Accept: "application/json" },
-            body: JSON.stringify({ name: name, finish: fin }) })
-            .then(function (r) { return r.json(); })
+          // never rejects: signed out and no connection come back in the site's words, with Sign in
+          window.MtgFetch.answer("/watchlist/api/watch", { body: JSON.stringify({ name: name, finish: fin }), csrf: csrf.value, what: "the card was not watched" })
             .then(function (d) {
-              if (d && d.ok) { show([d.watch]); return; }
+              if (d && d.ok) { show([d.watch], owned); return; }
               w.disabled = false;
-              box.appendChild(el("p", "notice error", (d && d.message) || "The card could not be watched."));
-            })
-            .catch(function () { w.disabled = false; box.appendChild(el("p", "notice error", "No connection.")); });
+              var pr = window.MtgFetch.problem(d, "the card was not watched");
+              var p = el("p", "notice error", pr.text);
+              p.setAttribute("role", "alert");
+              pr.actions.forEach(function (a) { a.className = "btn small"; p.appendChild(document.createTextNode(" ")); p.appendChild(a); });
+              box.appendChild(p);
+            });
         });
         box.appendChild(w);
         return;
       }
       watches.forEach(function (v) {
         var where = printLabel([(v.set || "").toUpperCase(), v.collector_number || ""].filter(Boolean).join(" ")) || "any printing";
-        box.appendChild(el("p", null, where + " · " + v.finish + ": " + money(v.price, v.currency) + (v.day ? " on " + v.day : "")));
+        var unpriced = v.price === null || v.price === undefined;
+        var lead = where + " \u00b7 " + titleCase(v.finish || "nonfoil") + ": ";
+        var line = unpriced ? noPriceLine(lead)  // no price yet: one muted line, never a second
+          : el("p", null, lead + money(v.price, v.currency) + (v.day ? " on " + v.day : ""));
+        box.appendChild(line);
         var rows = (v.history || []).filter(function (h) { return h.price !== null; }).reverse().slice(0, 30);
-        if (!rows.length) { box.appendChild(el("p", "muted", "No price yet; it comes with the next daily check.")); return; }
+        if (!rows.length) {
+          if (!unpriced) box.appendChild(noPriceLine());
+          return;
+        }
         var table = el("table");
         var head = el("tr");
         head.appendChild(el("th", null, "Day"));
@@ -425,8 +561,10 @@
         });
         box.appendChild(table);
       });
-      var a = el("a", null, "Open the watchlist");
-      a.href = "/watchlist";
+      // a capsule, like every other way on (no plain blue link); it opens this card's row
+      var a = el("a", "btn small", "Open the watchlist");
+      var wid = watches.length === 1 ? watches[0].watch_id : "";
+      a.href = wid ? "/watchlist?open=" + encodeURIComponent(wid) + "#wr-" + encodeURIComponent(wid) : "/watchlist";
       box.appendChild(a);
     }
     btn.addEventListener("click", function () {
@@ -436,13 +574,15 @@
       if (!opening) return;
       box.textContent = "";
       box.appendChild(el("p", "muted", "Reading the price history…"));
-      getJSON("/watchlist/api/card?name=" + encodeURIComponent(name)).then(function (x) {
+      var url = "/watchlist/api/card?name=" + encodeURIComponent(name) +
+        (sid ? "&sid=" + encodeURIComponent(sid) + "&finish=" + encodeURIComponent(fin) : "");
+      getJSON(url).then(function (x) {
         if (!x.ok || !x.d || !x.d.ok) {
           box.textContent = "";
           box.appendChild(el("p", "notice error", "The price history could not be read. Press Price history again to retry."));
           return;
         }
-        show(x.d.watches || []);
+        show(x.d.watches || [], x.d.owned || null);
       }).catch(function () {
         box.textContent = "";
         box.appendChild(el("p", "notice error", "No connection. Press Price history again to retry."));
@@ -457,6 +597,8 @@
     return {
       name: node.getAttribute("data-card") || "",
       img: node.getAttribute("data-img") || "",
+      sid: node.getAttribute("data-sid") || "",
+      scry: node.getAttribute("data-scry") || "",  // the printing's own Scryfall page, where the page knows it
       // the back face's picture: a two-faced card's (Show back face) or a custom card's, through
       // the gateway
       back_img: node.getAttribute("data-back") || "",
@@ -485,5 +627,5 @@
       label: node.getAttribute("data-label") || ""
     };
   }
-  window.MtgCardView = { text: extraFor, open: open, update: update, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };
+  window.MtgCardView = { text: extraFor, open: open, update: update, close: function () { close(false); }, fromElement: fromElement, mana: mana, symbolize: symbolize };
 })();

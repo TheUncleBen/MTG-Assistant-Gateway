@@ -3,8 +3,8 @@ delete, and a deck's rename, move, delete and export. Each is the member's own p
 page (a session cookie and the page's X-CSRF-Token), with the same checks as the pages that did
 these before; none of them is an assistant's tool.
 
-Deleting a folder runs as a job, since it saves every deck inside first (a snapshot and, with
-backups on, a backup copy) at the gateway's Archidekt pace: the box starts it and reads its
+Deleting a folder runs as a job, since it saves every deck inside first (a gateway snapshot; no
+backup copy on Archidekt) at the gateway's Archidekt pace: the box starts it and reads its
 progress until it ends."""
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import prefs
+from . import backup_place, prefs
 from .decks import DeckError, current_client
 from .folderview import visible_folders
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
@@ -61,7 +61,7 @@ def _fail(kind: str, message: str, **extra: Any) -> JSONResponse:
 
 
 def _from(exc: DeckError) -> JSONResponse:
-    extra = {k: v for k, v in exc.extra.items() if k in ("counts",)}
+    extra = {k: v for k, v in exc.extra.items() if k in ("counts", "backup_folder_id") and v is not None}
     resp = _fail(exc.kind, str(exc), **extra)
     if exc.retry_after:
         resp.headers["Retry-After"] = str(exc.retry_after)
@@ -187,12 +187,14 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
     # -- folders -------------------------------------------------------------------------------
     @server.custom_route("/decks/api/folders", methods=["GET"], include_in_schema=False)
     async def folder_list(request: Request) -> Response:
-        """The member's folders for the Move and Inside lists: the backup folder never shows."""
+        """The member's folders for the Move and Inside lists: the backup folder never shows. The
+        tree My decks keeps (folder_view), which every write the member sends forgets; the move or
+        folder write itself checks the tree on Archidekt."""
         sub, refused = await member(request, write=False)
         if refused:
             return refused
         try:
-            info = await decks.folders(sub)
+            info = await decks.folder_view(sub)
         except DeckError as exc:
             return _from(exc)
         return ok(root_id=info["root_id"], folders=[_folder_out(f) for f in visible_folders(info)])
@@ -264,6 +266,22 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
             return _from(exc)
         return ok(folder=_folder_out(now), notice="folder_moved")
 
+    @server.custom_route("/decks/api/folders/backup/{fid}/top", methods=["POST"], include_in_schema=False)
+    async def backup_folder_top(request: Request) -> Response:
+        """The move or delete box's own answer to "the backup folder is inside": the member's press
+        moves the backup folder to the top level (backup_place.move_to_top), then the box asks again."""
+        sub, refused = await member(request, write=True)
+        if refused:
+            return refused
+        fid = folder_id_of(request)
+        if fid is None:
+            return _fail("invalid", "Pick a folder.")
+        try:
+            now = await backup_place.move_to_top(decks, sub, fid)
+        except DeckError as exc:
+            return _from(exc)
+        return ok(folder=_folder_out(now), notice="backup_moved")
+
     @server.custom_route("/decks/api/folders/{fid}/contents", methods=["GET"], include_in_schema=False)
     async def folder_contents(request: Request) -> Response:
         """What the delete box counts: decks, card packages and folders inside, read now."""
@@ -282,7 +300,6 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
             decks=len(got["decks"]),
             packages=len(got["packages"]),
             folders=len(got["folders"]),
-            backups=bool(decks.live.get("archidekt_backups")),
         )
 
     @server.custom_route("/decks/api/folders/{fid}/delete", methods=["POST"], include_in_schema=False)
@@ -390,9 +407,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         except DeckError as exc:
             return _from(exc)
         cards = sum(c.quantity for c in deck.cards if deck.in_deck(c))
-        return ok(
-            name=deck.name or "Unnamed deck", cards=cards, backups=bool(decks.live.get("archidekt_backups"))
-        )
+        return ok(name=deck.name or "Unnamed deck", cards=cards)
 
     @server.custom_route("/decks/api/decks/{deck_id}/delete", methods=["POST"], include_in_schema=False)
     async def deck_delete(request: Request) -> Response:
@@ -412,6 +427,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
     async def deck_export(request: Request) -> Response:
         """The Export box: the texts and files of the deck's Export page."""
         from .decks import deck_to_archidekt_text, deck_to_text
+        from .export_formats import to_plain
 
         sub, refused = await member(request, write=False)
         if refused:
@@ -433,7 +449,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         return ok(
             name=deck.name or "Unnamed deck",
             archidekt=deck_to_archidekt_text(deck),
-            plain=deck_to_text(deck),
+            plain=to_plain(deck),
             side=deck_to_text(deck, zone="side"),
             files=[{"label": label, "href": base + ext} for label, ext in files],
         )

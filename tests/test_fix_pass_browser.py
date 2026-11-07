@@ -23,6 +23,7 @@ from .test_editor_browser import _link
 from .test_menus_browser import _box, _exe, _items, _menu, _pick
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
+from .waits import expect, poll, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -137,7 +138,7 @@ def test_a_late_deck_list_answer_never_overwrites_a_newer_one(server: Server) ->
         page.goto(f"{server.base}/decks?folder=501", wait_until="networkidle")
         box = page.locator("#q")
         box.fill("ur")
-        page.wait_for_timeout(400)  # past the 250 ms pause: the "ur" request is out and held
+        poll(page, lambda: len(held) >= 1)  # past the 250 ms pause: the "ur" request is out and held
         assert len(held) == 1
         box.fill("urza")
         page.wait_for_function(
@@ -148,6 +149,7 @@ def test_a_late_deck_list_answer_never_overwrites_a_newer_one(server: Server) ->
             held[0].continue_()  # the older answer lands late (or was cut off by the page)
         except Exception:  # noqa: BLE001
             pass
+        # fixed wait: a negative check: the late answer to "ur" does not replace the list within 800 ms
         page.wait_for_timeout(800)
         names = page.locator("ul.decklist .deck .name").all_inner_texts()
         assert names == ["Urza's workshop"], names  # not the wider "ur" matches
@@ -167,6 +169,7 @@ def test_load_more_decks_keeps_the_search_the_results_are_of(server: Server) -> 
         page.goto(f"{server.base}/search?format=3", wait_until="networkidle")
         assert page.locator("ul.decklist li.deck").count() == 12
         page.locator(".spanel .tog input[value=U]").check()  # not sent: no search runs
+        # fixed wait: a negative check: no search runs within 300 ms of the tick
         page.wait_for_timeout(300)
         assert page.locator("ul.decklist li.deck").count() == 12
         page.locator("#s-more [data-more]").click()
@@ -200,6 +203,7 @@ def test_the_delete_folder_box_stays_until_its_job_ends(server: Server) -> None:
         # Esc and a press on the scrim do nothing while the job runs
         page.keyboard.press("Escape")
         page.mouse.click(5, 5)
+        # fixed wait: a negative check: Esc and the scrim press change nothing within 200 ms
         page.wait_for_timeout(200)
         assert page.locator(".mtgbox[role=dialog]:not([hidden])").count() == 1
         assert page.locator(".mtgbox[role=dialog]:not([hidden]) [data-cancel]").count() == 0
@@ -225,7 +229,8 @@ def test_back_closes_a_menu_in_the_app_and_on_a_tablet(server: Server, width: in
         page.locator("li.deck[data-deck-id='42'] button.kebab").click()
         _menu(page)
         page.go_back()
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         assert page.locator(".ctxmenu").count() == 0
         assert urlparse(page.url).path == "/decks", page.url  # still on My decks
         # the deck page's own card menu
@@ -234,7 +239,8 @@ def test_back_closes_a_menu_in_the_app_and_on_a_tablet(server: Server, width: in
         card.click(button="right")
         page.locator(".ctxmenu[role=menu]").wait_for(timeout=3000)
         page.go_back()
-        page.wait_for_timeout(300)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         assert page.locator(".ctxmenu").count() == 0
         assert urlparse(page.url).path == "/decks/42", page.url
         assert errors == [], errors
@@ -424,11 +430,8 @@ DECK_TARGETS = """() => {
   const mv = [...document.querySelectorAll('.curveaxis .mv')].filter(shown).map(size);
   const gap = axis ? parseFloat(getComputedStyle(axis).columnGap) || 0 : 0;
   const room = axis ? (R(axis).width - gap * (mv.length - 1)) / mv.length : 0;
-  const grip = [...document.querySelectorAll('button.stackgrip')].filter(shown).map(b => {
-    const reach = -parseFloat(getComputedStyle(b, '::before').top) || 0;
-    return {w: R(b).width + 2 * reach, h: R(b).height + 2 * reach}; });
   const de = document.documentElement;
-  return {stat, mv, room, grip, sideways: de.scrollWidth - de.clientWidth};
+  return {stat, mv, room, sideways: de.scrollWidth - de.clientWidth};
 }"""
 
 
@@ -445,7 +448,6 @@ def test_deck_page_targets_are_44_px_on_touch(server: Server, width: int, app: b
         assert got["stat"] and all(h >= 44 for h in got["stat"]), got
         # the axis buttons: 44 px high, and 44 px wide or as wide as the box lets eight be
         assert got["mv"] and all(m["w"] >= min(44, got["room"]) - 1 and m["h"] >= 44 for m in got["mv"]), got
-        assert got["grip"] and all(g["w"] >= 44 and g["h"] >= 44 for g in got["grip"]), got
         assert errors == [], errors
         browser.close()
 
@@ -455,10 +457,12 @@ PHONE_BAR = """() => {
   const bar = document.querySelector('.spanel .rbar');
   const cnt = bar.querySelector('.cnt'), sort = bar.querySelector('.g.sort');
   const view = bar.querySelector('.view');
+  const sel = bar.querySelector('.cnt + .btn:not([hidden])');
   const name = document.querySelector('.spanel .sp-name .search');
   const fbtn = document.querySelector('.spanel .fbtn');
   const mid = e => (R(e).top + R(e).bottom) / 2;
-  return {cnt: mid(cnt), sort: mid(sort), view: mid(view), nameB: R(name).bottom, fbtnT: R(fbtn).top};
+  return {cnt: mid(cnt), sort: mid(sort), view: mid(view), nameB: R(name).bottom, fbtnT: R(fbtn).top,
+          sel: sel ? mid(sel) : null, selR: sel ? R(sel).right : null, barR: R(bar).right};
 }"""
 
 
@@ -466,7 +470,9 @@ PHONE_BAR = """() => {
 @pytest.mark.parametrize("path", ["/cards?q=s", "/search?format=3", "/decks?folder=501"])
 def test_the_phone_results_bar_and_name_row(server: Server, width: int, path: str) -> None:
     """4: the count, Sort and the view share one row (deck search's longer count at 344 is on its
-    own line, as the mockup draws it); 6: Filters sits beside the name box."""
+    own line, as the mockup draws it); 6: Filters sits beside the name box. My decks' bar has
+    Select beside the count since 0.7.46: there the count and Select share the first row, at its
+    two ends, and Sort and the view the next, so no control is ever alone on a row."""
     from playwright.sync_api import sync_playwright
 
     sid = _link(server)
@@ -475,8 +481,11 @@ def test_the_phone_results_bar_and_name_row(server: Server, width: int, path: st
         page.goto(f"{server.base}{path}", wait_until="networkidle")
         got = page.evaluate(PHONE_BAR)
         assert abs(got["sort"] - got["view"]) < 2, got  # the same row: their middles meet
-        if not (width == 344 and path.startswith("/search")):
-            assert abs(got["cnt"] - got["sort"]) < 2, got
+        if path.startswith("/decks"):
+            assert got["sel"] is not None and abs(got["cnt"] - got["sel"]) < 2, got
+            assert abs(got["selR"] - got["barR"]) < 2 and got["sort"] > got["sel"] + 20, got
+        elif not (width == 344 and path.startswith("/search")):
+            assert got["sel"] is None and abs(got["cnt"] - got["sort"]) < 2, got
         assert got["fbtnT"] < got["nameB"], got  # the Filters button beside the name box
         assert errors == [], errors
         browser.close()
@@ -501,8 +510,10 @@ def test_card_search_controls_read_at_200_percent_text_on_a_desktop(server: Serv
     with sync_playwright() as p:
         browser, page, errors = _open(p, server, sid, 1280, touch=False)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        page.locator(".sp-open").click()  # the filters wait folded on a desktop
+        page.locator("#p-t").wait_for(state="visible", timeout=3000)
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(200)
+        settled(page)
         got = page.evaluate(ZOOM_1280)
         assert got["sideways"] <= 0, got
         assert len(got["mv"]) == 2 and all(w >= 4 for w in got["mv"]), got  # room for "From" and "To"
@@ -536,7 +547,7 @@ def test_phone_text_at_200_percent_keeps_tab_labels_whole_and_controls_readable(
         browser, page, errors = _open(p, server, sid, 390, app=True, touch=True)
         page.goto(f"{server.base}/decks?folder=501", wait_until="networkidle")
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(200)
+        settled(page)
         got = page.evaluate(ZOOM_390)
         assert got["sideways"] <= 0, got
         # 7: a one-word label never breaks mid-word; the sort drop-down shows its words
@@ -545,7 +556,7 @@ def test_phone_text_at_200_percent_keeps_tab_labels_whole_and_controls_readable(
         # 8: the Scan page's Set box can be typed in
         page.goto(f"{server.base}/scan", wait_until="networkidle")
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(200)
+        settled(page)
         got = page.evaluate(ZOOM_390)
         assert got["sideways"] <= 0, got
         assert got["setW"] is not None and got["setW"] >= 3, got
@@ -568,8 +579,12 @@ def test_the_brand_is_whole_at_1280_px_with_every_link(server: Server, path: str
         page.goto(f"{server.base}{path}", wait_until="networkidle")
         got = page.evaluate(BRAND)
         assert got["text"] == "MTG Assistant Gateway" and not got["cut"], got
-        # the four places, none dropped (navigation round 2: the rest under More)
-        assert got["links"] == 4, got
+        # the four places and the rail's pages, none dropped: a computer's bar this wide shows
+        # them all as links and no More (theme.TOPBAR_FULL_FROM, redesign screen 1)
+        from mtg_gateway import theme
+
+        assert got["links"] == len(theme.NAV_LINKS) + len(theme.rail_extra()) == 8, got
+        assert not page.locator(".topbar nav.site .navmore").is_visible()
         assert errors == [], errors
         browser.close()
 
@@ -581,9 +596,11 @@ def test_a_drop_down_keeps_its_chevron_while_hovered(server: Server) -> None:
     with sync_playwright() as p:
         browser, page, errors = _open(p, server, sid, 1280, touch=False)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        page.locator(".sp-open").click()  # the filters wait folded on a desktop
+        page.locator("#p-t").wait_for(state="visible", timeout=3000)
         btn = page.locator(".spanel .colors .msel-btn").first
         btn.hover()
-        page.wait_for_timeout(300)
+        settled(page)
         image = btn.evaluate("b => getComputedStyle(b).backgroundImage")
         assert "chevron" in image, image
         assert errors == [], errors
@@ -650,5 +667,138 @@ def test_card_tiles_keep_the_kebab_beside_the_name(
             for t in row:
                 assert t["kT"] is not None and t["kT"] < t["nmT"] + 24, t  # the ⋮ on the name's first line
             assert max(t["tyT"] for t in row) - min(t["tyT"] for t in row) < 2, row  # type lines level
+        assert errors == [], errors
+        browser.close()
+
+
+def test_load_more_decks_pages_come_back_after_back_and_a_reload(server: Server) -> None:
+    """Audit F-4 (eccfa3d9) on deck search's Load more (static/search.js): the second page is back
+    after Back from another page and after a reload."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 1280, touch=False)
+        page.goto(f"{server.base}/search?format=3", wait_until="networkidle")
+        page.locator("#s-more [data-more]").click()
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 24", timeout=5000
+        )
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        page.go_back()
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 24", timeout=5000
+        )
+        page.reload(wait_until="networkidle")
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 24", timeout=5000
+        )
+        assert page.locator("#s-count").inner_text() == "35 decks"
+        assert errors == [], errors
+        browser.close()
+
+
+def test_load_more_decks_that_could_not_be_read_says_so_in_the_one_wording(server: Server) -> None:
+    """Audit F-5 (eccfa3d9): deck search's Load more fails with the same words as every other."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 1280, touch=False)
+        page.goto(f"{server.base}/search?format=3", wait_until="networkidle")
+        how = {"answer": "abort"}
+
+        def answer(route):  # noqa: ANN001
+            if how["answer"] == "abort":
+                route.abort()
+            else:
+                route.fulfill(
+                    status=401,
+                    content_type="application/json",
+                    body='{"ok": false, "error": "unauthenticated"}',
+                )
+
+        page.route(lambda u: "/search/api/decks?" in u and "page=2" in u, answer)
+        page.locator("#s-more [data-more]").click()
+        toast = page.locator(".toast:not(.session-toast)")
+        toast.wait_for(state="visible", timeout=5000)
+        assert (
+            toast.inner_text().strip().startswith("No connection; nothing more could be loaded. Try again.")
+        )
+        assert page.locator("ul.decklist li.deck").count() == 12
+        # signed out meanwhile: the same shape of words, with Sign in
+        how["answer"] = "401"
+        page.evaluate("() => document.querySelectorAll('.toast').forEach(t => t.remove())")
+        page.locator("#s-more [data-more]").click()
+        toast.wait_for(state="visible", timeout=5000)
+        assert (
+            toast.inner_text()
+            .strip()
+            .startswith("You're signed out, so nothing more could be loaded. Try again.")
+        )
+        assert toast.locator("a, button", has_text="Sign in").count() == 1
+        assert errors == [], errors
+        browser.close()
+
+
+def test_rapid_filters_from_the_sheet_leave_one_entry_and_the_address_the_list_shows(server: Server) -> None:
+    """Audit F-12 (eccfa3d9), the stress test: on deck search, a drop-down picked in the sheet and
+    Show pressed at once, with every search and the sheet's own back() slowed, five times over,
+    leaves one entry over the page before (never a second) with the picked filter in the address;
+    on My decks, two boxes ticked at once and Back pressed on the sheet leave the address the
+    list was drawn for, and the page settles (no request stays open)."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_sheet_focus_browser import _open_sheet
+    from .test_sheet_history_browser import SLOW, _settle, _tick
+
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 360, touch=True)
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        page.goto(f"{server.base}/search", wait_until="networkidle")
+        _settle(page)
+        depth = page.evaluate("() => history.length")
+        page.evaluate(SLOW)
+        for i in range(5):
+            _open_sheet(page)
+            page.locator("#sp-filters select:not([name=cm]):not([name=dir])").first.select_option(
+                index=(i % 3) + 1
+            )
+            page.locator("#sp-filters .sp-show").click()
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+            quiet(page)  # the held back() and its popstate
+            _settle(page)
+            assert page.evaluate("() => history.length") == depth + 1, (
+                i,
+                page.evaluate("() => history.length"),
+                depth,
+            )
+            assert "format=" in page.url and page.evaluate(
+                "() => !(history.state && history.state.mtglayer)"
+            ), (i, page.url)
+            chosen = page.evaluate("() => document.querySelector('#sp-filters select[name=format]').value")
+            assert f"format={chosen}" in page.url, (i, chosen, page.url)
+        page.go_back()
+        page.wait_for_url(f"{server.base}/decks")
+        # My decks: two ticks at once, then Back on the sheet; the address names the ticked boxes
+        for i in range(5):
+            page.goto(f"{server.base}/decks", wait_until="networkidle")
+            _settle(page)
+            _open_sheet(page)
+            _tick(page, "box")
+            page.locator("#sp-filters input[type=checkbox]:visible").nth(1).check()
+            page.go_back()
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+            page.wait_for_load_state("networkidle", timeout=10000)
+            _settle(page)
+            form = page.evaluate(
+                "() => { const fd = new FormData(document.querySelector('.spanel form'));"
+                " const o = new URLSearchParams();"
+                " fd.forEach((v, k) => { if (String(v) !== '') o.append(k, String(v)); });"
+                " return o.toString(); }"
+            )
+            assert parse_qs(urlparse(page.url).query) == parse_qs(form), (i, page.url, form)
+            assert page.evaluate("() => !(history.state && history.state.mtglayer)"), i
         assert errors == [], errors
         browser.close()

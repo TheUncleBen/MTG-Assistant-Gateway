@@ -220,7 +220,7 @@ def test_settings_page_values_are_not_read_from_the_environment(
     monkeypatch.setenv("MTG_SCAN_MIN_OCR_CONFIDENCE", "35")
     monkeypatch.setenv("MTG_FORGE_GAMES", "9")
     s = load_settings()
-    assert (s.scryfall_lookup_interval, s.scan_min_ocr_confidence, s.forge_games) == (0.5, 50.0, 4)
+    assert (s.scryfall_lookup_interval, s.scan_min_ocr_confidence, s.forge_games) == (0.5, 50.0, 5)
     assert s.env_set == frozenset()
 
 

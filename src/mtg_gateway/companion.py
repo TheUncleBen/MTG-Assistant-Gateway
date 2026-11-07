@@ -24,7 +24,7 @@ from starlette.responses import RedirectResponse, Response
 
 from . import deck_stats
 from .archidekt import FORMAT_NAMES, format_label
-from .busy import busy_response
+from .busy import AGAIN, BUSY_TITLE, busy_response, outage
 from .deckpage import (
     LIST_ORDERS,
     money,
@@ -39,6 +39,7 @@ from .pages import (
 from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
+    UNPRICED_HTML,
     icon,
     render,
     stylesheet_link,
@@ -131,7 +132,14 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Cards", _num(stats.get("card_count"), 0)),
         ("Lands", _num(stats.get("land_count"), 0)),
         ("Avg MV", _num(stats.get("average_mana_value"))),
-        ("Price", money(stats.get("price_total")) if stats.get("price_total") is not None else "–"),
+        # no card priced (or a total of 0 from a report made before priced_cards): the shared muted
+        # "unknown" (theme.UNPRICED_HTML, as the deck page and the Binder say it), never $0
+        (
+            "Price",
+            _esc(money(stats.get("price_total")))
+            if stats.get("price_total") and stats.get("priced_cards") != 0
+            else UNPRICED_HTML,
+        ),
         # the bracket set on the deck is the deck's bracket; else Archidekt's estimate
         (
             "Bracket" if stats.get("archidekt_bracket") else "Archidekt's estimate",
@@ -141,7 +149,10 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ),
         ("Game changers", _num(len(stats.get("game_changers") or []), 0)),
     ]
-    tile_html = "".join(f"<div class='tile'><b>{_esc(v)}</b><span>{_esc(k)}</span></div>" for k, v in tiles)
+    tile_html = "".join(
+        f"<div class='tile'><b>{v if k == 'Price' else _esc(v)}</b><span>{_esc(k)}</span></div>"
+        for k, v in tiles
+    )
     curve = stats.get("mana_curve") or {}
     out = [f"<div class='tiles'>{tile_html}</div>"]
     if curve:
@@ -149,7 +160,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
             "<div class='twocol'><div><h3>Mana curve</h3>"
             + _bars(curve, label="Mana curve")
             + "</div><div><h3>Colors</h3>"
-            + _pips(stats.get("colour_pips") or {}, stats.get("mana_sources"))
+            + _pips(stats.get("color_pips") or {}, stats.get("mana_sources"))
             + "</div></div>"
         )
     # the deck page's verdict (deck_checks), also for a report stored before the engines merged
@@ -177,6 +188,7 @@ DECK_OK_MESSAGES = {
     "saved": "Saved to Archidekt. A snapshot from just before is under History if you want to undo.",
     "created": "Created on Archidekt.",
     "moved": "Deck moved to that folder on Archidekt.",
+    "undone": "Undone. The deck is back as it was before that change.",
 }
 # The deck pages' problem page (deck, Goldfish, Compare, Export): one full sentence per case as the
 # title, and one orange Back to my decks. Any other refusal shows its own words.
@@ -184,8 +196,8 @@ DECK_PROBLEM_TITLES = {
     "not_found": "This deck could not be found.",
     "forbidden": "This deck is private, so it can't be shown here.",
     "auth": "This deck is private, so it can't be shown here.",
-    "unavailable": "Archidekt didn't answer. Try again later.",
-    "rate_limited": "Archidekt didn't answer. Try again later.",
+    "unavailable": outage("unavailable", again=True),
+    "rate_limited": f"{BUSY_TITLE}. {AGAIN}",
 }
 
 
@@ -194,12 +206,15 @@ def deck_problem_title(exc: DeckError) -> str:
     if text:
         return text
     text = str(exc).strip() or "This deck could not be shown."
+    text = text[:1].upper() + text[1:]  # a refusal's own words, as a sentence (0.7.46 audit QG-19)
     return text if text.endswith((".", "!", "?")) else text + "."
 
 
 INDENT = "\u2003"  # an em space per folder level in folder pickers
 # Notices the settings page shows after one of its hand actions (?ok=).
 SETTINGS_OK_MESSAGES = {
+    "undone": "Undone. The deck is back as it was before that change.",
+    "saved": "Saved to Archidekt. A snapshot from just before is under History.",
     "categories": CATEGORIES_SAVED,
     "category_created": "Category created on Archidekt. A snapshot from just before is under History.",
     "category_deleted": "Category deleted on Archidekt. A snapshot from just before is under History.",
@@ -214,19 +229,19 @@ SETTINGS_OK_MESSAGES = {
     "collaborator_removed": "Collaborator removed on Archidekt.",
     "package": "Package settings saved to Archidekt and read back. A snapshot from just before is under "
     "History.",
+    "package_differs": "Package made on Archidekt, but Archidekt saved its settings differently. Check "
+    "them here and press Save package.",
     "template_added": "Category added on Archidekt; a snapshot from just before is under History.",
 }
 # Notices My decks shows (?ok=).
 LIST_OK_MESSAGES = {
     "saved": "Deck renamed on Archidekt.",
     "moved": "Deck moved on Archidekt.",
-    "deleted": "Deck deleted on Archidekt. Its last snapshot is under History; when backups are on, a copy "
-    "is in your backup folder.",
+    "deleted": "Deck deleted on Archidekt. Its last snapshot is under History.",
     "folder_created": "Folder created on Archidekt.",
     "folder_renamed": "Folder renamed on Archidekt.",
     "folder_moved": "Folder moved on Archidekt.",
-    "folder_deleted": "Folder deleted on Archidekt. Each deck's last snapshot is under History; when "
-    "backups are on, a copy of each deck is in your backup folder.",
+    "folder_deleted": "Folder deleted on Archidekt. Each deck's last snapshot is under History.",
 }
 DECK_ERR_MESSAGES = {
     "report_failed": "The deck report could not be made. Try again later.",
@@ -234,7 +249,7 @@ DECK_ERR_MESSAGES = {
     "not_found": "Archidekt could not find that deck.",
     "rate_limited": "Too many requests for your account are still running. Wait for them to finish "
     "and try again.",
-    "unavailable": "Archidekt or the research service is unavailable right now. Try again later.",
+    "unavailable": outage("unavailable", "Archidekt or the research service", again=True),
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it on the Account page.",
     "forbidden": "Archidekt refused access to that deck.",
@@ -257,7 +272,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             result = await state.decks.apply(sub, pid, via="browser")
         except DeckError as exc:
-            code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
+            code = _err_code(exc, proposal_exists=state.db.get_proposal(pid, sub) is not None)
             return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
         if result.get("state") == "applying":  # a large one carries on; its page shows the progress
             return RedirectResponse(f"/proposals/{pid}?ok=applying", status_code=303)
@@ -265,6 +280,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         target = deck_id or str(made.get("deck_id") or result.get("deck_id") or "")
         if not target.isdigit():
             return RedirectResponse(f"/proposals/{pid}?ok=applied", status_code=303)
+        if made.get("package_saved_as") and not made.get("package_block"):
+            return RedirectResponse(f"/proposals/{pid}?ok=applied", status_code=303)  # no block to edit
+        if made.get("package_saved_as"):  # a new package whose settings Archidekt saved otherwise
+            return RedirectResponse(f"/decks/{target}/settings?ok=package_differs#package", status_code=303)
         return RedirectResponse(f"/decks/{target}?ok={ok}", status_code=303)
 
     decks = state.decks
@@ -286,6 +305,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         extra_scripts: tuple[str, ...] = (),
         extra_css: str = "",
         main_class: str = "",
+        head_extra: str = "",
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -308,7 +328,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             # (Goldfish, Compare) loads the card viewer without deck.js
             + ("<script src='/static/cardview.js' defer></script>" if scripts or viewer_only else "")
             + ("<script src='/static/deck.js' defer></script>" if scripts and not viewer_only else "")
-            + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts),
+            + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts)
+            + head_extra,
         )
         if csp:
             resp.headers["Content-Security-Policy"] = csp
@@ -319,12 +340,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     def deck_problem(request: Request, exc: DeckError, *, sub: str, sid: str | None) -> Response:
         """A deck that cannot be shown (the deck page, Goldfish, Compare, Export): the shared busy
         page while Archidekt is busy, else one sentence for the case and Back to my decks."""
-        if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+        if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Deck"):
             return busy
         title = deck_problem_title(exc)
+        # the sentence is the page's title; the panel holds the way back, not the sentence again
         return page(
             title,
-            f"<div class='panel deckproblem'><p>{_esc(title)}</p>"
+            f"<div class='panel deckproblem'>"
             f"<a class='btn btn-primary' href='/decks'>{icon('decks')} Back to my decks</a></div>",
             sub=sub,
             sid=sid,
@@ -402,7 +424,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         return (
             "<div class='card'><h2>Link your Archidekt account</h2><p>Your decks appear here once Archidekt "
             "is linked. Public decks can still be opened by their Archidekt link.</p>"
-            "<div class='actions'><a class='btn btn-primary' href='/account/details#archidekt'>"
+            "<div class='actions'><a class='btn btn-primary' href='/account/details/archidekt'>"
             "Link Archidekt</a></div></div>"
         )
 
@@ -438,6 +460,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         secure=secure,
     )
     state.folder_jobs = add_folder_routes(server, state)
+    from .deck_bulk import add_bulk_routes
+
+    add_bulk_routes(server, state)
     add_custom_picture_routes(server, state)
     add_deck_routes(server, state, h)
     add_deck_extras_routes(server, state, h)
@@ -530,6 +555,8 @@ OFFLINE_SCRIPT = (STATIC_DIR / "offline.js").read_text(encoding="utf-8")
 # with its underscores as spaces, first letter capitalised).
 EVENT_LABELS = {
     "browser_login": "Signed in on the website",
+    # the Android app's browser sign-in did not come back by itself (pages.login_app_return)
+    "app_signin_tap_page": "App sign-in showed the “Open the app” page in the browser",
     "login_ok": "Signed in",
     "login_denied": "Sign-in refused",
     "login_rejected_group": "Sign-in refused: not in an allowed group",
@@ -539,6 +566,7 @@ EVENT_LABELS = {
     "tokens_revoked": "An assistant's access was revoked",
     "refresh_rejected": "An assistant's expired access was refused",
     "refresh_reuse_detected": "A reused assistant token was refused",
+    "refresh_retry_answered": "An assistant's repeated sign-in renewal was answered",
     "code_reuse_detected": "A reused sign-in code was refused",
     "proposal_created": "Proposal created",
     "proposal_applied": "Proposal applied",
@@ -549,15 +577,19 @@ EVENT_LABELS = {
     "archidekt_link_failed": "Archidekt link failed",
     "archidekt_link_expired": "Archidekt link expired",
     "archidekt_session_refreshed": "Archidekt sign-in renewed",
-    "collection_added": "Cards added to the collection",
-    "collection_removed": "Cards removed from the collection",
-    "collection_changed": "Collection changed",
+    "collection_added": "Cards added to the binder",
+    "collection_removed": "Cards removed from the binder",
+    "collection_changed": "Binder changed",
+    "collection_cleared": "Binder cleared",
     "deck_voted": "Liked a deck",
     "deck_bookmarked": "Bookmarked a deck",
     "deck_commented": "Commented on a deck",
     "user_followed": "Followed a user",
-    "report_created": "Deck simulation run",
+    "report_created": "Deck test run",
     "report_more_games": "Asked for more Forge games for a report",
+    "report_stopped": "Stopped a deck test",
+    "report_deleted": "Report deleted",
+    "snapshot_deleted": "Snapshot deleted",
     "scan_session_saved": "Scan saved",
     "scan_session_deleted": "Scan deleted",
     "folder_created": "Folder created",
@@ -581,7 +613,8 @@ EVENT_LABELS = {
     "admin_unlink": "An administrator unlinked your Archidekt account",
     "admin_delete_data": "An administrator deleted your data",
     "apply_needs_user": "Left for your press on the review page",
-    "approval_mode_set": "Approval mode changed",
+    "approval_mode_set": "Default approval mode changed",
+    "assistant_mode_set": "An assistant's approval mode changed",
     "approval_refused": "Approval refused",
     "apps_disconnected": "Apps disconnected",
     "archidekt_link_unsealed": "Archidekt link ended by a gateway update",
@@ -593,13 +626,14 @@ EVENT_LABELS = {
     "backup_failed": "Backup copy failed",
     "collaborator_added": "Collaborator added to a deck",
     "collaborator_removed": "Collaborator removed from a deck",
-    "collection_updated": "Collection card details changed",
+    "collection_updated": "Binder card details changed",
     "comment_voted": "Voted on a comment",
     "deck_comment_deleted": "Deleted a comment",
     "deck_comment_edited": "Edited a comment",
     "deck_cover_changed": "Deck cover changed",
     "deck_deleted": "Deck deleted",
     "deck_moved": "Deck moved to another folder",
+    "removed_card_deleted": "A removed card's row deleted for good on Archidekt",
     "deck_tag_added": "Tag added to a deck",
     "deck_tag_removed": "Tag removed from a deck",
     "folder_delete_stopped": "Folder delete stopped before anything was deleted",
@@ -609,6 +643,7 @@ EVENT_LABELS = {
     "issuer_repinned": "Sign-in provider address updated",
     "proposal_amended": "Proposal changed by the app",
     "proposal_apply_stopped": "Applying a proposal stopped before any change; it waits again",
+    "proposal_read_back": "A change cut off by a restart was checked against the deck",
     "proposal_reopened": "Proposal brought back",
     "proposal_withdrawn": "Proposal withdrawn",
     "proposals_applied_together": "Proposals applied together",

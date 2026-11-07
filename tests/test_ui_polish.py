@@ -85,7 +85,7 @@ def test_link_preview_image_is_absolute() -> None:
 def test_est_cost_delta_and_csv_types() -> None:
     assert (
         deckpage.est_cost_html({"price_total": 0, "priced_cards": 0})
-        == "<span title='No prices from Archidekt yet'>–</span>"
+        == "<span class='muted unpriced' title='No prices from Archidekt yet'>unknown</span>"
     )
     assert deckpage.est_cost_html({"price_total": 12.5, "priced_cards": 3}) == "$12.50"
     assert (
@@ -226,10 +226,13 @@ async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Sta
     )
     try:
         page = (await b.http.get("/account/details", headers=NAV)).text
-        assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl green'>" in page and note in page
+        # the row on the settings list carries the state; the fold under it the label and the note
+        assert "<span class='lbl'>Archidekt writes</span><span class='val'>On</span>" in page
+        assert "<p><span class='ui-lbl green'>" in page and note in page
         decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
         page = (await b.http.get("/account/details", headers=NAV)).text
-        assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl grey'>" in page and note in page
+        assert "<span class='lbl'>Archidekt writes</span><span class='val'>Off</span>" in page
+        assert "<p><span class='ui-lbl grey'>" in page and note in page
         for old in ("Deck writes", "MTG_WRITES_ENABLED", "by its operator"):
             assert old not in page, old
     finally:
@@ -303,3 +306,13 @@ def test_error_page_shell_survives_a_failing_database(monkeypatch: pytest.Monkey
     monkeypatch.setattr(app_mod, "browser_session", lambda _state, _request: ("sub-1", "sid-1"))
     state = SimpleNamespace(db=BrokenDb(), settings=SimpleNamespace(admin_group=None))
     assert app_mod._shell_for(state, None) == {}  # type: ignore[arg-type]
+
+
+def test_the_card_viewer_words_a_price_nobody_knows_one_way() -> None:
+    """Audit B7: cardview.js said "No price yet; it comes with the next daily (price) check" in
+    two places and "unknown · comes with the next daily check" in another. One wording, through
+    one helper, with the shared muted "unknown"."""
+    js = (Path(theme.__file__).parent / "static" / "cardview.js").read_text(encoding="utf-8")
+    assert '"No price yet' not in js and 'daily price check."' not in js  # the old lines, as strings
+    assert js.count("comes with the next daily check") == 1  # written once, in noPriceLine
+    assert js.count("noPriceLine(") == 4  # the helper and its three callers

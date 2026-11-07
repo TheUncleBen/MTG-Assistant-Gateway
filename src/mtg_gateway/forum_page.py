@@ -27,9 +27,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import actions, deck_extras, forum, ui
+from .busy import busy_body, busy_headers, busy_json_response, busy_plan, same_url
 from .companion import DECK_CSP, _json_for_html
 from .decks import DeckError, current_client
-from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect
+from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect_here
 from .theme import esc, icon
 
 PAGE = "/forum"
@@ -43,7 +44,7 @@ NEW_THREAD_WHY = (
     "Archidekt. Replies work here."
 )
 OPEN_LABEL = "Open a thread by its link or number"
-OPEN_PLACEHOLDER = "https://archidekt.com/forum/thread/… or the number"
+OPEN_PLACEHOLDER = "Link or number"
 OPEN_BUTTON = "Open thread"
 OPEN_BAD = "That is not a thread: give the thread's number or its link."
 LOCKED = "This thread is locked on Archidekt, so it takes no new replies."
@@ -52,6 +53,13 @@ ARCHIVED = "This thread is archived on Archidekt, so it takes no new replies."
 REPLY_PUBLIC = "Public under “{name}”. An assistant's reply always waits for your press."
 REPLY_PUBLIC_UNNAMED = "Public under your Archidekt name. An assistant's reply always waits for your press."
 WRITES_OFF = "Archidekt writes are switched off on this gateway, so replies can be read here but not posted."
+# a member without a linked Archidekt account reads the forum (decision C8) and is offered the link
+LINK_TO_REPLY = "Link Archidekt to reply"
+LINK_WHY = "You are reading Archidekt's forum without a linked account. Link yours to reply here."
+LINK_FAILED = (
+    "Archidekt shows this part of the forum to signed-in readers only. Link your Archidekt account "
+    "to read and reply here, or read it on Archidekt."
+)
 # the contest strip (the mockup's r2-contest screen)
 CONTEST_INTRO = (
     "Enter one of your decks with a short summary. Archidekt replaces that deck's description with "
@@ -78,10 +86,17 @@ MARKS = {
 ORDERS = (("recent", "Most recent"), ("points", "Points"))
 
 CSS = """
+/* the hub's name box narrows the sections (QG-25): a hidden row or group is gone, the count line
+   only shows with words */
+.fm .fm-group[hidden],.fm .tr[hidden]{display:none}
+.fm .fm-count{margin:-.25rem 0 .5rem}.fm .fm-count:empty{display:none}
 .fm .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;
   color:var(--text-muted);font-size:.9rem}
-.fm .crumbs a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;
-  padding:0 .25rem}
+/* the Link Archidekt strip (a member without a link): the words, then the one orange button */
+.fm .fm-link{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 1rem;
+  padding:.75rem 1rem;border-radius:var(--radius);background:var(--orange-tint)}
+.fm .fm-link p{flex:1 1 16rem;margin:0}
+.fm .fm-link .btn{margin:0;flex:none}
 .fm .fm-why{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .75rem;margin:0 0 .75rem}
 .fm .fm-why .btn{margin:0;flex:none}
 .fm .fm-why span{flex:1 1 14rem;color:var(--text-muted);font-size:.9rem}
@@ -116,7 +131,7 @@ CSS = """
 .fm form.fm-open .field input{width:100%;min-height:44px}
 .fm form.fm-open .btn{margin:0;min-height:44px}
 .fm .fm-links{margin:.5rem 0 1rem}
-.fm .loadmore .btn{margin:0;min-width:12rem}
+.fm .loadmore .btn{margin:0;min-width:min(12rem,calc(100vw - 2rem))}
 /* the thread's first post: its ⋮ at the end of the header line (a reply's ⋮ is the deck page's
    comment panel's, deckpage.py) */
 .fm .fm-post .ph .kebab{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;
@@ -207,6 +222,18 @@ def _plural(n: int, word: str) -> str:
     return f"{n:,} {many}"
 
 
+def link_strip_html(*, failed: bool = False) -> str:
+    """For a member without a linked Archidekt account: the one line why there is no reply box,
+    with the Link Archidekt button (the page's one orange button). ``failed``: the forum could
+    not be read either, so the strip is the page's body."""
+    words = LINK_FAILED if failed else LINK_WHY
+    return (
+        f"<div class='fm-link'><p>{esc(words)}</p>"
+        f"<a class='btn btn-primary' href='/account/details/archidekt'>{icon('link')}{esc(LINK_TO_REPLY)}</a>"
+        "</div>"
+    )
+
+
 def new_thread_html(section: str = "") -> str:
     """The plain button that opens Archidekt's New thread page in a new tab, with the one line why."""
     url = NEW_THREAD_URL + (f"?section={quote(section, safe='')}" if section else "")
@@ -225,11 +252,12 @@ def group_anchor(group: str) -> str:
 
 
 def crumbs_html(*parts: tuple[str, str]) -> str:
-    """Forum › group › section: every crumb a link (a group's goes to its list on the front page)."""
-    out = [f"<a href='{PAGE}'>Forum</a>"]
+    """Forum › group › section: every crumb a way back, the theme's grey capsule (a group's goes to
+    its list on the front page)."""
+    out = [ui.cap_link("Forum", PAGE)]
     for text, href in parts:
         out.append("<span aria-hidden='true'>›</span>")
-        out.append(f"<a href='{esc(href)}'>{esc(text)}</a>" if href else f"<span>{esc(text)}</span>")
+        out.append(ui.cap_link(text, href) if href else f"<span>{esc(text)}</span>")
     return f"<nav class='crumbs' aria-label='You are in'>{''.join(out)}</nav>"
 
 
@@ -256,17 +284,23 @@ def changed_html(message: str, *, value: str = "", error: str = "") -> str:
     )
 
 
-def sections_html(got: dict[str, Any]) -> str:
+def sections_html(got: dict[str, Any], q: str = "") -> str:
     """The groups and their sections: a table a group (no chips above it: they named every
-    section a second time, and the tables are short enough to read down)."""
+    section a second time, and the tables are short enough to read down), under a name box that
+    narrows the rows as you type (static/forum.js; ``q`` is the box submitted without scripts:
+    0.7.46 audit QG-25)."""
     groups = got.get("groups") or []
+    needle = q.strip().casefold()
     out = []
     for g in groups:
         rows = []
         for s in g["sections"]:
+            words = f"{s['section']} {s['description'] or ''}".casefold()
+            if needle and needle not in words:
+                continue
             desc = f"<span class='deck'>{esc(s['description'])}</span>" if s["description"] else ""
             rows.append(
-                f"<a class='tr' href='{section_href(g['group'], s['section'])}'>"
+                f"<a class='tr' href='{section_href(g['group'], s['section'])}' data-q='{esc(words)}'>"
                 f"<span class='title'><span class='t'>{esc(s['section'])}</span>{desc}</span>"
                 f"<span class='fm-n'>{s['posts']:,}</span></a>"
             )
@@ -283,8 +317,14 @@ def sections_html(got: dict[str, Any]) -> str:
             + "</div></div>"
         )
     if not out:
-        out.append("<p class='muted'>Archidekt's forum lists no sections right now.</p>")
-    return "".join(out)
+        out.append(
+            "<p class='muted'>No section matches.</p>"
+            if needle
+            else "<p class='muted'>Archidekt's forum lists no sections right now.</p>"
+        )
+    tools = ui.toolbar(PAGE, search_label="Find a section", placeholder="Section name|Name", q=q)
+    status = "<p class='muted small fm-count' data-filter-count aria-live='polite'></p>"
+    return tools + status + "".join(out)
 
 
 def section_label(section: str) -> str:
@@ -312,11 +352,12 @@ def thread_rows_html(threads: list[dict[str, Any]]) -> str:
         last_html = by + (" · " if by and when else "") + when
         # on a phone the last post's date joins the owner and the replies on the second line
         # (one flex item, so the row's gap doesn't open a space before the date's dot)
+        # as facts (ui.facts): no dot left at a line's end; the date a fact of its own, shown on a phone
         sub = (
-            "<span>"
-            + " · ".join((esc(t["owner"]), _plural(t["responses"], "reply")))
-            + (f"<span class='sm-only fm-when'> · {when}</span>" if when else "")
-            + "</span>"
+            "<span class='ui-dots-w'><span class='tx ui-dots balanced'>"
+            f"<span>{esc(t['owner'])}</span><span>{_plural(t['responses'], 'reply')}</span>"
+            + (f"<span class='sm-only fm-when'>{when}</span>" if when else "")
+            + "</span></span>"
         )
         rows.append(
             f"<a class='tr' href='{thread_href(t['id'])}' data-id='{t['id']}'>"
@@ -340,20 +381,21 @@ def load_more_words(got: dict[str, Any]) -> dict[str, Any]:
         "shown": shown,
         "total": total,
         "label": f"Load more ({shown:,} of {total:,} shown)",
-        "done": f"All {total:,} shown.",
+        "done": ui.all_shown(total, ""),
     }
 
 
-def threads_html(got: dict[str, Any]) -> str:
+def threads_html(got: dict[str, Any], *, strip: str = "") -> str:
     """One section's page: crumbs, the head, the New thread button, the toolbar, the table and
-    Load more (a button; without scripts, the next page's address)."""
+    Load more (a button; without scripts, the next page's address). ``strip``: the Link
+    Archidekt strip for a member without a link."""
     group, section = got["group"], got["section"]
     order, q, page = got["order"], got["search"], got["page"]
     head = ui.page_head(section, f"{group} · {_plural(got['count'], 'thread')}")
     tools = ui.toolbar(
         section_href(group, section),
         search_label="Search threads",
-        placeholder="Search threads",
+        placeholder="Search",
         q=q,
         filters=[ui.filter_select("order", "Order", ORDERS, order)],
     )
@@ -388,6 +430,7 @@ def threads_html(got: dict[str, Any]) -> str:
     return (
         crumbs_html((group, f"{PAGE}#{group_anchor(group)}"), (section, section_href(group, section)))
         + head
+        + strip
         + new_thread_html(section)
         + tools
         + table
@@ -424,10 +467,12 @@ def toolbar_html() -> str:
     return f"<div class='rt' role='toolbar' aria-label='Text style'>{buttons}</div>"
 
 
-def reply_form_html(csrf: str, me_name: str) -> str:
+def reply_form_html(csrf: str, me_name: str, thread_id: str = "") -> str:
     public = REPLY_PUBLIC.format(name=me_name) if me_name else REPLY_PUBLIC_UNNAMED
+    # the reply typed is kept and put back (static/draft.js), per thread
     return (
-        f"<form class='newcomment' data-forum='1' data-me-name='{esc(me_name)}'>"
+        f"<form class='newcomment' data-forum='1' data-me-name='{esc(me_name)}' "
+        f"data-draft='reply:{esc(thread_id)}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<label for='ctext'>Your reply</label>"
         + toolbar_html()
@@ -535,7 +580,8 @@ def enter_box_html(
     v = values or {}
     summary = v.get("summary", "")
     body = (
-        f"<form id='fm-enter-f' method='post' action='{thread_href(tid)}/contest' class='stack' novalidate>"
+        f"<form id='fm-enter-f' method='post' action='{thread_href(tid)}/contest' class='stack' novalidate "
+        f"data-draft='contest:{esc(tid)}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<input type='hidden' name='entry_action' value='enter'>"
         "<div class='field'><label for='fm-ed'>Deck</label><span class='sel'>"
@@ -550,8 +596,8 @@ def enter_box_html(
         f"<textarea id='fm-es' name='summary' rows='4' maxlength='{actions.CONTEST_SUMMARY_MAX}' "
         f"data-count='fm-es-c' required>{esc(summary)}</textarea>"
         f"<div class='dx-under'><span class='muted small'>{esc(CONTEST_SUMMARY_HELP)}</span>"
-        f"<span class='muted small' id='fm-es-c' data-counter>{len(summary)} / "
-        f"{actions.CONTEST_SUMMARY_MAX}</span></div></div>"
+        f"<span class='muted small' id='fm-es-c' data-counter>"
+        f"{ui.counted(len(summary), actions.CONTEST_SUMMARY_MAX)}</span></div></div>"
         + ui.notice(
             f"<b>{esc(CONTEST_REPLACES)}</b> {esc(deck_extras.CONTEST_WARN)}",
             "warn",
@@ -602,7 +648,7 @@ def withdraw_box_html(
         f"Withdraw “{name}” from this contest?",
         body,
         actions=[
-            ui.box_button("Keep my entry", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Withdraw", kind="danger-solid", form="fm-withdraw-f", icon_name="x"),
         ],
         open=open,
@@ -618,6 +664,7 @@ def thread_html(
     me: int | None,
     me_name: str = "",
     writes_enabled: bool,
+    linked: bool = True,
     entries: list[dict[str, Any]] | None = None,
     open_box: str = "",
     box_error: str = "",
@@ -627,11 +674,13 @@ def thread_html(
     contest strip, the replies in the deck page's comment panel and the reply box with its text
     style buttons. The thread's replies go to the script as JSON, in the shape the comment route
     answers, so the panel draws them without reading the thread again. ``entries``: a contest
-    thread's entries (None when they could not be read)."""
+    thread's entries (None when they could not be read). ``linked``: False for a member without
+    a linked Archidekt account, who reads the thread and is offered the link where the reply box
+    would be."""
     tid = t["id"]
     target = forum.target(tid)
     closed = t["locked"] or t["archived"]
-    can_write = writes_enabled and not closed
+    can_write = writes_enabled and not closed and linked
     contest = t.get("type") == "contest"
     # the title, its line (who started it, the replies), then Open on Archidekt on a line of its
     # own: the order the section page keeps (its heading, its line, New thread on Archidekt)
@@ -668,9 +717,11 @@ def thread_html(
     }
     data = _json_for_html(pre)  # every < escaped: no reply can open a tag inside the block
     if can_write:
-        form = reply_form_html(csrf, me_name)
+        form = reply_form_html(csrf, me_name, str(tid))
     elif closed:
         form = ""
+    elif not linked:
+        form = link_strip_html()
     else:
         form = f"<p class='muted small'>{esc(WRITES_OFF)}</p>"
     replies = "".join(_comment_html(c) for c in t["replies"]) or "<p class='muted'>No replies yet.</p>"
@@ -755,25 +806,58 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     def wants_json(request: Request) -> bool:
         return "application/json" in (request.headers.get("accept") or "")
 
-    def problem(exc: DeckError, sub: str, sid: str | None, *, status: int = 400) -> Response:
+    def problem(
+        exc: DeckError, sub: str, sid: str | None, *, status: int = 400, request: Request | None = None
+    ) -> Response:
         if exc.kind == "unavailable" and str(exc) == forum.FORUM_CHANGED:
             body = ui.page_head(TITLE, SUB) + changed_html(str(exc))
             return respond(body, sub, sid)
+        if exc.kind == "not_linked" or (exc.kind == "auth" and not forum.linked(decks, sub)):
+            # a member without a link, where Archidekt wants a signed-in reader: never the
+            # assistant's sentence with a raw address, but plain words, the Link button and the
+            # way to Archidekt's own forum
+            body = (
+                ui.page_head(TITLE, SUB)
+                + link_strip_html(failed=True)
+                + f"<p class='fm-links'><a class='btn btn-plain' href='{ARCHIDEKT_FORUM}' target='_blank' "
+                f"rel='noreferrer noopener'>{icon('external')}Archidekt's forum</a></p>" + open_form_html()
+            )
+            return respond(body, sub, sid)
+        plan = busy_plan(exc)
+        if plan is not None:
+            # Archidekt (or the member's own pace) is busy: the shared busy panel with 429 or 503
+            # and Retry-After, never a 400 "bad request" (independent review 2, L15)
+            body = ui.page_head(TITLE, SUB) + busy_body(plan, same_url(request) if request else PAGE)
+            resp = respond(body, sub, sid, status=plan.status)
+            resp.headers.update(busy_headers(plan))
+            return resp
+        words = str(exc)
         if exc.kind == "not_found":
             status = 404
-        body = ui.page_head(TITLE, SUB) + ui.notice(str(exc), "error", role="alert") + open_form_html()
+            words = forum.THREAD_NOT_FOUND  # forum.thread's own words, the tool's too
+        elif exc.kind == "invalid" and words.startswith("thread_id must be"):
+            words = OPEN_BAD  # the open form's own words, not the tool's field name
+        body = (
+            ui.page_head(TITLE, SUB)
+            + ui.notice(words, "error", role="alert")
+            + f"<p><a class='btn btn-primary' href='{PAGE}'>{icon('back')} Back to the forum</a></p>"
+            + open_form_html()
+        )
         return respond(body, sub, sid, status=status)
 
     @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)
     async def forum_home(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         try:
-            got = await forum.sections(decks, sub)
+            # kept briefly per member, forgotten by any write they send (decks.short_reads)
+            got = await decks.short_reads.get(sub, ("forum",), lambda: forum.sections(decks, sub))
         except DeckError as exc:
-            return problem(exc, sub, sid)
-        body = ui.page_head(TITLE, SUB) + new_thread_html() + sections_html(got)
+            return problem(exc, sub, sid, request=request)
+        strip = "" if forum.linked(decks, sub) else link_strip_html()
+        q = (request.query_params.get("q") or "")[:80]
+        body = ui.page_head(TITLE, SUB) + strip + new_thread_html() + sections_html(got, q)
         return respond(body, sub, sid)
 
     @server.custom_route(PAGE + "/thread", methods=["GET"], include_in_schema=False)
@@ -781,7 +865,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The little form: a thread's link or number goes to its page."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         raw = (request.query_params.get("thread") or "").strip()[:200]
         try:
             tid = forum._thread_id(raw)
@@ -797,7 +881,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = str(request.path_params["thread_id"])[:200]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         # the old addresses of the thread's boxes (/forum/thread/<n>/enter and so on): the thread
         # page with that box drawn open, so the strip's buttons work without scripts
         head, _slash, tail = raw.rpartition("/")
@@ -809,7 +893,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             tid = forum._thread_id(raw)
         except DeckError as exc:
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         if raw != str(tid):  # a link pasted into the address: its own page
             return RedirectResponse(thread_href(tid), status_code=303)
         if open_box:
@@ -835,10 +919,16 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The thread page; ``open_box`` names one of its boxes (CONTEST_BOXES) drawn open, as
         the old addresses draw it and as a refused press comes back with its words."""
         try:
-            t = await forum.thread(decks, sub, tid, page=page_no)
+            # kept briefly per member; their reply, vote or report forgets it (decks.short_reads)
+            t = await decks.short_reads.get(
+                sub, ("forum-thread", str(tid), page_no), lambda: forum.thread(decks, sub, tid, page=page_no)
+            )
+            # the trail as the section listings read so far name it (not as when the thread was kept)
+            t["in"] = forum.in_section(int(t["id"]))
         except DeckError as exc:
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         link = state.db.get_link(sub) or {}
+        linked = bool(link)
         raw_me = str(link.get("archidekt_user_id") or "")
         me = int(raw_me) if raw_me.isdigit() else None
         me_name = str(link.get("archidekt_username") or "")
@@ -846,8 +936,12 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if t.get("type") == "contest" and link:
             # the contest's entries, as the contest page reads them (one read, on contest threads only)
             try:
-                entries = await decks._call_unslotted(
-                    sub, lambda token, *_: decks.client.contest_entries(token, tid)
+                entries = await decks.short_reads.get(
+                    sub,
+                    ("forum-contest", str(tid)),
+                    lambda: decks._call_unslotted(
+                        sub, lambda token, *_: decks.client.contest_entries(token, tid)
+                    ),
                 )
             except DeckError:
                 entries = None
@@ -857,6 +951,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             me=me,
             me_name=me_name,
             writes_enabled=bool(s.writes_enabled),
+            linked=linked,
             entries=entries,
             open_box=open_box,
             box_error=box_error,
@@ -869,11 +964,11 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = str(request.path_params["thread_id"])[:200]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         try:
             tid = forum._thread_id(raw)
         except DeckError as exc:
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         data = await h.form(request, limit=64_000)
         if not h.check_csrf(sid, data):
             if wants_json(request):
@@ -971,7 +1066,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         section = str(request.path_params["section"])[:100]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(section_href(group, section))
+            return login_redirect_here(request, section_href(group, section))
         q = request.query_params
         order = q.get("order") if q.get("order") in forum.ORDERS else "recent"
         search = (q.get("q") or "").strip()[:100]
@@ -980,13 +1075,21 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         except ValueError:
             page_no = 1
         try:
-            got = await forum.threads(decks, sub, group, section, page=page_no, order=order, search=search)
+            got = await decks.short_reads.get(
+                sub,
+                ("forum-section", group, section, page_no, order, search),
+                lambda: forum.threads(decks, sub, group, section, page=page_no, order=order, search=search),
+            )
         except DeckError as exc:
             if wants_json(request):
+                # Load more: busy or unreachable is 429 or 503 with Retry-After, as the page is
+                busy = busy_json_response(exc)
+                if busy is not None:
+                    return busy
                 return JSONResponse(
                     {"ok": False, "message": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"}
                 )
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         if wants_json(request):
             # Load more with scripts: the next page's rows, appended in place (static/forum.js)
             has_more = got["page"] < got["pages"]
@@ -1000,4 +1103,5 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 },
                 headers={"Cache-Control": "no-store"},
             )
-        return respond(threads_html(got), sub, sid, title=f"{section}: {TITLE}")
+        strip = "" if forum.linked(decks, sub) else link_strip_html()
+        return respond(threads_html(got, strip=strip), sub, sid, title=f"{section}: {TITLE}")

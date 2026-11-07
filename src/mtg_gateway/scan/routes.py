@@ -35,10 +35,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, JSONResponse, Response
 
 from .. import prefs
-from ..pages import NO_STORE, _csrf, _safe_next, browser_session, csrf_header_ok, read_limited
+from ..pages import NO_STORE, _csrf, browser_session, csrf_header_ok, login_redirect_here, read_limited
 from ..theme import ICONS, render
 from .service import ScanError, ScanService, parse_cards
 
@@ -155,7 +155,7 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
     async def scan_page(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return RedirectResponse(f"/login?next={_safe_next('/scan')}", status_code=302)
+            return login_redirect_here(request, "/scan")
         user = state.db.get_user(sub) or {}
         who = user.get("preferred_username") or user.get("email") or sub
         config = {
@@ -296,6 +296,25 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
         )
 
+    @server.custom_route("/scan/api/printing", methods=["GET"], include_in_schema=False)
+    async def printing(request: Request) -> Response:
+        """One printing by ``set`` and ``number``: the printing picker finds a deck row's card by
+        its own printing before it lists the card's printings."""
+        who = api_user(request, write=False)
+        if isinstance(who, Response):
+            return who
+        qp = request.query_params
+        try:
+            card = await service.printing(qp.get("set", ""), qp.get("number", ""), owner=who[0])
+        except ScanError as exc:
+            return fail(exc)
+        keys = ("name", "oracle_id", "set", "collector_number", "layout", "type_line")
+        slim = {k: card.get(k) for k in keys}
+        return JSONResponse(
+            {"ok": True, "card": slim},
+            headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+        )
+
     @server.custom_route("/scan/api/prints", methods=["GET"], include_in_schema=False)
     async def prints(request: Request) -> Response:
         who = api_user(request, write=False)
@@ -318,9 +337,12 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             )
         except ScanError as exc:
             return fail(exc)
+        # from the local copy while Scryfall can't be reached (out["as_of_note"] says so): never kept,
+        # so Scryfall's own answer is shown again as soon as it is back
+        keep = "no-store" if out.get("from_local_copy") else "private, max-age=3600"
         return JSONResponse(
             {"ok": True, **out},
-            headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+            headers={"Cache-Control": keep, "X-Content-Type-Options": "nosniff"},
         )
 
     @server.custom_route("/scan/api/resolve", methods=["POST"], include_in_schema=False)

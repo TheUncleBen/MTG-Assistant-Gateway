@@ -35,6 +35,7 @@ from .test_overflow_sweep_browser import CARDS, _seed
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_ui_pass_c_browser import _seed as _parity_seed
+from .waits import expect, frame, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -47,6 +48,23 @@ CHIP_MS = 150
 LONG_TASK_MS = 300
 SERVER_MS = 80
 HOLD_MS = 450  # static/cardmenu.js: the press and hold that opens a menu
+# A measure over its budget is taken again, up to this many runs in all, and the best run counts.
+# The page's own cost is the floor of every run and a busy runner (other tests in parallel under
+# -n) only adds to it, so a page over budget is over in every run: more runs discount only the
+# runner, never the page.
+RUNS = 5
+
+
+def best_within(budget: int, once, *, least: int = 1, most: int = RUNS) -> int:
+    """The best of at least ``least`` and at most ``most`` runs of ``once()`` (each returns ms),
+    stopping once the best is within ``budget``."""
+    best = 10**6
+    for i in range(most):
+        if i >= least and best <= budget:
+            break
+        best = min(best, once())
+    return best
+
 
 MAIN_PAGES = (
     "/",
@@ -171,28 +189,35 @@ class Driver:
 
     def goto(self, path: str) -> None:
         self.page.goto(self.server.base + path, wait_until="load")
-        self.page.wait_for_timeout(300)  # the deferred scripts have run and the first frame is up
+        frame(self.page)  # the deferred scripts ran before load; the first frame is up
 
-    def measure(self, do, *, tries: int = 2, reset=None) -> int:
+    def measure(self, do, *, tries: int = 2, reset=None, budget: int | None = None) -> int:
         """The best of ``tries`` runs of ``do`` (input to the frame after the first change on the
         page), ``reset()`` between them. The best run is the one that shows the page's own cost;
-        a worse one shows the runner being busy."""
-        best = 10**6
-        for i in range(tries):
-            if i and reset:
+        a worse one shows the runner being busy. With ``budget`` (and ``reset``), runs go on while
+        the best is over it, up to RUNS in all (best_within)."""
+        first = [True]
+
+        def once() -> int:
+            if not first[0] and reset:
                 reset()
                 # on a phone the close goes back over the box's own history entry; that lands later
-                self.page.wait_for_timeout(700)
+                quiet(self.page)
+            first[0] = False
             self.perf.clear()
             self.page.evaluate("() => window.__arm()")
             do()
             for _ in range(60):  # the response, within 3 s at most
                 if self.perf:
                     break
+                # fixed wait: poll interval (perf fills as console events land)
                 self.page.wait_for_timeout(50)
             assert self.perf, "nothing on the page changed after the input"
-            best = min(best, self.perf[0])
-        return best
+            return self.perf[0]
+
+        if budget is None or reset is None:
+            return best_within(0, once, least=tries, most=tries)
+        return best_within(budget, once, least=tries)
 
     def close(self) -> None:
         self.browser.close()
@@ -218,7 +243,7 @@ class Driver:
         assert b is not None
         x, y = b["x"] + b["width"] / 2, b["y"] + min(b["height"] / 2, 30)
         self.cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        self.page.wait_for_timeout(HOLD_MS + 150)
+        self.page.locator(".ctxmenu").first.wait_for(timeout=5000)  # held past the hold: the menu opened
         self.cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
 
 
@@ -233,12 +258,16 @@ class _Held:
     def __exit__(self, *exc):
         return False
 
-    def release(self) -> None:
-        for _ in range(100):  # until the request has reached the route (5 s at most)
+    def reached(self) -> None:
+        """Until the request has reached the route (5 s at most)."""
+        for _ in range(100):
             if self.routes:
                 break
-            self.page.wait_for_timeout(50)
+            self.page.wait_for_timeout(50)  # fixed wait: poll interval (routes fill as events land)
         assert self.routes, "the input sent no request"
+
+    def release(self) -> None:
+        self.reached()
         self.routes[0].continue_()
         self.page.unroute(self.pattern)
         self.page.wait_for_url(self.pattern)
@@ -267,21 +296,29 @@ def test_menus_open_within_one_beat(server: Server) -> None:
             d.goto("/decks")
             tile = page.locator("li.deck[data-deck-id]").first
             kebab = tile.locator("button.kebab").first
-            ms = d.measure(partial(kebab.click, no_wait_after=True), reset=d.escape)
+            ms = d.measure(partial(kebab.click, no_wait_after=True), reset=d.escape, budget=MENU_MS)
             assert d.menu().is_visible()
             slow.append(("decks ⋮", d.width, ms))
             d.escape()
-            page.wait_for_timeout(250)
+            quiet(page)
             right = partial(tile.click, button="right", position={"x": 20, "y": 20}, no_wait_after=True)
-            ms = d.measure(right, reset=d.escape)
+            ms = d.measure(right, reset=d.escape, budget=MENU_MS)
             assert d.menu().is_visible()
             slow.append(("decks right-click", d.width, ms))
             d.escape()
             if d.width < 600:
-                # a press and hold: the menu comes within the beat after the hold's own time
-                d.goto("/decks")  # a fresh page: the menu just closed is still settling its Back entry
+                # a press and hold: the menu comes within the beat after the hold's own time. Like
+                # the others, the best of a few runs (one sample read the runner: a busy machine
+                # fires the page's 450 ms hold timer late), each on a fresh page, as the menu just
+                # closed is still settling its Back entry
+                d.goto("/decks")
                 tile = page.locator("li.deck[data-deck-id]").first
-                ms = d.measure(partial(d.hold, tile), tries=1)
+
+                def fresh(d: Driver = d) -> None:
+                    d.escape()
+                    d.goto("/decks")
+
+                ms = d.measure(partial(d.hold, tile), reset=fresh, budget=MENU_MS + HOLD_MS)
                 assert d.menu().is_visible()
                 slow.append(("decks hold", d.width, ms - HOLD_MS))
                 d.escape()
@@ -289,7 +326,7 @@ def test_menus_open_within_one_beat(server: Server) -> None:
             d.goto("/decks/42")
             card = page.locator(".deckview li[data-card]").first
             right = partial(card.click, button="right", position={"x": 10, "y": 10}, no_wait_after=True)
-            ms = d.measure(right, reset=d.escape)
+            ms = d.measure(right, reset=d.escape, budget=MENU_MS)
             assert d.menu().is_visible()
             slow.append(("deck card right-click", d.width, ms))
             d.escape()
@@ -298,7 +335,7 @@ def test_menus_open_within_one_beat(server: Server) -> None:
             custom = page.locator(".deckview .row[data-custom-id='41']")
             custom.scroll_into_view_if_needed()
             right = partial(custom.click, button="right", position={"x": 10, "y": 10}, no_wait_after=True)
-            ms = d.measure(right, reset=d.escape)
+            ms = d.measure(right, reset=d.escape, budget=MENU_MS)
             assert d.menu().is_visible()
             slow.append(("custom card right-click", d.width, ms))
             d.escape()
@@ -306,20 +343,43 @@ def test_menus_open_within_one_beat(server: Server) -> None:
             d.goto("/forum/thread/700002")
             reply_kebab = page.locator("#comments .kebab").first
             reply_kebab.scroll_into_view_if_needed()
-            ms = d.measure(partial(reply_kebab.click, no_wait_after=True), reset=d.escape)
+            ms = d.measure(partial(reply_kebab.click, no_wait_after=True), reset=d.escape, budget=MENU_MS)
             assert d.menu().is_visible()
             slow.append(("forum reply ⋮", d.width, ms))
             d.escape()
             # an admin row's ⋮ (static/admin.js)
             d.goto("/admin/users")
             row_kebab = page.locator(".adm .ui-table .act .kebab").first
-            ms = d.measure(partial(row_kebab.click, no_wait_after=True), reset=d.escape)
+            ms = d.measure(partial(row_kebab.click, no_wait_after=True), reset=d.escape, budget=MENU_MS)
             assert d.menu().is_visible()
             slow.append(("admin users ⋮", d.width, ms))
             assert d.errors == [], d.errors
     print("menus (ms at 4x):", slow)
     over = [s for s in slow if s[2] > MENU_MS]
     assert not over, f"menus over {MENU_MS} ms at 4x: {over}; all: {slow}"
+
+
+def _box_from_menu(d: Driver, item: str) -> int:
+    """A deck's menu, then ``item`` in it: ms from the tap to the box on screen."""
+    tile = d.page.locator("li.deck[data-deck-id]").first
+    tile.locator("button.kebab").first.click(no_wait_after=True)
+    d.menu().wait_for()
+    entry = d.menu().locator("[role=menuitem]", has_text=item).first
+    ms = d.measure(partial(entry.click, no_wait_after=True), tries=1)
+    assert d.box().is_visible(), item
+    d.escape()
+    quiet(d.page)
+    return ms
+
+
+def _longest_task(d: Driver, path: str) -> int:
+    """Load ``path``: the longest task in ms, from the start of the page."""
+    d.page.goto(d.server.base + path, wait_until="load")
+    # fixed wait: the measure's window: the long tasks of the first 700 ms after load are what
+    # counts (a time window to measure in, not a guess at a condition)
+    d.page.wait_for_timeout(700)
+    tasks = d.page.evaluate("() => window.__perf.longtasks")
+    return max(tasks or [0])
 
 
 def test_boxes_open_within_one_beat(server: Server) -> None:
@@ -334,29 +394,21 @@ def test_boxes_open_within_one_beat(server: Server) -> None:
             d.goto("/decks")
             # New deck: a box the page already holds (ui.box), opened from its link
             opener = page.locator("[data-box-open=newdeck]").first
-            ms = d.measure(partial(opener.click, no_wait_after=True), reset=d.escape)
+            ms = d.measure(partial(opener.click, no_wait_after=True), reset=d.escape, budget=BOX_MS)
             assert d.box().is_visible() and "New deck" in d.box().inner_text()
             slow.append(("New deck", d.width, ms))
             d.escape()
-            page.wait_for_timeout(300)
+            quiet(page)
             # New folder: built by a script; the box shows at once with its loading line
             new_folder = page.locator("[data-new-folder]").first
-            ms = d.measure(partial(new_folder.click, no_wait_after=True), reset=d.escape)
+            ms = d.measure(partial(new_folder.click, no_wait_after=True), reset=d.escape, budget=BOX_MS)
             assert d.box().is_visible()
             slow.append(("New folder", d.width, ms))
             d.escape()
-            page.wait_for_timeout(300)
+            quiet(page)
             # a deck's menu → Export… and Delete… (the box comes before the answer from the gateway)
             for item in ("Export", "Delete"):
-                tile = page.locator("li.deck[data-deck-id]").first
-                tile.locator("button.kebab").first.click(no_wait_after=True)
-                d.menu().wait_for()
-                entry = d.menu().locator("[role=menuitem]", has_text=item).first
-                ms = d.measure(partial(entry.click, no_wait_after=True), tries=1)
-                assert d.box().is_visible(), item
-                slow.append((f"menu {item}", d.width, ms))
-                d.escape()
-                page.wait_for_timeout(300)
+                slow.append((f"menu {item}", d.width, best_within(BOX_MS, partial(_box_from_menu, d, item))))
             # admin: Disable… from a member's row menu is the member's page with its box drawn
             # open (the page cannot hold a box per member), so what must come at once is the
             # navigation bar; the box itself is checked by test_admin_pages_browser
@@ -375,7 +427,7 @@ def test_boxes_open_within_one_beat(server: Server) -> None:
             d.goto("/account/details")
             acct = page.locator("main [data-box-open]").first
             if acct.count():
-                ms = d.measure(partial(acct.click, no_wait_after=True), reset=d.escape)
+                ms = d.measure(partial(acct.click, no_wait_after=True), reset=d.escape, budget=BOX_MS)
                 assert d.box().is_visible()
                 slow.append(("account box", d.width, ms))
                 d.escape()
@@ -400,33 +452,40 @@ def test_chips_filters_sizes_and_searches_respond_at_once(server: Server) -> Non
             current = page.evaluate("() => document.documentElement.getAttribute('data-card-size')")
             other = sizes.filter(has_not=page.locator(f"[data-card-size-set='{current}']")).first
             if d.width < 600 and not other.is_visible():
-                other = page.locator("[data-card-size-set]:visible").first
-            back = page.locator(f"[data-card-size-set='{current}']").first
+                # a phone (0.7.46, mockup screen 5): the View sheet holds the card size switch
+                page.locator(".toolbar .viewbtn").click()
+                page.locator(".mtgbox[role=dialog]:not([hidden]) .viewsheet .sizeseg").wait_for(timeout=3000)
+                other = page.locator(".viewsheet .sizeseg button[aria-pressed=false]").first
+                back = page.locator(".viewsheet .sizeseg button", has_text=current.upper()).first
+            else:
+                back = page.locator(f"[data-card-size-set='{current}']").first
             undo = partial(back.click, no_wait_after=True)
-            ms = d.measure(partial(other.click, no_wait_after=True), reset=undo)
+            ms = d.measure(partial(other.click, no_wait_after=True), reset=undo, budget=CHIP_MS)
             slow.append(("card size", d.width, ms))
             # the deck list's name filter: the list shows the pending look as the letter lands,
             # the request itself waits for the pause in typing (static/decks.js)
             d.goto("/decks")
             q = page.locator("#listform #q")  # the name field sits in the toolbar at every width
             q.click()
-            page.wait_for_timeout(200)
+            settled(page)
+            frame(page)  # the focus's own changes are drawn before the measure is armed
             ms = d.measure(partial(page.keyboard.type, "s"), tries=1)
             assert page.locator("#decks-list[aria-busy=true]").count() == 1
             slow.append(("decks search letter", d.width, ms))
-            page.wait_for_timeout(800)
+            expect(page.locator("#decks-list[aria-busy=true]")).to_have_count(0)  # the search after the pause
             # the card search page: the same pending look (static/cardsearch.js)
             d.goto("/cards?q=sol")
             cq = page.locator("#cs-form input[name=q]").first
             if not cq.is_visible():  # on a phone the field may sit in the Filters sheet
                 page.locator(".sp-open").first.click()
-                page.wait_for_timeout(300)
+                expect(cq).to_be_visible()
             cq.click()
-            page.wait_for_timeout(200)
+            settled(page)
+            frame(page)  # the focus's own changes are drawn before the measure is armed
             ms = d.measure(partial(page.keyboard.type, "a"), tries=1)
             assert page.locator(".cs-results[aria-busy=true]").count() == 1
             slow.append(("card search letter", d.width, ms))
-            page.wait_for_timeout(800)
+            expect(page.locator(".cs-results[aria-busy=true]")).to_have_count(0)  # the search after the pause
             # a chip that is a link to another address shows the navigation bar at once; the
             # answer is held until the measure has been read, so the page is still there to ask
             d.goto("/proposals")
@@ -459,13 +518,11 @@ def test_no_long_task_over_budget_while_the_heaviest_pages_load(server: Server) 
     with sync_playwright() as p:
         for d in _drivers(p, server, sid, exe):
             for path in HEAVY_PAGES:
-                best = 10**6
-                for _ in range(2):  # the better of two loads: the page's own cost, not the runner's
-                    d.page.goto(d.server.base + path, wait_until="load")
-                    d.page.wait_for_timeout(700)
-                    tasks = d.page.evaluate("() => window.__perf.longtasks")
-                    best = min(best, max(tasks or [0]))
-                worst.append((path, d.width, best))
+                # the better of two loads at least (the page's own cost, not the runner's), more
+                # while over budget (best_within)
+                worst.append(
+                    (path, d.width, best_within(LONG_TASK_MS, partial(_longest_task, d, path), least=2))
+                )
             assert d.errors == [], d.errors
     print("longest task on load (ms at 4x):", worst)
     over = [w for w in worst if w[2] > LONG_TASK_MS]
@@ -528,7 +585,10 @@ def test_the_server_answers_main_pages_fast_and_static_files_are_kept(server: Se
             assert m, (path, r.headers.get("server-timing"))
             best = min(best, float(m.group(1)))
         slow.append((path, best))
-        assert r.headers["cache-control"] == "no-store"  # a member's page is never kept
+        # kept by the member's own browser only, and always asked again (owner decision, 0.7.46);
+        # the account and Admin pages are never kept
+        kept = "no-store" if path.startswith(("/account", "/admin")) else "private, no-cache"
+        assert r.headers["cache-control"] == kept, path
     print("server time (ms):", slow)
     over = [s for s in slow if s[1] > SERVER_MS]
     assert not over, f"server time over {SERVER_MS} ms: {over}; all: {slow}"
@@ -585,7 +645,10 @@ def _loading_looks(d: Driver) -> None:
     asked: list[str] = []
 
     def record(req) -> None:  # noqa: ANN001
-        if req.url.startswith(d.server.base) and "/static/" not in req.url:
+        # a picture the page already holds (a custom card's, through the gateway's own route)
+        # loads when its tile comes near the window, which a layout change can bring about; the
+        # browser's lazy loading is not a control's wait on the gateway
+        if req.url.startswith(d.server.base) and "/static/" not in req.url and req.resource_type != "image":
             asked.append(req.method + " " + req.url[len(d.server.base) :])
 
     page.on("request", record)
@@ -596,6 +659,7 @@ def _loading_looks(d: Driver) -> None:
         asked.clear()
         page.evaluate(WATCH)
         do()
+        # fixed wait: a negative check: no request and no loading look within 400 ms of the control
         page.wait_for_timeout(400)
         looks = page.evaluate("() => window.__looks")
         # the bell's count is the page's own read after it loads (static/bell.js, when the browser
@@ -608,7 +672,7 @@ def _loading_looks(d: Driver) -> None:
         assert waits == [] and looks == [], (name, d.width, asked, looks)
         if undo:
             undo()
-            page.wait_for_timeout(400)
+            quiet(page)
 
     d.goto("/decks")
     tile = page.locator("li.deck[data-deck-id]").first
@@ -628,8 +692,10 @@ def _loading_looks(d: Driver) -> None:
     if sort_btn.is_visible():
         local("collection sort list", sort_btn.click, d.escape)
     d.goto("/decks/42/settings")
+    # the categories' Save and Undo buttons are hidden by design since each change saves itself
+    # (decksettings.js: Undo is the toast's, which asks the gateway); a visible one is local
     reset = page.locator("#categories button[type=reset]")
-    if reset.count():
+    if reset.count() and reset.first.is_visible():
         local("categories Undo changes", reset.first.click)
     # a control that does ask the gateway shows its loading line while it waits
     d.goto("/decks")
@@ -640,7 +706,8 @@ def _loading_looks(d: Driver) -> None:
         d.menu().wait_for()
         d.menu().locator("[role=menuitem]", has_text="Delete").first.click()
         d.box().wait_for()
-        page.wait_for_timeout(200)
+        held.reached()
+        expect(d.box().locator(".loading")).to_have_count(1)
         assert held.routes, "Delete… read nothing from the gateway"
         assert d.box().locator(".loading").count() == 1
         assert page.evaluate("() => window.__looks"), "no loading look while it waited"
@@ -672,26 +739,74 @@ def test_category_boxes_and_the_companion_switch_respond_at_once(server: Server)
             ):
                 opener = page.locator(button).first
                 opener.scroll_into_view_if_needed()
-                ms = d.measure(partial(opener.click, no_wait_after=True), reset=d.escape)
+                ms = d.measure(partial(opener.click, no_wait_after=True), reset=d.escape, budget=BOX_MS)
                 assert d.box().is_visible(), what
                 slow.append((what, d.width, ms, BOX_MS))
                 d.escape()
-                page.wait_for_timeout(300)
+                quiet(page)
             d.goto("/decks/42")
             card = page.locator(".deckview li[data-card]").first
-            # the best of a press on and a press back off, as measure() takes the best of two
-            # elsewhere: one press alone shows the runner being busy as often as the page's cost
-            runs = []
-            for turn in range(2):
+
+            # the best of a press on and a press back off, and of more presses while the best is
+            # over budget, as measure() does elsewhere (best_within): one press alone shows the
+            # runner being busy as often as the page's cost. Alone the frame is 70-130 ms at 1366
+            # px; six workers beside it pushed both of two presses over (158 ms).
+            def press(card=card, d=d, page=page) -> int:
                 was = card.get_attribute("data-companion")
                 card.click(button="right", position={"x": 10, "y": 10}, no_wait_after=True)
                 d.menu().wait_for()
                 item = d.menu().locator("[role=menuitemcheckbox]", has_text="Companion").first
-                runs.append(d.measure(partial(item.click, no_wait_after=True), tries=1))
-                assert card.get_attribute("data-companion") == (None if was else "1"), turn
-                page.wait_for_timeout(700)  # the save lands before the next press
-            slow.append(("Companion switch", d.width, min(runs), CHIP_MS))
+                ms = d.measure(partial(item.click, no_wait_after=True), tries=1)
+                assert card.get_attribute("data-companion") == (None if was else "1"), was
+                expect(page.locator(".histtools button", has_text="Undo")).to_be_enabled()  # the save landed
+                return ms
+
+            slow.append(("Companion switch", d.width, best_within(CHIP_MS, press, least=2), CHIP_MS))
             assert d.errors == [], d.errors
     print("0.7.42 controls (ms at 4x):", slow)
+    over = [s for s in slow if s[2] > s[3]]
+    assert not over, f"over budget at 4x: {over}; all: {slow}"
+
+
+RELAYOUT_MS = 25  # a change inside one row of the text view: its stack alone, not every column
+
+
+def test_a_change_in_one_deck_row_relays_out_its_stack_alone(server: Server) -> None:
+    """The text view's stacks flow down columns; a change inside one row (the Companion word, a
+    count) relaid out every row of every column, 45-145 ms at 4x, the whole of the Companion
+    switch's cost (review 2, L13). Each stack is now one piece for the column layout, so the
+    change costs a few ms: measured as a forced layout right after a mark is added to a row."""
+    from playwright.sync_api import sync_playwright
+
+    sid, _pending = _seed(server)
+    exe = _exe()
+    slow: list[tuple] = []
+    with sync_playwright() as p:
+        for d in _drivers(p, server, sid, exe):
+            d.goto("/decks/42?view=text")
+            assert d.page.locator(".deckview.text li.row").count() > 30
+            ms = d.page.evaluate(
+                """() => {
+                  const rows = [...document.querySelectorAll('.deckview.text li.row')];
+                  let best = Infinity;
+                  for (let i = 0; i < 5; i++) {
+                    const row = rows[(i * 7) % rows.length];
+                    const mark = document.createElement('span');
+                    mark.className = 'mc';
+                    mark.textContent = 'Companion';
+                    document.body.offsetHeight;  // a clean layout first
+                    const t0 = performance.now();
+                    row.appendChild(mark);
+                    document.body.offsetHeight;  // the relayout the change forces
+                    best = Math.min(best, performance.now() - t0);
+                    mark.remove();
+                    document.body.offsetHeight;
+                  }
+                  return best;
+                }"""
+            )
+            slow.append(("row relayout", d.width, round(ms), RELAYOUT_MS))
+            assert d.errors == [], d.errors
+    print("row relayout (ms at 4x):", slow)
     over = [s for s in slow if s[2] > s[3]]
     assert not over, f"over budget at 4x: {over}; all: {slow}"

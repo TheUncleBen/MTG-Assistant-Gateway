@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from . import tool_labels, ui
+from .busy import outage
 from .companion import EVENT_LABELS, card_model_line, event_label, member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT, DECK_LIST_LAST
@@ -46,6 +47,9 @@ REFUSED_EVENTS = (
     "not_in_group_refused",
     "cimd_rejected",
 )
+# The bucket of events with no client id on the pages' tiles and in the App filter ("Other";
+# it was "no app" / "No app" before, which the filter's text still finds: polish re-check Q4).
+OTHER_APP = "Other"
 FAILED_EVENTS = (
     "proposal_failed",
     "archidekt_link_failed",
@@ -55,6 +59,7 @@ FAILED_EVENTS = (
 )
 SIGNIN_EVENTS = (
     "browser_login",
+    "app_signin_tap_page",
     "login_ok",
     "login_denied",
     "login_rejected_group",
@@ -65,13 +70,22 @@ SIGNIN_EVENTS = (
     "tokens_revoked",
     "refresh_rejected",
     "refresh_reuse_detected",
+    "refresh_retry_answered",
     "code_reuse_detected",
     "signed_out_everywhere",
 )
-REPORT_EVENTS = ("report_created", "report_more_games")
+REPORT_EVENTS = (
+    "report_created",
+    "report_more_games",
+    "report_stopped",
+    "report_deleted",
+    "snapshot_deleted",
+)
 ADMIN_ACTIONS = ("admin_disable", "admin_enable", "admin_revoke", "admin_unlink", "admin_delete_data")
 # admin actions written once (no member copy): the admin page's "Admin actions" counts them too
 ADMIN_ONCE = ("setting_changed", "card_model_removed")
+# one-time upgrade entries with nothing for anyone to do: listed only when asked for by name
+QUIET_EVENTS = ("archidekt_sessions_sealed",)
 
 # The admin's own row of an action on a member's account, as the admin page names it.
 ADMIN_PAGE_NAMES = {
@@ -103,6 +117,7 @@ ADMIN_ACTION_WORDS = {
 
 ICONS = {
     "browser_login": "login",
+    "app_signin_tap_page": "login",
     "login_ok": "login",
     "login_denied": "login",
     "issuer_repinned": "login",
@@ -117,9 +132,13 @@ ICONS = {
     "archidekt_session_refreshed": "refresh",
     "setting_changed": "settings",
     "approval_mode_set": "settings",
+    "assistant_mode_set": "settings",
     "view_choices_forgotten": "settings",
     "report_created": "report",
     "report_more_games": "report",
+    "report_stopped": "report",
+    "report_deleted": "report",
+    "snapshot_deleted": "bookmark",
     "folder_created": "folder",
     "folder_renamed": "folder",
     "folder_moved": "folder",
@@ -140,6 +159,7 @@ ICONS = {
     "collection_removed": "collection",
     "collection_updated": "collection",
     "collection_changed": "collection",
+    "collection_cleared": "trash",
     "scan_session_created": "collection",
     "scan_session_saved": "collection",
     "scan_session_deleted": "collection",
@@ -150,8 +170,8 @@ ICONS = {
 
 # The error a failed row stores, in words; the code goes only in the row's details.
 ERROR_WORDS = {
-    "rate_limited": "Archidekt asked the gateway to slow down",
-    "unavailable": "Archidekt can't be reached right now",
+    "rate_limited": outage("slow_down").removesuffix("."),
+    "unavailable": outage("unavailable").removesuffix("."),
     "not_found": "Archidekt could not find that deck",
     "forbidden": "Archidekt refused access to that deck",
     "auth": "Archidekt did not accept that username and password",
@@ -408,7 +428,7 @@ class Log:
             # only a member's copy of an admin's action carries the administrator client; the admin
             # page lists the admin's own row instead (from the website), so it has no such option
             opts.append(("admin", self.admin_label))
-        return opts + [("none", "No app")]
+        return opts + [("other", OTHER_APP)]
 
     def _app_sql(self, app: str) -> tuple[str, list[Any]]:
         if app == "website":
@@ -417,7 +437,7 @@ class Log:
             # the admin page's Admin app: the administrator client (only member copies carry it,
             # so it lists nothing there) and the admin's own rows are the website's
             return "client_id = ?", [ADMIN_CLIENT]
-        if app == "none":
+        if app in ("none", "other"):  # "none": the value before 0.7.46's "Other" (kept links)
             return "client_id IS NULL", []
         if app.startswith("app:"):
             ids = [
@@ -453,6 +473,9 @@ class Log:
         if query.event:
             where.append("event = ?")
             args.append(query.event)
+        else:
+            where.append(f"event NOT IN ({_marks(QUIET_EVENTS)})")
+            args += list(QUIET_EVENTS)
         if query.time:
             where.append("at >= ?")
             args.append(int((time.time() if now is None else now) - TIME_SECONDS[query.time]))
@@ -683,7 +706,7 @@ def _deck_html(names: Names, sub: str | None, deck_id: Any, *, link: bool, own: 
     if name:
         return f"<a href='{href}'>{esc(name)}</a>" if link else esc(name)
     # the admin page: the deck's id stays in the opened row's details, never in the cell
-    return f"<a href='{href}'>Open the deck</a>" if link else f"<span class='gone'>{GONE_DECK}</span>"
+    return ui.cap_link("Open the deck", href) if link else f"<span class='gone'>{GONE_DECK}</span>"
 
 
 def _member_chip(log: Any, client_id: str | None) -> str:
@@ -724,9 +747,10 @@ def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
     if pid:
         href = f"/proposals/{quote(str(pid), safe='')}"
         text = "Open the proposal to see why" if event == "proposal_failed" else "Open the proposal"
-        bits.append(f"<a href='{href}'>{text}</a>")
-    if event in REPORT_EVENTS and d.get("report_id"):
-        bits.append(f"<a href='/history/reports/{quote(str(d['report_id']), safe='')}'>Open the report</a>")
+        bits.append(ui.cap_link(text, href))
+    # a deleted report has no page to open (its deck, when recorded, is named above)
+    if event in REPORT_EVENTS and event != "report_deleted" and d.get("report_id"):
+        bits.append(ui.cap_link("Open the report", f"/history/reports/{quote(str(d['report_id']), safe='')}"))
     if d.get("via") in VIA_WORDS and d.get("via") not in ("mcp", "app"):  # those: the By column
         bits.append(VIA_WORDS[d["via"]])
     if d.get("by") == "deck sync":
@@ -758,6 +782,9 @@ def admin_detail_html(row: Mapping[str, Any], names: Names) -> str:
         return f"<span class='said'>{esc(said)}</span>"
     if event == "card_model_removed" and (said := card_model_line(d, names.member(d.get("added_by")))):
         return f"<span class='said'>{esc(said)}</span>"
+    if event == "client_registered" and isinstance(hosts := d.get("redirect_hosts"), list) and hosts:
+        # where the app's sign-ins go back to, as its registration lists them (at most three hosts)
+        return f"<span class='said'>Signs you back in at {esc(', '.join(str(h) for h in hosts))}</span>"
     pairs: list[str] = []
     items = list(d.items())
     if "deck_id" not in d and (deck_id := _deck_of(row, d, names)) not in (None, ""):
@@ -794,19 +821,25 @@ def admin_detail_html(row: Mapping[str, Any], names: Names) -> str:
 
 
 def _counts(rows: Iterable[Any], log: Log) -> dict[str, int]:
-    """Events per app ("Claude 3", "no app 4"), in the order the widget lists them."""
+    """Events per app ("Claude 3", "Other 4": rows with no client id, polish re-check Q4), in the
+    order the widget lists them."""
     out: dict[str, int] = {}
     for r in rows:
-        name = log.app_name(r["client_id"]) or "no app"
+        name = log.app_name(r["client_id"]) or OTHER_APP
         out[name] = out.get(name, 0) + 1
-    order = sorted((n for n in out if n not in ("Website", log.admin_label, "no app")), key=str.casefold)
-    order += [n for n in ("Website", log.admin_label, "no app") if n in out]
+    order = sorted((n for n in out if n not in ("Website", log.admin_label, OTHER_APP)), key=str.casefold)
+    order += [n for n in ("Website", log.admin_label, OTHER_APP) if n in out]
     return {n: out[n] for n in order}
 
 
 def _problem_widget(rows: list[Any], href: str) -> str:
     refused = sum(1 for r in rows if is_refused(r["event"], _detail(r)))
     failed = sum(1 for r in rows if r["event"] in FAILED_EVENTS)
+    if not refused + failed:
+        # nothing to show: no red chips at 0 and no button to an empty list (polish re-check Q3)
+        return ui.widget(
+            "Refused or failed", "alert", 0, unit="in 7 days", detail="Nothing refused or failed"
+        )
     labels = refused_label(f"Refused {refused}") + ui.label_for("failed", word=f"Failed {failed}")
     return ui.widget(
         "Refused or failed",
@@ -815,7 +848,7 @@ def _problem_widget(rows: list[Any], href: str) -> str:
         unit="in 7 days",
         detail_html=labels,
         actions=[ui.button_link("Show them", href)],
-        tone="alert" if refused + failed else "",
+        tone="alert",
     )
 
 
@@ -873,14 +906,18 @@ def _empty(path: str, query: Query, nothing_at_all: str) -> str:
         return f"<div class='ui-card'><p>{nothing_at_all}</p></div>"
     return (
         "<div class='ui-card'><p>Nothing matches these filters. "
-        f"<a href='{path}'>Show all activity</a></p></div>"
+        + ui.cap_link("Show all activity", path)
+        + "</p></div>"
     )
 
 
 def _pager(path: str, query: Query, total: int) -> str:
-    newer = query.href(path, offset=max(0, query.offset - PER_PAGE)) if query.offset > 0 else None
-    older = query.href(path, offset=query.offset + PER_PAGE) if query.offset + PER_PAGE < total else None
-    return ui.pager(query.offset, total, newer_href=newer, older_href=older)
+    """Load more under the list (Standard 13): the next page's link, whose rows the shared
+    static/loadmore.js adds in place."""
+    upto = min(total, query.offset + PER_PAGE)
+    if upto < total:
+        return ui.load_more(query.href(path, offset=upto), shown=upto, total=total, into=".act-table")
+    return ui.load_more("", done=f"All {total:,} shown.") if total > PER_PAGE else ""
 
 
 def _event_options(log: Log, *, admin_page: bool) -> list[tuple[str, str]]:
@@ -918,7 +955,7 @@ def _search(
         if clients:
             parts.append(f"client_id IN ({_marks(clients)})")
             args += clients
-        if low == "no app" or (len(low) >= 2 and "no app".startswith(low)):
+        if any(low == w or (len(low) >= 2 and w.startswith(low)) for w in ("no app", OTHER_APP.casefold())):
             parts.append("client_id IS NULL")
         if admin_page:
             with log.db._lock:
@@ -958,34 +995,32 @@ def _spark(values: list[int]) -> str:
     return f"<span class='spark' role='img' aria-label='Events per day, oldest first: {said}'>{bars}</span>"
 
 
-def _join(parts: Iterable[str]) -> str:
-    return " · ".join(parts)
-
-
 ACT_CSS = """
 .act-page .ui-chip svg.i{width:15px;height:15px;margin-right:.3rem;vertical-align:-2px}
-.act-page .wdg .det .ui-lbl{height:22px;font-size:.78rem}
+.act-page .wdg .det .ui-lbl{min-height:22px;font-size:.78rem}
 .act-page .spark{flex:1 1 100%;display:flex;align-items:flex-end;gap:3px;height:36px;margin:.1rem 0 0}
 .act-page .spark i{flex:1;display:block;min-height:2px;background:var(--text-muted);border-radius:2px 2px 0 0}
 .act-page .spark i:last-child{background:var(--text)}
-.act-page form.ui-tools{display:grid;grid-template-columns:minmax(0,1fr) repeat(var(--nf),minmax(0,10rem));
-  gap:.5rem}
-.act-page form.ui-tools .f{min-width:0}
+/* the toolbar wraps as every list's does (theme.py's ui-tools rules, by the toolbar's own width):
+   its own grid of 10rem filter columns left the search 0 px wide and the page 1395 px wide at
+   1280 px with 200% text (audit N9) */
 .act-page form.ui-tools .search input{-webkit-appearance:none;appearance:none;width:100%;
   border:1px solid var(--control-border);border-radius:var(--radius)}
 .act-page form.ui-tools .f select:not(.msel-native),.act-page form.ui-tools .f .msel-btn{width:100%}
-@media (max-width:899.98px){.act-page form.ui-tools{grid-template-columns:repeat(var(--nf),minmax(0,1fr))}
-  .act-page form.ui-tools .search{grid-column:1 / -1}}
-@media (max-width:599.98px){.act-page form.ui-tools{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .act-page form.ui-tools .f:last-of-type:nth-of-type(odd){grid-column:1 / -1}}
 .act-table .tr{column-gap:.75rem}
 /* with large text a widget's word can be wider than its half of a phone's row */
-.act-page .wdg .big,.act-page .wdg .lab,.act-page .wdg .det{overflow-wrap:anywhere}
+/* the detail line only: a value or a label never breaks inside a word (audit 71911eba M1) */
+.act-page .wdg .det{overflow-wrap:anywhere}
 @media (max-width:599.98px){
   /* two widgets a row on a phone, one when the text is large */
   .act-page .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}}
-/* below 900 px the rows stack their cells in two lines, so the column headings no longer fit */
-@media (max-width:899.98px){.act-table .tr.th{display:none}}
+/* the rows' layout follows the table's own width in its text (a container, as the lists' toolbars
+   do): the lined-up columns while they fit, the two-line rows under 61em (a 900 px viewport at
+   the pages' 14 px text) and the stacked rows under 40em (600 px). So at 200% text the When and
+   Actions columns fold instead of spilling past the page (audit N9/P2: 1200 px wide at 900 and
+   1024 px). Below 61em the column headings no longer fit */
+.act-table{container-type:inline-size}
+@container (max-width:61em){.act-table .tr.th{display:none}}
 .act-table .c-who{font-weight:700;min-width:0;overflow-wrap:anywhere}
 .act-table .c-det{display:flex;flex-wrap:wrap;gap:.2rem .6rem;font-size:.9rem;align-items:baseline;
   overflow-wrap:anywhere}
@@ -1012,7 +1047,7 @@ ADMIN_CSS = (
     + """
 .act-admin .act-table .tr{grid-template-columns:15rem 6.5rem minmax(0,1fr) 7rem 6.5rem 88px}
 .act-admin .act-table .tr.th > span:last-child{text-align:right}
-@media (max-width:899.98px){
+@container (max-width:61em){
   .act-admin .act-table .tr.ev{grid-template-columns:auto minmax(0,1fr) auto 88px;
     grid-template-areas:"ev who when more" "det det app more";row-gap:.3rem}
   .act-admin .act-table .c-ev{grid-area:ev} .act-admin .act-table .c-who{grid-area:who}
@@ -1020,10 +1055,11 @@ ADMIN_CSS = (
   .act-admin .act-table .c-app{grid-area:app;justify-self:end} .act-admin .act-table .c-btns{grid-area:more}
   .act-admin .act-table .more-body{grid-area:auto;grid-column:1 / -1}
 }
-@media (max-width:599.98px){
+@container (max-width:40em){
   .act-admin .act-table .tr.ev{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem;
     position:relative;padding-right:92px}
-  .act-admin .act-table .c-ev{flex:0 0 calc(100% - 6.5rem);order:1}
+  /* at least its longest word wide (min-content): When goes under a name that leaves it no room */
+  .act-admin .act-table .c-ev{flex:0 0 calc(100% - 6.5rem);min-width:min-content;max-width:100%;order:1}
   .act-admin .act-table .c-when{flex:0 0 6rem;order:2;text-align:right;font-size:.86rem}
   .act-admin .act-table .c-who{order:3;font-size:.9rem}
   .act-admin .act-table .c-app{order:4;font-size:.86rem}
@@ -1040,14 +1076,14 @@ MEMBER_CSS = (
     + """
 .act-member .act-table .tr{grid-template-columns:17rem minmax(0,1fr) 8rem 6.5rem}
 .act-member .act-table .c-det{display:block;font-size:.92rem}
-@media (max-width:899.98px){
+@container (max-width:61em){
   .act-member .act-table .tr.ev{grid-template-columns:minmax(0,1fr) auto;
     grid-template-areas:"ev when" "det app";
     row-gap:.3rem}
   .act-member .act-table .c-ev{grid-area:ev} .act-member .act-table .c-when{grid-area:when;justify-self:end}
   .act-member .act-table .c-det{grid-area:det} .act-member .act-table .c-app{grid-area:app;justify-self:end}
 }
-@media (max-width:599.98px){
+@container (max-width:40em){
   .act-member .act-table .tr.ev{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .5rem}
   .act-member .act-table .c-ev{flex:1 1 100%;order:1}
   .act-member .act-table .c-app{order:2;font-size:.86rem;align-self:center}
@@ -1093,11 +1129,11 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
     by_kind: dict[str, int] = {}
     for r in admin_rows:
         by_kind[r["event"]] = by_kind.get(r["event"], 0) + 1
-    admin_line = _join(
+    admin_facts = [
         f"{n} {ADMIN_ACTION_WORDS[e][0 if n == 1 else 1]}"
         for e, n in by_kind.items()
         if e in ADMIN_ACTION_WORDS
-    )
+    ]
     members: dict[str, int] = {}
     for r in week:
         if r["sub"]:
@@ -1105,10 +1141,10 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
     with db._lock:
         everyone = int(db._conn.execute("SELECT COUNT(*) FROM users WHERE disabled_at IS NULL").fetchone()[0])
     day_members = len({r["sub"] for r in day if r["sub"]})
-    apps = _join(
-        [f"From {day_members} member{'' if day_members == 1 else 's'}"] * bool(day)
-        + [f"{n} {c}" for n, c in _counts(day, log).items()]
-    )
+    # one fact a span (ui.facts): a tile's narrow line never ends on a dot (re-check S5)
+    app_facts = [f"From {day_members} member{'' if day_members == 1 else 's'}"] * bool(day) + [
+        f"{n} {c}" for n, c in _counts(day, log).items()
+    ]
     top = max(members.items(), key=lambda kv: kv[1]) if members else None
     top_name = names.member(top[0]) if top else None
     fortnight = log.since(14 * 86400, now)
@@ -1125,7 +1161,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             "activity",
             len(day),
             unit="events",
-            detail=apps,
+            detail_html=ui.facts(app_facts),
             actions=[ui.button_link("Show them", query.href(path, time="24h", kind="all"))],
         ),
         ui.widget(
@@ -1133,11 +1169,12 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             "shield",
             len(admin_rows),
             unit="in 7 days",
-            detail=admin_line,
-            actions=[
-                ui.button_link("Show them", query.href(path, kind="admin", time="7d")),
-                ui.button_link("Users", "/admin/users"),
-            ],
+            detail_html=ui.facts(admin_facts),
+            # at 0 no button to an empty list (as the problem tile, polish re-check Q3)
+            actions=(
+                [ui.button_link("Show them", query.href(path, kind="admin", time="7d"))] if admin_rows else []
+            )
+            + [ui.button_link("Users", "/admin/users")],
         ),
         ui.widget(
             "Members active",
@@ -1187,7 +1224,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
         search=_search(log, names, admin_page=True, member_sub=None),
         filters=filters,
         search_label="Search activity",
-        placeholder="Search member, event or detail",
+        placeholder="Search",
         now=now,
     )
     if not rows:
@@ -1218,7 +1255,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
         "What members, their apps and admins did on this gateway, newest first. Kept for a year.",
     )
     return (
-        f"<div class='act-page act-admin' style='--nf:4'>{head}{nav}"
+        f"<div class='act-page act-admin'>{head}{nav}"
         f"{ui.widgets(cards)}{top_html}"
         f"{table}{_pager(path, query, total)}</div>"
     )
@@ -1229,7 +1266,8 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     sub = r.get("sub")
     who_name = names.member(sub) if sub else None
     if sub and who_name:
-        who = f"<a href='{esc(query.href(path, sub=sub))}'>{esc(who_name)}</a>"
+        # plain text, not a bare link: the row's menu and details have "Show NAME only"
+        who = esc(who_name)
     else:
         who = f"<span class='none'>{NO_MEMBER}</span>"
     cid = r.get("client_id")
@@ -1239,7 +1277,7 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     if cid:
         app_detail = f"{esc(app)} <span class='muted'>(<code>{esc(cid)}</code>)</span>"
     else:
-        app_detail = "No app <span class='muted'>(no client id stored)</span>"
+        app_detail = "No app <span class='muted'>(no client ID stored)</span>"
     member_detail = (
         f"{esc(who_name or NO_NAME)} <span class='muted'>(<code>{esc(sub)}</code>)</span>"
         if sub
@@ -1307,8 +1345,9 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
         when_html = ui.when(latest["at"], now=now)
         last_applied = f"Last: {esc(deck)}, {when_html}" if deck else f"Last: {when_html}"
     apps_now = db.user_clients(sub)
-    app_line = _join(
-        f"{esc(a['name'] or 'An assistant')} {ui.when(a['last_issued_at'], now=now)}" for a in apps_now[:3]
+    app_line = ui.facts(
+        (f"{esc(a['name'] or 'An assistant')} {ui.when(a['last_issued_at'], now=now)}" for a in apps_now[:3]),
+        html=True,
     )
     cards = [
         _problem_widget(week, query.href(path, kind="problems", time="7d", app="", event="", q="")),
@@ -1317,7 +1356,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
             "activity",
             len(week),
             unit="events",
-            detail=_join(f"{n} {c}" for n, c in _counts(week, log).items()),
+            detail_html=ui.facts(f"{n} {c}" for n, c in _counts(week, log).items()),
             actions=[ui.button_link("Show them", query.href(path, time="7d", kind="all"))],
         ),
         ui.widget(
@@ -1334,7 +1373,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
             len(apps_now),
             unit="connected",
             detail_html=app_line,
-            actions=[ui.button_link("Connected apps", "/account/details#apps")],
+            actions=[ui.button_link("Assistants", "/account/assistants")],
         ),
     ]
     filters = [
@@ -1350,7 +1389,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
         search=_search(log, names, admin_page=False, member_sub=sub),
         filters=filters,
         search_label="Search my activity",
-        placeholder="Search event, deck or app",
+        placeholder="Search",
         now=now,
     )
     if not rows:
@@ -1376,7 +1415,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
             + "</div>"
         )
     return (
-        "<div class='act-page act-member' style='--nf:3'>"
+        "<div class='act-page act-member'>"
         + ui.page_head(
             "My activity",
             "Everything done in your name on this gateway: sign-ins, which assistant proposed and applied "

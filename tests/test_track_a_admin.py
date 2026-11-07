@@ -15,10 +15,10 @@ async def test_the_overview_shows_the_live_approval_modes(gw: Harness) -> None: 
         live.set("approval_mode_max", "semi", by="admin-test")
         page = (await b.http.get("/admin", headers=NAVIGATE)).text
         row = "<div class='ui-row'><p class='lab'>{}</p><div class='ctl'>{}</div></div>"
-        assert row.format("Default approval mode", "Semi-auto (semi)") in page
-        assert row.format("Highest approval mode allowed", "Semi-auto (semi)") in page
+        assert row.format("Default approval mode", "Apply low-risk changes without asking") in page
+        assert row.format("Highest approval mode allowed", "Apply low-risk changes without asking") in page
         live.set("approval_mode_max", "auto", by="admin-test")
         page = (await b.http.get("/admin", headers=NAVIGATE)).text
-        assert row.format("Highest approval mode allowed", "Full auto (auto)") in page
+        assert row.format("Highest approval mode allowed", "Apply changes without asking") in page
     finally:
         await b.aclose()

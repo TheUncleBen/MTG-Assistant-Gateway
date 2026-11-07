@@ -19,7 +19,7 @@ How the pieces fit is in [ARCHITECTURE.md](ARCHITECTURE.md).
   (`docker compose version`). amd64 or arm64, so a Raspberry Pi 4 or 5 is
   fine. About 900 MB of memory free for three of the containers at their limits,
   and another 1.5 GB for Forge, which the example file turns on (to run without it, see
-  "Forge simulations" in [DEPLOY.md](DEPLOY.md#forge-simulations-on-by-default)). [HARDWARE.md](HARDWARE.md) has the
+  "Forge games" in [DEPLOY.md](DEPLOY.md#forge-games-on-by-default)). [HARDWARE.md](HARDWARE.md) has the
   minimum and recommended machines and how long tests take.
 - A **domain name** for the gateway, say `mtg.example.com`, pointing at a
   reverse proxy that can reach this machine.
@@ -109,20 +109,24 @@ Worth a look:
 | `MTG_HTTP_BIND`, `MTG_HTTP_PORT` | `127.0.0.1`, `8080` | Where the gateway listens on this machine, for a proxy on the same machine. A proxy container on the gateway's network doesn't need it (the proxy overrides remove it) |
 | `MTG_DATA_DIR`, `MTG_BACKUP_DIR` | `./data`, `./backups` | Local disk only, not NFS or SMB |
 | `MTG_TAG` | `latest` | `latest` follows every new version; one version, written `X.Y.Z`, stays on it (the versions are in [VERSIONS.md](VERSIONS.md)) |
-| `FORGE_REPLICAS` | `1` | Forge simulations; `0` turns them off |
+| `FORGE_REPLICAS` | `1` | Forge games; `0` turns them off |
 | `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt |
 
 Every other variable is explained in `.env` and in the
 [environment reference](DEPLOY.md#environment-reference).
 
 The feature switches in `.env` (watchlists, backup copies on Archidekt, the
-Approve buttons in the chat, the scanner's artwork check, the new-version
+Apply buttons in the chat, the scanner's artwork check, the new-version
 check, background deck checks) are left empty, which means on. An admin can
 then turn each one on or off on the Settings page (`/admin/settings`), along
 with the approval modes, the gateway's name and every other setting. `false`
 (`0` for `MTG_DECK_SYNC_MINUTES`) turns a feature off in `.env` instead; the
 page then shows it greyed out, and you change it in `.env`
-([OPERATIONS.md](OPERATIONS.md#the-settings-page)). Approvals start safe: a
+([OPERATIONS.md](OPERATIONS.md#the-settings-page)). The three sign-in times in
+`.env` (`MTG_ACCESS_TOKEN_TTL`, `MTG_REFRESH_TOKEN_TTL`,
+`MTG_BROWSER_SESSION_TTL`) are left empty the same way: the Settings page's
+**Sign-in** rows set them, and the longest a website sign-in lasts is set only
+there. Approvals start safe: a
 person who hasn't chosen an approval mode has every change wait for their own
 press, on the card in the chat or the Apply button on the review page. Each
 person picks their own mode on their Account page.

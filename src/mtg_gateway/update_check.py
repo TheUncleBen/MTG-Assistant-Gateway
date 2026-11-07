@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from . import __version__
+from .busy import outage
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ def _short(exc: Exception) -> str:
     if isinstance(exc, ValueError):
         return str(exc)[:200]
     if isinstance(exc, httpx.TimeoutException):
-        return "GitHub did not answer in time"
+        return outage("timeout", "GitHub").removesuffix(".")
     if isinstance(exc, httpx.HTTPError):
-        return "could not reach GitHub"
+        return outage("unreachable", "GitHub").removesuffix(".")
     return "unexpected error"

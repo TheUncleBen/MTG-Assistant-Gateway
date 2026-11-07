@@ -25,11 +25,11 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         name="list_card_packages",
         title="List Archidekt card packages",
         description=(
-            "Archidekt card packages, most imported first, 50 a page, as Archidekt's Packages page "
-            "lists them. whose: mine (default, the user's own), followed (ones the user bookmarked) "
-            "or all (everyone's public packages). Filters: name_contains, intended_format (a format "
-            "name such as commander) and budget (1 to 4, $ to $$$$). Each package: id, name, owner, "
-            "keywords, budget, formats and how many times it was added to a deck. Changes nothing."
+            "Archidekt card packages, most imported first, as its Packages page lists them. whose: "
+            "mine (default), followed (bookmarked) or all (everyone's public ones). Filters: "
+            "name_contains, intended_format, budget (1 to 4). Each: id, name, owner, keywords, budget, "
+            "formats and how often it was added to a deck. limit (default 20) caps the rows; left_out "
+            "counts the rest. Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -39,7 +39,10 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         intended_format: str | None = None,
         budget: int | None = None,
         page: int = 1,
+        limit: Annotated[int, Field(description="Rows to return from the page: 1 to 50.")] = 20,
     ) -> dict[str, object]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= packages.PAGE_ROWS:
+            return _tool_error(packages._err(f"limit must be a number from 1 to {packages.PAGE_ROWS}"))
         try:
             got = await packages.listing(
                 state.decks,
@@ -53,31 +56,30 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return _tool_error(exc)
         rows = [{k: v for k, v in r.items() if k not in ("block", "size")} for r in got["rows"]]
-        return {"ok": True, "packages": rows, "page": page, "more": got["more"]}
+        out: dict[str, object] = {"ok": True, "packages": rows[:limit], "page": page, "more": got["more"]}
+        if len(rows) > limit:
+            out["left_out"] = len(rows) - limit
+        return out
 
     @server.tool(
         name="propose_add_package",
         title="Propose adding a card package to a deck (write, two-step)",
         description=(
-            "Step 1 of adding a card package's cards to one of the user's own decks, as Archidekt's Add "
-            "package does: any package the user can open (list_card_packages, or its id or URL). "
-            "categories: package (each card keeps its package category, the default), default "
-            "(Archidekt files them) or maybeboard. skip_existing (default true) leaves out cards the "
-            "deck has; skip_outside_identity (default true) leaves out cards outside the commander's "
-            "colors; singleton (default: the deck's format decides) adds one copy of each; color_tag "
-            "puts a color tag on every card it adds (one the deck uses or one of the user's color tags "
-            "by name, or any name with color as #rrggbb). Returns a "
-            "proposal like propose_deck_changes (kind 'edit': the adds, each reviewed, under a line "
-            "naming the package and what was left out), applied with apply_proposal. When it is "
-            "applied, Archidekt counts one import of the package, as on the site. Changes nothing on "
+            "Step 1 of adding a card package's cards to one of the user's decks, as Archidekt's Add "
+            "package: any package the user can open (list_card_packages, or its ID or URL). "
+            "categories: package (default), default (Archidekt files them) or maybeboard. "
+            "skip_existing and skip_outside_identity (default true) leave out cards the deck has or "
+            "off the commander's colors; singleton (default by format): one copy each; color_tag tags "
+            "every added card (a tag's name, or with color #rrggbb). Returns a proposal like "
+            "propose_deck_changes (kind 'edit'); applying it counts one import. Changes nothing on "
             "Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,
     )
     async def propose_add_package(
-        deck_id: Annotated[str, Field(description="The user's own deck: its id or URL.")],
-        package_id: Annotated[str, Field(description="The card package: its id or URL.")],
+        deck_id: Annotated[str, Field(description="The user's own deck: its ID or URL.")],
+        package_id: Annotated[str, Field(description="The card package: its ID or URL.")],
         categories: Literal["package", "default", "maybeboard"] = "package",
         skip_existing: bool = True,
         skip_outside_identity: bool = True,
@@ -97,6 +99,6 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
                 color_tag=color_tag,
                 color=color,
             )
-            return _proposal({"ok": True, **out})
+            return h._proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

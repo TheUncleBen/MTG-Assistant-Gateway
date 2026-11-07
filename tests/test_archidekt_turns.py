@@ -228,16 +228,110 @@ async def test_member_cache_refresh_keeps_a_pages_turn_but_not_the_syncs() -> No
     assert seen == [True, False, False]
 
 
+async def _held_call(pacer: Pacer, name: str, started: list[str], release: asyncio.Event) -> None:
+    async with pacer:
+        started.append(name)
+        await release.wait()
+
+
+def _as_page(coro: Any) -> asyncio.Task[Any]:
+    ctx = contextvars.copy_context()
+    ctx.run(page_turn.set, True)
+    return asyncio.get_running_loop().create_task(coro, context=ctx)
+
+
+async def test_a_page_call_starts_while_a_slow_background_call_is_still_out() -> None:
+    """The pacer spaces the starts of calls; it does not hold its turn while Archidekt answers, so a
+    page's read is not stuck behind a slow background read."""
+    pacer = Pacer(0.1, 30)
+    started: list[str] = []
+    slow, quick = asyncio.Event(), asyncio.Event()
+    quick.set()
+    bg = asyncio.create_task(_held_call(pacer, "sync", started, slow))
+    await asyncio.sleep(0.01)
+    t0 = time.monotonic()
+    await asyncio.wait_for(_as_page(_held_call(pacer, "page", started, quick)), 1.0)
+    took = time.monotonic() - t0
+    assert started == ["sync", "page"] and not bg.done()
+    # a page read starts from the burst (archidekt.PAGE_BURST) without the gap, never after the
+    # slow answer
+    assert took < 0.5, took
+    slow.set()
+    await bg
+
+
+async def test_background_calls_keep_one_of_the_two_slots_free_for_pages() -> None:
+    pacer = Pacer(0.0, 30)
+    started: list[str] = []
+    release = asyncio.Event()
+    a = asyncio.create_task(_held_call(pacer, "a", started, release))
+    b = asyncio.create_task(_held_call(pacer, "b", started, release))
+    await asyncio.sleep(0.05)
+    assert started == ["a"] and pacer.busy()  # one background call out at a time
+    p1 = _as_page(_held_call(pacer, "page1", started, release))
+    p2 = _as_page(_held_call(pacer, "page2", started, release))
+    await asyncio.sleep(0.05)
+    # pages may have up to PAGE_BURST out at once (owner decision, 0.7.46); background still one
+    assert started == ["a", "page1", "page2"]
+    release.set()
+    await asyncio.gather(a, b, p1, p2)
+    assert sorted(started) == ["a", "b", "page1", "page2"]
+    assert not pacer.busy()
+
+
+async def test_a_background_call_cancelled_while_it_waits_outside_the_turn_leaves_it_held() -> None:
+    """A background call waiting outside the turn for a slot has already let the turn go: when it is
+    cancelled there, it must not release the turn a second time, out from under its next holder."""
+    pacer = Pacer(0.0, 0)
+    await pacer.enter(first=False, page=False)  # the one background slot is out
+    waiter = asyncio.create_task(pacer.enter(first=False, page=False))
+    await asyncio.sleep(0.01)
+    assert pacer._waiting == 1 and not pacer._lock.locked()
+    await pacer._lock.acquire(first=True)  # another call holds the turn now
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert pacer._lock.locked() and pacer._waiting == 0
+    pacer._lock.release()
+    pacer.leave(page=False)
+    assert not pacer.busy()
+
+
+async def test_the_per_minute_cap_keeps_a_share_for_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Background work (the deck sync, assistants, applies) may use all but a sixth of the per-minute
+    cap; the rest is kept for the member's pages, so a long apply never leaves a page waiting a
+    minute. Pages count towards the same cap: it is never passed."""
+    monkeypatch.setattr(Pacer, "WINDOW", 0.6)
+    pacer = Pacer(0.0, 12)  # 2 of 12 kept for pages
+    done = asyncio.Event()
+    done.set()
+    started: list[str] = []
+    for n in range(10):
+        await _held_call(pacer, f"bg{n}", started, done)
+    t0 = time.monotonic()
+    late = asyncio.create_task(_held_call(pacer, "bg10", started, done))
+    await asyncio.sleep(0.05)
+    assert "bg10" not in started  # background has used its share for this minute
+    await asyncio.wait_for(_as_page(_held_call(pacer, "page1", started, done)), 0.3)
+    await asyncio.wait_for(_as_page(_held_call(pacer, "page2", started, done)), 0.3)
+    third = _as_page(_held_call(pacer, "page3", started, done))
+    await asyncio.sleep(0.05)
+    assert "page3" not in started  # the cap itself still holds for pages too
+    await asyncio.gather(late, third)
+    assert time.monotonic() - t0 >= 0.45
+
+
 # -- the app ------------------------------------------------------------------------------------------
 async def test_pages_take_the_page_turn_and_assistants_do_not(stack: Stack, monkeypatch) -> None:
     seen: list[bool] = []
-    real = Pacer.__aenter__
+    real = Pacer.enter
 
-    async def recording(self: Pacer) -> None:
-        seen.append(archidekt_mod.page_turn.get())
-        await real(self)
+    async def recording(self: Pacer, *, first: bool, page: bool) -> None:
+        seen.append(first)
+        assert first == archidekt_mod.page_turn.get()
+        await real(self, first=first, page=page)
 
-    monkeypatch.setattr(Pacer, "__aenter__", recording)
+    monkeypatch.setattr(Pacer, "enter", recording)
     token = await linked_user(stack)
     seen.clear()
     out = await call(stack.h, token, "get_deck", {"deck_ref": "42"})

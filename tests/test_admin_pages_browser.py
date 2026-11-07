@@ -73,6 +73,15 @@ def test_every_admin_page_fits_and_reads(server: Server, width: int, theme: str)
                 ".filter(h => h > 0)"
             )
             assert not kebabs or min(kebabs) >= 43.5, (path, kebabs)
+            # every part of the admin switch stays on one line ("Card models"): the strip scrolls
+            # instead (final audit D11)
+            if path.startswith("/admin"):
+                lines = page.evaluate(
+                    "() => [...document.querySelectorAll('.adm-nav a')].map(a => {"
+                    " const r = document.createRange(); r.selectNodeContents(a);"
+                    " return [a.textContent.trim(), r.getClientRects().length]; })"
+                )
+                assert len(lines) == 6 and all(n == 1 for _, n in lines), (path, lines)
             _shot(page, f"admin-{path.strip('/').replace('/', '-') or 'overview'}-{width}-{theme}.png")
         # the six admin tabs sit in the same place on every tab (the 1200 px width)
         lefts = set()
@@ -128,7 +137,7 @@ def test_a_members_row_menu_and_the_two_boxes(server: Server, width: int, theme:
         menu = page.locator(".ctxmenu")
         assert menu.is_visible()
         items = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
-        assert items == ["Enable", "Revoke tokens and sessions", "Activity", "Delete data…"]
+        assert items == ["Enable", "Revoke tokens and sessions…", "Activity", "Delete data…"]
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
         page.keyboard.press("Escape")
@@ -139,8 +148,8 @@ def test_a_members_row_menu_and_the_two_boxes(server: Server, width: int, theme:
         items = [t.strip() for t in page.locator(".ctxmenu [role=menuitem]").all_inner_texts()]
         assert items == [
             "Disable…",
-            "Revoke tokens and sessions",
-            "Unlink Archidekt",
+            "Revoke tokens and sessions…",
+            "Unlink Archidekt…",
             "Activity",
             "Delete data…",
         ]
@@ -154,7 +163,7 @@ def test_a_members_row_menu_and_the_two_boxes(server: Server, width: int, theme:
         assert last.inner_text().strip() == "Disable account" and "danger" in (
             last.get_attribute("class") or ""
         )
-        box.locator(".acts button", has_text="Cancel").click()
+        box.locator(".acts button", has_text="Keep it").click()
         page.wait_for_selector("#disable", state="hidden")
         assert page.url.endswith("/admin/users?open=user-2")
         # the panel is open: Delete data… opens its box in place; the red button waits for the tick
@@ -210,5 +219,71 @@ def test_a_metrics_row_opens_in_place_and_an_activity_row_has_a_menu(server: Ser
         items = [t.strip() for t in page.locator(".ctxmenu [role=menuitem]").all_inner_texts()]
         assert "Copy details" in items and any("only" in t for t in items)
         page.keyboard.press("Escape")
+        browser.close()
+    assert errors == []
+
+
+def test_revoke_and_unlink_ask_in_the_box_and_warn_on_your_own_row(server: Server) -> None:
+    """Audit P-20 (eccfa3d9): Revoke tokens and sessions and Unlink Archidekt acted at once from
+    the row menu, even on the admin's own row (the walk signed itself out). Both ask first in the
+    pop-up box every destructive action uses: the safe choice first and focused, the red button
+    last, and on the admin's own row the box says what happens to them; the member panel's own
+    buttons ask the same way, and the red button then posts."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _admin(server)
+    seed(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280, "light", exe)
+        posts: list[str] = []
+        page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+        page.goto(f"{server.base}/admin/users", wait_until="networkidle")
+        rows = page.locator(".au .ui-table .tr.mem")
+        bob = rows.filter(has_text="bob@example.test")
+        box = page.locator(".mtgbox-scrim .mtgbox[role=dialog]")
+        gone = "() => !document.querySelector('.mtgbox-scrim')"
+        bob.click(button="right")
+        page.locator(".ctxmenu [role=menuitem]", has_text="Revoke tokens and sessions…").click()
+        box.wait_for(state="visible")
+        assert box.locator("h2").inner_text() == "Revoke the tokens and sessions of “bob”?"
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep them"
+        last = box.locator(".acts button").last
+        assert last.inner_text().strip() == "Revoke tokens and sessions"
+        assert "danger" in (last.get_attribute("class") or "")
+        assert page.evaluate(MEASURE) == []
+        box.locator(".acts button", has_text="Keep them").click()
+        page.wait_for_function(gone)
+        assert posts == []
+        bob.click(button="right")
+        page.locator(".ctxmenu [role=menuitem]", has_text="Unlink Archidekt…").click()
+        box.wait_for(state="visible")
+        assert box.locator("h2").inner_text() == "Unlink the Archidekt account of “bob”?"
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
+        assert box.locator(".acts button").last.inner_text().strip() == "Unlink Archidekt"
+        page.keyboard.press("Escape")
+        page.wait_for_function(gone)
+        assert posts == []
+        # the admin's own row: the box says what happens to them
+        me = page.locator(".au .ui-table .tr.mem[data-you]")
+        assert me.count() == 1
+        me.locator(".kebab").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Revoke tokens and sessions…").click()
+        box.wait_for(state="visible")
+        assert box.locator("h2").inner_text() == "Revoke your own tokens and sessions?"
+        assert "You are signed out of this browser too" in box.inner_text()
+        page.keyboard.press("Escape")
+        page.wait_for_function(gone)
+        assert posts == []
+        # the member panel's own button asks the same way, and the red button posts
+        page.goto(f"{server.base}/admin/users?open=user-2", wait_until="networkidle")
+        page.locator(".au form.ui-actions button[name=action][value=revoke]").click()
+        box.wait_for(state="visible")
+        assert box.locator("h2").inner_text() == "Revoke the tokens and sessions of “bob”?"
+        assert posts == []
+        box.locator(".acts button", has_text="Revoke tokens and sessions").click()
+        page.wait_for_load_state("networkidle")
+        assert len(posts) == 1 and "/admin/users" in posts[0], posts
+        assert "/admin/users" in page.url
         browser.close()
     assert errors == []

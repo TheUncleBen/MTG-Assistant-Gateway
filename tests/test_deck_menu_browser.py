@@ -28,6 +28,7 @@ from mtg_gateway.oidc import OIDCClient
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, make_settings
 from .fake_archidekt import FakeArchidekt
 from .test_scan_browser import _chromium_path, _free_port, _serve
+from .waits import expect, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -35,6 +36,12 @@ PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAIAAAAbd2raAAAAFElEQVR4nGNgYGD4z8DAwMDAwMAAAAwAA/8BpYQAAAAASUVORK5CYII="
 )
 EDIT_URL = re.compile(r"/api/v1/decks/42/edit$")
+
+
+def _edit_post(r) -> bool:
+    """A save sent to the edit endpoint: not the re-read the page asks for after a slow answer
+    ({"refresh": true}, static/deck.js), which carries no changes."""
+    return bool(EDIT_URL.search(r.url)) and '"changes"' in (r.post_data or "")
 
 
 class Server:
@@ -78,7 +85,7 @@ class Server:
                 if httpx.get(f"{self.base}/healthz", timeout=1).status_code == 200:
                     return
             except httpx.HTTPError:
-                time.sleep(0.1)
+                time.sleep(0.1)  # fixed wait: poll interval of the start-up loop (100 tries)
         raise RuntimeError("gateway did not start")
 
     def stop(self) -> None:
@@ -181,7 +188,7 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
         menu.wait_for(timeout=3000)
         assert menu.count() == 1 and menu.locator(".menu").count() == 0
         page.keyboard.press("Escape")
-        page.wait_for_timeout(100)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0
         # a real right-click opens the themed menu with the card's actions, inside the window
         card.click(button="right")
@@ -205,10 +212,8 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
         with page.expect_request(EDIT_URL) as req:
             menu.locator(".qtyrow .step").nth(1).click()
         body = json.loads(req.value.post_data)
-        assert body == {
-            "changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}],
-            "confirmed": False,
-        }
+        assert body["changes"] == [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]
+        assert body["confirmed"] is False and body["view"] == view  # the page's own view, for a drawn row
         assert req.value.headers.get("x-csrf-token")
         # until the save answers the toast says "Saving…" (a slow CI runner took longer than 200 ms)
         page.wait_for_function(
@@ -285,7 +290,7 @@ def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: S
         sent: list[list[dict]] = []
         page.on(
             "request",
-            lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+            lambda r: sent.append(json.loads(r.post_data)["changes"]) if _edit_post(r) else None,
         )
         page.locator(".deck-toast button", has_text="Undo").click()
         page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
@@ -341,13 +346,14 @@ def test_undo_of_a_maybeboard_remove_puts_back_its_printing(server: Server) -> N
         card.scroll_into_view_if_needed()
         card.click()
         page.wait_for_selector(".cardview.open", timeout=3000)
-        page.locator(".cardview .acts button", has_text="Remove from deck").click()
+        # (a side row's viewer says which category it leaves)
+        page.locator(".cardview .acts button", has_text="Remove from “Maybeboard”").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert server.quantity("Sol Ring", side=True) == 0
         sent: list[list[dict]] = []
         page.on(
             "request",
-            lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+            lambda r: sent.append(json.loads(r.post_data)["changes"]) if _edit_post(r) else None,
         )
         page.locator(".deck-toast button", has_text="Undo").click()
         page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
@@ -389,7 +395,7 @@ def test_viewer_quantity_buttons_and_remove(server: Server) -> None:
             page.locator(".cardview .acts button", has_text="Remove from deck").click()
         assert json.loads(req2.value.post_data)["changes"] == [{"action": "remove", "card_name": "Cultivate"}]
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
-        page.wait_for_timeout(300)
+        expect(page.locator(".cardview.open")).to_have_count(0)
         assert page.locator(".cardview.open").count() == 0
         assert page.locator(".deckview .c[data-card='Cultivate']").count() == 0
         assert server.quantity("Cultivate") == 0
@@ -416,6 +422,8 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366)
+        # the Maybeboard stack comes last now (0.7.46 audit D-14): a window tall enough for both
+        page.set_viewport_size({"width": 1366, "height": 1400})
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         url = page.url
         source = ".deckview .row[data-card='Sol Ring'][data-zone='side']"
@@ -425,13 +433,13 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         page.keyboard.press("Enter")
         page.wait_for_selector(".cardview.open", timeout=3000)
         page.keyboard.press("Escape")
-        page.wait_for_timeout(200)
+        expect(page.locator(".cardview.open")).to_have_count(0)
         row.focus()
         page.keyboard.press("Shift+F10")
         page.wait_for_selector(".ctxmenu", timeout=3000)
         assert page.evaluate("document.activeElement.closest('.ctxmenu') !== null")
         page.keyboard.press("Escape")
-        page.wait_for_timeout(100)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0
         assert page.evaluate("document.activeElement.getAttribute('data-card')") == "Cultivate"
         target = page.locator(".stack[data-group='Commander']")
@@ -443,13 +451,17 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         assert body["changes"] == [
             {"action": "set_category", "card_name": "Sol Ring", "category": "Commander", "zone": "side"}
         ]
-        # filed under Commander, Sol Ring becomes a second commander: a commander change asks first
-        dialog = page.locator(".deck-toast[role='alertdialog']")
+        # filed under Commander, Sol Ring becomes a second commander: a commander change asks first,
+        # in the pop-up box (audit F-7), Keep it focused and the red Save anyway last
+        dialog = page.locator(".mtgbox-scrim .mtgbox[role=dialog]")
         dialog.wait_for(timeout=5000)
-        assert "This changes the deck's commander. Save anyway?" in dialog.inner_text()
-        dialog.locator("button", has_text="Save anyway").click()
+        assert "This changes the deck's commander." in dialog.inner_text()
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
+        last = dialog.locator(".acts button").last
+        assert last.inner_text().strip() == "Save anyway" and "danger" in (last.get_attribute("class") or "")
+        last.click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
-        page.wait_for_timeout(200)
+        expect(target.locator(".row[data-card='Sol Ring']")).to_have_count(1)
         assert page.url == url and page.locator(".movebar").count() == 0  # no staging bar
         moved = target.locator(".row[data-card='Sol Ring']")
         assert moved.count() == 1 and moved.get_attribute("data-zone") == "main"
@@ -483,7 +495,7 @@ def test_press_and_hold_opens_the_menu_on_touch(server: Server) -> None:
         x, y = box["x"] + 60, box["y"] + box["height"] / 2
         cdp = page.context.new_cdp_session(page)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(500)
+        expect(card).to_have_class(re.compile(r"\bheld\b"))  # the hold armed: the card is held
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         menu = page.locator(".ctxmenu[role=menu]")
         menu.wait_for(timeout=3000)
@@ -494,12 +506,13 @@ def test_press_and_hold_opens_the_menu_on_touch(server: Server) -> None:
         assert b["x"] >= 0 and b["x"] + b["width"] <= 390 and b["y"] + b["height"] <= 800, b
         # Back closes it on a phone
         page.go_back()
-        page.wait_for_timeout(200)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0 and "/decks/42" in page.url
         # a short tap still opens the viewer (after the hold's own click guard has passed)
+        # fixed wait: the hold's lift swallows the next click for 400 ms (a timer in deck.js the
+        # page does not show); a tap counts only after it
         page.wait_for_timeout(500)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(80)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         page.wait_for_selector(".cardview.open", timeout=3000)
         assert page.locator(".ctxmenu").count() == 0
@@ -526,7 +539,7 @@ def test_a_hold_that_also_starts_the_browsers_drag_leaves_no_card_stuck(server: 
         x, y = box["x"] + box["width"] / 2, box["y"] + 30
         cdp = page.context.new_cdp_session(page)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(450)
+        expect(card).to_have_class(re.compile(r"\bheld\b"))  # the hold armed: the card is held
         assert card.get_attribute("draggable") == "false"  # no browser drag under a finger
         # what Android does next: its drag starts (cancelling the touch) and, the finger letting
         # go without moving, its context menu event; no dragend follows
@@ -554,13 +567,12 @@ def test_a_hold_that_also_starts_the_browsers_drag_leaves_no_card_stuck(server: 
         other = page.locator(".deckview .c:not([data-card='Cultivate'])").first
         name = other.get_attribute("data-card")
         page.mouse.click(5, 5)
-        page.wait_for_timeout(500)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0
         other.scroll_into_view_if_needed()
         ob = other.bounding_box()
         ox, oy = ob["x"] + ob["width"] / 2, ob["y"] + 20
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": ox, "y": oy}]})
-        page.wait_for_timeout(80)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         page.wait_for_selector(".cardview.open", timeout=3000)
         assert name in page.locator(".cardview.open").inner_text()
@@ -594,7 +606,7 @@ def test_a_pen_never_starts_the_browsers_drag_and_a_hold_left_over_ends_at_the_n
                 {bubbles: true, cancelable: true, touches: [t], targetTouches: [t], changedTouches: [t]}));
         }"""
         card.evaluate(touch)
-        page.wait_for_timeout(450)
+        expect(card).to_have_class(re.compile(r"\bheld\b"))  # the hold armed: the card is held
         assert "held" in (card.get_attribute("class") or "")
         other.evaluate(touch)  # the first touch never ended
         assert "held" not in (card.get_attribute("class") or "")
@@ -681,15 +693,17 @@ def test_a_declined_confirmation_rejects_the_proposal_it_made(server: Server) ->
             dialog.wait_for(timeout=5000)
             assert dialog.locator("h2").inner_text() == "Remove 9 cards?"
             assert dialog.locator(".acts button.danger").inner_text().strip() == "Remove 9 cards"
-            if close == "Dismiss":
-                dialog.locator("button[aria-label='Close']").click()
-            else:
-                dialog.locator("button", has_text="Keep them").click(timeout=3000)
+            with page.expect_request(re.compile(r"/api/v1/proposals/prop_decline/reject$")):
+                if close == "Dismiss":
+                    dialog.locator("button[aria-label='Close']").click()
+                else:
+                    dialog.locator("button", has_text="Keep them").click(timeout=3000)
             gone = "() => !document.querySelector('.mtgbox-scrim')"
             page.wait_for_function(gone, timeout=3000)
-            page.wait_for_timeout(200)
+            quiet(page)
             page.keyboard.press("Escape")
-            page.wait_for_timeout(200)
+            expect(page.locator(".cardview.open")).to_have_count(0)
+            quiet(page)
         assert rejected == ["POST"] * 3  # one reject per declined question, never two
         assert page.locator(".deckview .c[data-card='Cultivate']").count() == 1  # nothing changed
         assert server.quantity("Cultivate") == 1
@@ -717,7 +731,7 @@ def _edits(page) -> list[list[dict]]:
     sent: list[list[dict]] = []
     page.on(
         "request",
-        lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+        lambda r: sent.append(json.loads(r.post_data)["changes"]) if _edit_post(r) else None,
     )
     return sent
 
@@ -751,7 +765,6 @@ def test_drag_saves_at_once_with_undo_and_redo_buttons_and_keys(server: Server) 
 
         def wait_for(text: str) -> None:
             page.locator(".deck-toast .msg", has_text=text).wait_for(timeout=8000)
-            page.wait_for_timeout(150)
 
         # Ctrl+Z with the focus on the page (not in a field) undoes the drop
         page.locator("h1.deckname").click()
@@ -785,6 +798,7 @@ def test_drag_saves_at_once_with_undo_and_redo_buttons_and_keys(server: Server) 
         # typing in a field: Ctrl+Z belongs to the field, nothing is sent
         page.locator("#q").click()
         page.keyboard.press("Control+z")
+        # fixed wait: proves nothing is sent within 600 ms of Ctrl+Z in a field (a negative check)
         page.wait_for_timeout(600)
         assert len(sent) == 7 and _cats(server, "Cultivate") == ["Lands"]
         assert errors == []
@@ -806,16 +820,17 @@ def test_undo_of_a_remove_restores_every_category_and_a_note_is_warned_about(ser
         sent = _edits(page)
         card = page.locator(".deckview .row[data-card='Cultivate']").first
         assert json.loads(card.get_attribute("data-allcats")) == ["Ramp", "Value"]
-        dialog = page.locator(".deck-toast[role='alertdialog']")
+        dialog = page.locator(".mtgbox-scrim .mtgbox[role=dialog]")
         menu = page.locator(".ctxmenu[role=menu]")
-        # Cancel: nothing is sent and the card stays
+        # Keep it (focused, in the pop-up box: audit F-7): nothing is sent and the card stays
         card.click(button="right")
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Remove from deck").click()
         dialog.wait_for(timeout=5000)
         assert "has a card note" in dialog.inner_text() and "cannot write notes" in dialog.inner_text()
-        dialog.locator("button", has_text="Cancel").click()
-        page.wait_for_timeout(400)
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
+        dialog.locator("button", has_text="Keep it").click()
+        quiet(page)  # the box closed
         assert sent == [] and server.quantity("Cultivate") == 1
         page.keyboard.press("Escape")
         # Remove anyway: the removal goes out
@@ -922,7 +937,7 @@ def test_drag_onto_the_stack_directly_below_in_the_stacks_view(server: Server) -
         head = land.locator(".stackhead").bounding_box()
         x0, y0 = s["x"] + s["width"] / 2, s["y"] + 12
         page.mouse.move(x0, y0)
-        page.wait_for_timeout(300)  # the fan opens under the pointer
+        settled(page)  # the fan opened under the pointer
         page.mouse.down()
         page.mouse.move(x0, y0 + 8, steps=2)  # the drag starts on this card
         page.mouse.move(head["x"] + head["width"] / 2, head["y"] + head["height"] / 2, steps=8)
@@ -1013,7 +1028,7 @@ def test_the_card_menu_switches_companion_and_back_face(server: Server) -> None:
 
 MENU_ROWS = """() => [...document.querySelectorAll(
     '.ctxmenu[role=menu] [role=menuitem], .ctxmenu[role=menu] [role=menuitemcheckbox], ' +
-    '.ctxmenu[role=menu] .qtyrow')]
+    '.ctxmenu[role=menu] .qtyrow, .ctxmenu[role=menu] .qtyrow .step')]
   .filter(e => e.getClientRects().length)
   .map(e => { const r = e.getBoundingClientRect(); return { text: e.textContent.trim().slice(0, 24),
     cls: e.className, h: r.height, w: r.width, x: r.left }; })"""
@@ -1046,12 +1061,12 @@ def test_every_card_menu_row_and_step_is_finger_sized_on_a_phone(server: Server)
         cdp = page.context.new_cdp_session(page)
         x, y = box["x"] + 60, box["y"] + box["height"] / 2
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(500)
+        expect(card).to_have_class(re.compile(r"\bheld\b"))  # the hold armed: the card is held
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         menu = page.locator(".ctxmenu[role=menu]")
         menu.wait_for(timeout=3000)
         menu.locator("button.more", has_text="Move to").click()
-        page.wait_for_timeout(100)
+        settled(page)
         rows = page.evaluate(MENU_ROWS)
         texts = [r["text"] for r in rows]
         assert "Companion" in texts and "Show back face" in texts and "−" in texts and "+" in texts, texts
@@ -1131,9 +1146,7 @@ def test_card_menu_rows_without_an_icon_keep_the_slot_so_text_lines_up(server: S
         assert comp.get_attribute("aria-checked") == "false"
         assert comp.locator(".ic-slot[aria-hidden=true]").count() == 1 and comp.locator("svg").count() == 0
         starts = page.evaluate(MENU_TEXT_X)
-        assert {s["text"] for s in starts} >= {"Open card", "Companion", "Add to collection", "Copy name"}, (
-            starts
-        )
+        assert {s["text"] for s in starts} >= {"Open card", "Companion", "Add to binder", "Copy name"}, starts
         xs = {s["x"] for s in starts}
         assert len(xs) == 1, starts
         assert errors == []

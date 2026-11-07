@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from . import ui
 from .mana import pip_html
 from .theme import card_size_control, esc, icon
 
@@ -68,21 +69,29 @@ def name_row(
     under_html: str = "",
     attrs: str = "",
     filters_button: bool = True,
+    fold: bool | None = None,
+    filters_word: str = "Filters",
 ) -> str:
     """The panel's first row: the name box with its search button (``attrs`` adds attributes to
     the box), ``under_html`` right under the box (deck search's "Open this deck"), the Filters
     button phones open the sheet with, and ``cross_html`` (the cross-link) at the end of the row,
-    hidden on phones."""
+    hidden on phones. ``fold``: the button shows at every width and folds the filter groups in
+    place on a Fold or desktop (``filters_sheet`` with ``folded``); True when they start open.
+    ``filters_word`` names the button by what the sheet holds (``filters_sheet``'s ``title``)."""
+    expanded = "true" if fold else "false"
+    # the lite "View" sheet (the card size alone) is no filter: the eye, not the funnel (re-check S4)
+    fic = icon("eye" if filters_word == "View" else "filter")
     fbtn = (
-        "<button type='button' class='btn sp-open fbtn' aria-controls='sp-filters' aria-expanded='false'>"
-        f"{icon('filter')} Filters <span class='n'></span></button>"
+        f"<button type='button' class='btn sp-open fbtn{' fold' if fold is not None else ''}' "
+        f"aria-controls='sp-filters' aria-expanded='{expanded}'>"
+        f"{fic} {esc(filters_word)} <span class='n'></span></button>"
         if filters_button
         else ""
     )
     return (
         f"<div class='srow'><div class='sp-name'><label for='{esc(input_id)}'>{esc(label)}</label>"
         f"<span class='search'><input id='{esc(input_id)}' type='search' name='{esc(name)}' "
-        f"value='{esc(value)}' placeholder='{esc(placeholder)}' autocomplete='off' "
+        f"value='{esc(value)}'{ui.hint_attrs(placeholder)} autocomplete='off' "
         f"enterkeyhint='search'{attrs}>"
         f"<button type='submit' aria-label='{esc(search_label)}' title='{esc(search_label)}'>{icon('search')}"
         f"</button></span><div class='under'>{under_html}</div></div>{fbtn}{cross_html}</div>"
@@ -188,7 +197,7 @@ def text_group(
 ) -> str:
     box = (
         f"<input id='{esc(input_id)}' type='text' name='{esc(name)}' value='{esc(value)}' "
-        f"placeholder='{esc(placeholder)}' autocomplete='off'{attrs}>"
+        f"{ui.hint_attrs(placeholder)} autocomplete='off'{attrs}>"
     )
     return group(label, box, for_id=input_id, cls=cls)
 
@@ -196,10 +205,26 @@ def text_group(
 # --- the phone sheet ---------------------------------------------------------------------------
 
 
-def filters_sheet(inner_html: str, *, show_html: str, clear_html: str, size: bool = True) -> str:
+def filters_sheet(
+    inner_html: str,
+    *,
+    show_html: str,
+    clear_html: str,
+    size: bool = True,
+    folded: bool | None = None,
+    pref: str = "",
+    title: str = "Filters",
+) -> str:
     """The filter groups, which phones open as a full-screen sheet (the Filters button in the
-    name row): a head with Filters and ×, the groups, the card size (phones only, where the
-    results bar hides it), then Clear filters and ``show_html`` (the button that closes it)."""
+    name row): a head with its ``title`` (what the sheet holds: "Filters", or "View" when it holds
+    only the card size; ``name_row``'s ``filters_word`` names the button the same) and ×, the
+    groups, the card size (phones only, where the results bar hides it), then Clear filters and
+    ``show_html`` (the button that closes it).
+    ``folded``: on a Fold or desktop the groups fold in place behind the same button (mockup
+    screen 5): True draws them folded, False open, None (other panels) always open. ``pref``: the
+    account choice static/searchpanel.js keeps the last state in. Without scripts nothing can
+    open a sheet or unfold the groups, so a <noscript> style shows them at every width and hides
+    the button."""
     size_html = (
         "<div class='sheet-size'>"
         + card_size_control().replace("class='field cardsize'", "class='cardsize'")
@@ -207,10 +232,21 @@ def filters_sheet(inner_html: str, *, show_html: str, clear_html: str, size: boo
         if size
         else ""
     )
+    # no groups (the Binder with no tags to filter by): a bottom sheet the height of its content,
+    # not a full screen for one card-size control (polish re-check Q5)
+    cls = (" folded" if folded else "") + ("" if inner_html else " lite")
+    data = f" data-pref='{esc(pref)}'" if pref else ""
+    noscript = (
+        "<noscript><style>.spanel .sp-filters,.spanel .sp-filters.folded{display:contents;position:static;"
+        "overflow:visible}"
+        ".spanel .fbtn.sp-open,.spanel .sp-sheet-head,.spanel .sp-sheet-foot{display:none}</style></noscript>"
+    )
     return (
-        "<div id='sp-filters' class='sp-filters'><div class='sp-sheet-head'><h2>Filters</h2>"
-        f"<button type='button' class='close' aria-label='Close filters'>{icon('x')}</button></div>"
-        f"{inner_html}{size_html}<div class='sp-sheet-foot'>{clear_html}{show_html}</div></div>"
+        f"<div id='sp-filters' class='sp-filters{cls}'{data} aria-labelledby='sp-filters-title'>"
+        f"<div class='sp-sheet-head'><h2 id='sp-filters-title'>{esc(title)}</h2>"
+        f"<button type='button' class='close' aria-label='Close {esc(title.lower())}'>{icon('x')}</button>"
+        "</div>"
+        f"{inner_html}{size_html}<div class='sp-sheet-foot'>{clear_html}{show_html}</div></div>{noscript}"
     )
 
 

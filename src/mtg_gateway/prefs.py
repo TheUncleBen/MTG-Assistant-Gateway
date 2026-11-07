@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .theme import VIEW_COOKIE, VIEW_KINDS
+from .theme import CARD_SIZE, CARD_SIZE_PAGES, VIEW_COOKIE, VIEW_KINDS
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -32,12 +33,31 @@ if TYPE_CHECKING:
     from .db import Database
 
 VIEW = "view."  # + one of theme.VIEW_KINDS
-CARD_SIZE = "card.size"
+# SORT + one of SORT_KINDS: the list's sort as last picked, {"sort": word, "dir": word} (0.7.46
+# audit QG-11): My decks, the Binder, a member's profile, card search, deck search and the precons
+# open sorted the way they were left (audit F-10 for the last three)
+SORT = "sort."
+SORT_KINDS = ("decks", "collection", "profile", "cards", "search", "precons")
+_SORT_WORD = re.compile(r"-?[A-Za-z0-9_]{1,40}")  # each regex here: fullmatch
+# CARD_SIZE: the one size every page used before 2026-10-28, still read by a page without its own;
+# CARD_SIZE + "." + one of theme.CARD_SIZE_PAGES: that page's own size
 CARD_SIZES = ("s", "m", "l")
 DECKSTATS = "deckstats"
 EDHPLAY_STEPS = "edhplay.steps"
 SCAN_INTRO = "scan.intro"
 STACK = "stack:"  # + deck id + ":" + grouping
+# The Binder's Add box and the Watchlist's Watch form, as last used with "Use ... next time" ticked
+# (2026-10-28): {finish, condition, language} and {finish, alert_pct}. A card menu's "Add to
+# binder" or Watch, which asks nothing, uses them too.
+BINDER_ADD = "binder.add"
+WATCH_ADD = "watch.add"
+# the member's price alert defaults, set on every card they watch from then on (mockup screen 8):
+# {pct, above, below, drop, rise}, each a number or absent (off); prices.DEFAULT_ALERTS until set
+WATCH_ALERTS = "watch.alerts"
+_ALERT_HI = {"pct": 1000, "above": 1_000_000, "below": 1_000_000, "drop": 100, "rise": 1000}
+_FINISHES = ("nonfoil", "foil", "etched")
+_CONDITIONS = ("NM", "LP", "MP", "HP", "DMG")
+_LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")
 MAX_STACK_ORDERS = 150  # the newest 150; saving one more forgets the oldest
 MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # Set by "Forget my view choices" and kept: from then on a device's pre-0.7.29 choices (a view
@@ -45,32 +65,79 @@ MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # the update can't bring the forgotten choices back. Not a choice: the pages' API can't read or
 # set it.
 FORGOTTEN = "prefs.forgotten"
+# Card search's filter groups on a Fold or desktop: folded behind the Filters button ("closed",
+# the default) or open (mockup screen 5, 2026-11-01); phones always open them as a sheet
+CARDS_FILTERS = "cards.filters"
+CARDS_FILTERS_STATES = ("open", "closed")
 
-_STACK_NAME = re.compile(r"^stack:(\d{1,12}):([a-z0-9_-]{0,40})$")
-_WORD = re.compile(r"^[a-z0-9_-]{1,40}$")
+CARD_SIZE_NAMES = (CARD_SIZE, *(f"{CARD_SIZE}.{page}" for page in CARD_SIZE_PAGES))
+
+_STACK_NAME = re.compile(r"stack:(\d{1,12}):([a-z0-9_-]{0,40})")
+_WORD = re.compile(r"[a-z0-9_-]{1,40}")
 
 
 def valid(name: str, value: Any) -> bool:
     """Whether ``value`` is a well-formed choice called ``name`` (anything else is refused, so the
     store holds only what the pages read back)."""
+    if name.startswith(SORT):
+        return (
+            name[len(SORT) :] in SORT_KINDS
+            and isinstance(value, dict)
+            and set(value) <= {"sort", "dir"}
+            and isinstance(value.get("sort"), str)
+            and bool(_SORT_WORD.fullmatch(value["sort"]))
+            and (value.get("dir") is None or value["dir"] in ("auto", "asc", "desc"))
+        )
     if name.startswith(VIEW):
-        return name[len(VIEW) :] in VIEW_KINDS and isinstance(value, str) and bool(_WORD.match(value))
-    if name == CARD_SIZE:
+        return name[len(VIEW) :] in VIEW_KINDS and isinstance(value, str) and bool(_WORD.fullmatch(value))
+    if name in CARD_SIZE_NAMES:
         return value in CARD_SIZES
-    if name in (EDHPLAY_STEPS, SCAN_INTRO):
+    if name == EDHPLAY_STEPS:
         return value is True
+    if name == CARDS_FILTERS:
+        return value in CARDS_FILTERS_STATES
+    if name == SCAN_INTRO:  # "seen": shown once, folded from then on; True: dismissed with Got it
+        return value is True or value == "seen"
+    if name == BINDER_ADD:
+        return (
+            isinstance(value, dict)
+            and set(value) <= {"finish", "condition", "language"}
+            and value.get("finish", "nonfoil") in _FINISHES
+            and value.get("condition", "NM") in _CONDITIONS
+            and value.get("language", "EN") in _LANGUAGES
+        )
+    if name == WATCH_ADD:
+        pct = value.get("alert_pct") if isinstance(value, dict) else None
+        return (
+            isinstance(value, dict)
+            and set(value) <= {"finish", "alert_pct"}
+            and value.get("finish", "nonfoil") in _FINISHES
+            and (
+                pct is None
+                or (isinstance(pct, int | float) and not isinstance(pct, bool) and 0 < pct <= 1000)
+            )
+        )
+    if name == WATCH_ALERTS:
+        return (
+            isinstance(value, dict)
+            and set(value) <= set(_ALERT_HI)
+            and all(
+                isinstance(v, int | float) and not isinstance(v, bool) and 0 < v <= _ALERT_HI[k]
+                for k, v in value.items()
+            )
+        )
     if name == DECKSTATS:
         return (
             isinstance(value, dict)
             and len(value) <= 12
             and all(
                 isinstance(k, str)
-                and _WORD.match(k)
+                and _WORD.fullmatch(k)
                 and (isinstance(v, bool) or (isinstance(v, str) and len(v) <= 40))
                 for k, v in value.items()
             )
         )
-    if _STACK_NAME.match(name):
+    if _STACK_NAME.fullmatch(name):
         return (
             isinstance(value, list)
             and 0 < len(value) <= MAX_STACK_NAMES
@@ -95,21 +162,40 @@ def save(db: Database, sub: str, name: str, value: Any) -> bool:
 def valid_name(name: str) -> bool:
     return (
         (name.startswith(VIEW) and name[len(VIEW) :] in VIEW_KINDS)
-        or name in (CARD_SIZE, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO)
-        or bool(_STACK_NAME.match(name))
+        or (name.startswith(SORT) and name[len(SORT) :] in SORT_KINDS)
+        or name
+        in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO, BINDER_ADD, WATCH_ADD, WATCH_ALERTS)
+        or bool(_STACK_NAME.fullmatch(name))
     )
 
 
 def forget(db: Database, sub: str) -> int:
-    """ "Forget my view choices": views, card size, stack orders, stats toggles and the
+    """ "Forget my view choices": views, sorts, card size, stack orders, stats toggles and the
     dismissed tips. Other things kept on the account (notifications, approval mode) stay."""
     n = db.delete_prefs(
         sub,
-        names=(CARD_SIZE, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO),
-        prefixes=(VIEW, STACK),
+        names=(*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO),
+        prefixes=(VIEW, SORT, STACK),
     )
     db.set_pref(sub, FORGOTTEN, True)
     return n
+
+
+def choices(db: Database, sub: str, name: str) -> dict[str, Any]:
+    """The remembered Add or Watch choices (BINDER_ADD, WATCH_ADD), or {}."""
+    value = db.get_pref(sub, name)
+    return value if isinstance(value, dict) and valid(name, value) else {}
+
+
+def alert_defaults(db: Database, sub: str) -> dict[str, float]:
+    """The price alerts a card the member watches gets (WATCH_ALERTS): the member's own once
+    they saved any, else the shipped default (prices.DEFAULT_ALERTS)."""
+    from .prices import DEFAULT_ALERTS  # prices imports theme, not this module
+
+    value = db.get_pref(sub, WATCH_ALERTS)
+    if isinstance(value, dict) and valid(WATCH_ALERTS, value):
+        return {k: float(v) for k, v in value.items()}
+    return dict(DEFAULT_ALERTS)
 
 
 def copies_refused(db: Database, sub: str) -> bool:
@@ -117,9 +203,11 @@ def copies_refused(db: Database, sub: str) -> bool:
     return db.get_pref(sub, FORGOTTEN) is True
 
 
-def card_size(db: Database, sub: str | None) -> str:
-    size = db.get_pref(sub, CARD_SIZE) if sub else None
-    return size if size in CARD_SIZES else "m"
+def card_sizes(db: Database, sub: str, page: str) -> dict[str, Any]:
+    """What theme.set_card_size needs to draw ``page``: its own size, the printings dialog's, the
+    one size chosen before for every page, and the "forgotten" marker."""
+    names = (CARD_SIZE, f"{CARD_SIZE}.{page}", f"{CARD_SIZE}.printings", FORGOTTEN)
+    return {n: v for n in names if (v := db.get_pref(sub, n)) is not None}
 
 
 def from_this_site(request: Request) -> bool:
@@ -176,6 +264,49 @@ def view_choice(
     return default, False
 
 
+def sort_choice(
+    db: Database,
+    sub: str,
+    request: Request,
+    kind: str,
+    *,
+    sorts: Iterable[str],
+    default: str,
+    name: str = "sort",
+    dirs: Iterable[str] = (),
+    default_dir: str = "",
+    dir_name: str = "dir",
+) -> tuple[str, str]:
+    """The sort (and direction) a list opens with: the address's when it names a known one
+    (remembered on the account when the pick came from this site), else the one remembered,
+    else ``default``. So a sort picked once is the sort the next visit opens with, until
+    "Forget my view choices" (QOL-12)."""
+    assert kind in SORT_KINDS
+    sorts, dirs = tuple(sorts), tuple(dirs)
+    stored = db.get_pref(sub, SORT + kind)
+    if not isinstance(stored, dict):
+        stored = {}
+    asked = request.query_params.get(name)
+    asked_dir = request.query_params.get(dir_name) if dirs else None
+    if asked in sorts:
+        direction = (
+            asked_dir if asked_dir in dirs else (stored.get("dir") if asked == stored.get("sort") else None)
+        )
+        if direction not in dirs:
+            direction = default_dir
+        if from_this_site(request):
+            want: dict[str, Any] = {"sort": asked}
+            if dirs:
+                want["dir"] = direction
+            if want != stored:
+                db.set_pref(sub, SORT + kind, want)
+        return asked, direction
+    if stored.get("sort") in sorts:
+        direction = stored.get("dir")
+        return stored["sort"], direction if direction in dirs else default_dir
+    return default, default_dir
+
+
 def remember_view(
     db: Database, sub: str, response: Response, kind: str, view: str, *, secure: bool
 ) -> Response:
@@ -201,10 +332,60 @@ def page_prefs(db: Database, sub: str | None, *names: str) -> str:
     return f"<script id='mtg-prefs' type='application/json'>{blob}</script>"
 
 
+# A page's saves are numbered (static/prefs.js: ``page``, a random id the page picks when it
+# loads, and ``seq``, 1, 2, 3... in the order its choices were made). For each member and name the
+# gateway keeps the page and number of the last save it stored, and drops a save of that name from
+# the same page with a number no higher (0.7.46 audit C7): a request the page cancelled after it
+# reached the gateway, or one that was slow, never lands over a newer choice. Kept in memory
+# (SaveNumbers), so not across a restart; a save without a number goes as it comes.
+SEQ_PER_MEMBER = 300  # a member's newest names: as many as the account keeps (MAX_PREFS_PER_ACCOUNT)
+SEQ_MEMBERS = 500  # the members who saved most recently
+_PAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")  # fullmatch: a "$" also matches before a last newline
+_MAX_SEQ = 2**53 - 1  # the largest whole number a page's script counts to exactly
+
+
+class SaveNumbers:
+    """The page and number of each member's last numbered save of each name. Bounded per member
+    (``per_member`` names: past that, that member's own least recently saved name goes) and in
+    members (``members``: a member saving for the first time past that pushes out the member
+    who saved least recently, whole). So one member's saves, however many, never push out a part
+    of another member's numbers (audit of 099f600a): at most ``per_member * members`` names."""
+
+    def __init__(self, *, per_member: int = SEQ_PER_MEMBER, members: int = SEQ_MEMBERS) -> None:
+        from collections import OrderedDict
+
+        self.per_member, self.members = per_member, members
+        # sub -> name -> (page, seq); both least recently saved first
+        self._subs: OrderedDict[str, OrderedDict[str, tuple[str, int]]] = OrderedDict()
+
+    def get(self, sub: str, name: str) -> tuple[str, int] | None:
+        mine = self._subs.get(sub)
+        return mine.get(name) if mine is not None else None
+
+    def keep(self, sub: str, name: str, page: str, seq: int) -> None:
+        from collections import OrderedDict
+
+        mine = self._subs.get(sub)
+        if mine is None:
+            while len(self._subs) >= self.members:
+                self._subs.popitem(last=False)
+            mine = self._subs[sub] = OrderedDict()
+        self._subs.move_to_end(sub)
+        mine[name] = (page, seq)
+        mine.move_to_end(name)
+        while len(mine) > self.per_member:
+            mine.popitem(last=False)
+
+    def size(self) -> int:
+        return sum(len(m) for m in self._subs.values())
+
+
 def add_prefs_routes(server: MCPServer, state: AppState) -> None:
     """GET /api/v1/prefs and POST /api/v1/prefs for the pages' scripts. The member's own browser
     only: an assistant or an app with a token has no business with how the pages look."""
     from .api import caller_for, json_body
+
+    numbers = SaveNumbers()
 
     async def who(request: Request, *, write: bool) -> str | Response:
         caller = await caller_for(state, request, write=write)
@@ -229,7 +410,9 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
     async def set_prefs(request: Request) -> Response:
         """``{"set": {name: value or null}}`` saves each (null forgets it); ``{"copy": {...}}``
         saves only the names the account doesn't have yet (the one-time copy from this device).
-        Answers which names were saved and which were refused."""
+        ``page`` and ``seq`` (both or neither) number the save: a name a newer save from the same
+        page already stored is left as it is (SaveNumbers). Answers which names were saved, which
+        were refused and which were superseded by a newer save."""
         sub = await who(request, write=True)
         if isinstance(sub, Response):
             return sub
@@ -239,12 +422,38 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
         changes, copy = data.get("set") or {}, data.get("copy") or {}
         if not isinstance(changes, dict) or not isinstance(copy, dict) or len(changes) + len(copy) > 400:
             return JSONResponse({"ok": False, "error": "invalid", "message": "set and copy are objects"}, 400)
+        page, seq = data.get("page"), data.get("seq")
+        if (page, seq) != (None, None) and not (
+            isinstance(page, str) and _PAGE_ID.fullmatch(page) and type(seq) is int and 0 < seq <= _MAX_SEQ
+        ):
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "page is an ID and seq a whole number from 1"},
+                400,
+            )
         have = state.db.get_prefs(sub) if copy else {}
         if copy and have.get(FORGOTTEN) is True:
             copy = {}  # forgotten: this device's old choices are dropped, not copied
-        saved, refused = [], []
+        # the names a save from this page numbered as high or higher stored already: decided
+        # before any is saved, so a name in both "copy" and "set" of this one isn't its own rival
+        stale = {
+            n
+            for n in {*map(str, copy), *map(str, changes)}
+            if seq is not None and (kept := numbers.get(sub, n)) and kept[0] == page and kept[1] >= seq
+        }
+        saved, refused, superseded = [], [], []
         for name, value in [*((n, v) for n, v in copy.items() if n not in have), *changes.items()]:
-            (saved if save(state.db, sub, str(name), value) else refused).append(str(name))
+            name = str(name)
+            if name in stale:
+                if name not in superseded:
+                    superseded.append(name)  # a newer choice from this page is stored already
+                continue
+            if not save(state.db, sub, name, value):
+                refused.append(name)  # keeps no number: an older valid save of it still goes
+                continue
+            saved.append(name)
+            if seq is not None:
+                numbers.keep(sub, name, page, seq)
         return JSONResponse(
-            {"ok": True, "saved": saved, "refused": refused}, headers={"Cache-Control": "no-store"}
+            {"ok": True, "saved": saved, "refused": refused, "superseded": superseded},
+            headers={"Cache-Control": "no-store"},
         )

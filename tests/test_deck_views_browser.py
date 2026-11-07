@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from .test_deck_menu_browser import EDIT_URL, Server, _cats, _chromium, _edits, _file_under, _overflow, _page
+from .waits import expect, frame, settled
 
 pytest.importorskip("playwright")
 
@@ -78,52 +79,38 @@ def test_table_and_scroll_views(server: Server, width: int, scheme: str) -> None
         browser.close()
 
 
-def test_stack_order_by_keyboard_is_kept_and_reset(server: Server) -> None:
+def test_stacks_follow_archidekts_category_order_with_no_handles(server: Server) -> None:
+    """Owner decision C4 (0.7.46): the stacks come in Archidekt's category order, the one order
+    there is; the side stacks last (D-14). No drag handle, no Reset stack order, and a stack
+    order kept on the account by an earlier version changes nothing."""
     from playwright.sync_api import sync_playwright
 
+    from mtg_gateway import views
+    from mtg_gateway.archidekt import parse_deck
+
+    expected = [n for n, _cards in views.cards_by_category(parse_deck(server.ark.decks[42]))]
+    assert expected[0] == "Commander" and expected[-1] == "Maybeboard" and len(expected) >= 4
     _chromium()
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366)
-        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
-        names = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
-        assert len(names) >= 3
-        grip = page.locator(f".stack[data-group='{names[1]}'] .stackgrip")
-        grip.focus()
-        with page.expect_response(_stack_saved):
-            page.keyboard.press("ArrowUp")
-        now = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
-        assert now[:2] == [names[1], names[0]]
-        assert grip.evaluate("e => document.activeElement === e")
-        assert "position 1 of" in page.locator("p.sr-only[aria-live]").inner_text()
+        page.goto(f"{server.base}{'/decks/42?view=text'}", wait_until="networkidle")
+        names = page.evaluate(ORDER)
+        assert names == expected, names
+        assert page.locator(".stackgrip, .stack-reset").count() == 0
+        # a stack order an earlier version kept on the account changes nothing
+        server.db.set_pref("user-1", "stack:42:category", [names[2], names[0], names[1], *names[3:]])
         page.reload(wait_until="networkidle")
-        kept = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
-        assert kept == now
-        # 0.7.29: kept on the account, so a fresh browser (another device) shows it too
-        assert server.db.get_pref("user-1", "stack:42:category") == now
-        other = browser.new_context(viewport={"width": 1366, "height": 900})
-        other.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
-        page2 = other.new_page()
-        page2.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
-        assert page2.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == now
-        assert "this device" not in page2.locator(".stack-reset").inner_text()
-        other.close()
-        with page.expect_response(_stack_saved):
-            page.locator(".stack-reset").click()
-        back = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
-        assert back == names
-        page.reload(wait_until="networkidle")
-        assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == names
-        assert page.locator(".stack-reset").count() == 0
-        assert server.db.get_pref("user-1", "stack:42:category") is None
+        assert page.evaluate(ORDER) == names
         assert errors == []
         browser.close()
 
 
 def test_choices_kept_in_the_browser_before_are_copied_to_the_account_once(server: Server) -> None:
-    """A stack order, the stats toggles and the dismissed EDHPlay steps that 0.7.28 kept in
-    this browser show at once on the first visit after the update, are saved to the account, and
-    are removed from the browser; a value the account already has wins."""
+    """The stats toggles and the dismissed EDHPlay steps that 0.7.28 kept in this browser show
+    at once on the first visit after the update, are saved to the account, and are removed from
+    the browser; a value the account already has wins. A stack order kept then is dropped: the
+    stacks follow Archidekt's order now (0.7.46, owner decision C4)."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -141,9 +128,9 @@ def test_choices_kept_in_the_browser_before_are_copied_to_the_account_once(serve
             mine,
         )
         page.reload(wait_until="networkidle")
-        assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == mine
+        assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == names
         page.wait_for_function("() => localStorage.getItem('mtg-stack-order:42:category') === null")
-        assert server.db.get_pref("user-1", "stack:42:category") == mine
+        assert server.db.get_pref("user-1", "stack:42:category") is None
         assert server.db.get_pref("user-1", "deckstats") == {"chart": "pie"}
         assert server.db.get_pref("user-1", "edhplay.steps") is True
         left = page.evaluate("() => Object.keys(localStorage).sort()")
@@ -153,8 +140,8 @@ def test_choices_kept_in_the_browser_before_are_copied_to_the_account_once(serve
 
 
 def test_after_forget_a_devices_old_choices_are_never_shown(server: Server) -> None:
-    """After "Forget my view choices" a device's pre-0.7.29 stack order isn't
-    shown even on the first page it opens; it is dropped, not copied, and removed from the browser."""
+    """After "Forget my view choices" a device's pre-0.7.29 stats toggles aren't copied even on
+    the first page it opens; they are dropped and removed from the browser."""
     from playwright.sync_api import sync_playwright
 
     from mtg_gateway.prefs import FORGOTTEN
@@ -165,13 +152,10 @@ def test_after_forget_a_devices_old_choices_are_never_shown(server: Server) -> N
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366)
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
-        names = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
-        mine = [names[2], names[0], names[1], *names[3:]]
-        page.evaluate("o => localStorage.setItem('mtg-stack-order:42:category', JSON.stringify(o))", mine)
+        page.evaluate("() => localStorage.setItem('mtg.deckstats', JSON.stringify({chart: 'pie'}))")
         page.reload(wait_until="networkidle")
-        assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == names
-        page.wait_for_function("() => localStorage.getItem('mtg-stack-order:42:category') === null")
-        assert server.db.get_pref("user-1", "stack:42:category") is None
+        page.wait_for_function("() => localStorage.getItem('mtg.deckstats') === null")
+        assert server.db.get_pref("user-1", "deckstats") is None
         assert errors == []
         browser.close()
 
@@ -179,78 +163,13 @@ def test_after_forget_a_devices_old_choices_are_never_shown(server: Server) -> N
 ORDER = "() => [...document.querySelectorAll('.deckview .stack')].map(s => s.dataset.group)"
 
 
-def _stack_saved(r) -> bool:
-    """The answer to the stack order's save (prefs.js POST /api/v1/prefs). A test that reloads
-    after a move waits for it: under load the reload can otherwise be served before the save."""
-    return r.url.endswith("/api/v1/prefs") and '"stack:42:' in (r.request.post_data or "")
-
-
 def _poll(page, js: str, timeout_ms: int = 6000) -> None:
     """Wait for a condition while a pointer or finger is held down (no clicks, no locators)."""
     for _ in range(timeout_ms // 50):
         if page.evaluate(js):
             return
-        page.wait_for_timeout(50)
+        page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
     raise AssertionError(f"timed out waiting for {js}")
-
-
-def test_stack_drag_by_mouse_scrolls_on_and_lands_where_the_bar_shows(server: Server) -> None:
-    """The stacks stay put while one is dragged (a bar shows where it lands, its name follows
-    the pointer), the page scrolls on near the window's edge so a stack off screen is reachable, the
-    move happens on letting go and is kept after a reload; Escape puts a dragged stack back."""
-    from playwright.sync_api import sync_playwright
-
-    _chromium()
-    sid = server.sign_in_and_link()
-    with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, 1440)
-        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
-        names = page.evaluate(ORDER)
-        assert names[0] == "Commander" and len(names) >= 8
-        # the last row of stacks starts below the window
-        last = page.locator(f".stack[data-group='{names[-1]}']")
-        assert last.bounding_box()["y"] > 900
-        g = page.locator(".stack[data-group='Commander'] .stackgrip").bounding_box()
-        x, y = g["x"] + g["width"] / 2, g["y"] + g["height"] / 2
-        page.mouse.move(x, y)
-        page.mouse.down()
-        for i in range(1, 13):
-            page.mouse.move(x + 20 * i / 12, y + (892 - y) * i / 12)
-        assert page.locator(".stacktag").inner_text() == "Commander"
-        assert page.evaluate(ORDER) == names  # nothing moves under the pointer while dragging
-        top = f"document.querySelector(\"[data-group='{names[-1]}']\").getBoundingClientRect().top"
-        _poll(page, f"{top} < 500")
-        page.mouse.move(x + 40, 450)  # out of the edge: the page stops
-        b = last.bounding_box()
-        page.mouse.move(b["x"] + b["width"] * 0.75, min(max(b["y"] + 100, 200), 650), steps=4)
-        page.wait_for_timeout(100)
-        bar = page.locator(".stackdrop")
-        assert bar.evaluate("e => getComputedStyle(e).opacity") == "1"
-        # upright, after the last stack in its row
-        assert "scale(4," in bar.evaluate("e => e.style.transform")
-        _shot(page, "stack-drag-mouse-1440")
-        with page.expect_response(_stack_saved):
-            page.mouse.up()
-        now = page.evaluate(ORDER)
-        assert now == [n for n in names if n != "Commander"] + ["Commander"]
-        assert page.locator(".stackdrop, .stacktag").count() == 0
-        assert f"position {len(names)} of {len(names)}" in page.locator("p.sr-only[aria-live]").inner_text()
-        page.reload(wait_until="networkidle")
-        assert page.evaluate(ORDER) == now
-        # Escape while dragging: the stack stays where it was
-        page.evaluate("scrollTo(0, 0)")
-        g = page.locator(f".stack[data-group='{now[0]}'] .stackgrip").bounding_box()
-        page.mouse.move(g["x"] + 10, g["y"] + 10)
-        page.mouse.down()
-        page.mouse.move(g["x"] + 400, g["y"] + 60, steps=5)
-        assert page.locator(".stackdrop").count() == 1
-        page.keyboard.press("Escape")
-        page.mouse.up()
-        assert page.evaluate(ORDER) == now
-        assert page.locator(".stackdrop, .stacktag, .stack.moving").count() == 0
-        assert "stays where it was" in page.locator("p.sr-only[aria-live]").inner_text()
-        assert errors == []
-        browser.close()
 
 
 def _touch(cdp, kind: str, x: float = 0, y: float = 0) -> None:
@@ -258,10 +177,11 @@ def _touch(cdp, kind: str, x: float = 0, y: float = 0) -> None:
     cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": points})
 
 
-def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) -> None:
-    """On a phone: a stack's handle takes a 44 px finger; a finger held near the bottom edge
-    scrolls the page on, for a stack and for a held card alike, so a category off screen is
-    reachable; Android's own long press does not open the card menu under a held card."""
+def test_a_held_card_drags_to_a_category_off_screen_by_touch(server: Server) -> None:
+    """On a phone: a finger held near the bottom edge scrolls the page on under a held card, so a
+    category off screen is reachable; the hold opens the card's menu during the hold (0.7.46),
+    Android's own long press does not open a second one, and the slide closes it as the card
+    moves; the drop saves at once."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -270,65 +190,44 @@ def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) ->
         browser, page, errors = _page(p, server, sid, 390, has_touch=True, is_mobile=True)
         cdp = page.context.new_cdp_session(page)
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
-        grip = page.locator(".stack[data-group='Commander'] .stackgrip")
-        grip.scroll_into_view_if_needed()
-        g = grip.bounding_box()
-        assert g["width"] < 44  # drawn small, but the finger target around it is 44 px
-        hit = f"document.elementFromPoint({g['x'] - 6}, {g['y'] + g['height'] + 6})"
-        assert page.evaluate(f"{hit} === document.querySelector(\"[data-group='Commander'] .stackgrip\")")
-        x, y = g["x"] + g["width"] / 2, g["y"] + g["height"] / 2
-        top0 = page.evaluate("scrollY")
-        _touch(cdp, "touchStart", x, y)
-        for i in range(1, 11):
-            _touch(cdp, "touchMove", x + 2 * i, y + (790 - y) * i / 10)
-            page.wait_for_timeout(16)
-        _poll(page, "document.querySelector(\"[data-group='Instant']\").getBoundingClientRect().top < 600")
-        _touch(cdp, "touchMove", x, 450)
-        page.wait_for_timeout(100)
-        assert page.evaluate("scrollY") > top0 + 1000
-        t = page.locator(".stack[data-group='Instant']").bounding_box()["y"]
-        _touch(cdp, "touchMove", x, t + 20)  # on Instant's header: before it
-        page.wait_for_timeout(100)
-        _shot(page, "stack-drag-touch-390")
-        with page.expect_response(_stack_saved):
-            _touch(cdp, "touchEnd")
-        page.wait_for_timeout(100)
-        now = page.evaluate(ORDER)
-        assert now.index("Commander") == now.index("Instant") - 1 and now[0] != "Commander"
-        page.reload(wait_until="networkidle")
-        assert page.evaluate(ORDER) == now
-
-        # a held card: the long press menu stays shut, and the card slides to a category off screen
-        page.evaluate("try { localStorage.clear() } catch (e) {}")
-        page.reload(wait_until="networkidle")
         row = page.locator(".stack[data-group='Commander'] .row").first
         row.scroll_into_view_if_needed()
         b = row.bounding_box()
         x, y = b["x"] + 60, b["y"] + b["height"] / 2
         _touch(cdp, "touchStart", x, y)
-        page.wait_for_timeout(450)
+        _poll(page, "!!document.querySelector('.ctxmenu')")  # the hold opened its menu
         page.evaluate(
             f"""() => document.elementFromPoint({x}, {y}).dispatchEvent(new MouseEvent('contextmenu',
                 {{bubbles: true, cancelable: true, clientX: {x}, clientY: {y}}}))"""
         )
-        assert page.locator(".ctxmenu").count() == 0
+        assert page.locator(".ctxmenu").count() == 1  # the hold's own menu, one only
         for i in range(1, 11):
             _touch(cdp, "touchMove", x, y + (790 - y) * i / 10)
-            page.wait_for_timeout(16)
+            frame(page)  # one move a frame, as a finger's
         assert page.locator(".dragghost").count() == 1
+        assert page.locator(".ctxmenu").count() == 0  # the slide moves the card: the menu made way
         _poll(page, "document.querySelector(\"[data-group='Sorcery']\").getBoundingClientRect().top < 600")
         _touch(cdp, "touchMove", x, 450)
-        page.wait_for_timeout(100)
-        t = page.locator(".stack[data-group='Sorcery']").bounding_box()["y"]
-        _touch(cdp, "touchMove", x, t + 40)
-        page.wait_for_timeout(100)
+        frame(page)
+        # on Sorcery's rows (the page may still be settling after the scroll: measure until the
+        # finger really is over that stack)
+        for _ in range(20):
+            t = page.locator(".stack[data-group='Sorcery']").bounding_box()["y"]
+            _touch(cdp, "touchMove", x, t + 40)
+            page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with 20 tries
+            over = page.evaluate(
+                f"() => (document.elementFromPoint({x}, {t + 40}).closest('.stack') || {{}}).dataset?.group"
+            )
+            if over == "Sorcery":
+                break
+        _shot(page, "card-drag-touch-390")
         # the drop is saved at once, as the card menu's Move to is
         with page.expect_request(EDIT_URL) as req:
             _touch(cdp, "touchEnd")
         assert json.loads(req.value.post_data)["changes"] == [
             {"action": "set_category", "card_name": "Aesi, Tyrant of Gyre Strait", "category": "Sorcery"}
         ]
-        page.wait_for_timeout(100)
+        expect(page.locator(".dragghost")).to_have_count(0)
         assert page.locator(".dragghost").count() == 0
         moved = page.locator(".stack[data-group='Sorcery'] .row[data-card='Aesi, Tyrant of Gyre Strait']")
         assert moved.count() == 1
@@ -389,12 +288,10 @@ def _pause_clock(page) -> None:
     page.clock.pause_at(page.evaluate("Date.now()") / 1000 + PAUSE_AHEAD_S)
 
 
-@pytest.mark.parametrize(
-    ("how", "hz"), [("mouse", None), ("finger", None), ("card", None), ("mouse", 120), ("finger", 30)]
-)
+@pytest.mark.parametrize(("how", "hz"), [("card", None), ("card", 120), ("card", 30)])
 def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) -> None:
-    """0.7.22's edge scrolling while something is dragged, measured: a stack's handle by mouse and
-    by finger in every view, a held card by finger, and on a 120 Hz and a 30 Hz screen. Resting
+    """0.7.22's edge scrolling while something is dragged, measured: a held card by finger, and
+    on a 120 Hz and a 30 Hz screen (the stacks' own drag went with owner decision C4). Resting
     near the bottom edge, the page starts on the next frame, scrolls at a steady speed (about
     1,200 px/s at the very edge, half that halfway into the zone) whatever the frame rate, and
     stops as soon as the pointer leaves the zone or is let go. The page's clock is
@@ -462,7 +359,7 @@ def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) 
             assert edge["steady"][0] > 0.6 and edge["steady"][1] < 1.4, label  # not in jumps
             assert edge["after"] < 100 and half["after"] < 100, label  # stops on leaving the zone
             assert len(settled) == 1, label  # and once let go
-            assert page.locator(".stackdrop, .stacktag, .dragghost").count() == 0
+            assert page.locator(".dragghost").count() == 0
         assert errors == []
         browser.close()
 
@@ -478,7 +375,7 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
         page.goto(f"{server.base}/decks/42?view={view}", wait_until="networkidle")
         sel = ".deckview .c, .deckview .row"
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         tools = page.locator(".bulkbar .bulktools")
         assert tools.is_visible()
         assert page.locator(".bulkbar select").first.is_disabled()
@@ -511,7 +408,7 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         assert all(_rows(server, n)[0]["categories"] != ["Maybeboard"] for n in picks)
 
         # finish: one change per name; the badge redraws from the answer
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         for name in picks:
             page.locator(f'.deckview [data-card="{name}"]').first.click()
         with page.expect_response(EDIT_URL) as req3:
@@ -532,11 +429,11 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         assert first.get_attribute("data-finish") == "Foil"
 
         # remove, with Escape leaving selection first to show it clears
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         page.locator(f'.deckview [data-card="{picks[0]}"]').first.click()
         page.keyboard.press("Escape")
         assert page.locator(".deckview .picked").count() == 0
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         for name in picks:
             page.locator(f'.deckview [data-card="{name}"]').first.click()
         before = page.locator(sel).count()
@@ -591,7 +488,7 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         page.reload(wait_until="networkidle")
         dot = page.locator(".deckview .row[data-card='Cultivate'] .tagdot")
         assert dot.get_attribute("title") == "Tag: Have"
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         page.locator(".deckview .row[data-card='Cultivate']").first.click()
         page.locator(".bulkbar button", has_text="Color tag").click()
         with page.expect_response(EDIT_URL):
@@ -626,7 +523,7 @@ def test_bulk_edge_cases_at_320(server: Server) -> None:
         browser, page, errors = _page(p, server, sid, 320, color_scheme="dark")
         page.on("dialog", lambda d: errors.append("dialog: " + d.message))
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         side = page.locator(".deckview .row[data-zone='side'][data-card='Sol Ring']").first
         side.click()
         assert _overflow(page) == 0
@@ -636,7 +533,7 @@ def test_bulk_edge_cases_at_320(server: Server) -> None:
         assert page.locator(".deck-toast").count() == 0  # nothing was sent
         page.locator(".bulkbar button", has_text="Cancel").click()
         # two main rows of Sol Ring: the remove goes through, without an Undo
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         page.locator(".deckview .row[data-zone='main'][data-card='Sol Ring']").first.click()
         page.evaluate(
             "() => { const r = document.querySelector(\".row[data-zone='main'][data-card='Sol Ring']\");"
@@ -788,6 +685,24 @@ def _menu_shot(page, what: str, width: int, scheme: str) -> None:
     _shot(page, f"t159-menu-{what}-{scheme}-{device}")
 
 
+def _select_cards(page) -> None:
+    """Starts (or ends) selecting: the select bar's button where the bar shows, else the View
+    sheet's Select cards switch (a phone, mockup screen 5), which closes the sheet."""
+    btn = page.locator(".bulkbar button", has_text="Select cards")
+    if btn.is_visible():
+        btn.click()
+        return
+    page.locator(".toolbar .viewbtn").click()
+    sheet = page.locator(".mtgbox[role=dialog]:not([hidden])")
+    sheet.wait_for(timeout=3000)
+    switch = sheet.locator(".viewsheet .switch input")
+    on = switch.is_checked()
+    sheet.locator(".viewsheet .switch").click()
+    if on:  # switched off: the sheet stays; Done closes it (switched on, it closes by itself)
+        sheet.locator(".acts button", has_text="Done").click()
+    page.locator(".mtgbox-scrim").wait_for(state="detached")
+
+
 def _open_menu(page, row):
     row.scroll_into_view_if_needed()
     row.click(button="right")
@@ -857,8 +772,9 @@ def test_quantity_steps_save_in_the_background(server: Server, width: int, heigh
             if len(sent) == 2 and server.quantity("Cultivate") == 5:
                 break
             assert row.get_attribute("data-qty") == "5"
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        # fixed wait: a negative check: no further save (one back) goes out within 300 ms of Saved
         page.wait_for_timeout(300)
         assert [ch[0]["quantity"] for ch in sent] == [4, 5], sent  # in order, never one back
         assert server.quantity("Cultivate") == 5 and row.get_attribute("data-qty") == "5"
@@ -908,7 +824,7 @@ def test_move_to_saves_in_the_background(server: Server, width: int, height: int
             assert page.locator(".stack[data-group='Ramp']").count() == 0  # emptied, so gone
             page.locator(".deck-toast .msg", has_text="Moving Cultivate to Lands").wait_for(timeout=3000)
             row.scroll_into_view_if_needed()
-            page.wait_for_timeout(300)
+            settled(page)
             _menu_shot(page, "move-saving", width, scheme)
         finally:
             held.set()
@@ -960,7 +876,7 @@ def test_remove_saves_in_the_background(server: Server, width: int, height: int,
             assert page.locator(".ctxmenu").count() == 0
             assert rows.count() == 0  # off the page before Archidekt answers
             page.locator(".deck-toast .msg", has_text="Removing Cultivate").wait_for(timeout=3000)
-            page.wait_for_timeout(300)
+            settled(page)
             _menu_shot(page, "remove-saving", width, scheme)
         finally:
             held.set()
@@ -1086,6 +1002,8 @@ def _settle(page, ms: int = 1200) -> None:
     page.wait_for_function(
         "() => !document.querySelector('.deck-toast .msg')?.textContent.startsWith('Saving')", timeout=8000
     )
+    # fixed wait: a negative check: the end state holds for ``ms`` (a later save of the same card,
+    # the old bug, would change it within this time)
     page.wait_for_timeout(ms)
 
 
@@ -1107,6 +1025,7 @@ def test_plus_then_minus_leaves_no_saving_note(server: Server, width: int, heigh
         assert page.locator(".deck-toast .msg", has_text="Saving Cultivate: 1 copy").count() == 1
         page.clock.resume()
         page.locator(".deck-toast").wait_for(state="detached", timeout=3000)
+        # fixed wait: a negative check: nothing is sent within 600 ms of the note going
         page.wait_for_timeout(600)
         assert sent == [] and row.get_attribute("data-qty") == "1"
         assert page.locator(".deck-toast").count() == 0

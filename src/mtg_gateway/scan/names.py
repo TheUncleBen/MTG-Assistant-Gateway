@@ -10,6 +10,10 @@ Accents are ignored both ways (``lim-dul`` finds ``Lim-Dûl``).
 
 The catalog loads in the background (first use, and refreshed when older than a day); until it has
 loaded, ``suggest`` answers ``None`` and the caller falls back to Scryfall's autocomplete.
+
+The catalog leaves tokens out, so ``TOKEN_NAMES`` (the tokens cards make most often) is added to it:
+Add to binder, Watch a card and Add to deck then suggest "Treasure" or "Soldier" too. A token comes
+after the cards that match (typing "sol" still offers Sol Ring first), unless it is the whole text.
 """
 
 from __future__ import annotations
@@ -32,6 +36,26 @@ MAX_SUGGESTIONS = 20
 # keystroke searches only those instead of all ~35,000 names.
 NARROW_KEEP = 64
 
+
+# Tokens by the name Scryfall gives them: the artifacts every set makes, then the creature tokens
+# seen most. Not every token: a name not here can still be typed in full.
+TOKEN_NAMES = tuple(
+    n.strip()
+    for n in """
+Treasure, Food, Clue, Blood, Map, Powerstone, Gold, Shard, Junk, Incubator, Walker, Lander,
+Mutagen, Gift, Copy, Emblem, The Monarch, The Initiative, City's Blessing, Day // Night,
+Energy Reserve, Poison Counter, Eldrazi Spawn, Eldrazi Scion, Servo, Thopter, Construct, Myr,
+Golem, Germ, Saproling, Soldier, Spirit, Zombie, Zombie Army, Goblin, Beast, Elf Warrior,
+Elf Druid, Insect, Squirrel, Rat, Bird, Cat, Dog, Wolf, Bear, Boar, Elephant, Ox, Rhino,
+Dinosaur, Dragon, Angel, Demon, Devil, Human, Human Soldier, Human Warrior, Human Cleric, Knight,
+Warrior, Cleric, Wizard, Rogue, Pirate, Vampire, Faerie, Faerie Rogue, Elemental, Plant,
+Treefolk, Ooze, Hydra, Wurm, Snake, Fish, Octopus, Kraken, Shark, Horror, Illusion, Shapeshifter,
+Satyr, Centaur, Gnome, Monk, Samurai, Ninja, Rabbit, Bat, Frog, Lizard, Mouse, Otter, Raccoon,
+Hippo, Spider, Scarecrow, Gargoyle, Phyrexian Germ, Phyrexian Mite, Phyrexian Golem, Pest,
+Inkling, Fractal, Spirit Cleric, Wall, Kobold, Dwarf, Orc Army, Citizen, Detective, Mercenary,
+Survivor, Assassin
+""".split(",")
+)
 
 _JOINERS = str.maketrans("-'\u2019,", "    ")
 
@@ -66,9 +90,19 @@ def _sort_key(name: str) -> tuple[str, str]:
 
 
 class NameCatalog:
-    def __init__(self, scryfall: Callable[[], Any], *, ttl: float = CATALOG_TTL):
+    def __init__(
+        self,
+        scryfall: Callable[[], Any],
+        *,
+        ttl: float = CATALOG_TTL,
+        local: Callable[[], list[str]] | None = None,
+    ):
         # A getter, because the scan service's Scryfall client is replaced in tests after construction.
         self._scryfall = scryfall
+        # the printings copy's names (bulk.py), read in a thread when Scryfall's catalog can't be
+        # loaded: without any catalog every unknown name walks paced Scryfall lookups (B-4)
+        self._local = local
+        self.from_copy = False
         self.ttl = ttl
         self._names: list[str] = []
         self._folded: list[str] = []
@@ -77,6 +111,7 @@ class NameCatalog:
         self._task: asyncio.Task[None] | None = None
         self._hits: OrderedDict[str, list[int]] = OrderedDict()
         self._known: set[str] | None = None
+        self._token: list[bool] = []
 
     @property
     def loaded(self) -> bool:
@@ -92,16 +127,20 @@ class NameCatalog:
 
     def set_names(self, names: list[str]) -> None:
         """Install a catalog (also used by tests and for a fresh download)."""
-        self._names = sorted(set(names), key=_sort_key)
+        cards = set(names)
+        self._names = sorted(cards | set(TOKEN_NAMES), key=_sort_key)
         self._folded = [fold(n) for n in self._names]
+        self._token = [n not in cards for n in self._names]
         self._hits.clear()
         self._known = None
         self._loaded_at = time.monotonic()
+        self.from_copy = False
 
     def ensure(self) -> None:
         """Start a background (re)load when the catalog is missing or a day old. Never blocks the
         caller; a failed download is retried after ten minutes."""
-        fresh = self._names and self.age < self.ttl
+        # names from the copy stand in only until Scryfall's own catalog loads: it is retried
+        fresh = self._names and self.age < self.ttl and not self.from_copy
         if fresh or time.monotonic() < self._next_try:
             return
         if self._task is not None and not self._task.done():
@@ -113,6 +152,20 @@ class NameCatalog:
         self._next_try = time.monotonic() + RETRY_AFTER_FAILURE
         self._task = loop.create_task(self.load())
 
+    async def ready(self, wait: float) -> bool:
+        """Whether the catalog is loaded, starting its load when it is missing and waiting up to
+        ``wait`` seconds for a load under way. A resolve call that would otherwise walk paced
+        Scryfall autocompletes for each unknown name waits for this one request instead. A load
+        that failed lately is not retried here (RETRY_AFTER_FAILURE), so this returns at once."""
+        if self._names:
+            return True
+        self.ensure()
+        task = self._task
+        if task is not None and not task.done() and wait > 0:
+            # never raises for the load itself (it logs its own failure) nor cancels it on time out
+            await asyncio.wait({task}, timeout=wait)
+        return bool(self._names)
+
     def close(self) -> None:
         """Cancel a download still running (called when the gateway shuts down)."""
         if self._task is not None and not self._task.done():
@@ -123,8 +176,18 @@ class NameCatalog:
         try:
             names = await self._scryfall().catalog_card_names()
         except Exception as exc:  # any failure: keep the old list (or none) and retry later
-            logger.warning("card-name catalog not loaded (%s); suggestions use Scryfall meanwhile", exc)
-            return False
+            names = [] if self._names or self._local is None else await asyncio.to_thread(self._local)
+            if not names:
+                logger.warning("card-name catalog not loaded (%s); suggestions use Scryfall meanwhile", exc)
+                return False
+            self.set_names(names)
+            self.from_copy = True
+            logger.warning(
+                "card-name catalog not loaded (%s); using the %d names of the local printings copy meanwhile",
+                exc,
+                len(names),
+            )
+            return True
         self.set_names(names)
         self._next_try = 0.0
         logger.info("card-name catalog loaded: %d names", len(self._names))
@@ -154,14 +217,21 @@ class NameCatalog:
         starts: list[str] = []
         words: list[str] = []
         inside: list[str] = []
+        tokens: list[str] = []
         for i in hits:
+            if self._token[i]:
+                # a token typed in full comes first; otherwise after the cards
+                (starts if self._folded[i] == q else tokens).append(self._names[i])
+                continue
             where = rank(self._folded[i], q)
             if where is None:  # cannot happen: _matching only keeps names containing q
                 continue
             (starts, words, inside)[where].append(self._names[i])
             if len(starts) >= limit:
                 break
-        return (starts + words + inside)[:limit]
+        exact = [n for n in starts if fold(n) == q]
+        rest = [n for n in starts if fold(n) != q]
+        return (exact + rest + words + inside + tokens)[:limit]
 
     def _matching(self, q: str) -> list[int]:
         """Catalog positions of every name containing ``q``, in catalog order. Starts from the

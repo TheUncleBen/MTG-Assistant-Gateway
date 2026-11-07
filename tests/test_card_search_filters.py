@@ -337,10 +337,10 @@ async def test_a_bad_search_is_a_400_with_scryfalls_reason(stack: Stack) -> None
     b = await linked(stack)
     try:
         r = await b.http.get("/cards/api/search", params={"x": "bad:thing"})
-        assert r.status_code == 400 and "unknown keyword bad" in r.json()["message"]
+        assert r.status_code == 400 and "Unknown keyword bad." in r.json()["message"]
         stack.sf.fail_with = 503
         r = await b.http.get("/cards/api/search", params={"q": "other"})
-        assert r.status_code == 503 and "not answering" in r.json()["message"]
+        assert r.status_code == 503 and "Scryfall can't be reached right now." in r.json()["message"]
     finally:
         stack.sf.fail_with = None
         await b.aclose()

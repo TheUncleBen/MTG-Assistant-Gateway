@@ -7,6 +7,27 @@
 <title>Printings of a card</title>
 <style>
 /*@BASE@*/
+/* the detail (one printing, big, with Use this printing) is drawn in the card's flow and takes the
+   list's place, so the host's frame follows its height instead of covering a frame sized for the list */
+.card.viewing .toolbar,.card.viewing .scroll,.card.viewing #note,.card.viewing #asof,.card.viewing #actions{display:none}
+#asof{margin:0 0 8px}
+.detail.flow{position:static;padding:0;overflow:visible;z-index:auto}
+.detail .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px}
+#detail .cap{font-size:.8125rem;color:var(--muted);overflow-wrap:anywhere}
+#detail .cap b{color:var(--text);font-weight:600;font-size:.9375rem}
+/* the words of the card as text, under the picture on a phone: what a small picture cannot show */
+#dtext{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.875rem;line-height:1.5;margin:0}
+#dtext.wait{color:var(--muted)}
+.more{margin:8px auto}
+/* the pictures could not load: the same tiles as a plain list of set and number */
+.grid.list{display:block;padding:0}
+.grid.list .tile{flex-direction:row;align-items:center;gap:10px;min-height:44px;padding:6px 10px;border-radius:0;
+  border:0;border-top:1px solid var(--border);background:var(--bg)}
+.grid.list .tile:first-child{border-top:0}
+.grid.list .tile img{display:none}
+.grid.list .tile .cap{font-size:.875rem;flex:1 1 auto}
+.grid.list .tile .tick{position:static;flex:none}
+.grid.list .tile.picked{background:var(--blue-bg)}
 </style>
 </head>
 <body>
@@ -16,9 +37,15 @@
   <div class="toolbar" id="toolbar">
     <input type="search" id="filter" placeholder="Filter by set name or code" aria-label="Filter printings" autocomplete="off">
     <div class="chips finish" id="finish" role="group" aria-label="Finish"><button type="button" class="on" data-finish="" aria-pressed="true">Any finish</button><button type="button" data-finish="foil" aria-pressed="false">Foil</button><button type="button" data-finish="nonfoil" aria-pressed="false">Non-foil</button><button type="button" data-finish="etched" aria-pressed="false">Etched</button></div>
+    <button type="button" class="small" id="bigger" aria-pressed="false">Bigger pictures</button>
     <button type="button" class="small hidden" id="expand">Expand</button>
   </div>
-  <div class="scroll"><div class="grid" id="grid" role="list"></div></div>
+  <p class="note hidden" id="asof" role="status"></p>
+  <div class="scroll"><div class="grid" id="grid" role="list"></div><div id="morebox"></div></div>
+  <div class="detail flow hidden" id="detail" role="region" aria-label="One printing">
+    <div class="top"><span class="cap" id="dcap"></span><button type="button" class="small" id="back">Back to the list</button></div>
+    <div class="body"><div id="dpic"></div><div><p id="dtext"></p><div class="acts" id="dacts"></div></div></div>
+  </div>
   <p class="note hidden" id="note"></p>
   <div class="actions" id="actions"></div>
   <div class="status hidden" id="status" role="status" aria-live="polite"></div>
@@ -28,8 +55,15 @@
 (function () {
   "use strict";
   var B = Bridge, el = B.el, $ = B.$;
-  var MAX_TILES = 400;
-  var all = [], picked = null, cardName = "", oracleId = "", link = "";
+  // a page of tiles at a time (PAGE), Show more for the rest: the card grows in the chat's own
+  // scroll and never scrolls inside it; MAX_TILES caps a very long list
+  var MAX_TILES = 400, PAGE = 8;
+  var all = [], picked = null, viewing = null, cardName = "", oracleId = "", link = "";
+  var limit = PAGE, one = false, textCache = {};
+  // pictures that could not be drawn against those that could: past half, the list says so and
+  // shows set and number as a plain list (a picture host blocked by the chat, or down)
+  var failed = 0, loaded = 0, listMode = false;
+  var NO_PICTURES = "Pictures could not load; the set and number are listed.";
 
   function caption(c) {
     var bits = [];
@@ -42,6 +76,16 @@
     return bits.join(" · ");
   }
   function finishesOf(c) { return Array.isArray(c.finishes) ? c.finishes : []; }
+  // a printing's small and normal-size pictures: the data's own links when it carries them, else
+  // the Scryfall lookup at each size
+  function pics(c) {
+    return [c.image_small || B.scryfallImage(c.scryfall_id, c.name),
+      c.image_normal || B.scryfallImage(c.scryfall_id, c.name, "normal"),
+      c.image_large || B.scryfallImage(c.scryfall_id, c.name, "large")];
+  }
+  // the srcset's sizes: a tile is half the card on a phone, a third on a wide card; one across
+  // (Bigger pictures) or the big picture of the detail, the card's width up to 480px
+  function sizesFor(wide) { return wide ? "(max-width: 520px) 92vw, 480px" : "(max-width: 420px) 45vw, 160px"; }
   function matches(c, q, fin) {
     if (fin && finishesOf(c).indexOf(fin) < 0) return false;
     if (!q) return true;
@@ -53,30 +97,114 @@
       (c.released_at ? ", released " + c.released_at : "") + (fin.length ? ", finishes: " + fin.join(", ") : "") +
       (c.scryfall_id ? " (Scryfall id " + c.scryfall_id + ")" : "");
   }
+  function setLabel(c) { return (c.set || "").toUpperCase() + (c.collector_number ? " #" + c.collector_number : ""); }
+  function pictureFailed() {
+    failed++;
+    if (!listMode && failed >= 2 && failed > loaded) { listMode = true; draw(); }
+  }
   function draw() {
     var q = String($("filter").value || "").trim().toLowerCase(), fin = finishWanted();
     var grid = $("grid"); grid.replaceChildren();
-    var shown = 0;
+    grid.className = listMode ? "grid list" : one ? "grid one" : "grid";
+    var shown = 0, matched = 0, cap = Math.min(limit, MAX_TILES);
     all.forEach(function (c) {
-      if (!matches(c, q, fin) || shown >= MAX_TILES) return;
+      if (!matches(c, q, fin)) return;
+      matched++;
+      if (shown >= cap) return;
       shown++;
       var t = el("button", "tile" + (picked === c ? " picked" : "")); t.type = "button"; t.setAttribute("role", "listitem");
       t.setAttribute("aria-label", describe(c));
-      t.appendChild(B.picture(c.image_small || B.scryfallImage(c.scryfall_id, c.name), ""));
-      var cap = el("span", "cap"); var b = el("b", "", (c.set || "").toUpperCase() + (c.collector_number ? " #" + c.collector_number : ""));
-      cap.appendChild(b); cap.appendChild(el("span", "", " " + caption(c).replace(/^[^·]*·?\s*/, "")));
-      t.appendChild(cap); t.appendChild(el("span", "tick", "✓"));
-      t.onclick = function () { pick(c); };
+      if (!listMode) {
+        var p = pics(c);
+        t.appendChild(B.picture(p[0], "", p[1],
+          { sizes: sizesFor(one), large: one ? p[2] : "", onError: pictureFailed, onLoad: function () { loaded++; } }));
+      }
+      var capEl = el("span", "cap"); var b = el("b", "", setLabel(c));
+      capEl.appendChild(b); capEl.appendChild(el("span", "", " " + caption(c).replace(/^[^·]*·?\s*/, "")));
+      t.appendChild(capEl); t.appendChild(el("span", "tick", "✓"));
+      t.onclick = function () { view(c); };
       grid.appendChild(t);
     });
-    var note = $("note");
-    if (!shown) { note.textContent = all.length ? "No printing matches that filter." : ""; note.className = "note"; }
-    else if (shown < all.length) { note.textContent = shown + " of " + all.length + " printings shown."; note.className = "note"; }
-    else note.className = "note hidden";
+    // Show more: the next page of what matches, the gateway's disclosure capsule
+    var box = $("morebox"); box.replaceChildren();
+    var left = Math.min(matched, MAX_TILES) - shown;
+    if (left > 0) {
+      var more = el("button", "more", "Show " + Math.min(PAGE, left) + " more (" + left + " left)"); more.type = "button"; more.id = "more";
+      more.onclick = function () { limit += PAGE; draw(); };
+      box.appendChild(more);
+    }
+    var note = $("note"), text = "";
+    if (!matched) text = all.length ? "No printing matches that filter." : "";
+    else if (matched > MAX_TILES) text = MAX_TILES + " of " + matched + " printings can be shown; filter by set to find the rest.";
+    if (listMode && all.length) text = NO_PICTURES + (text ? " " + text : "");
+    note.textContent = text; note.className = text ? "note" : "note hidden";
+    B.reportSize();
+  }
+  // the filter or finish changed: the paging starts over
+  function redraw() { limit = PAGE; draw(); }
+  // One printing, big, in the list's place: the person looks before choosing, and the pick is
+  // the Use this printing press, as on the site's own Printings sheet.
+  function view(c) {
+    viewing = c;
+    $("dcap").replaceChildren();
+    $("dcap").appendChild(el("b", "", (c.name || cardName) + " · " + setLabel(c)));
+    $("dcap").appendChild(document.createElement("br"));
+    $("dcap").appendChild(document.createTextNode(
+      [c.set_name || "", c.released_at ? "released " + c.released_at : "", finishesOf(c).length ? finishesOf(c).join(", ") : ""]
+        .filter(Boolean).join(" · ")));
+    var pic = $("dpic"); pic.replaceChildren();
+    var p = pics(c), img = B.picture(p[0], "big", p[1], { sizes: sizesFor(true), large: p[2] });
+    img.loading = "eager";
+    pic.appendChild(img);
+    rulesText(c);
+    var acts = $("dacts"); acts.replaceChildren();
+    var use = el("button", "primary", picked === c ? "Picked" : "Use this printing"); use.type = "button"; use.id = "use";
+    use.disabled = picked === c;
+    use.onclick = function () { pick(c); };
+    acts.appendChild(use);
+    if (typeof c.scryfall_uri === "string" && c.scryfall_uri.indexOf("https://scryfall.com/") === 0) {
+      var s = el("a", "link", "Open on Scryfall"); s.href = "#";
+      s.onclick = function (e) { e.preventDefault(); B.openLink(c.scryfall_uri, function (t) { B.setStatus(t, ""); }); };
+      acts.appendChild(s);
+    }
+    $("detail").className = "detail flow";
+    $("card").className = "card viewing";
+    $("back").focus();
+    B.reportSize();
+  }
+  // The words of the card as text (the picture may be too small to read on a phone): the type
+  // and cost the list carries at once, the rules text from Scryfall by the printing's id.
+  function rulesText(c) {
+    var t = $("dtext"), key = c.scryfall_id || ("name:" + (c.name || cardName));
+    var head = [c.type_line || "", c.mana_cost || ""].filter(Boolean).join("  ");
+    if (textCache[key]) { t.className = ""; t.textContent = textCache[key]; return; }
+    t.className = "wait"; t.textContent = head ? head + "\n\nLoading the rules text…" : "Loading the rules text…";
+    var url = c.scryfall_id ? "https://api.scryfall.com/cards/" + encodeURIComponent(c.scryfall_id)
+      : "https://api.scryfall.com/cards/named?exact=" + encodeURIComponent(c.name || cardName);
+    fetch(url, { credentials: "omit", headers: { Accept: "application/json" } })
+      .then(function (res) { return res.json(); })
+      .then(function (j) {
+        var faces = Array.isArray(j.card_faces) && j.card_faces.length ? j.card_faces : [j];
+        var text = faces.map(function (f) {
+          var top = (f.name || "") + (f.mana_cost ? "  " + f.mana_cost : "") + "\n" + (f.type_line || "");
+          var pt = f.power != null ? "\n" + f.power + "/" + f.toughness : (f.loyalty != null ? "\nLoyalty " + f.loyalty : "");
+          return top + "\n\n" + (f.oracle_text || "") + pt;
+        }).join("\n\n— — —\n\n");
+        if (j.object === "error") text = head;
+        textCache[key] = text;
+        if (viewing === c) { t.className = ""; t.textContent = text; B.reportSize(); }
+      })
+      .catch(function () { if (viewing === c) { t.className = ""; t.textContent = head; B.reportSize(); } });
+  }
+  function closeView() {
+    viewing = null;
+    $("detail").className = "detail flow hidden";
+    $("card").className = "card";
     B.reportSize();
   }
   function pick(c) {
     picked = c;
+    closeView();
     draw();
     B.setStatus("Picked: " + describe(c), "ok");
     renderActions();
@@ -84,7 +212,12 @@
       ", set " + B.quote(c.set_name || "") + ", set_code " + B.quote(c.set || "") + ", collector_number " +
       B.quote(c.collector_number || "") + (c.released_at ? ", released " + B.quote(c.released_at) : "") +
       (finishesOf(c).length ? ", finishes " + B.quote(finishesOf(c).join(", ")) : "") +
-      (c.scryfall_id ? ", Scryfall id " + B.quote(c.scryfall_id) : "") + ". Use that set_code and collector_number for it.");
+      (c.scryfall_id ? ", Scryfall id " + B.quote(c.scryfall_id) : "") + ". Use that set_code and collector_number for it.")
+      .then(function (heard) {
+        // a chat that cannot carry the pick: the person says it in their next message instead
+        if (!heard) B.setStatus("Picked: " + describe(c) + " Your chat could not pass this on, so tell your assistant: use " +
+          setLabel(c) + ".", "ok");
+      });
   }
   function renderActions() {
     var a = $("actions"); a.replaceChildren();
@@ -95,6 +228,24 @@
       a.appendChild(s);
     }
     B.reportSize();
+  }
+  // The list came from the gateway's own copy of Scryfall's printings (from_local_copy, while
+  // Scryfall isn't answering): say so over the list, with the copy's day (as_of, an ISO date-time)
+  // in the viewer's own locale, in the site's picker's words (audit N15, P8: short, and no "prices",
+  // which the card does not show), or the gateway's own line (as_of_note) when the day can't be
+  // read. A live list shows nothing here.
+  function showAsOf(d) {
+    var p = $("asof"), text = "";
+    if (d && d.from_local_copy) {
+      var iso = d.as_of ? String(d.as_of) : "", t = iso ? Date.parse(iso) : NaN;
+      if (!isNaN(t)) {
+        // the day in UTC, as the tools' as_of_note gives it: the card and the answer name one day
+        var opts = { dateStyle: "medium", timeZone: "UTC" };
+        text = "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached right now";
+      } else if (d.as_of_note) text = String(d.as_of_note);
+      else text = "From the gateway's own copy · Scryfall can't be reached right now";
+    }
+    p.textContent = text; p.className = text ? "note" : "note hidden";
   }
   function load(result) {
     var sc = result.structuredContent || {}, meta = (result._meta || {})["mtg/card"] || {};
@@ -109,7 +260,8 @@
     }
     var total = Number(sc.total_cards || meta.total || 0);
     $("count").textContent = total ? total + " printing" + (total === 1 ? "" : "s") : "";
-    $("summary").textContent = "Tap the printing you mean; your assistant will use it.";
+    $("summary").textContent = "Tap a printing to see it bigger, then press Use this printing; your assistant will use it.";
+    showAsOf(sc);
     if (!link) { B.setStatus("The list is in the assistant's message.", ""); return; }
     fetch(link, { credentials: "omit", headers: { Accept: "application/json" } })
       .then(function (r) { return r.json().then(function (j) { return [r.status, j]; }); })
@@ -117,12 +269,22 @@
         var j = pair[1] || {};
         if (pair[0] !== 200 || j.ok === false) { B.setStatus(String(j.message || "The printings could not be loaded; ask again."), "err"); return; }
         all = Array.isArray(j.cards) ? j.cards : [];
-        if (j.has_more) { $("summary").textContent = "The newest " + all.length + " of " + (j.total_cards || "many") + " printings. Tap the one you mean."; }
+        if (j.from_local_copy) showAsOf(j);
+        if (j.has_more) { $("summary").textContent = "The newest " + all.length + " of " + (j.total_cards || "many") + " printings. Tap one to see it bigger, then press Use this printing."; }
         draw();
       })
       .catch(function () { B.setStatus("The printings could not be loaded (no connection to the gateway). The newest sets are in the assistant's message.", "err"); });
   }
-  $("filter").addEventListener("input", draw);
+  $("filter").addEventListener("input", redraw);
+  $("back").onclick = closeView;
+  // Bigger pictures: one whole card across the card, in the card itself, for a chat that offers
+  // no full screen (ChatGPT's phone app lists none, so Expand never shows there)
+  $("bigger").onclick = function () {
+    one = !one;
+    $("bigger").textContent = one ? "Smaller pictures" : "Bigger pictures";
+    $("bigger").setAttribute("aria-pressed", one ? "true" : "false");
+    draw();
+  };
   // The finish filter is a row of the card's own chips, not the host browser's list.
   function finishWanted() {
     var on = $("finish").querySelector("button.on");
@@ -136,7 +298,7 @@
       x.classList.toggle("on", on);
       x.setAttribute("aria-pressed", on ? "true" : "false");
     });
-    draw();
+    redraw();
   });
   B.start("MTG Assistant Gateway printings card", load, {
     displayModes: ["inline", "fullscreen"],

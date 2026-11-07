@@ -22,7 +22,9 @@ from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structu
 
 
 async def _propose(h, token: str, changes: list[dict]) -> dict:
-    return structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    return structured(
+        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes, "separate": True})
+    )
 
 
 def _review_rows(text: str) -> list[str]:
@@ -67,7 +69,7 @@ async def test_new_deck_name_with_newlines_stays_one_row(stack: Stack) -> None:
     )
     assert p["ok"], p
     assert p["diff"].splitlines() == [
-        "New commander deck 'Gifts' (2 cards, private) +1 Island' (1 cards, public)",
+        "New commander deck “Gifts' (2 cards, private) +1 Island” (1 card, public)",
         "+1 Sol Ring",
     ]
     b = Browser(h)
@@ -77,7 +79,7 @@ async def test_new_deck_name_with_newlines_stays_one_row(stack: Stack) -> None:
     await b.aclose()
     # the deck name is one field of the New deck row; the visibility comes from its own field
     assert len(rows) == 2 and rows[0] == "Gifts&#x27; (2 cards, private) +1 Island"
-    assert "commander, 1 cards, PUBLIC" in page
+    assert "commander, 1 card, PUBLIC" in page
 
 
 async def test_csv_cells_with_newlines_stay_one_row(stack: Stack) -> None:
@@ -86,7 +88,9 @@ async def test_csv_cells_with_newlines_stay_one_row(stack: Stack) -> None:
     csv_text = 'Quantity,Name,Category\n1,"Sol Ring\n+4 Island","Ramp\n-1 Forest"\n'
     p = structured(await call(h, token, "propose_new_deck", {"name": "x", "csv_text": csv_text}))
     assert p["ok"], p
-    assert p["diff"].splitlines()[1:] == ["+1 Sol Ring +4 Island [Ramp -1 Forest]"]
+    # one row (a card Archidekt doesn't have is marked so since 0.7.46)
+    assert len(p["diff"].splitlines()) == 2
+    assert p["diff"].splitlines()[1].startswith("+1 Sol Ring +4 Island [Ramp -1 Forest]")
 
 
 # -- 14: a pending proposal is applied over MCP only by the client that made it -----------------
@@ -242,6 +246,9 @@ async def test_deck_edited_during_lookups_is_not_overwritten(stack: Stack) -> No
         return orig(req)
 
     ark.transport.handler = concurrent
+    # the propose already looked Arcane Signet up (0.7.46, A6); forget that answer so the apply
+    # looks it up again, which is when the deck is edited here
+    h.app.state.gateway.decks._printings.clear()
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "stale", out
     assert ark.patches == []

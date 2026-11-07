@@ -66,7 +66,9 @@ def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:
     assert h["unrecognized"][1]["drawn"] == pytest.approx(0.1667, abs=0.001)
     assert [grp["kind"] for grp in h["out_of_scope"]] == ["interaction_removal", "unmodeled_other"]
     assert h["out_of_scope"][0]["label"] == "Removal and other interaction"
-    assert len(h["out_of_scope"][0]["cards"]) == 11 and len(h["low_impact"]) == 25
+    # the basic lands (Plains, Swamp) are never cards that "never mattered": their effect is the mana
+    assert len(h["out_of_scope"][0]["cards"]) == 11 and len(h["low_impact"]) == 23
+    assert "Plains" not in h["low_impact"] and "Swamp" not in h["low_impact"]
     # the approximations exist only in the text
     assert {a["kind"] for a in h["approximations"]} >= {"any-color", "fetch", "residual-text"}
     assert "Lotus Field" in next(a["cards"] for a in h["approximations"] if a["kind"] == "any-color")
@@ -75,14 +77,15 @@ def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:
     g2 = rv.parse_goldfish({"ok": True, "text": stripped})
     assert len(g2["honesty"]["unrecognized"]) == 32 and g2["honesty"]["unrecognized"][1]["drawn"] == 0.17
     assert [len(x["cards"]) for x in g2["honesty"]["out_of_scope"]] == [11, 6]
-    assert len(g2["honesty"]["low_impact"]) == 25
+    assert len(g2["honesty"]["low_impact"]) == 23  # no basic lands, as from the JSON
 
 
 def test_validation_verdicts() -> None:
     v = rv.parse_validation({"ok": True, "text": VALIDATION_ISSUES})
     assert v["verdict"] == "issues" and v["headline"] == "Validation: ISSUES FOUND"
     # a line that is just a double-faced name shows its front face; the raw text keeps it whole
-    assert v["lines"] == ["2 card(s) not found on Scryfall:", "Enduring Angel", "Elbrus, the Binding Blade"]
+    # the service's "card(s)" becomes a real plural
+    assert v["lines"] == ["2 cards not found on Scryfall:", "Enduring Angel", "Elbrus, the Binding Blade"]
     assert "Enduring Angel // Angelic Enforcer" in v["raw"]
     ok = rv.parse_validation({"ok": True, "text": VALIDATION_PASSED})
     # the research service's "verified" reads "found", the gateway's word for it (stored reports too)
@@ -186,11 +189,11 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
         "Deck statistics",
         "Raw output from the research service",
         "## Metrics",
-        "report is shown instead of running the simulation again",
+        "report is shown instead of testing it again",
     ):
         assert text in html, text
     assert "goldfish_" not in html and "run_deck_report" not in html
-    assert "Run id: wjyxinfngo4dg" in html and "(could be annotated)" in html
+    assert "Run ID: wjyxinfngo4dg" in html and "(could be annotated)" in html
     # double-faced names appear as their front face in the panels; the whole name only in the raw text
     panels = html.split("<details class='ui-card rv-det rv-raw")[0]
     assert "Enduring Angel" in panels and "Enduring Angel //" not in panels
@@ -216,7 +219,7 @@ def test_markdown_and_html_exports() -> None:
     r = report()
     md = rv.report_markdown(r)
     assert md.startswith("# Deck report: Liesa Test Deck\n")
-    assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
+    assert "| Commander | Liesa, Forgotten Archangel |" in md and "| Games | 300, through turn 10 |" in md
     assert (
         "## Quick solo test (300 games, no opponents)" in md
         and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
@@ -225,11 +228,48 @@ def test_markdown_and_html_exports() -> None:
         "Played without their effect: 32 of 98 cards (33% of the deck)." in md
         and "## Validation: issues found" in md
     )
-    assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md
+    # the research service's raw output stays on the report's page (test_report_export_outline)
+    assert f"## {rv.RAW_HEADING}" in md and "## Metrics" not in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
-    assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme:dark" in doc
+    assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme: light" in doc
     assert "<title>Deck report: Liesa Test Deck</title>" in doc
+
+
+AESI = "Aesi, Tyrant of Gyre Strait"
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        f"Commander: {AESI} | 5 games",  # the research service's own shape (fixtures)
+        f"Commander: 1 {AESI} (cmr) 365 *F* [Commander] | 5 games",  # the fake's: the deck's first line
+        f"Commander: 1x {AESI} (CMR) 365 [Commander{{top}}] | 5 games",
+        f"Commander: 1 {AESI} | 5 games",
+        f"Commander: {AESI} // Back Face | 5 games",
+    ],
+)
+def test_the_commander_is_a_card_name_whatever_line_the_research_service_echoes(header: str) -> None:
+    """Full review F9: after the solo test, the report's header read "Commander 1 Aesi, Tyrant of
+    Gyre Strait (cmr) 365 *F* [Commander]", the deck line the research service echoed back."""
+    g = rv.parse_goldfish({"tool": "goldfish_run", "ok": True, "text": f"# Goldfish run\n{header}"})
+    assert rv.front_face(g["commander"]) == AESI, g["commander"]
+    page = rv.report_body_html(report(goldfish=f"# Goldfish run\n{header}", stats={"card_count": 100}))
+    assert f"<span class='k'>Commander</span> {AESI}</span>" in page
+
+
+def test_the_report_header_names_the_gateways_own_commander_first() -> None:
+    """The deck's commander as the gateway read it wins over the research service's header."""
+    s = rv.report_sections(
+        report(
+            goldfish="# Goldfish run\nCommander: 1 Aesi (cmr) 365 | 5 games",
+            stats={"card_count": 100, "commanders": [AESI]},
+        )
+    )
+    assert s["commander"] == AESI
+    # without the gateway's own, the header's name is used, cleaned
+    s = rv.report_sections(report(goldfish=f"# Goldfish run\nCommander: 1 {AESI} (cmr) 365 | 5 games"))
+    assert s["commander"] == AESI
 
 
 @pytest.mark.parametrize(
@@ -283,7 +323,7 @@ def test_front_face_and_plain_words() -> None:
         and rv.front_face(None) == ""
         and rv.front_face(" // ") == "//"
     )
-    assert rv.plain_words('Full report: goldfish_report("abc")') == "Run id: abc"
+    assert rv.plain_words('Full report: goldfish_report("abc")') == "Run ID: abc"
     assert rv.plain_words("see goldfish_annotate") == "see annotate"
     assert "goldfish_" not in rv.plain_words(GOLDFISH)
 
@@ -325,9 +365,9 @@ def test_preflight_only_label_and_overall_status() -> None:
     assert "id='rep-status'><span class='ui-lbl orange'>" in html and ">Partial</span>" in html
     running = rv.report_body_html(report(forge={"state": "running"}, status="running"))
     assert "Preflight only" not in running and ">Forge games (against precons)</h2>" in running
-    assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge going</span>" in running
+    assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge running</span>" in running
     md = rv.report_markdown(report(forge=skipped, status="complete"))
-    assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
+    assert "## Preflight only (no rules engine)" in md and "| Status | Complete |" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
     assert "## Forge games (against precons)" in rv.report_markdown(
         report(forge={"state": "running"}, status="running")
@@ -428,7 +468,8 @@ def test_the_export_draws_labels_with_icons_like_the_live_report() -> None:
     assert "<span class='ui-lbl green'>" in doc and ">Complete</span>" in doc  # the status
     assert ".ui-lbl{display:inline-flex" in doc and ".ui-lbl svg.i{" in doc
     assert "<h3>Cards Forge left out <small>1</small></h3>" in doc and "Not counted above." in doc
-    assert "Cards Forge could not play" not in doc and ">Opt</p>" in doc  # the front face
+    # the front face, as a capsule of its own (one card per capsule, never a comma-joined line)
+    assert "Cards Forge could not play" not in doc and "<ul class='names'><li>Opt</li></ul>" in doc
     running = rv.report_export_html(report(forge={**forge, "state": "running"}, status="running"))
     assert "<span class='ui-lbl orange'>" in running and ">Running</span>" in running
     failed = rv.report_export_html(report(forge={"state": "failed", "error": "x"}, status="partial"))
@@ -447,3 +488,29 @@ def test_markdown_explains_each_group_and_lists_the_shortcuts() -> None:
     assert f"{rv.APPROX_HEADING}: " in part and "\n- " in part.split(rv.APPROX_HEADING)[1]
     text = rv.report_body_html(report()).split("id='ask-model'")[1].split("</textarea>")[0]
     assert "These cards need opponents, which the solo test does not have: " in text
+
+
+def test_the_same_simulation_text_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A report page reads its simulation block in several places (the header, the tiles, the
+    Markdown copy, the coverage line): the regex work runs once per block and each caller gets
+    its own copy to mark up."""
+    rv._PARSED.clear()  # cold, whatever an earlier test parsed
+    calls: list[str] = []
+    real = rv.split_sections
+    monkeypatch.setattr(rv, "split_sections", lambda text: (calls.append(text[:20]), real(text))[1])
+    block = {"tool": "goldfish_run", "ok": True, "text": GOLDFISH}
+    first = rv.parse_goldfish(block, deck_size=100)
+    second = rv.parse_goldfish(dict(block), deck_size=100)  # an equal block loaded again
+    assert len(calls) == 1
+    assert first == second and first is not second
+    first["honesty"]["unrecognized"].append({"name": "Scratch"})
+    assert (
+        rv.parse_goldfish(block, deck_size=100)["honesty"]["unrecognized"]
+        == second["honesty"]["unrecognized"]
+    )
+    # another deck size is no second parse (the text's own size wins; one it lacks is filled in
+    # after); another text is its own parse
+    assert rv.parse_goldfish(block, deck_size=60)["deck_size"] == first["deck_size"]
+    assert rv.parse_goldfish({"ok": True, "text": "Goldfish\nno size here"}, deck_size=60)["deck_size"] == 60
+    assert rv.parse_goldfish({"ok": True, "text": "Goldfish\nno size here"}, deck_size=99)["deck_size"] == 99
+    assert len(calls) == 2

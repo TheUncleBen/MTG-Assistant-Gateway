@@ -50,12 +50,17 @@ async def test_precons_have_the_shared_panel_set_headings_and_load_more(stack: S
         assert "class='avatar" not in tiles and "class='tags'" not in tiles and "No deck tags" not in tiles
         assert "<span class='info plain'>" in tiles and "<time class='ui-when'" in tiles
         assert "class='disc pre-all' data-n='1' hidden aria-expanded='false'>Show all 1</button>" in page
-        assert "All 1 set shown." in page and "data-load-more" not in page
+        assert "1 set shown." in page and "All 1" not in page and "data-load-more" not in page
         assert "No preconstructed deck matches that filter." not in page
         # by name is one grid without headings
         r = await b.http.get("/precons?sort=name", headers=NAV)
         assert "class='sec'" not in r.text and r.text.count("<ul class='plain decklist") == 1
-        assert "All 1 decks shown." in r.text
+        assert "1 deck shown." in r.text and "All 1" not in r.text
+        # the sort picked is remembered for the next visit and the page's own asks (audit F-10):
+        # by set again for the rest
+        r = await b.http.get("/precons", headers=NAV)
+        assert "class='sec'" not in r.text, "the sort by name was not remembered"
+        await b.http.get("/precons?sort=set", headers=NAV)
         # the filter: the count says how many of all, every matching set is open
         r = await b.http.get("/precons?q=sample", headers=NAV)
         assert "id='pre-count' aria-live='polite'>1 of 1 decks</h2>" in r.text
@@ -128,11 +133,11 @@ async def test_a_profile_has_one_header_the_results_bar_and_load_more(stack: Sta
         assert "order=-updatedAt" in page.split("data-qs='")[1].split("'")[0]
         assert ">Load more decks</button>" in page
         assert "Sample Commander Deck" in page
-        # a member without public decks
+        # a member without public decks: the empty state, no results bar (0.7.46)
         r = await b.http.get("/users/amy", headers=NAV)
-        assert "<p class='sub'>No public decks, or no such user</p>" in r.text
-        assert "<p class='muted'>No public decks yet.</p>" in r.text and "Try fewer filters" not in r.text
-        assert "id='s-count' aria-live='polite'>0 decks</h2>" in r.text
+        assert "<p class='sub'>Archidekt profile</p>" in r.text
+        assert "<h2 id='pempty-h'>No public decks yet</h2>" in r.text and "Try fewer filters" not in r.text
+        assert "id='s-count'" not in r.text
     finally:
         await b.aclose()
 

@@ -19,6 +19,8 @@ from mtg_gateway import link_disclosure, pages
 from .conftest import AUTO_PROXY, Stack, stack_with
 from .test_decks_and_proxy import Browser, call, linked_user, structured
 
+A = "/account/details/archidekt"
+
 stack_options = stack_with(AUTO_PROXY)
 
 
@@ -68,8 +70,8 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         # everything else the operator can read, and the sign-in service's tokens
         "approval mode",
         "profile picture",
-        "deck and collection changes",
-        "connected apps, usage counts",
+        "deck and binder changes",
+        "connected assistants, usage counts",
         "use the same key, so they can open those too",
         # everything admins see and do
         "username, groups and user ID at the sign-in service",
@@ -98,7 +100,7 @@ async def test_disclosure_is_shown_in_full_and_must_be_ticked_before_linking(sta
     h, ark = stack.h, stack.ark
     b = Browser(h)
     await b.login()
-    page = (await b.http.get("/account/details")).text
+    page = (await b.http.get(A)).text
     assert "Link your Archidekt account" in page
     assert "<div class='notice disclosure' id='archidekt-disclosure'>" in page
     for line in link_disclosure.SUMMARY:
@@ -150,7 +152,7 @@ async def test_disclosure_stays_readable_on_the_account_page_after_linking(stack
     b = Browser(h)
     await b.login()
     assert (await b.link("alice", "pw-alice")).status_code == 303
-    page = (await b.http.get("/account/details")).text
+    page = (await b.http.get(A)).text
     assert "Linked to <strong>alice</strong>" in page
     assert "<details class='disclosure' id='archidekt-disclosure'>" in page
     assert html.escape(link_disclosure.SECTIONS[3][1][0]) in page
@@ -223,7 +225,7 @@ async def test_expiry_comes_from_the_refresh_token_and_is_shown(stack: Stack) ->
         "user-1", decks._seal("user-1", access, _jwt({"exp": exp, "token_type": "refresh"}))
     )
     assert decks.status("user-1")["link_expires_at"] == exp
-    page = (await b.http.get("/account/details")).text
+    page = (await b.http.get(A)).text
     assert f"Archidekt's session stops working on {pages._when(exp)}" in page
     # without a refresh token, the access token's own expiry is the end
     h.db.update_link_secret("user-1", decks._seal("user-1", access, None))
@@ -231,7 +233,7 @@ async def test_expiry_comes_from_the_refresh_token_and_is_shown(stack: Stack) ->
     # an opaque refresh token: unknown, and no date is shown
     h.db.update_link_secret("user-1", decks._seal("user-1", access, "ref-alice"))
     assert decks.status("user-1")["link_expires_at"] is None
-    assert "session stops working" not in (await b.http.get("/account/details")).text
+    assert "session stops working" not in (await b.http.get(A)).text
     await b.aclose()
 
 

@@ -20,12 +20,13 @@ import re
 import time
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote, unquote
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import prefs, profile, ui
+from . import alerts_push, notify, prefs, profile, ui
+from .busy import busy_json_response, outage
 from .decks import DeckError, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -34,14 +35,17 @@ from .pages import (
     apply_own_press,
     browser_session,
     limited_form,
-    login_redirect,
+    login_redirect_here,
     read_limited,
+    section_href,
 )
 from .theme import esc, icon
 
 PROFILE_TTL = 30.0  # seconds the profile read is kept for the pages (a press forgets it)
 COUNT_TTL = 60.0  # the bell's count
-LIST_TTL = 10.0  # the bell's list: Archidekt's own bell asks at most once every 10 s
+# The Alerts list (the page and the bell's box), kept per member this long; any write the member
+# sends forgets it (forget_list), so their own reply, follow or vote never shows the list from before.
+LIST_TTL = 60.0
 PROFILE_WAIT = 3.0  # seconds a page waits for the profile read before it says Archidekt did not answer
 PICTURE_BODY_LIMIT = profile.AVATAR_MAX_BYTES + 16_000  # the file plus the form's own fields
 HIST = "A copy of your profile from just before is kept under History."
@@ -62,7 +66,7 @@ EMAIL_ROWS = (
     ("contactable", "Other members can contact me", "Lets members message you through Archidekt."),
     ("newsletter", "Archidekt's newsletter", "Occasional email about the site."),
     ("comment_emails", "Email me when someone comments", "On your decks and your forum posts."),
-    ("site_notifications", "Archidekt notifications", "Shows Archidekt's notifications in the bell."),
+    ("site_notifications", "Archidekt alerts", "Shows Archidekt's alerts in the bell."),
 )
 # the new-device defaults profile.PREFERENCES supports, in the mockup's order: (name, label,
 # help, choices as (value, words) for a drop-down, or None for a switch)
@@ -104,6 +108,9 @@ KIND_WORDS = {
     "Contest": "Contest",
 }
 _DECK_URL = re.compile(r"https://archidekt\.com/decks/(\d+)$")
+_THREAD_URL = re.compile(r"https://archidekt\.com/forum/thread/(\d+)$")
+# Archidekt's profile address names a user; /users/ here takes a username, so a bare number stays there
+_USER_URL = re.compile(r"https://archidekt\.com/user/([^/?#]*[^/?#\d][^/?#]*)$")
 
 CSS = """
 .acc .pr-me{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
@@ -143,11 +150,25 @@ CSS = """
 @media (max-width:599.98px){.acc .ui-row{grid-template-columns:minmax(0,1fr)}
   .acc .ui-row.sw{grid-template-columns:minmax(0,1fr) auto}
   .acc .ui-row.sw .ctl{grid-column:2;grid-row:1 / span 2;justify-self:end;align-self:start}}
+/* a page too narrow for the label's words beside the switch (a 320 px phone at 200% text): the
+   switch goes under the label, at the row's end */
+.acc{container-type:inline-size}
+@container (max-width:13em){
+  .acc .ui-row.sw{grid-template-columns:minmax(0,1fr)}
+  .acc .ui-row.sw .ctl{grid-column:1;grid-row:auto;justify-self:end}}
 """
 COLLECTION_CSS = """
-.col-vis{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:0 0 .9rem;padding:.6rem .8rem;
-  border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface)}
-.col-vis .t{flex:1 1 14rem;min-width:0;font-size:.95rem}
+/* one slim row: the words, the button at its end (under them only where the row is too narrow
+   for both: final audit N11) */
+.col-vis{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .75rem;
+  padding:.3rem .8rem;border:1px solid var(--card-border);border-radius:var(--radius-panel);
+  background:var(--surface)}
+.col-vis .t{flex:1 1 auto;min-width:0;font-size:.95rem}
+.col-vis .t .muted{white-space:nowrap}
+/* a row too narrow for the sentence and the button together (a 412 px phone): "Private" with its
+   icon says it, and the button keeps the row */
+.col-vis{container-type:inline-size}
+@container (max-width:28em){ .col-vis .t .muted{display:none} }
 .col-vis .t b{display:inline-flex;align-items:center;gap:.3rem;vertical-align:-3px}
 .col-vis .t b svg.i{width:16px;height:16px}
 .col-vis form{margin:0}
@@ -164,11 +185,21 @@ _COUNT: dict[str, tuple[float, int]] = {}
 _LIST: dict[str, tuple[float, dict[str, Any]]] = {}
 _LOCKS: dict[str, asyncio.Lock] = {}
 _LAST_ERROR: dict[str, str] = {}
+_LIST_GEN: dict[str, int] = {}  # sub -> the member's writes seen (forget_list)
 
 
 def forget(sub: str) -> None:
     """A press changed the profile: the next page reads it again."""
     _PROFILE.pop(sub, None)
+
+
+def forget_list(sub: str, _path: str = "") -> None:
+    """A write the member sent (DeckService.write_hooks): the next Alerts view reads the list again,
+    and a read under way meanwhile keeps nothing."""
+    _LIST.pop(sub, None)
+    _LIST_GEN[sub] = _LIST_GEN.get(sub, 0) + 1
+    if len(_LIST_GEN) > 10_000:
+        _LIST_GEN.clear()
 
 
 def forget_all(sub: str) -> None:
@@ -233,11 +264,18 @@ async def unseen_count(decks: Any, sub: str) -> int:
 
 
 async def notification_list(decks: Any, sub: str) -> dict[str, Any]:
+    from .decks import reloading
+
     hit = _LIST.get(sub)
-    if hit and hit[0] > time.monotonic():
+    if hit and hit[0] > time.monotonic() and not reloading(("alerts", sub)):  # a reload reads again
         return hit[1]
+    gen = _LIST_GEN.get(sub, 0)
     got = await profile.notifications(decks, sub)
-    _LIST[sub] = (time.monotonic() + LIST_TTL, got)
+    if _LIST_GEN.get(sub, 0) == gen:
+        _LIST[sub] = (time.monotonic() + LIST_TTL, got)
+    if notify.prefs(decks.db, sub)["ntfy_on"]:
+        # what the member just saw here is never pushed to their phone later (alerts_push.py)
+        alerts_push.seen_in_bell(decks.db, sub, profile.user_id(decks, sub), got["notifications"])
     # the site zeroes its badge once the list was read (no mark-as-read request was seen in its
     # scripts)
     _COUNT[sub] = (time.monotonic() + COUNT_TTL, 0)
@@ -339,7 +377,7 @@ def picture_box(csrf_in: str, username: str, *, open: bool, error: str = "") -> 
             ),
         ],
         open=open,
-        close_href="/account/details#profile",
+        close_href=section_href("profile"),
         cls="pr-box",
     )
 
@@ -356,24 +394,62 @@ def account_cards(
     values: dict[str, str] | None = None,
     open_box: str | None = None,
 ) -> str:
-    """The four cards after Your Archidekt lists while Archidekt is linked. ``now`` is the profile
-    as Archidekt answers it (None: it couldn't be read); ``ok``/``saved`` the notice a redirect
-    carries; ``error``/``error_in`` Archidekt's refusal and the card it belongs to; ``values`` what
-    was typed, kept in the fields after a refusal. ``stamp`` is the page's render stamp
-    (pages.press_stamp): every form carries it as ``shown``, and the press is refused without it."""
+    """The cards in one piece (the Account details list with its rows folded open)."""
+    return "".join(
+        cards(
+            now,
+            csrf,
+            stamp=stamp,
+            ok=ok,
+            saved=saved,
+            error=error,
+            error_in=error_in,
+            values=values,
+            open_box=open_box,
+        ).values()
+    )
+
+
+def cards(
+    now: dict[str, Any] | None,
+    csrf: str | None,
+    *,
+    stamp: str = "",
+    ok: str = "",
+    saved: str = "",
+    error: str = "",
+    error_in: str = "",
+    values: dict[str, str] | None = None,
+    open_box: str | None = None,
+    heading: bool = True,
+) -> dict[str, str]:
+    """The Archidekt sections of Account details while Archidekt is linked, each its own page
+    (pages.SECTIONS): ``profile`` (the picture, username and bio), ``email`` (the four switches),
+    ``defaults`` (the new device defaults) and ``only`` (what stays on Archidekt, at the foot of the
+    profile page). ``now`` is the profile as Archidekt answers it (None: it couldn't be read, and
+    each page says so); ``ok``/``saved`` the notice a redirect carries; ``error``/``error_in``
+    Archidekt's refusal and the card it belongs to; ``values`` what was typed, kept in the fields
+    after a refusal. ``stamp`` is the page's render stamp (pages.press_stamp): every form carries it
+    as ``shown``, and the press is refused without it. ``heading`` False leaves out the three
+    cards' own headings (each one's page names it)."""
     csrf_in = _hidden(csrf, stamp)
     v = values or {}
+
+    def h2(words: str) -> str:
+        return f"<h2>{words}</h2>" if heading else ""
+
     if now is None:
-        return (
-            "<div class='card' id='profile'><h2>Archidekt profile</h2>"
-            + ui.notice(
-                "Archidekt did not answer, so your profile and settings can't be shown right now. "
-                "Reload the page to try again.",
-                "warn",
-                role="status",
-            )
-            + "</div>"
+        unread = ui.notice(
+            f"{outage('unavailable').removesuffix('.')}, so your profile and settings can't be shown. "
+            "Reload the page to try again.",
+            "warn",
+            role="status",
         )
+        return {
+            "profile": f"<div class='card' id='profile'>{h2('Archidekt profile')}{unread}</div>",
+            "email": f"<div class='card' id='email'>{h2('Email and alerts on Archidekt')}{unread}</div>",
+            "defaults": f"<div class='card' id='defaults'>{h2('New device default settings')}{unread}</div>",
+        }
     me = profile.summary(now)
     username = str(v.get("username", me["username"]))
     bio = str(v.get("bio", me["bio"]))
@@ -395,17 +471,17 @@ def account_cards(
         return ""
 
     prof = (
-        f"<div class='card' id='profile'><h2>Archidekt profile</h2>{note('profile')}{note('picture')}"
+        f"<div class='card' id='profile'>{h2('Archidekt profile')}{note('profile')}{note('picture')}"
         "<div class='ui-row full'><p class='lab'>Picture</p>"
         "<p class='help'>A JPEG or PNG up to 1 MB.</p>"
         "<div class='ctl'><div class='pr-me'><span class='big' aria-hidden='true'>"
         f"{esc(_initial(me['username']))}"
         "</span><div class='ui-actions'>"
         + ui.box_opener(
-            "Upload a picture…", "/account/details?picture=1#profile", "picture", icon_name="image"
+            "Upload a picture…", section_href("profile", "picture=1"), "picture", icon_name="image"
         )
         + "</div></div></div></div>"
-        f"<form method='post' action='/account/profile' id='pr-f'>{csrf_in}"
+        f"<form method='post' action='/account/profile' id='pr-f' data-draft='profile'>{csrf_in}"
         "<input type='hidden' name='action' value='profile'>"
         + _row(
             "<label for='pr-un'>Username</label>",
@@ -436,7 +512,7 @@ def account_cards(
             )
         )
     email = (
-        f"<div class='card' id='email'><h2>Email and notifications on Archidekt</h2>{note('email')}"
+        f"<div class='card' id='email'>{h2('Email and alerts on Archidekt')}{note('email')}"
         + "".join(email_rows)
         + "</div>"
     )
@@ -469,7 +545,7 @@ def account_cards(
             ctl = _select_form(csrf_in, name=name, label=label, choices=choices, cur=cur)
             pref_rows.append(_row(f"<label for='pr-{name}'>{esc(label)}</label>", help_text, ctl))
     defaults = (
-        "<div class='card' id='defaults'><h2>New device default settings</h2>"
+        f"<div class='card' id='defaults'>{h2('New device default settings')}"
         "<p class='muted small'>What Archidekt starts with on a device you haven't set up yet.</p>"
         f"{note('defaults')}" + "".join(pref_rows) + "</div>"
     )
@@ -479,7 +555,7 @@ def account_cards(
         f"<p><a class='btn btn-plain' href='{ON_ARCHIDEKT_URL}' target='_blank' rel='noopener noreferrer'>"
         f"{icon('external')} Open Archidekt</a></p></div>"
     )
-    return prof + email + defaults + only
+    return {"profile": prof, "email": email, "defaults": defaults, "only": only}
 
 
 def collection_visibility(
@@ -519,14 +595,14 @@ def collection_visibility(
     if err:
         strip = ui.notice(err, "error", role="alert")
     elif ok == "public":
-        strip = ui.notice("Your collection is public on Archidekt.", "ok", role="status")
+        strip = ui.notice("Your binder is public on Archidekt.", "ok", role="status")
     elif ok == "private":
-        strip = ui.notice("Your collection is private on Archidekt.", "ok", role="status")
+        strip = ui.notice("Your binder is private on Archidekt.", "ok", role="status")
     elif ok == "unconfirmed":
         strip = ui.notice(UNCONFIRMED, "warn", role="status")
     box = ui.box(
         "col-vis",
-        "Make your collection public?",
+        "Make your binder public?",
         f"<form id='col-vis-f' method='post' action='/account/profile'>{hidden}"
         "<input type='hidden' name='on' value='1'><input type='hidden' name='confirmed' value='1'>"
         "<p>Anyone can then see every card you own, with finish and condition, on your Archidekt profile. "
@@ -545,20 +621,135 @@ def collection_visibility(
 
 
 def _gateway_url(url: str | None) -> str | None:
-    """A deck's notification opens the gateway's own deck page; everything else stays on Archidekt."""
+    """A notification opens the gateway's own page where it has one: a deck's, a forum thread's
+    (a reply, a sticky, news of a feature) and a follower's profile. News and contests stay on
+    Archidekt."""
     if not url:
         return None
-    m = _DECK_URL.match(url)
-    return f"/decks/{m.group(1)}" if m else url
+    if m := _DECK_URL.match(url):
+        return f"/decks/{m.group(1)}"
+    if m := _THREAD_URL.match(url):
+        return f"/forum/thread/{m.group(1)}"
+    if m := _USER_URL.match(url):
+        return f"/users/{quote(unquote(m.group(1)), safe='')}"
+    return url
 
 
-def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
-    """The bell's list: each row the notification's text and kind, tinted while unseen, a link to
-    its target where Archidekt names one (the gateway's deck page for a deck)."""
+GATEWAY_KIND_WORDS = {"prices": "Price alert", "reports": "Deck report", "summary": "Summary"}
+
+
+def _row_html(cls: str, mark: str, text: str, sub_text: str, href: str) -> str:
+    inner = (
+        f"<i aria-hidden='true'>{esc(mark)}</i><span class='t'>{esc(text)}"
+        f"<span class='s'>{esc(sub_text)}</span></span>"
+    )
+    if href and href.startswith("/"):
+        return f"<li><a class='{cls}' href='{esc(href)}'>{inner}</a></li>"
+    if href:
+        return (
+            f"<li><a class='{cls}' href='{esc(href)}' target='_blank' rel='noopener noreferrer'>"
+            f"{inner}</a></li>"
+        )
+    return f"<li><div class='{cls}'>{inner}</div></li>"
+
+
+def _has_words(q: str, *parts: Any) -> bool:
+    return not q or any(q in str(p or "").casefold() for p in parts)
+
+
+def alerts_page_parts(
+    mine: list[dict[str, Any]],
+    waiting: dict[str, tuple[str, int, str]],
+    got: dict[str, Any],
+    *,
+    linked: bool,
+    error: str = "",
+    kind: str = "",
+    q: str = "",
+) -> str:
+    """The Alerts page's list, narrowed by the Type filter (``kind``, an ALERT_TYPES value) and
+    the search box (``q``, in a title or its line), 0.7.46 audit QG-25. Everything when both are
+    empty; a type alone keeps its own heading."""
+    q = q.casefold().strip()
+    if kind == "waiting":
+        mine = []
+    elif kind in ("prices", "reports", "summary"):
+        mine = [a for a in mine if a["event"] == kind]
+        waiting = {}
+    if q:
+        mine = [a for a in mine if _has_words(q, a["title"], a["message"])]
+        waiting = {k: v for k, v in waiting.items() if _has_words(q, v[0], "waiting for you")}
+        rows = [n for n in (got.get("notifications") or []) if _has_words(q, n.get("text"))]
+        got = {**got, "notifications": rows}
+    ours = kind != "archidekt"
+    theirs = kind in ("", "archidekt")
+    if q and ours and theirs and not mine and not waiting and not got.get("notifications"):
+        return "<p class='muted'>No alerts match.</p>"
+    out = ""
+    if ours:
+        if q and not mine and not waiting:
+            rows_html = "<p class='muted'>No alerts match.</p>"
+        else:
+            rows_html = gateway_rows_html(mine, waiting)
+        out += "<h3 class='bell-part'>From this gateway</h3>" + rows_html
+    if theirs:
+        if error:
+            ark = ui.notice(error, "error", role="alert")
+        elif q and not got.get("notifications"):
+            ark = "<p class='muted'>No alerts match.</p>"
+        else:
+            ark = notifications_html(got, linked=linked)
+        out += "<h3 class='bell-part'>From Archidekt</h3>" + ark
+    return out
+
+
+def gateway_rows_html(alerts: list[dict[str, Any]], waiting: dict[str, tuple[str, int, str]]) -> str:
+    """The gateway's own part of the bell (0.7.46 audit QG-16): what waits for the member's
+    press now (read live, one row per deck, the words of the phone's message), then the kept
+    alerts (a price alert that fired, a report that finished, a summary), newest first."""
+    out = []
+    for deck_id, (name, count, pid) in sorted(waiting.items(), key=lambda kv: kv[1][0].lower()):
+        if count <= 0:
+            continue
+        title = notify.new_decks_title(count) if deck_id == "new" else notify.waiting_title(count, name)
+        if count == 1 and pid:
+            href = f"/proposals/{pid}"
+        else:
+            href = "/proposals" if deck_id == "new" else f"/decks/{deck_id}"
+        out.append(_row_html("bell-row new", "W", title, "Waiting for you", href))
+    for a in alerts:
+        kind = GATEWAY_KIND_WORDS.get(a["event"], "Gateway")
+        cls = "bell-row" + ("" if a.get("seen_at") else " new")
+        sub_text = kind + ("" if a.get("seen_at") else " · new") + " · " + ui.when_text(a["created_at"])
+        out.append(_row_html(cls, kind[:1], a["title"], sub_text, a["path"]))
+    if not out:
+        return (
+            "<p class='muted'>Nothing from this gateway yet: a price alert that fires, a deck report that "
+            "finishes and your summary show here.</p>"
+        )
+    return f"<ul class='bell-list' role='list'>{''.join(out)}</ul>"
+
+
+def notifications_html(
+    got: dict[str, Any],
+    *,
+    linked: bool = True,
+    gateway: list[dict[str, Any]] | None = None,
+    waiting: dict[str, tuple[str, int, str]] | None = None,
+) -> str:
+    """The bell's list in two parts: the gateway's own (``gateway``, ``waiting``), then
+    Archidekt's: each row the notification's text and kind, tinted while unseen, a link to its
+    target where Archidekt names one (the gateway's own page where it has one)."""
+    if gateway is not None or waiting is not None:
+        return (
+            "<h3 class='bell-part'>From this gateway</h3>"
+            + gateway_rows_html(gateway or [], waiting or {})
+            + "<h3 class='bell-part'>From Archidekt</h3>"
+            + notifications_html(got, linked=linked)
+        )
     if not linked:
         return (
-            "<p class='muted'>Link your Archidekt account under Account details to see its notifications "
-            "here.</p>"
+            "<p class='muted'>Link your Archidekt account under Account details to see its alerts here.</p>"
         )
     rows = got.get("notifications") or []
     if not rows:
@@ -585,20 +776,10 @@ def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
 
 
 BELL_NOTE = (
-    "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. "
-    "Turn them off under Account › Email and notifications."
+    "The count clears when you open this list. This gateway keeps its newest alerts here; Archidekt's "
+    "stay for as long as Archidekt keeps them. Choose which of the gateway's alerts you get under Account "
+    "› Account details › Push notifications, and Archidekt's under Email and alerts on Archidekt."
 )
-
-
-def home_widget() -> str:
-    """Home's On Archidekt widget: the count comes after the page has loaded (static/bell.js)."""
-    return (
-        f"<div class='wdg' data-bell-widget><a class='lab' href='/notifications'>{icon('bell')}On Archidekt"
-        "</a>"
-        "<span class='big'><span data-bell-big>…</span></span>"
-        "<span class='det'><span data-bell-det>Archidekt's notifications</span></span>"
-        "<span class='go'><a class='btn btn-plain' href='/notifications' data-bell-open>Open</a></span></div>"
-    )
 
 
 # -- the routes --------------------------------------------------------------------------------------------
@@ -606,6 +787,8 @@ def home_widget() -> str:
 
 def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     decks = h.decks
+    if forget_list not in decks.write_hooks:
+        decks.write_hooks.append(forget_list)
     page = h.page
     check_csrf = h.check_csrf
     s = h.s
@@ -638,34 +821,27 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def account_again(
         request: Request, sub: str, sid: str | None, *, error: str, error_in: str, values: dict[str, str]
     ) -> Response:
-        """The Account page drawn again with Archidekt's refusal in the card it belongs to."""
-        from .pages import ACCOUNT_CSP, ACCOUNT_CSS, account_html
+        """That section's page drawn again with Archidekt's refusal in its card."""
+        from .pages import account_response, section_html
 
-        body = await account_html(
+        section = "profile" if error_in == "picture" else error_in
+        body = await section_html(
             state,
             sub,
             _csrf(s, sid),
+            section,
             open_box="picture" if error_in == "picture" else None,
             profile_error=error,
             profile_error_in=error_in,
             profile_values=values,
         )
-        return page(
-            "Account",
-            body,
-            sub=sub,
-            sid=sid,
-            status=400,
-            csp=ACCOUNT_CSP,
-            extra_css=ACCOUNT_CSS + CSS,
-            extra_scripts=("pages.js", "profile.js"),
-        )
+        return account_response(page, f"<div class='acc'>{body}</div>", sub, sid, status=400, section=section)
 
     @server.custom_route("/account/profile", methods=["POST"], include_in_schema=False)
     async def profile_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/account")
+            return login_redirect_here(request, "/account")
         raw = await read_limited(request, 16_384)
         fields = parse_qs((raw or b"").decode("utf-8", "replace"), keep_blank_values=True)
         data = {k: v[0] for k, v in fields.items()}
@@ -674,7 +850,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         action = data.get("action") or ""
         on = data.get("on") == "1"
         shown = data.get("shown")
-        back = "/collection" if data.get("next") == "/collection" else "/account/details"
+        back = "/collection" if data.get("next") == "/collection" else section_href("profile")
         card = {"profile": "profile", "email": "email", "preference": "defaults"}.get(action, "")
         try:
             if action == "profile":
@@ -692,7 +868,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     saved.append("username")
                     unconfirmed = unconfirmed or verified(out) is False
                 code = "ok=unconfirmed" if unconfirmed else f"ok=profile&saved={','.join(saved)}"
-                return RedirectResponse(f"/account/details?{code}#profile", status_code=303)
+                return RedirectResponse(section_href("profile", code), status_code=303)
             if action == "email":
                 out = await press(sub, shown, field="email", switch=data.get("switch") or "", on=on)
             elif action == "preference":
@@ -711,7 +887,10 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 raise DeckError("invalid", "That is not something this page can do.")
         except DeckError as exc:
             if wants_json(request):
-                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+                # a switch: Archidekt busy or unreachable is 429 or 503 with Retry-After
+                return busy_json_response(exc) or JSONResponse(
+                    {"ok": False, "message": str(exc)}, status_code=400
+                )
             if back == "/collection":
                 _LAST_ERROR[sub] = str(exc)
                 return RedirectResponse("/collection#visibility", status_code=303)
@@ -723,7 +902,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if wants_json(request):
             return JSONResponse({"ok": True, "notice": text, "verified": verified(out)})
         code = "ok=unconfirmed" if verified(out) is False else f"ok={card}"
-        return RedirectResponse(f"/account/details?{code}#{card}", status_code=303)
+        return RedirectResponse(section_href(card, code), status_code=303)
 
     @server.custom_route("/account/picture", methods=["POST"], include_in_schema=False)
     async def picture_post(request: Request) -> Response:
@@ -731,7 +910,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sends it (profile.set_avatar). The page's own route: never an assistant."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/account")
+            return login_redirect_here(request, "/account")
         posted = await limited_form(request, PICTURE_BODY_LIMIT, max_files=1, max_fields=10)
         too_big = posted is TOO_BIG
         data: dict[str, str] = {}
@@ -762,7 +941,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         forget(sub)
         if wants_json(request):
             return JSONResponse({"ok": True, "notice": PICTURE_SAVED, "verified": out.get("verified")})
-        return RedirectResponse("/account/details?ok=picture#profile", status_code=303)
+        return RedirectResponse(section_href("profile", "ok=picture"), status_code=303)
 
     # -- the bell ---------------------------------------------------------------------------------
 
@@ -775,12 +954,12 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False}, status_code=401, headers={"Cache-Control": "no-store"})
-        n = 0
+        n = state.db.unseen_gateway_alerts(sub)
         if linked(sub):
             try:
-                n = await unseen_count(decks, sub)
+                n += await unseen_count(decks, sub)
             except DeckError:
-                n = 0
+                pass
         return JSONResponse({"ok": True, "unseen": n}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/notifications", methods=["GET"], include_in_schema=False)
@@ -788,7 +967,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The list: as a box on the page with scripts (JSON), as a small page without them."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/notifications")
+            return login_redirect_here(request, "/notifications")
         is_linked = linked(sub)
         got: dict[str, Any] = {"notifications": [], "unseen": 0}
         error = ""
@@ -800,24 +979,45 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 got = await notification_list(decks, sub)
             except DeckError as exc:
                 error = str(exc)
-        if cross_site and is_linked:
-            body = f"<p><a class='btn' href='/notifications'>{icon('bell')} Show my notifications</a></p>"
-        elif error:
-            body = ui.notice(error, "error", role="alert")
+        unseen = int(got.get("unseen") or 0)
+        if cross_site:
+            body = f"<p><a class='btn' href='/notifications'>{icon('bell')} Show my alerts</a></p>"
         else:
-            body = notifications_html(got, linked=is_linked)
-        if wants_json(request):
+            # the gateway's own part: what waits for the press now, and the kept alerts; seen
+            # once this list was read (the count clears, the rows stay)
+            mine = state.db.gateway_alerts(sub)
+            unseen += sum(1 for a in mine if a["seen_at"] is None)
+            state.db.mark_gateway_alerts_seen(sub)
+            try:
+                waiting = await asyncio.to_thread(decks.waiting_by_deck, sub)
+            except Exception:  # noqa: BLE001 - the bell never fails for its waiting rows
+                waiting = {}
+            body = alerts_page_parts(mine, waiting, got, linked=is_linked, error=error)
+        if wants_json(request):  # the bell's box: never narrowed
             return JSONResponse(
-                {"ok": not error, "unseen": int(got.get("unseen") or 0), "html": body, "message": error},
+                {"ok": not error, "unseen": unseen, "html": body, "message": error},
                 headers={"Cache-Control": "no-store"},
             )
-        badge = f" <span class='bell-badge'>{got['unseen']} new</span>" if got.get("unseen") else ""
+        # the page: a Type filter and a search box (0.7.46 audit QG-25), applied as a GET
+        qp = request.query_params
+        kind = qp.get("type") if qp.get("type") in {v for v, _ in notify.ALERT_TYPES} else ""
+        q = (qp.get("q") or "").strip()[:100]
+        if not cross_site and (kind or q):
+            body = alerts_page_parts(mine, waiting, got, linked=is_linked, error=error, kind=kind, q=q)
+        tools = ui.toolbar(
+            "/notifications",
+            search_label="Search alerts",
+            placeholder="Search alerts|Search",
+            q=q,
+            filters=[ui.filter_select("type", "Type", notify.ALERT_TYPES, kind)],
+        )
+        badge = f" <span class='bell-badge'>{unseen} new</span>" if unseen else ""
         return page(
-            "Notifications",
-            f"<div class='bell-page'><div class='ui-head'><h1>Notifications{badge}</h1></div>"
-            "<p class='ui-sub'>Your notifications from Archidekt.</p>"
-            f"<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
-            "<div class='ui-actions'><a class='btn btn-plain' href='/account/details#email'>"
+            "Alerts",
+            f"<div class='bell-page'><div class='ui-head'><h1>Alerts{badge}</h1></div>"
+            "<p class='ui-sub'>Alerts from this gateway and from Archidekt.</p>"
+            f"{tools}<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
+            f"<div class='ui-actions'><a class='btn btn-plain' href='{section_href('email')}'>"
             f"{icon('settings')} Settings</a>"
             "</div></div></div>",
             sub=sub,

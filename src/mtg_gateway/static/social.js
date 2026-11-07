@@ -31,29 +31,25 @@
   // Each is the person's own click: a confirmation chip appears first, then the gateway sends the
   // action to Archidekt under their linked session (/social/api). Nothing here is reachable by an
   // assistant.
+  // through the shared MtgFetch (static/fetchjson.js): never rejects; a session that ended or a
+  // lost connection comes back as {ok: false} in the site's one wording (socialProblem adds the
+  // Sign in button that comes back to this page); an error page instead of JSON says to reload
   function socialRequest(method, url, body) {
-    return fetch(url, {
-      method: method, credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () {
-        // not the gateway's JSON answer (an error page): the request reached it, the outcome is unknown
-        return { ok: false, status: r.status, error: "server",
-                 message: "The gateway hit a problem. Reload the page to see what reached Archidekt." };
-      });
-    });
+    return window.MtgFetch.answer(url, { method: method, body: body === undefined ? undefined : JSON.stringify(body), csrf: CSRF });
   }
   function socialProblem(d) {
+    var frag = document.createDocumentFragment();
     if (d && (d.error === "not_linked" || d.error === "auth")) {
       var a = el("a", "", "Link your Archidekt account");
-      a.href = "/account/details#archidekt";
-      var frag = document.createDocumentFragment();
+      a.href = "/account/details/archidekt";
       frag.appendChild(a);
       frag.appendChild(document.createTextNode(" to like, bookmark, follow or comment."));
       return frag;
     }
-    return document.createTextNode((d && d.message) || "That did not work; try again.");
+    var pr = window.MtgFetch.problem(d, null);
+    frag.appendChild(document.createTextNode(pr.text));
+    pr.actions.forEach(function (b) { b.className = "btn small"; frag.appendChild(document.createTextNode(" ")); frag.appendChild(b); });
+    return frag;
   }
   function confirmChip(btn, question, yesLabel, onYes) {
     var old = btn.parentNode.querySelector(".confirm");
@@ -501,6 +497,10 @@
       if (t && h) h.textContent = t.replace("{name}", who || "this");
       var n = reportBox.querySelector(".boxnote"); if (n) { n.hidden = true; n.textContent = ""; }
       var ta = reportBox.querySelector("textarea"); if (ta) ta.value = "";
+      // the one box serves every comment: what was typed is kept per comment (static/draft.js),
+      // so a reload brings back the report being written, and never another comment's
+      var form = reportBox.querySelector("form[data-draft]"), Draft = window.MtgDraft;
+      if (form && Draft) Draft.keep(form, form.getAttribute("data-draft").split("#")[0] + "#" + id);
       Box.openElement(reportBox, { returnFocus: back || null });
     };
     var commentLink = function (id) { return location.origin + location.pathname + "#c" + id; };
@@ -627,6 +627,7 @@
           thread.insertBefore(node, thread.firstChild);
         }
         textarea.value = ""; parentId = null; replyTo.hidden = true;
+        if (form.__draft) form.__draft.clear();  // posted: the draft has done its job (static/draft.js)
         // the count is of comments on the deck, not replies (Archidekt's thread count)
         if (countEl && !parentBox) { var n = (parseInt(countEl.textContent, 10) || 0) + 1; countEl.textContent = n === 1 ? "1 comment" : n + " comments"; }
       };

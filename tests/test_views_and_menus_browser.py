@@ -24,6 +24,7 @@ from .test_editor_browser import PNG, _link
 from .test_editor_leave_browser import HOSTILE
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -76,6 +77,19 @@ def _pick(page, select_id: str, label: str) -> None:
         page.locator("[role=listbox] [role=option]", has_text=label).first.click()
 
 
+def _pick_view(page, label: str) -> None:
+    """Choose the deck page's view: from View as on a wide screen, from the View sheet's Layout
+    on a phone (the redesigned phone toolbar is one row, Quick add, View and ⋮)."""
+    if page.locator(".field:has(#f-view) .msel-btn").is_visible():
+        _pick(page, "f-view", label)
+        return
+    page.locator(".toolbar .viewbtn").click()
+    layout = page.locator(".viewsheet #vs-view")
+    layout.wait_for(timeout=3000)
+    with page.expect_navigation(wait_until="networkidle"):
+        layout.select_option(label=label)
+
+
 def _nav(page, href: str) -> None:
     """Follow the site's own link to ``href`` (tab bar on a phone, top bar on a desktop)."""
     link = page.locator(f".tabbar > a[href='{href}']:visible, .topbar nav.site a[href='{href}']:visible")
@@ -91,14 +105,16 @@ def test_view_as_is_remembered_after_leaving_and_coming_back(server: Server, wid
         # the deck page: Text by default, Stacks picked, then away to the deck list and back in
         page.goto(f"{server.base}/decks/{DECK}", wait_until="networkidle")
         assert page.locator("#cards.deckview.text").count() == 1
-        _pick(page, "f-view", "Stacks")
+        _pick_view(page, "Stacks")
         assert "view=stacks" in page.url and page.locator("#cards.deckview.stacks").count() == 1
         _nav(page, "/decks")
         with page.expect_navigation(wait_until="networkidle"):
             page.locator(f"a[href='/decks/{DECK}']").first.click()
         assert page.url == f"{server.base}/decks/{DECK}", page.url
         assert page.locator("#cards.deckview.stacks").count() == 1, "the deck went back to Text"
-        assert page.locator(".field:has(#f-view) .msel-btn").inner_text().strip() == "Stacks"
+        # the View as box says so (hidden on a phone, where the View sheet mirrors it)
+        shown = page.locator(".field:has(#f-view) .msel-btn").evaluate("b => b.textContent").strip()
+        assert shown == "Stacks", shown
         # rendered so by the gateway: the first paint already has it (no flash of Text)
         first = page.request.get(f"{server.base}/decks/{DECK}").text()
         assert "class='deckview stacks'" in first and "<option value='stacks' selected>" in first
@@ -189,16 +205,51 @@ def test_short_menu_items_keep_one_line(server: Server, width: int, touch: bool)
                     continue
                 s.scroll_into_view_if_needed()
                 s.click()
-                page.wait_for_timeout(50)
+                redrawn(page)
                 label = s.get_attribute("aria-label") or s.inner_text().strip()[:30]
                 problems += [f"{path} [{label}]: {m}" for m in page.evaluate(MENU_ITEMS)]
                 page.keyboard.press("Escape")
                 # closed, and on a phone the menu's history entry given back (feedback.js)
                 page.wait_for_function(
                     "() => !document.querySelector('details.dd[open]')"
-                    " && !(history.state && history.state.menu)"
+                    " && !(history.state && history.state.mtglayer)"
                 )
         assert problems == [], "\n".join(problems)
+        assert errors == []
+    finally:
+        browser.close()
+        p.stop()
+
+
+def test_tab_out_of_a_drop_down_menu_closes_it(server: Server) -> None:
+    """Audit F-13 (eccfa3d9): a drop-down menu (details.dd, static/feedback.js) stayed open when
+    Tab left it. It closes the moment the focus leaves it, forwards or backwards."""
+    p, browser, page, errors = _start(server, 1280)
+    try:
+        page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
+        summaries = page.locator("details.dd > summary")
+        opened = 0
+        for i in range(summaries.count()):
+            s = summaries.nth(i)
+            if not s.is_visible():
+                continue
+            s.click()
+            page.wait_for_selector("details.dd[open]")
+            for _ in range(30):
+                page.keyboard.press("Tab")
+                inside = page.evaluate(
+                    "() => { const d = document.querySelector('details.dd[open]');"
+                    " return !!(d && d.contains(document.activeElement)); }"
+                )
+                if not inside:
+                    break
+            assert page.locator("details.dd[open]").count() == 0, (i, "Tab left the menu open")
+            s.click()
+            page.wait_for_selector("details.dd[open]")
+            page.keyboard.press("Shift+Tab")
+            assert page.locator("details.dd[open]").count() == 0, (i, "Shift+Tab left the menu open")
+            opened += 1
+        assert opened >= 1
         assert errors == []
     finally:
         browser.close()

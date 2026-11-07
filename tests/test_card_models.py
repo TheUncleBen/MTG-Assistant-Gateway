@@ -300,7 +300,7 @@ async def test_a_kept_model_plays_only_in_its_members_later_runs(tmp_path: Path)
     assert [u["name"] for u in used] == [name] and len(used[0]["model"]) == 12 and "yours" not in used[0]
     assert "alice" not in json.dumps(mine) and "added_by" not in json.dumps(mine)
     page = report_body_html(mine)
-    assert "Played with saved card descriptions" in page and "last changed " in page
+    assert "Played with your card models" in page and "last changed " in page
     assert "another member" not in page and "added by you" not in page
     assert "last changed " in report_markdown(mine) and "added by you" not in report_markdown(mine)
     own = {"name": name, "triggers": [{"on": "etb", "do": "gain_life", "count": 3}]}
@@ -518,11 +518,11 @@ async def test_nothing_about_kept_models_shows_while_they_are_off(monkeypatch: A
         "goldfish": {"ok": True, "text": GOLDFISH, "kept_models": used, "models_saved": True},
     }
     cards = [{"name": "Odd Card"}]
-    assert "Played with saved card descriptions" in report_body_html(r)
+    assert "Played with your card models" in report_body_html(r)
     assert "which models the gateway kept" in ask_html(r, cards)
     monkeypatch.setattr(card_models, "SWITCHED_ON", False)
-    assert "Played with saved card descriptions" not in report_body_html(r)
-    assert "Played with saved card descriptions" not in report_markdown(r)
+    assert "Played with your card models" not in report_body_html(r)
+    assert "Played with your card models" not in report_markdown(r)
     text = ask_html(r, cards)
     assert "models" not in text.replace("your models as its annotations", "")
     assert "and which cards you could not describe." in text
@@ -636,9 +636,9 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         store.put_card_model("sol ring", "Sol Ring", model, sub, 1)
         store.put_card_model("arcane signet", "Arcane Signet", model, "someone-else", 1)
         page = await b.http.get("/history/reports/rep_kept", headers=NAV)
-        assert "Played with saved card descriptions" in page.text
-        assert "aria-label='Remove the saved description of Sol Ring'" in page.text
-        assert "Remove the saved description of Arcane Signet" not in page.text
+        assert "Played with your card models" in page.text
+        assert "aria-label='Remove the card model of Sol Ring'" in page.text
+        assert "Remove the card model of Arcane Signet" not in page.text
         csrf = re.search(r"name='csrf' value='([^']+)'", page.text).group(1)
         url = "/history/reports/rep_kept/models/remove"
         assert (await b.http.post(url, data={"card": "Sol Ring"})).status_code == 403
@@ -649,7 +649,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         assert done.headers["location"] == "/history/reports/rep_kept?models=removed"
         assert (sub, "sol ring") not in store.rows
         after = await b.http.get(done.headers["location"], headers=NAV)
-        assert "The saved description was removed." in after.text and "Remove the saved" not in after.text
+        assert "The card model was removed." in after.text and "Remove the saved" not in after.text
         missing = await b.http.post("/history/reports/nope/models/remove", data={"csrf": csrf, "card": "x"})
         assert missing.status_code == 404
         # the assistant's tool: the member's own only
@@ -661,10 +661,21 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
             and out["removed"] is False
             and out["message"] == "You have no saved model for this card."
         )
+        # one call removes nothing: it hands the member the confirm, and only their press removes
         out = structured(await call(h, token, "remove_card_model", {"card_name": "sol ring"}))
-        assert out == {"ok": True, "removed": True} and store.rows.keys() == {
-            ("someone-else", "arcane signet")
-        }
+        assert out["ok"] and out["removed"] is False, out
+        assert (sub, "sol ring") in store.rows  # still kept after the call
+        assert out["remove_url"] == f"{h.settings.public_url}/history/models?remove=Sol%20Ring", out
+        assert "Remove" in out["message"] and "nothing is removed" in out["message"].lower(), out
+        confirm = await b.http.get(out["remove_url"].removeprefix(h.settings.public_url), headers=NAV)
+        assert "Remove the card model of “Sol Ring”?" in confirm.text
+        assert "id='rm-mine-sol-ring-f'" in confirm.text and (sub, "sol ring") in store.rows
+        mm_csrf = re.search(r"name='csrf' value='([^']+)'", confirm.text).group(1)
+        pressed = await b.http.post(
+            "/history/models/remove", data={"csrf": mm_csrf, "back": "/history/models", "card": "Sol Ring"}
+        )
+        assert pressed.headers["location"] == "/history/models?models=removed"
+        assert store.rows.keys() == {("someone-else", "arcane signet")}
         gw.reports.models = KeptModels(SimpleNamespace())  # a store without the schema 14 methods
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "does not save card models" in out["message"]
@@ -680,9 +691,15 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         assert failed.headers["location"] == "/history/reports/rep_kept?models=error"
         shown = await b.http.get(failed.headers["location"], headers=NAV)
         assert "could not be removed. Try again later." in shown.text and "already removed" not in shown.text
-        assert "<p class='notice error'>The saved description could not be removed." in shown.text
+        assert "<p class='notice error'>The card model could not be removed." in shown.text
+
+        # a store that can't be read is never reported as "no saved model"
+        def unreadable(keys: list[str], who: str) -> list[dict[str, Any]]:
+            raise OSError("disk")
+
+        monkeypatch.setattr(store, "get_card_models", unreadable)
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
-        assert out["ok"] is False and "could not remove" in out["message"]
+        assert out["ok"] is False and "could not read" in out["message"], out
         monkeypatch.undo()
         monkeypatch.setattr(card_models, "SWITCHED_ON", True)
         # switched off: the Remove route removes nothing and no notice shows
@@ -691,7 +708,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         off = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})
         assert off.status_code == 404 and (sub, "sol ring") in store.rows
         quiet = await b.http.get("/history/reports/rep_kept?models=removed", headers=NAV)
-        assert "The saved description was removed." not in quiet.text
+        assert "The card model was removed." not in quiet.text
     finally:
         gw.reports.models = real
         await b.aclose()
@@ -700,7 +717,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
 async def test_my_card_models_lists_only_the_members_own_and_removes_with_a_confirm(
     stack: Stack, monkeypatch: Any
 ) -> None:
-    """My card models (card_models_view): the member's own saved descriptions as a box on the report
+    """Card models (card_models_view): the member's own saved descriptions as a box on the report
     page and the Goldfish page, and as the page /history/models; another member's never show, on
     any of them. Remove asks first (the confirm box) and comes back to the page it was opened from
     with the report page's own notice; another member's description cannot be removed."""
@@ -725,20 +742,20 @@ async def test_my_card_models_lists_only_the_members_own_and_removes_with_a_conf
         assert page.status_code == 200, page.text[:300]
         assert (
             "id='my-models' role='dialog'" in page.text
-            and "<h2 id='my-models-title'>My card models</h2>" in page.text
+            and "<h2 id='my-models-title'>Card models</h2>" in page.text
         )
         rows = page.text.split("<ul class='mm-list'", 1)[1].split("</ul>", 1)[0]
         assert rows.count("<li data-name=") == 2 and "Arcane Signet" not in page.text
         assert "class='cardlink' data-card='Sol Ring'" in rows  # the shared card menu's hook
         assert "<time class='ui-when'" in rows and "changed <time" in rows and "added <time" in rows
-        assert "data-models-filter" in page.text and "Search by card name" in page.text
+        assert "data-models-filter" in page.text and "Search by name" in page.text
         assert "<textarea" not in rows and "<input" not in rows  # no hand editing
-        assert "aria-label='Remove the saved description of Sol Ring'" in rows
+        assert "aria-label='Remove the card model of Sol Ring'" in rows
         # someone else's name in ?remove= gets no confirm; an own one does
         other = await b.http.get("/history/models?remove=Arcane%20Signet", headers=NAV)
-        assert "Remove the saved description of “Arcane Signet”?" not in other.text
+        assert "Remove the card model of “Arcane Signet”?" not in other.text
         ask = await b.http.get("/history/models?remove=Sol%20Ring", headers=NAV)
-        assert "<h2 id='rm-mine-sol-ring-title'>Remove the saved description of “Sol Ring”?</h2>" in ask.text
+        assert "<h2 id='rm-mine-sol-ring-title'>Remove the card model of “Sol Ring”?</h2>" in ask.text
         assert "name='card' value='Sol Ring'" in ask.text and "action='/history/models/remove'" in ask.text
         # the Goldfish page and a report page open the same box; another member's never show
         gf = await b.http.get("/decks/42/goldfish", headers=NAV)
@@ -773,13 +790,13 @@ async def test_my_card_models_lists_only_the_members_own_and_removes_with_a_conf
         assert r.headers["location"] == "/history/models?models=removed"  # an outside address is not followed
         assert (sub, "sol ring") not in store.rows and ("someone-else", "sol ring") in store.rows
         after = await b.http.get(r.headers["location"], headers=NAV)
-        assert "The saved description was removed." in after.text and after.text.count("<li data-name=") == 1
+        assert "The card model was removed." in after.text and after.text.count("<li data-name=") == 1
         gf2 = await b.http.get("/decks/42/goldfish?models=removed", headers=NAV)
-        assert "The saved description was removed." in gf2.text
+        assert "The card model was removed." in gf2.text
         # the empty state
         store.rows.pop((sub, "opt"))
         empty = await b.http.get("/history/models", headers=NAV)
-        assert "No saved descriptions yet." in empty.text and "data-models-filter" not in empty.text
+        assert "No card models yet." in empty.text and "data-models-filter" not in empty.text
     finally:
         gw.reports.models = real
         await b.aclose()

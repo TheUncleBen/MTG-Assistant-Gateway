@@ -1,0 +1,176 @@
+Subject: rules_search ranks rare terms and terms close together first
+
+Found in the assistant tool review of the live gateway (2026-10-28):
+"commander damage" did not have 903.10a (21 combat damage from one commander)
+in the top 5: "damage" is in hundreds of rules and counted as much as
+"commander". The score now weighs each term by how rare it is in the rules,
+counts at most 3 uses of a term, doubles it when every term stands within a
+few words of the others, and adds a quarter when a term names the rule's
+section (903 Commander). The phrase bonus and the all-terms bonus stay, as
+does the total (entries with any one of the terms). The documents' tokens
+and term counts are worked out once per index.
+
+On the vendored Comprehensive Rules, "commander damage" now has 704.6c and
+903.10a in its top 5 and "commander tax" leads with 903.8 and the glossary's
+Commander Tax; the upstream ranking tests still pass.
+
+tests/test_rules_search_ranking.py.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 has none of these. Needs
+patches 0001-0016 applied first.
+diff --git a/mystic_forge/rulebook.py b/mystic_forge/rulebook.py
+index 1088a7a..a13f0e2 100644
+--- a/mystic_forge/rulebook.py
++++ b/mystic_forge/rulebook.py
+@@ -20,6 +20,7 @@ Verified upstream format (MagicCompRules 20260807.txt):
+ 
+ from __future__ import annotations
+ 
++import math
+ import re
+ from collections import Counter
+ from dataclasses import dataclass, field
+@@ -102,38 +103,79 @@ class RulesIndex:
+             display = self.glossary_display[key]
+             yield display, "glossary", f"{display} {definition}"
+ 
++    def _search_index(self) -> list[tuple[str, str, list[str], Counter, set[str]]]:
++        """Each document's tokens, counts and section title terms, and every term's document
++        frequency, worked out once per index (the rules do not change after parse)."""
++        cached = getattr(self, "_indexed", None)
++        if cached is not None:
++            return cached
++        docs = []
++        df: Counter = Counter()
++        for ref, kind, text in self._documents():
++            tokens = _tokenize(text)
++            if not tokens:
++                continue
++            counts = Counter(tokens)
++            df.update(counts.keys())
++            head = ref.split(".", 1)[0] if kind == "rule" else ""
++            section = self.rules.get(head) if head and head != ref else None
++            docs.append((ref, kind, tokens, counts, set(_tokenize(section.text)) if section else set()))
++        self._indexed, self._df = docs, df
++        return docs
++
+     def search(self, query: str, limit: int = 10) -> tuple[list[SearchHit], int]:
+         """Ranked hits over rules + glossary.
+ 
+-        Scoring: term frequency dampened by document length, x3 when every
+-        query term is present, x2 when the terms appear as a phrase. Stop
+-        words are dropped from the query before matching, unless doing so
+-        would leave nothing to search on. total = documents matching at
+-        least one significant query term.
++        Scoring: each query term's frequency (at most 3) weighted by how rare
++        the term is in the rules (so "commander" counts for more than
++        "damage"), dampened by document length; x3 when every query term is
++        present, x2 more when they stand close together (within a few words),
++        x1.5 when they appear as a phrase, and x1.25 when a term names the
++        rule's section (903 Commander for "commander damage"). Stop words are
++        dropped from the query before matching, unless doing so would leave
++        nothing to search on. total = documents matching at least one
++        significant query term.
+         """
+         q = significant_terms(query)
+         if not q:
+             return [], 0
++        docs = self._search_index()
++        n = len(docs)
++        idf = {t: math.log(1 + n / (1 + self._df[t])) for t in q}
++        terms = set(q)
+         phrase = " ".join(q)
+         hits: list[SearchHit] = []
+-        for ref, kind, text in self._documents():
+-            tokens = _tokenize(text)
+-            if not tokens:
+-                continue
+-            counts = Counter(tokens)
+-            matched = sum(counts[t] for t in q)
+-            if not matched:
++        for ref, kind, tokens, counts, section in docs:
++            if not any(counts[t] for t in terms):
+                 continue
+-            score = matched / (1.0 + len(tokens) / 200.0)
+-            if all(counts[t] for t in q):
++            score = sum(min(counts[t], 3) * idf[t] for t in q) / (1.0 + len(tokens) / 200.0)
++            if all(counts[t] for t in terms):
+                 score *= 3.0
++                if len(terms) > 1 and _near(tokens, terms, len(q) + 4):
++                    score *= 2.0
+             if len(q) > 1 and f" {phrase} " in f" {' '.join(tokens)} ":
+-                score *= 2.0
++                score *= 1.5
++            if section & terms:
++                score *= 1.25
+             hits.append(SearchHit(ref=ref, kind=kind, score=score))
+         hits.sort(key=lambda h: (-h.score, h.ref))
+         return hits[:max(0, limit)], len(hits)
+ 
+ 
++def _near(tokens: list[str], terms: set[str], window: int) -> bool:
++    """Whether every one of `terms` occurs within `window` consecutive tokens."""
++    at = [i for i, t in enumerate(tokens) if t in terms]
++    for k, i in enumerate(at):
++        seen = set()
++        for j in at[k:]:
++            if j >= i + window:
++                break
++            seen.add(tokens[j])
++        if seen == terms:
++            return True
++    return False
++
++
+ def parse(text: str) -> RulesIndex:
+     idx = RulesIndex()
+     lines = [ln.rstrip() for ln in text.lstrip("﻿").splitlines()]
+diff --git a/tests/test_rules_search_ranking.py b/tests/test_rules_search_ranking.py
+new file mode 100644
+index 0000000..d550282
+--- /dev/null
++++ b/tests/test_rules_search_ranking.py
+@@ -0,0 +1,43 @@
++"""rules_search ranks the rule an assistant is after near the top: a rare term
++counts for more than a common one, terms close together count for more than
++terms far apart, and a term that names the rule's section counts too (found in
++the assistant tool review, 2026-10-28: "commander damage" had 903.10a outside
++the top 5). Checked on the vendored Comprehensive Rules."""
++from pathlib import Path
++
++import pytest
++
++from mystic_forge import rulebook
++
++CR = Path(__file__).resolve().parent.parent / "mystic_forge" / "data" / "MagicCompRules.txt"
++
++
++@pytest.fixture(scope="module")
++def idx():
++    return rulebook.parse(CR.read_text(encoding="utf-8"))
++
++
++def _top(idx, query, n=5):
++    hits, _total = idx.search(query, n)
++    return [h.ref for h in hits]
++
++
++def test_commander_damage_finds_the_21_damage_rules(idx):
++    top = _top(idx, "commander damage")
++    assert "903.10a" in top and "704.6c" in top, top
++
++
++def test_commander_tax_finds_its_rule_and_glossary_entry(idx):
++    top = _top(idx, "commander tax", 2)
++    assert set(top) == {"903.8", "Commander Tax"}, top
++
++
++def test_a_single_keyword_still_leads_with_its_own_rules(idx):
++    assert set(_top(idx, "deathtouch", 3)) <= {"702.2", "702.2a", "702.2b", "702.2c", "702.2d", "Deathtouch"}
++    assert "Trample" in _top(idx, "trample", 3)
++
++
++def test_the_total_still_counts_every_entry_with_any_term(idx):
++    _hits, total = idx.search("commander damage", 5)
++    _hits, alone = idx.search("commander", 5)
++    assert total >= alone

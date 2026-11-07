@@ -1,4 +1,4 @@
-"""The launcher shortcuts in the web manifest: My decks, Scan page,
+"""The launcher shortcuts in the web manifest: Decks, Scan,
 Proposals, Reports and, only while watchlists are on, Watchlist, in that order; the Android app's
 GatewayUrl.SHORTCUTS lists the same pages (GatewayUrlTest)."""
 
@@ -22,8 +22,8 @@ async def test_manifest_shortcuts_follow_the_watchlists(stack: Stack, monkeypatc
     m = (await stack.h.http.get("/app.webmanifest")).json()
     got = [(s["name"], s["url"]) for s in m["shortcuts"]]
     want = [
-        ("My decks", "/decks"),
-        ("Scan page", "/scan"),
+        ("Decks", "/decks"),  # the navigation's name
+        ("Scan", "/scan"),  # as the navigation names it (review F12)
         ("Proposals", "/proposals"),
         ("Reports", "/reports"),
     ]
@@ -34,3 +34,7 @@ def test_the_android_app_lists_the_same_pages() -> None:
     src = KT.read_text(encoding="utf-8")
     block = src.split("val SHORTCUTS")[1].split(")\n")[0]
     assert re.findall(r'"(/\w+)"', block) == ["/decks", "/scan", "/proposals", "/reports", "/watchlist"]
+    # and with the same short name as the navigation and the web manifest
+    strings = (KT.parents[4] / "res/values/strings.xml").read_text(encoding="utf-8")
+    assert '<string name="shortcut_scan">Scan</string>' in strings
+    assert '<string name="shortcut_decks">Decks</string>' in strings

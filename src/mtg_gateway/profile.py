@@ -28,7 +28,7 @@ EMAIL_SWITCHES = {
     "contactable": ("profile", "contactable", "Other members may email you"),
     "newsletter": ("profile", "newsletterable", "Archidekt's newsletter"),
     "comment_emails": ("profile", "comment_notification_emailable", "Emails about comments on your decks"),
-    "site_notifications": ("accountSettings", "noArchidektNotifications", "Archidekt's notifications"),
+    "site_notifications": ("accountSettings", "noArchidektNotifications", "Archidekt's alerts"),
 }
 # New Device Default Settings: the choices the site's controls offer (REQUESTS.md section 9)
 DECK_VIEWS = {"card": 0, "text": 1, "grid": 2, "scroll": 3, "table": 4, "brewer": 5}
@@ -122,7 +122,7 @@ def bio_words(doc: Any) -> str:
 
 def _onoff(value: Any, what: str) -> bool:
     if not isinstance(value, bool):
-        raise _err(f"{what} takes true or false")
+        raise _err(f"{what} takes true or false.")
     return value
 
 
@@ -155,7 +155,7 @@ def plan(field: Any, params: dict[str, Any], now: dict[str, Any]) -> tuple[dict[
     if field == "email":
         switch = params.get("switch")
         if switch not in EMAIL_SWITCHES:
-            raise _err(f"switch must be one of: {', '.join(EMAIL_SWITCHES)}")
+            raise _err(f"switch must be one of: {', '.join(EMAIL_SWITCHES)}.")
         group, key, label = EMAIL_SWITCHES[switch]
         on = _onoff(params.get("on"), "on")
         value = (not on) if key == "noArchidektNotifications" else on
@@ -164,11 +164,11 @@ def plan(field: Any, params: dict[str, Any], now: dict[str, Any]) -> tuple[dict[
     if field == "preference":
         pref = params.get("preference")
         if pref not in PREFERENCES:
-            raise _err(f"preference must be one of: {', '.join(PREFERENCES)}")
+            raise _err(f"preference must be one of: {', '.join(PREFERENCES)}.")
         key, label, choices = PREFERENCES[pref]
         pick = str(params.get("value") or "").strip().lower()
         if pick not in choices:
-            raise _err(f"{pref} takes one of: {', '.join(choices)}")
+            raise _err(f"{pref} takes one of: {', '.join(choices)}.")
         value = choices[pick]
         if pref in PRICE_SLOTS:
             now_list = sett.get(key)
@@ -190,12 +190,12 @@ def plan(field: Any, params: dict[str, Any], now: dict[str, Any]) -> tuple[dict[
     if field == "collection_public":
         on = _onoff(params.get("on"), "on")
         return {"profile": {"is_collection_public": on}}, {
-            "text": "Make your Archidekt collection public: anyone can see it"
+            "text": "Make your binder public on Archidekt: anyone can see it"
             if on
-            else "Make your Archidekt collection private",
+            else "Make your binder private on Archidekt",
             "same": prof.get("is_collection_public") == on,
         }
-    raise _err(f"field must be one of: {', '.join(FIELDS)}")
+    raise _err(f"field must be one of: {', '.join(FIELDS)}.")
 
 
 def landed(body: dict[str, Any], now: dict[str, Any]) -> bool:
@@ -257,6 +257,13 @@ async def send(decks: DeckService, sub: str, body: dict[str, Any]) -> dict[str, 
 async def notifications(decks: DeckService, sub: str) -> dict[str, Any]:
     uid = user_id(decks, sub)
     rows = await decks._call(sub, lambda token, *_: decks.client.notifications(token, uid))
+    out = notification_rows(rows)
+    return {"notifications": out, "unseen": sum(1 for n in out if not n["seen"])}
+
+
+def notification_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    """Archidekt's notification list as the bell and the phone alerts (alerts_push.py) use it: the
+    first 100, each its kind, plain text, whether it was seen and its link."""
     out = []
     for n in rows[:100]:
         if not isinstance(n, dict):
@@ -269,7 +276,7 @@ async def notifications(decks: DeckService, sub: str) -> dict[str, Any]:
                 "url": notification_url(n),
             }
         )
-    return {"notifications": out, "unseen": sum(1 for n in out if not n["seen"])}
+    return out
 
 
 def notification_url(n: dict[str, Any]) -> str | None:

@@ -21,6 +21,7 @@ import threading
 import weakref
 from typing import TYPE_CHECKING, Any
 
+from . import refusals
 from .archidekt_account import CUSTOM_CARD_FIELDS, HEX_COLOR_RE
 from .decklist import clean_text
 from .decks import DeckError, _row, needs_look_error
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 LISTS_TARGET = "lists"  # deck_id of a lists proposal: it is about the account, not one deck
 LISTS_NAME = "Your Archidekt lists"
-KINDS = ("templates", "default_categories", "color_tags", "pins", "custom_cards")
+KINDS = ("templates", "default_categories", "color_tags", "pins", "custom_cards", "collection_tags")
 # What each list is called in a sentence, and the operations each takes
 NOUNS = {
     "templates": "category templates",
@@ -38,6 +39,7 @@ NOUNS = {
     "color_tags": "color tags",
     "pins": "pinned cards",
     "custom_cards": "custom cards",
+    "collection_tags": "binder tags",
 }
 OPS = {
     "templates": ("create", "edit", "delete"),
@@ -45,12 +47,15 @@ OPS = {
     "color_tags": ("create", "edit", "delete"),
     "pins": ("pin", "edit", "unpin", "remove_all"),
     "custom_cards": ("create", "edit", "delete"),
+    # the tags on the member's binder entries (0.7.46, parity release 3; collection_tags.py)
+    "collection_tags": ("create", "edit", "delete"),
 }
 # Waits for the member's own press in every approval mode
 DELETES = frozenset(
     {
         ("templates", "delete"),
         ("color_tags", "delete"),
+        ("collection_tags", "delete"),
         ("custom_cards", "delete"),
         ("pins", "remove_all"),
         # they take entries out of a list as well (security review 0.7.43)
@@ -88,9 +93,9 @@ def _err(text: str) -> DeckError:
 def _name(value: Any, what: str, limit: int) -> str:
     name = clean_text(str(value or ""))
     if not name:
-        raise _err(f"{what} is required")
+        raise _err(f"{what} is required.")
     if len(name) > limit:
-        raise _err(f"{what} must be at most {limit} characters")
+        raise _err(f"{what} must be at most {limit} characters.")
     return name
 
 
@@ -98,7 +103,7 @@ def _bool(value: Any, what: str, default: bool | None = None) -> bool:
     if value is None and default is not None:
         return default
     if not isinstance(value, bool):
-        raise _err(f"{what} must be true or false")
+        raise _err(f"{what} must be true or false.")
     return value
 
 
@@ -107,7 +112,7 @@ def _color(value: Any, default: str | None = None) -> str:
         return default
     text = str(value or "").strip()
     if not HEX_COLOR_RE.fullmatch(text):
-        raise _err("color must be a hex color like #fa890d")
+        raise _err("color must be a hex color like #fa890d.")
     return text.lower()
 
 
@@ -187,6 +192,14 @@ def counts(sub: str) -> dict[str, int]:
     return dict(_COUNTS.get(sub) or {})
 
 
+def read_counts_again(sub: str) -> None:
+    """A reload of Binder › Lists (the browser's Reload, the app's pull): the totals are read
+    again by the page's own ask for them (lists_page.COUNTS_API). A list resting after a failed
+    read (COUNT_RETRY_AFTER) stays resting, so a run of pulls never adds up on a struggling
+    Archidekt."""
+    _COUNTS.pop(sub, None)
+
+
 def forget_counts(sub: str) -> None:
     _COUNTS.pop(sub, None)
     _COUNT_FAILED.pop(sub, None)
@@ -219,7 +232,7 @@ def count_resting(sub: str, now: float) -> set[str]:
 async def read(decks: DeckService, sub: str, kind: str, *, page: int = 1, search: str = "") -> dict[str, Any]:
     """One list as it is on Archidekt now, in the gateway's own words."""
     if kind not in KINDS:
-        raise _err(f"list must be one of: {', '.join(KINDS)}")
+        raise _err(f"which_list must be one of: {', '.join(KINDS)}.")
     got = await _read(decks, sub, kind, page=page, search=search)
     if kind != "custom_cards" or not search:
         _COUNTS.setdefault(sub, {})[kind] = int(got["total"])
@@ -258,6 +271,11 @@ async def _read(decks: DeckService, sub: str, kind: str, *, page: int, search: s
             for t in rows
         ]
         return {"list": kind, "items": items, "total": len(items)}
+    if kind == "collection_tags":
+        from . import collection_tags
+
+        items = await collection_tags.read_tags(decks, sub)
+        return {"list": kind, "items": items, "total": len(items)}
     if kind == "pins":
         rows = await _get(decks, sub, lambda token, *_: client.pins(token))
         items = [_pin(p) for p in rows]
@@ -279,7 +297,7 @@ async def _read(decks: DeckService, sub: str, kind: str, *, page: int, search: s
 def _one(items: list[dict[str, Any]], name: Any, what: str, *, key: str = "name") -> dict[str, Any]:
     want = clean_text(str(name or ""))
     if not want:
-        raise _err(f"name the {what}")
+        raise _err(f"Name the {what}.")
     hits = [i for i in items if _same(str(i.get(key) or ""), want)]
     if not hits:
         listed = ", ".join(f"“{i[key]}”" for i in items[:20]) or "none"
@@ -337,7 +355,7 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
     def add(op: dict[str, Any], text: str, **extra: Any) -> None:
         key = (op["op"], str(op.get("id") or op.get("oracle_id") or op.get("name") or ""))
         if op["op"] != "pin" and key in seen:
-            raise _err(f"the same {NOUNS[kind][:-1]} is changed twice: give one change per entry")
+            raise _err(f"The same {NOUNS[kind][:-1]} is changed twice: give one change per entry.")
         seen.add(key)
         ops.append(op)
         destructive = (kind, op["op"]) in DELETES or bool(extra.pop("premier", False))
@@ -345,10 +363,10 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
 
     for c in changes:
         if not isinstance(c, dict):
-            raise _err("each change must be an object with an op")
+            raise _err("Each change must be an object with an op.")
         op = str(c.get("op") or "")
         if op not in OPS[kind]:
-            raise _err(f"op for {NOUNS[kind]} must be one of: {', '.join(OPS[kind])}")
+            raise _err(f"Each change's op for {NOUNS[kind]} must be one of: {', '.join(OPS[kind])}.")
         if kind == "templates":
             if op == "create":
                 name = _name(c.get("name"), "name", TEMPLATE_NAME_MAX)
@@ -425,7 +443,7 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
             if not isinstance(raw, list) or not raw:
                 raise _err(
                     "categories must list at least one of your category templates (the first is the main "
-                    "one); use clear to remove them all"
+                    "one); use clear to remove them all."
                 )
             names = now["templates"]
             picked: list[str] = []
@@ -445,35 +463,40 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                 f"Default categories of “{name}”: " + ", ".join(picked) + " (main: " + picked[0] + ")",
                 **({"premier": True, "note": f"{', '.join(premier)}: " + PREMIER_NOTE} if premier else {}),
             )
-        elif kind == "color_tags":
+        elif kind in ("color_tags", "collection_tags"):
+            what = "color tag" if kind == "color_tags" else "binder tag"
             if op == "create":
                 name = _name(c.get("name"), "name", TAG_NAME_MAX)
                 if any(_same(t["name"], name) for t in items):
-                    raise _err(f"You already have a color tag called “{name}”.")
+                    raise _err(f"You already have a {what} called “{name}”.")
                 color = _color(c.get("color"), DEFAULT_TAG_COLOR)
-                add({"op": op, "name": name, "color": color}, f"New color tag “{name}” ({color})")
+                add({"op": op, "name": name, "color": color}, f"New {what} “{name}” ({color})")
                 continue
-            t = _one(items, c.get("name"), "color tag")
+            t = _one(items, c.get("name"), what)
             if op == "delete":
                 add(
                     {"op": op, "id": t["id"], "name": t["name"]},
-                    f"Delete the color tag “{t['name']}”",
-                    note="Cards already tagged keep their color and name; the tag only leaves your list.",
+                    f"Delete the {what} “{t['name']}”",
+                    note="Cards already tagged keep their color and name; the tag only leaves your list."
+                    if kind == "color_tags"
+                    else await _binder_tag_note(decks, sub, t),
                 )
                 continue
             name = _name(c["new_name"], "new_name", TAG_NAME_MAX) if c.get("new_name") else t["name"]
-            color = _color(c.get("color"), t["color"].lower())
+            color = _color(c.get("color"), (t["color"] or DEFAULT_TAG_COLOR).lower())
             if not _same(name, t["name"]) and any(_same(x["name"], name) for x in items):
-                raise _err(f"You already have a color tag called “{name}”.")
-            if name == t["name"] and color == t["color"].lower():
-                raise _err(f"That changes nothing on the color tag “{t['name']}”.")
+                raise _err(f"You already have a {what} called “{name}”.")
+            if name == t["name"] and color == (t["color"] or DEFAULT_TAG_COLOR).lower():
+                raise _err(f"That changes nothing on the {what} “{t['name']}”.")
             said = ([f"renamed “{name}”"] if name != t["name"] else []) + (
-                [f"color {t['color']} -> {color}"] if color != t["color"].lower() else []
+                [f"color {t['color']} -> {color}"] if color != (t["color"] or "").lower() else []
             )
             add(
                 {"op": op, "id": t["id"], "was": t, "name": name, "color": color},
-                f"Color tag “{t['name']}”: " + ", ".join(said),
-                note="Cards already tagged keep their old name and color.",
+                f"{what.capitalize()} “{t['name']}”: " + ", ".join(said),
+                note="Cards already tagged keep their old name and color."
+                if kind == "color_tags"
+                else "Every entry with this tag shows the new name and color.",
             )
         elif kind == "pins":
             if op == "remove_all":
@@ -485,7 +508,7 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                 printing = await _resolve(decks, sub, c)
                 finish = str(c.get("finish") or "Normal")
                 if finish not in FINISHES:
-                    raise _err("finish must be Normal, Foil or Etched")
+                    raise _err("finish must be Normal, Foil or Etched.")
                 qty = _copies(c.get("quantity"), 1)
                 notes = _notes(c.get("notes"), "")
                 if len(items) + sum(1 for o in ops if o["op"] == "pin") >= MAX_PINS:
@@ -520,7 +543,7 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                 "card_id": p["card_id"],
             }
             if new["finish"] not in FINISHES:
-                raise _err("finish must be Normal, Foil or Etched")
+                raise _err("finish must be Normal, Foil or Etched.")
             if c.get("set_code"):
                 printing = await _resolve(decks, sub, {**c, "card": p["name"]})
                 new["card_id"] = printing["id"]
@@ -576,7 +599,7 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                 f"Custom card “{found['name']}”: " + ", ".join(_FIELD_WORDS.get(k, k) for k in changed),
             )
     if not ops:
-        raise _err("nothing to change: give at least one change")
+        raise _err("Nothing to change: give at least one change.")
     return ops, rows
 
 
@@ -608,11 +631,24 @@ _FIELD_WORDS = {
 }
 
 
+async def _binder_tag_note(decks: DeckService, sub: str, tag: dict[str, Any]) -> str:
+    """How many binder entries carry ``tag`` (the delete takes it off them), from one whole read."""
+    from . import collection_tags
+
+    try:
+        records, _tags, complete = await collection_tags.whole_records(decks, sub)
+    except DeckError:
+        return "Every entry with this tag loses it. (The gateway could not count them just now.)"
+    n = sum(1 for r in records if tag["id"] in collection_tags.record_tag_ids(r))
+    entries = f"{n:,} {'entry' if n == 1 else 'entries'}" + ("" if complete else " or more")
+    return f"{entries} in your binder carry this tag and lose it. The entries themselves stay."
+
+
 def _copies(value: Any, default: int) -> int:
     if value is None:
         return default
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= PIN_MAX_COPIES:
-        raise _err(f"quantity must be a whole number from 1 to {PIN_MAX_COPIES} (unpin to remove it)")
+        raise _err(f"quantity must be a whole number from 1 to {PIN_MAX_COPIES} (unpin to remove it).")
     return value
 
 
@@ -621,7 +657,7 @@ def _notes(value: Any, default: str) -> str:
         return default
     text = clean_text(str(value))
     if len(text) > PIN_NOTES_MAX:
-        raise _err(f"notes must be at most {PIN_NOTES_MAX} characters")
+        raise _err(f"Notes must be at most {PIN_NOTES_MAX} characters.")
     return text
 
 
@@ -638,9 +674,9 @@ def _pinned(items: list[dict[str, Any]], c: dict[str, Any]) -> dict[str, Any]:
         raise DeckError("not_found", f"“{want}” is not in your pinned cards.")
     if len(hits) > 1:
         raise _err(
-            f"“{want}” is pinned {len(hits)} times (pin ids "
+            f"“{want}” is pinned {len(hits)} times (pin IDs "
             + ", ".join(str(p["id"]) for p in hits)
-            + "): give pin_id to pick one"
+            + "): give pin_id to pick one."
         )
     return hits[0]
 
@@ -648,13 +684,15 @@ def _pinned(items: list[dict[str, Any]], c: dict[str, Any]) -> dict[str, Any]:
 async def _custom_by_name(decks: DeckService, sub: str, c: dict[str, Any]) -> dict[str, Any]:
     want = clean_text(str(c.get("name") or ""))
     if not want:
-        raise _err("name the custom card")
+        raise _err("Name the custom card.")
     found = await read(decks, sub, "custom_cards", search=want.split(" // ")[0])
     hits = [x for x in found["items"] if _same(x["name"], want) or _same(str(x.get("frontName") or ""), want)]
     if not hits:
         raise DeckError("not_found", f"You have no custom card called “{want}”.")
     if len(hits) > 1:
-        raise _err(f"You have {len(hits)} custom cards called “{want}”: change it on the My lists page.")
+        raise _err(
+            f"You have {len(hits)} custom cards called “{want}”: change it on Binder › Lists › Custom cards."
+        )
     return hits[0]
 
 
@@ -665,34 +703,36 @@ def _custom_fields(raw: Any, base: dict[str, Any]) -> dict[str, Any]:
         return {k: base.get(k) for k in CUSTOM_CARD_FIELDS}
     if not isinstance(raw, dict) or not raw:
         raise _err(
-            "fields must give the card's fields ("
+            "Fields must give the card's fields ("
             + ", ".join(k for k in CUSTOM_CARD_FIELDS if k not in PICTURE_FIELDS)
-            + ")"
+            + ")."
         )
     unknown = [k for k in raw if k not in CUSTOM_CARD_FIELDS]
     if unknown:
-        raise _err(f"unknown custom card field {unknown[0]!r}")
+        raise _err(f"Unknown custom card field “{unknown[0]}”.")
     if any(k in PICTURE_FIELDS for k in raw):
-        raise _err("A custom card's picture is uploaded on the My lists page only, by the member.")
+        raise _err(
+            "A custom card's picture is uploaded on Binder › Lists › Custom cards only, by the member."
+        )
     out = {k: base.get(k) for k in CUSTOM_CARD_FIELDS}
     for k, v in raw.items():
         if k == "hasBack":
             out[k] = _bool(v, "hasBack")
         elif k == "cmc":
             if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 1000:
-                raise _err("cmc must be a number from 0")
+                raise _err("Cmc must be a number from 0.")
             out[k] = v
         elif v is None:
             out[k] = None
         else:
             text = str(v).replace("\r\n", "\n").strip() if k in CUSTOM_LONG_FIELDS else clean_text(str(v))
             if len(text) > (CUSTOM_TEXT_MAX if k in CUSTOM_LONG_FIELDS else CUSTOM_SHORT_MAX):
-                raise _err(f"{k} is too long")
+                raise _err(f"{k} is too long.")
             out[k] = text or None
     if not out.get("frontName"):
-        raise _err("frontName is required: the card's name")
+        raise _err("FrontName is required: the card's name.")
     if not any(out.get(k) for k in ("frontTypes", "frontSubTypes", "frontSuperTypes")):
-        raise _err("a custom card needs at least one type (frontTypes, such as Creature)")
+        raise _err("A custom card needs at least one type (frontTypes, such as Creature).")
     if out.get("backName") and not out.get("hasBack"):
         out["hasBack"] = True
     return out
@@ -722,11 +762,11 @@ async def propose(
     """Check ``changes`` against the list as it is now and store them as one waiting proposal.
     ``picture`` only from set_picture: the member's own upload on the page."""
     if kind not in KINDS:
-        raise _err(f"list must be one of: {', '.join(KINDS)}")
+        raise _err(f"which_list must be one of: {', '.join(KINDS)}.")
     if not isinstance(changes, list) or not changes:
-        raise _err("changes must be a list of at least one change")
+        raise _err("changes must be a list of at least one change.")
     if len(changes) > MAX_CHANGES:
-        raise _err(f"at most {MAX_CHANGES} changes in one proposal")
+        raise _err(f"At most {MAX_CHANGES} changes in one proposal.")
     decks._room_for_proposal(sub)
     now = await read(decks, sub, kind) if kind != "custom_cards" else {"items": []}
     ops, rows = await _plan(decks, sub, kind, changes, now, picture)
@@ -835,6 +875,20 @@ async def apply(  # noqa: C901, PLR0912, PLR0915
                         token, o["oracle_id"], list(o["categories"])
                     ),
                 )
+            elif kind == "collection_tags":
+                if kind_op == "create":
+                    made[n] = await _send(
+                        decks,
+                        sub,
+                        lambda token, *_, o=op: client.create_collection_tag(token, o["name"], o["color"]),
+                    )
+                elif kind_op == "edit":
+                    tag = {"id": op["id"], "name": op["name"], "color": op["color"]}
+                    await _send(decks, sub, lambda token, *_, t=tag: client.update_collection_tag(token, t))
+                else:
+                    await _send(
+                        decks, sub, lambda token, *_, i=op["id"]: client.delete_collection_tag(token, i)
+                    )
             elif kind == "color_tags":
                 if kind_op == "create":
                     made[n] = await _send(
@@ -919,7 +973,7 @@ async def apply(  # noqa: C901, PLR0912, PLR0915
         "mismatches": mismatches,
         "snapshot_id": None,
     }
-    decks.db.finish_proposal(row["id"], state="applied", result=result)
+    decks.record_applied(row["id"], result, progress)
     return decks.describe(sub, row["id"])
 
 
@@ -927,7 +981,9 @@ def _owner(decks: DeckService, sub: str) -> int:
     link = decks.db.get_link(sub)
     uid = str((link or {}).get("archidekt_user_id") or "")
     if not uid.isdigit():
-        raise DeckError("not_linked", "The linked Archidekt account has no user id; relink it.")
+        if link is None:
+            raise DeckError("not_linked", refusals.not_linked(decks.settings.public_url))
+        raise DeckError("not_linked", refusals.no_user_id(decks.settings.public_url))
     return int(uid)
 
 
@@ -995,7 +1051,7 @@ async def _check(  # noqa: C901
             )
             if hit is None or {k: hit[k] for k in want} != want:
                 out.append(f"“{name}” does not read back as sent")
-        elif kind == "color_tags":
+        elif kind in ("color_tags", "collection_tags"):
             hit = (
                 by_id.get(op.get("id"))
                 if op["op"] == "edit"
@@ -1158,10 +1214,10 @@ async def from_templates(decks: DeckService, sub: str, changes: list[dict[str, A
             out.append(c)
             continue
         if c.get("action") not in (None, "create"):
-            raise _err("from_template goes with action create")
+            raise _err("From_template goes with action create.")
         extra = sorted(set(c) - {"action", "category", "from_template"})
         if extra:
-            raise _err(f"from_template takes the template's switches, so leave out {', '.join(extra)}")
+            raise _err(f"from_template takes the template's switches, so leave out {', '.join(extra)}.")
         t = _one(names, want, "category template")
         out.append(
             {

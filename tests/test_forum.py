@@ -7,6 +7,7 @@ from __future__ import annotations
 from .conftest import Stack
 from .test_account_actions import _browser_apply
 from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import account_call
 
 GENERAL = {"group": "Archidekt", "section": "General"}
 
@@ -27,6 +28,20 @@ async def test_sections_and_a_sections_threads_come_from_the_forums_own_pages(st
     assert [t["title"] for t in found["threads"]] == ["Best mana rocks?"]
 
 
+async def test_a_thread_opens_from_its_number_sent_as_a_number(stack: Stack) -> None:
+    """get_forum's description says thread_id is "a number or a forum link", so an assistant sends
+    700002, not "700002"; the same goes for a deck id anywhere (whole-application audit row 13)."""
+    token = await linked_user(stack)
+    t = structured(await call(stack.h, token, "get_forum", {"thread_id": 700002}))
+    assert t["ok"] is True, t
+    assert t["title"] == "Best mana rocks?"
+    deck = structured(await call(stack.h, token, "get_deck", {"deck_ref": 42}))
+    assert deck["ok"] is True and deck["id"] == "42", deck
+    # only a whole number stands for text: a list or a fraction is still refused by the tool's check
+    bad = structured(await call(stack.h, token, "get_forum", {"thread_id": 700002.5}))
+    assert bad["ok"] is False and bad["error"] == "invalid", bad
+
+
 async def test_a_thread_reads_its_first_post_and_replies(stack: Stack) -> None:
     token = await linked_user(stack)
     t = structured(
@@ -40,7 +55,7 @@ async def test_a_thread_reads_its_first_post_and_replies(stack: Stack) -> None:
 async def test_a_reply_waits_for_the_members_press_and_lands_in_the_thread(stack: Stack) -> None:
     token = await linked_user(stack)
     p = structured(
-        await call(
+        await account_call(
             stack.h,
             token,
             "propose_comment",
@@ -62,7 +77,9 @@ async def test_a_reply_waits_for_the_members_press_and_lands_in_the_thread(stack
 async def test_a_locked_thread_takes_no_reply(stack: Stack) -> None:
     token = await linked_user(stack)
     p = structured(
-        await call(stack.h, token, "propose_comment", {"thread_id": "700003", "action": "post", "text": "Hi"})
+        await account_call(
+            stack.h, token, "propose_comment", {"thread_id": "700003", "action": "post", "text": "Hi"}
+        )
     )
     assert p["ok"] is False and "locked or archived" in p["message"], p
 
@@ -79,7 +96,9 @@ async def test_a_changed_forum_page_is_said_plainly_and_a_thread_still_opens(sta
 async def test_the_review_page_names_the_forum_thread(stack: Stack) -> None:
     token = await linked_user(stack)
     p = structured(
-        await call(stack.h, token, "propose_comment", {"thread_id": "700002", "action": "post", "text": "Hi"})
+        await account_call(
+            stack.h, token, "propose_comment", {"thread_id": "700002", "action": "post", "text": "Hi"}
+        )
     )
     b = Browser(stack.h)
     try:
@@ -149,3 +168,12 @@ async def test_an_oversized_forum_page_is_not_read_whole() -> None:
     except ArchidektError as exc:
         assert exc.kind == "changed"
     assert sent <= SITE_PAGE_MAX + 2 * 65536
+
+
+async def test_a_missing_thread_is_called_a_thread_by_the_tool_too(stack: Stack) -> None:
+    """The tool says what the forum page says: the thread could not be found, never "that deck"."""
+    token = await linked_user(stack)
+    got = structured(await call(stack.h, token, "get_forum", {"thread_id": 1}))
+    assert got["ok"] is False and got["error"] == "not_found", got
+    assert "deck" not in got["message"], got
+    assert got["message"] == "That thread could not be found. It may have been deleted on Archidekt.", got

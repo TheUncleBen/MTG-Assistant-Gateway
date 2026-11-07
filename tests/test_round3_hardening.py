@@ -309,7 +309,9 @@ async def test_review_page_does_not_show_the_assistant_instructions(stack: Stack
 
 # -- 21: review rows come from structured data and cannot be forged -----------------------------
 def _acts(page: str) -> list[str]:
-    return re.findall(r"<span class='act'>(.*?)</span>", page)
+    """The review rows' action words (pages.py: one <li> per row). The Proposals list drawn beside
+    the review (ui.split) carries its rows' buttons in a span of the same class."""
+    return re.findall(r"<li class='[^']*'><span class='act'>(.*?)</span>", page)
 
 
 async def test_category_text_cannot_forge_review_rows(stack: Stack) -> None:
@@ -330,7 +332,7 @@ async def test_category_text_cannot_forge_review_rows(stack: Stack) -> None:
     page = (await b.http.get(f"/proposals/{p2['proposal_id']}")).text
     await b.aclose()
     assert _acts(page) == ["New deck", "Add"]
-    assert "commander, 1 cards, PUBLIC" in page
+    assert "commander, 1 card, PUBLIC" in page
 
 
 # -- 27: categories from a public deck cannot add card lines to decklist text --------------------
@@ -466,5 +468,5 @@ def test_review_page_next_step_never_names_a_tool() -> None:
     assert len(set(texts)) == len(texts)
     assert "Nothing changes on Archidekt until you apply it." in texts[1]
     assert texts[3].startswith("The last try stopped before anything changed")
-    assert "History" in texts[6] and "History" not in texts[7] and "your collection" in texts[8]
+    assert "History" in texts[6] and "History" not in texts[7] and "your binder" in texts[8]
     assert texts[9].startswith("A new deck was made on Archidekt")

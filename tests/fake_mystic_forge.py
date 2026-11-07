@@ -3,6 +3,12 @@ service validates, for tests that run the gateway's Mystic Forge proxy in memory
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
+import mcp_types as types
+from mcp.server.lowlevel import Server
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -76,6 +82,19 @@ def fake_mystic_forge() -> MCPServer:
     @mf.tool(name="goldfish_ab", description="paired goldfish A/B")
     async def goldfish_ab(params: _GoldfishAbInput) -> str:
         SIM_CALLS.append(("goldfish_ab", params.model_dump()))
+
+        def library(deck: str) -> int:  # the cards after the commander line (all of a 60-card deck)
+            lines = [ln for ln in deck.strip().splitlines() if ln.strip()]
+            rest = lines if params.constructed else lines[1:]
+            return sum(int(ln.split()[0]) if ln.split()[0].isdigit() else 1 for ln in rest)
+
+        a, b = library(params.deck_a), library(params.deck_b)
+        if a != b:
+            # Mystic Forge's own refusal, word for word (server.py goldfish_ab)
+            return (
+                f"A/B decks must be the same size for position-stable pairing: deck A has {a} cards, "
+                f"deck B has {b} (excluding commanders and any Scryfall-unrecognized names)."
+            )
         return f"# Goldfish A/B\n{params.n} paired games\n\n## Deltas (A − B)\n(none)"
 
     @mf.tool(name="validate_decklist", description="validate a decklist")
@@ -96,3 +115,22 @@ def fake_mystic_forge() -> MCPServer:
         return "hidden"
 
     return mf
+
+
+# The pinned Mystic Forge's own tool listing (scripts/record_mystic_forge_tools.py), for the tests
+# that measure what production lists: the fake above serves only a few tools.
+RECORDED_LISTING = Path(__file__).parent / "fixtures" / "mystic_forge" / "tools.json"
+
+
+def recorded_listing() -> dict[str, Any]:
+    return json.loads(RECORDED_LISTING.read_text(encoding="utf-8"))
+
+
+def recorded_mystic_forge() -> Server[Any]:
+    """A Mystic Forge that lists exactly the recorded tools of the pinned image (no calls)."""
+    listing = types.ListToolsResult.model_validate({"tools": recorded_listing()["tools"]})
+
+    async def list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
+        return listing
+
+    return Server("mystic-forge-recorded", on_list_tools=list_tools)

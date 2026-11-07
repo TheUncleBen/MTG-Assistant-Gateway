@@ -117,10 +117,10 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
         assert res[uri]["mimeType"] == "text/html;profile=mcp-app"
         assert meta.get("prefersBorder") is True
     csp = {uri: res[uri]["_meta"]["ui"].get("csp") or {} for uri in REGISTERED}
-    # Pictures from Scryfall; the deck and printings cards fetch their data from the gateway; the
-    # deck card reads rules text from Scryfall's API; the account card loads nothing.
+    # Pictures from Scryfall; the deck and printings cards fetch their data from the gateway and
+    # read rules text from Scryfall's API; the account card loads nothing.
     assert "https://cards.scryfall.io" in csp[PRINTINGS_CARD_URI]["resourceDomains"]
-    assert csp[PRINTINGS_CARD_URI]["connectDomains"] == ["https://mtg.test"]
+    assert csp[PRINTINGS_CARD_URI]["connectDomains"] == ["https://mtg.test", "https://api.scryfall.com"]
     assert csp[DECK_CARD_URI]["connectDomains"] == ["https://mtg.test", "https://api.scryfall.com"]
     assert "connectDomains" not in csp[PICKER_CARD_URI] or not csp[PICKER_CARD_URI]["connectDomains"]
     assert not csp[ACCOUNT_CARD_URI].get("resourceDomains") and not csp[ACCOUNT_CARD_URI].get(
@@ -557,7 +557,7 @@ async def test_resolve_cards_asks_a_form_for_ambiguous_names_where_it_can(stack:
     )
     # The row still says what was read, and that the user picked the name from the suggestions.
     assert (
-        row["input"]["name"] == "Cultivatz" and "picked from the suggestions for 'Cultivatz'" in row["note"]
+        row["input"]["name"] == "Cultivatz" and "picked from the suggestions for “Cultivatz”" in row["note"]
     )
     # A failed second pass keeps the first pass (its suggestions reach the assistant as before).
     service = h.app.state.gateway.scan
@@ -571,11 +571,11 @@ async def test_resolve_cards_asks_a_form_for_ambiguous_names_where_it_can(stack:
     monkeypatch.setattr(service, "resolve", real)
     calls = {"n": 0}
 
-    async def second_fails(inputs, *, owner=None):
+    async def second_fails(inputs, *, owner=None, waited=None):
         calls["n"] += 1
         if calls["n"] == 2:
             return await boom(inputs, owner=owner)
-        return await real(inputs, owner=owner)
+        return await real(inputs, owner=owner, waited=waited)
 
     monkeypatch.setattr(service, "resolve", second_fails)
     out = structured(await call(h, token, "resolve_cards", {"cards": [{"name": "Cultivatz"}]}))

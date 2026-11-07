@@ -38,7 +38,7 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         r = await b.http.get("/admin/models", headers=NAVIGATE)
         text = html.unescape(r.text)
         assert "All card models <span class='ui-sub'>3</span>" in text and "added by bram" in text
-        assert "Each model is used only in its owner's simulations. Only admins see who added it." in text
+        assert "Each model is used only in its owner's solo tests. Only admins see who added it." in text
         assert "<b>Bad name" not in r.text and "&lt;b&gt;Bad name" in r.text
         # Remove sits only in the row's menu: the ⋮ is a link to the page with the "are you sure"
         # box open, whose last button is the solid red Remove model with the same screen reader name
@@ -48,7 +48,7 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         box = html.unescape((await b.http.get(href, headers=NAVIGATE)).text)
         assert "<div class='ui-box mtgbox' id='remove' role='dialog'" in box and "data-open>" in box
         assert "Remove the model of “Sol Ring”?" in box
-        assert "“bram” added it. The simulator stops using it in bram's simulations. " in box
+        assert "“bram” added it. bram's solo tests stop using it. " in box
         assert "This can't be undone." in box
         assert (
             "<button type='submit' class='danger' form='rmf' "

@@ -128,20 +128,23 @@ async def test_history_reconciles_with_what_is_still_on_archidekt(stack: Stack) 
         snap_id = (await b.http.get("/api/v1/decks/42/history")).json()["snapshots"][0]["snapshot_id"]
         restore_form = f"name='snapshot_id' value='{snap_id}'"
         hist = await b.http.get("/history", headers=NAV)
+        copy_url = f"https://archidekt.com/decks/{copy_id}"
         assert (
             hist.text.split("id='backups'")[1].count("<div class='tr'>") == 1
-            and "backup copy on Archidekt</a>" in hist.text
+            and f" data-backup='{copy_url}'" in hist.text  # the snapshot's ⋮ offers the copy
         )
         assert restore_form in hist.text
+        opened = (await b.http.get(f"/history?open=s-{snap_id}", headers=NAV)).text
+        assert f"href='{copy_url}'" in opened and "Backup copy on Archidekt</a>" in opened
 
         # the owner deletes the backup copy on archidekt.com; the cached list has aged
         del ark.decks[int(copy_id)]
         svc.deck_lists.fresh = 0
         ark.calls.clear()
         hist = await b.http.get("/history", headers=NAV)
-        assert (
-            "Backup copies on Archidekt" not in hist.text and "backup copy on Archidekt</a>" not in hist.text
-        )
+        assert "Backup copies on Archidekt" not in hist.text and "data-backup=" not in hist.text
+        opened = (await b.http.get(f"/history?open=s-{snap_id}", headers=NAV)).text
+        assert "Backup copy on Archidekt</a>" not in opened
         assert "its backup copy is no longer on Archidekt" in hist.text
         assert restore_form in hist.text  # Restore uses the gateway's snapshot, not the copy
         reads = [p for m, p in ark.calls if m == "GET"]

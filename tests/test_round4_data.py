@@ -73,6 +73,9 @@ async def test_delete_data_during_apply_leaves_no_snapshot(stack: Stack) -> None
         return await real(*a, **kw)
 
     gw.archidekt.resolve_card = slow_resolve
+    # the propose already looked Opt up on Archidekt (0.7.46, A6); forget that answer so the apply
+    # asks again, which is where this test holds it
+    gw.decks._printings.clear()
     b = Browser(h)
     await b.login()
     csrf = await b.csrf("/account/details")
@@ -438,8 +441,9 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     assert "Helper Bot" in page and client_id[:12] not in page
     listing = (await b.http.get("/proposals")).text
     assert "Helper Bot" in listing
-    account = (await b.http.get("/account/details")).text
-    assert client_id[:12] in account
+    # the Assistants page lists it by its name, without its client id
+    account = (await b.http.get("/account/assistants")).text
+    assert "Helper Bot" in account and client_id[:12] not in account
     csrf = await b.csrf("/account/details")
     r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect", "client_id": client_id})
     assert r.status_code == 303
@@ -550,7 +554,7 @@ async def test_one_app_may_use_every_pending_slot(stack: Stack, monkeypatch: pyt
     quiet, _ = await _app_token(h, "quiet")
     assert not hasattr(decks_module, "MAX_PENDING_PER_CLIENT")
     for card in ("Opt", "Ponder", "Brainstorm"):
-        change = {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]}
+        change = {"deck_id": "42", "changes": [{"action": "add", "card_name": card}], "separate": True}
         assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
     change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Preordain"}]}
     refused = structured(await call(h, quiet, "propose_deck_changes", change))

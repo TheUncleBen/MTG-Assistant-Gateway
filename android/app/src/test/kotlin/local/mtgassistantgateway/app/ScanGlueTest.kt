@@ -15,7 +15,11 @@ class ScanGlueTest {
             assertTrue("glue should check $hook", install.contains("'$hook'"))
             assertTrue("glue should call $hook", install.contains("s.$hook("))
         }
-        assertTrue("the photo comes by URL, never as base64", !install.contains("atob("))
+        // The photo comes by URL; base64 only when that URL did not load, and only after asking.
+        val process = install.substring(install.indexOf("async function process"), install.indexOf("function outcome"))
+        assertTrue(process.contains("try { c = await load(url); } catch (e) { c = await loadDirect(n); }"))
+        assertEquals(1, Regex("atob\\(").findAll(install).count())
+        assertTrue(install.indexOf("atob(") > install.indexOf("photoData: function"))
         assertTrue("no fetch(data:) under the page's CSP", !install.contains("fetch("))
         assertTrue(install.contains("PHOTO_MAX = ${ScanGlue.PHOTO_MAX}"))
         assertTrue("no leftover Kotlin templates", !install.contains("$"))
@@ -37,8 +41,21 @@ class ScanGlueTest {
         }
         for (type in listOf("'no-card'", "'done'")) assertTrue(type, install.contains("type: $type"))
         assertTrue(install.contains("MtgNative.scanEvent(JSON.stringify(ev))"))
+        // A photo without an outline goes to the page's own rule (it reads the dashed box after a few),
+        // with the old count-only path kept for pages before it.
+        assertTrue(install.contains("s.noOutlineFrame(c, g)") && install.contains("s.noCardFrame()"))
         // The camera panel is the only screen while photos are taken: the page must never start its own camera.
         assertTrue(!install.contains("showTab('camera')") || install.indexOf("showTab('camera')") > install.indexOf("end: function"))
+    }
+
+    @Test fun eachPhotoReportsItsOwnOutcome() {
+        // A read left waiting by the photo before is dropped as the next one is handed over, so the
+        // done event's outcome is this photo's; it names the card found, or the name as read.
+        val onPhoto = install.substring(install.indexOf("onPhoto: function"), install.indexOf("undo: function"))
+        assertTrue(onPhoto.indexOf("s.state.pending = null;") in 0 until onPhoto.indexOf("process(s, url"))
+        for (field in listOf("ev.matched", "ev.name", "ev.set", "ev.number", "ev.read", "ev.blurry", "ev.pending")) {
+            assertTrue(field, install.contains("$field = "))
+        }
     }
 
     @Test fun onPhotoEmbedsTheUrlAndTheGuide() {
@@ -93,6 +110,39 @@ class ScanGlueTest {
         assertEquals(12, ScanGlue.acceptedSeq("\"ok:12\""))
         for (other in listOf(null, "null", "\"ok\"", "\"no-scan\"", "\"no-glue\"", "\"ok:x\"", "ok:3")) {
             assertEquals(other, null, ScanGlue.acceptedSeq(other))
+        }
+    }
+
+    @Test fun aPhotoWhoseUrlFailsIsAskedForOnceAndSaidPlainly() {
+        // The glue asks the app for that one photo, takes it once (a blob: URL revoked after reading),
+        // and with nothing in time reports PHOTO_LOST, which the panel turns into a plain line.
+        assertTrue(install.contains("send({ type: 'photo-direct', seq: n });"))
+        assertTrue(install.contains("var DIRECT_MS = ${ScanGlue.DIRECT_MS};"))
+        assertTrue(install.contains("var PHOTO_LOST = '${ScanGlue.PHOTO_LOST}';"))
+        assertTrue(install.contains("delete direct[n];") && install.contains("URL.revokeObjectURL(u)"))
+        assertTrue(install.contains("if (!take) return 'stale';"))
+        // Well inside the panel's watchdog, so the plain line comes first.
+        assertTrue(ScanGlue.DIRECT_MS in 1000..15_000)
+    }
+
+    @Test fun photoDataQuotesOnlyBase64() {
+        val js = ScanGlue.photoData(4, "/9j/4AAQ+w==")
+        assertTrue(js, js.contains("photoData(4, '/9j/4AAQ+w==')"))
+        assertTrue(js.startsWith("(function(){") && js.endsWith("})();"))
+        assertTrue(ScanGlue.photoData(4, "").contains("photoData(4, '')"))
+        for (bad in listOf("a'b", "abc\n", "<script>", "ab==c", "a b")) {
+            try {
+                ScanGlue.photoData(4, bad)
+                fail("accepted $bad")
+            } catch (e: IllegalArgumentException) {
+                assertEquals("bad photo data", e.message)
+            }
+        }
+        try {
+            ScanGlue.photoData(0, "")
+            fail("accepted seq 0")
+        } catch (e: IllegalArgumentException) {
+            assertEquals("bad seq", e.message)
         }
     }
 

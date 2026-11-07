@@ -24,6 +24,7 @@ from .conftest import Stack, StackOptions, stack_with
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 TOKEN = "tk_secret_ntfy_token_value"
+N = "/account/details/notifications"
 APP_UA = "Mozilla/5.0 (Linux; Android 16; wv) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.7.30"
 
 
@@ -196,7 +197,7 @@ async def test_the_stream_refuses_removed_members_too_many_connections_and_a_sil
 ) -> None:
     b, key = await _member(stack)
     try:
-        checks = iter([Membership.REVOKED, Membership.UNAVAILABLE])
+        checks = iter([Membership.REVOKED, Membership.UNAVAILABLE, Membership.SIGN_IN])
 
         async def check(sub: str) -> Membership:
             return next(checks, Membership.ALLOWED)
@@ -204,6 +205,10 @@ async def test_the_stream_refuses_removed_members_too_many_connections_and_a_sil
         monkeypatch.setattr(stack.gw.membership, "check", check)
         assert (await _refusal(stack, key))[0] == 401
         assert (await _refusal(stack, key))[1]["error"] == "unavailable"
+        # none of the member's sign-ins honoured: refused, but not a stop code (Push.kt), so the
+        # phone keeps its key and tries again until they sign in again (C2)
+        status, body = await _refusal(stack, key)
+        assert (status, body["error"]) == (403, "sign_in_again")
         stack.gw.notifier._streams[key] = notify.STREAM_MAX_PER_KEY
         status, body = await _refusal(stack, key)
         assert (status, body["error"]) == (429, "too_many")
@@ -336,6 +341,12 @@ async def test_a_member_removed_at_the_identity_provider_is_cut_off_at_the_next_
         outcome = Membership.UNAVAILABLE  # the identity provider not answering cuts nobody off
         await asyncio.sleep(0.3)
         assert stack.gw.notifier.streams(key) == 1
+        outcome = Membership.SIGN_IN  # no sign-in of theirs honoured any more: it ends too (C2)
+        assert await s.ended()
+        assert stack.gw.notifier.streams(key) == 0
+        outcome = Membership.ALLOWED
+        s = await Stream(stack, key).start()
+        assert s.status == 200
         outcome = Membership.REVOKED
         assert await s.ended()
         assert stack.gw.notifier.streams(key) == 0
@@ -443,26 +454,40 @@ async def test_a_group_replaces_its_message_and_withdraw_removes_it(stack: Stack
 # -- the Account card in the app ------------------------------------------------------------------
 
 
+async def test_the_card_in_the_app_names_samsungs_never_sleeping_apps(stack: Stack) -> None:
+    """Samsung's own battery saving can stop the app's connection whatever Android allows, so the
+    card names the list that keeps it awake (0.7.46 review)."""
+    b, _key = await _member(stack, app=True)
+    try:
+        await _post(b, {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1"})
+        page = (await b.http.get(N)).text  # the card has its own page (Account details list)
+        step = "On a Samsung phone, also add the app to Never sleeping apps (Settings, Battery, Background"
+        assert page.count(step) == 2  # connected, and not yet connected
+        assert f"Always connected. {step}" in page
+    finally:
+        await b.aclose()
+
+
 async def test_the_card_in_the_app_connects_this_phone(stack: Stack) -> None:
     b, key = await _member(stack, app=True)
     try:
         r = await _post(b, {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1"})
-        assert r.headers["location"] == "/account/details?ok=notify_saved&connect=1#notifications"
-        page = (await b.http.get("/account/details?ok=notify_saved&connect=1")).text
+        assert r.headers["location"] == f"{N}?ok=notify_saved&connect=1#notifications"
+        page = (await b.http.get(f"{N}?ok=notify_saved&connect=1")).text
         assert f"data-native='startNotifications' data-native-arg='{key}' data-native-auto" in page
         assert f"data-native-state='notificationsState' data-native-arg='{key}'" in page
-        assert "Get notifications on this phone" in page and "Update the app" in page
+        assert "Get push notifications on this phone" in page and "Update the app" in page
         assert "/install?for=android" not in page
         # a topic a member chose before 0.7.30 is replaced: only gateway-made topics are keys
         notify.save_prefs(stack.h.db, "user-1", ntfy_topic="mtg-my-own-topic-1234")
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         new = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
         assert notify.STRONG_TOPIC_RE.fullmatch(new) and f"data-native-arg='{new}'" in page
         assert "mtg-my-own-topic-1234" not in page
         # off: no phone part and no Send test
         r = await _post(b, {"action": "notify_save"})
-        assert r.headers["location"] == "/account/details?ok=notify_off#notifications"
-        page = (await b.http.get("/account/details")).text
+        assert r.headers["location"] == f"{N}?ok=notify_off#notifications"
+        page = (await b.http.get(N)).text
         assert "startNotifications" not in page and "Send test" not in page
     finally:
         await b.aclose()
@@ -470,14 +495,16 @@ async def test_the_card_in_the_app_connects_this_phone(stack: Stack) -> None:
 
 async def test_the_card_outside_the_app_says_to_tick_and_save_in_the_app(stack: Stack) -> None:
     """Outside the app the card's hint names the steps in order: in the app, tick Send me
-    notifications and press Save notifications (saving there connects the phone). It used to say
-    only "press Get notifications on this phone", a button that shows once notifications are on.
+    notifications and press Save push notifications (saving there connects the phone). It used to say
+    only "press Get push notifications on this phone", a button that shows once notifications are on.
     The summary's choice is labelled How often, not as if it were a button that sends it."""
     b, _key = await _member(stack, app=False)
     try:
-        page = (await b.http.get("/account/details")).text
-        assert "open this page in the app, tick Send me notifications and press Save notifications." in page
-        assert "and press Get notifications on this phone" not in page
+        page = (await b.http.get(N)).text
+        assert (
+            "open this page in the app, tick Send me push notifications and press Save push notifications."
+        ) in page
+        assert "and press Get push notifications on this phone" not in page
         assert "<label for='s-every'>How often</label>" in page and "Send my summary" not in page
     finally:
         await b.aclose()
@@ -544,7 +571,7 @@ async def test_a_topic_typed_while_an_older_version_ran_is_never_a_key(stack: St
         assert notify.replace_old_topics(db) == 1
         new = notify.prefs(db, "user-1")["ntfy_topic"]
         assert new not in (typed, key) and notify.strong_topic(db, "user-1", new)
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         assert typed not in page and f"data-native-arg='{new}'" in page
     finally:
         await b.aclose()
@@ -566,7 +593,7 @@ async def test_a_key_made_after_the_upgrade_still_connects_after_a_restart(stack
 async def test_the_token_is_never_on_the_page(stack: Stack, app: bool) -> None:
     b, _ = await _member(stack, app=app)
     try:
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         assert TOKEN not in page and "ntfy.test" not in page
     finally:
         await b.aclose()
@@ -617,7 +644,7 @@ async def test_each_decks_message_follows_its_proposals(stack: Stack) -> None:
                     stack.h,
                     token,
                     "propose_deck_changes",
-                    {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]},
+                    {"deck_id": "42", "changes": [{"action": "add", "card_name": card}], "separate": True},
                 )
             )
             assert p["state"] == "pending" and p["assistant_may_apply"] is False  # manual mode
@@ -730,3 +757,82 @@ async def test_drain_returns_when_a_send_finished_in_the_same_turn() -> None:
     assert n._tasks and all(t.done() for t in n._tasks)
     await asyncio.wait_for(n.drain(), 2)
     assert not n._tasks
+
+
+async def _until(check, seconds: float = 5.0) -> None:  # noqa: ANN001
+    end = asyncio.get_running_loop().time() + seconds
+    while not check():
+        assert asyncio.get_running_loop().time() < end, "never happened"
+        await asyncio.sleep(0.01)
+
+
+async def test_a_push_ntfy_could_not_take_is_sent_again_a_bounded_number_of_times(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ntfy was down (restarting: 503, or no connection): a background message used to be lost.
+    It is now sent again after each of PUSH_RETRY_DELAYS, so it arrives once ntfy is back; a server
+    that stays down is given up after the last try, and a refusal (403) is not sent again."""
+    monkeypatch.setattr(notify, "PUSH_RETRY_DELAYS", (0.05, 0.05, 0.05))
+    b, _key = await _member(stack)
+    try:
+        n, ntfy = stack.gw.notifier, stack.ntfy
+        # down for the first two tries, then back: the message arrives once
+        ntfy.status = 503
+        n.soon("user-1", "reports", "Deck report finished", "A deck report is ready to read.", "/history")
+        await asyncio.sleep(0.08)  # the first try and the first retry found it down
+        assert ntfy.published == []
+        ntfy.status = 200
+        await _until(lambda: len(ntfy.published) == 1)
+        assert ntfy.published[0]["title"] == "Deck report finished"
+        await asyncio.sleep(0.3)
+        assert len(ntfy.published) == 1  # once, not again after it was taken
+        # down for good: four tries in all, then given up and logged
+        tries = {"n": 0}
+        real = ntfy.handler
+
+        async def down(req: httpx.Request) -> httpx.Response:
+            tries["n"] += 1
+            raise httpx.ConnectError("down", request=req)
+
+        n._http = httpx.AsyncClient(transport=httpx.MockTransport(down))
+        n.soon("user-1", "reports", "Deck report finished", "Another one.", "/history")
+        await _until(lambda: "given up after 4 tries" in caplog.text)
+        await asyncio.sleep(0.2)
+        assert tries["n"] == 1 + len(notify.PUSH_RETRY_DELAYS)
+        # a refusal is not sent again
+        n._http = httpx.AsyncClient(transport=httpx.MockTransport(real))
+        ntfy.status = 403
+        n.soon("user-1", "reports", "Deck report finished", "Refused.", "/history")
+        await asyncio.sleep(0.3)
+        ntfy.status = 200
+        await asyncio.sleep(0.2)
+        assert [m["message"] for m in ntfy.published] == ["A deck report is ready to read."]
+    finally:
+        await b.aclose()
+
+
+async def test_a_deck_message_sent_again_is_only_the_one_still_to_show(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deck's message waiting to be sent again is dropped when a newer count replaced it or
+    nothing waits there any more, so the phone never shows an old count after ntfy is back."""
+    monkeypatch.setattr(notify, "PUSH_RETRY_DELAYS", (0.2, 0.2, 0.2))
+    b, key = await _member(stack)
+    try:
+        n, ntfy = stack.gw.notifier, stack.ntfy
+        ntfy.status = 503
+        n.deck_waiting("user-1", "42", "Atraxa", 1, "/decks/42")
+        await asyncio.sleep(0.05)
+        ntfy.status = 200
+        n.deck_waiting("user-1", "42", "Atraxa", 2, "/decks/42")  # taken at once
+        await _until(lambda: len(ntfy.published) == 1)
+        await asyncio.sleep(0.5)  # the first message's retry time has come and gone
+        assert [m["title"] for m in ntfy.published] == ["2 changes to Atraxa are waiting for you"]
+        # a withdraw ntfy could not take is sent again too
+        ntfy.status = 503
+        n.deck_waiting("user-1", "42", "Atraxa", 0, "/decks/42")
+        await asyncio.sleep(0.05)
+        ntfy.status = 200
+        await _until(lambda: ntfy.deleted == [f"/{key}/deck-42"])
+    finally:
+        await b.aclose()

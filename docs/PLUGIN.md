@@ -12,7 +12,7 @@ What each person types or clicks:
 | --- | --- | --- |
 | Claude Code | Paste `https://mtg.example.com/install` and say "install this plugin", or run the two commands below | `/mcp` → Authenticate (signs in through the browser), then `/mtg-gateway:setup-mtg-gateway` |
 | Claude web, desktop, iPhone, Android | Download the plugin from `/install` (`/plugin/mtg-gateway.zip`, or `/plugin/<your-name>.zip` when the Settings page's **Gateway name** is your own) and go to Customize → Plugins → Add → Upload plugin; or press **Connect to Claude** on `/install` | Connect the connector, pick **Use Claude's published identity** (Register automatically works too), approve the gateway's consent page if it names Claude and returns to `claude.ai` (Deny otherwise), sign in |
-| ChatGPT (web only) | Developer mode, add an app with the connector URL | Connect, sign in, paste the project instructions from `/skill` |
+| ChatGPT (added on the web; then also its Android app) | Developer mode, add an app with the connector URL | Connect, sign in, paste the project instructions from `/skill` |
 | Codex CLI | `codex mcp add` with the connector URL | `codex mcp login mtg-gateway` |
 
 Use your gateway's hostname instead of `mtg.example.com`. The rest of this
@@ -135,7 +135,8 @@ confirmed:
   Enterprise), and the repository's `.claude-plugin/marketplace.json` is one
   of the accepted formats. The setup page therefore labels the ChatGPT ZIP
   "Business/Enterprise admins only"; Plus and Pro accounts use the connector.
-- Custom MCP apps for individuals: Developer mode, web only, OAuth with
+- Custom MCP apps for individuals: Developer mode, added on the web (then usable
+  in the Android app too, tested), OAuth with
   automatic registration. Pro accounts are documented as read and fetch
   tools only. The gateway marks every tool read-only except
   `apply_proposal`, `amend_proposal`, `withdraw_proposal`,

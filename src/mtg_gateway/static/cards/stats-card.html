@@ -7,26 +7,28 @@
 <title>Deck statistics</title>
 <style>
 /*@BASE@*/
-h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 6px}
+h2{font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 6px}
 .bars{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;align-items:end;height:116px;
   padding:6px 4px 0;background:var(--bg2);border-radius:var(--radius)}
 .bars .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
-.bars .n{font-size:11px;font-variant-numeric:tabular-nums;color:var(--text);font-weight:600;line-height:1.3}
+.bars .n{font-size:.6875rem;font-variant-numeric:tabular-nums;color:var(--text);font-weight:600;line-height:1.3}
 .bars .bar{width:100%;max-width:34px;background:var(--blue);border-radius:3px 3px 0 0;min-height:2px}
-.bars .mv{font-size:11px;color:var(--muted);line-height:1.6}
+.bars .mv{font-size:.6875rem;color:var(--muted);line-height:1.6}
 .colours{list-style:none;margin:0;padding:0;display:grid;gap:6px}
-.colours li{display:grid;grid-template-columns:4.6em minmax(0,1fr) auto;align-items:center;gap:8px;font-size:13px}
+.colours li{display:grid;grid-template-columns:4.6em minmax(0,1fr) auto;align-items:center;gap:8px;font-size:.8125rem}
 .colours .track{height:10px;background:var(--bg2);border-radius:999px;overflow:hidden;border:1px solid var(--border)}
 .colours .fill{display:block;height:100%;border-radius:999px}
 .colours .fill.W{background:#f8f1d8}.colours .fill.U{background:#9bc8e8}.colours .fill.B{background:#4b4a4a}
 .colours .fill.R{background:#e49977}.colours .fill.G{background:#97c498}.colours .fill.C{background:#c9c6bd}
-.colours .v{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;font-size:12px}
+.colours .v{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;font-size:.75rem}
 ul.facts{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-ul.facts li{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border-top:1px solid var(--border);font-size:13px}
+ul.facts li{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border-top:1px solid var(--border);font-size:.8125rem}
 ul.facts li:first-child{border-top:0}
-ul.facts li > span:first-child{color:var(--muted)}
-ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
-.verdict{margin:10px 0 0;padding:9px 11px;border-radius:var(--radius);font-size:13px;overflow-wrap:anywhere}
+ul.facts li > span:first-child{color:var(--muted);min-width:0}
+/* a value stays whole ("2 · 0 · 0"); on a narrow card the label wraps instead */
+ul.facts li b{font-weight:600;text-align:right;white-space:nowrap;flex:none}
+ul.facts li b.unpriced{font-weight:400;color:var(--muted)}
+.verdict{margin:10px 0 0;padding:9px 11px;border-radius:var(--radius);font-size:.8125rem;overflow-wrap:anywhere}
 .verdict.ok{background:var(--green-bg);color:var(--green)} .verdict.bad{background:var(--red-bg);color:var(--red)}
 .verdict.info{background:var(--bg2);color:var(--text)}
 .verdict ul{margin:6px 0 0;padding-left:18px}
@@ -59,7 +61,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
   function bracketName(b) { return BRACKETS[b] || String(b); }
 
   function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
-  function fact(list, k, v) { var li = el("li"); li.appendChild(el("span", "", k)); li.appendChild(el("b", "", v)); list.appendChild(li); }
+  function fact(list, k, v, cls) { var li = el("li"); li.appendChild(el("span", "", k)); li.appendChild(el("b", cls || "", v)); list.appendChild(li); }
   function link(text, url) {
     var a = el("a", "link", text); a.href = "#";
     a.onclick = function (e) { e.preventDefault(); B.openLink(url, function (m) { B.setStatus(m, ""); }); };
@@ -152,10 +154,21 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
       $("note").className = "note";
     } else {
       if (st.mana_curve) drawCurve(st.mana_curve);
-      drawColours(st.colour_pips || {}, st.mana_sources || {}, st.colour_identity);
+      // older chats carry the 0.7.45 names (colour_*)
+      drawColours(st.color_pips || st.colour_pips || {}, st.mana_sources || {}, st.color_identity || st.colour_identity);
       fact(facts, "Lands / nonlands", num(st.land_count) + " / " + num(st.nonland_count));
       if (st.average_mana_value != null) fact(facts, "Average mana value", String(st.average_mana_value));
-      fact(facts, "Price", "$" + num(st.price_total).toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));
+      // no card priced, no total, or a total that is not a number: "unknown", muted and plain, as the
+      // site says it (never "$0.00"; audit P4, A4). A total of 0 with no priced count (an older
+      // payload) is no price either; a partly priced deck keeps its sum and "(n of m priced)"
+      // a total is a finite JS number or a string that is wholly a number ("0" is 0): true, [5] or
+      // "12abc" are no total
+      var raw = st.price_total, total = NaN;
+      if (typeof raw === "number") total = raw;
+      else if (typeof raw === "string" && /^\s*-?(\d+\.?\d*|\.\d+)\s*$/.test(raw)) total = Number(raw);
+      var noPrice = st.priced_cards === 0 || !isFinite(total) || (st.priced_cards == null && total === 0);
+      if (noPrice) fact(facts, "Price", "unknown", "unpriced");
+      else fact(facts, "Price", "$" + total.toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));
       if (st.game_changers) fact(facts, "Game changers", String(st.game_changers.length));
       fact(facts, "Tutors · extra turns · land denial", num(st.tutors) + " · " + num(st.extra_turns) + " · " + num(st.mass_land_denial));
       if (st.salt_total) fact(facts, "Salt", String(st.salt_total));

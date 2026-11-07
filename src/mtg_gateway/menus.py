@@ -10,10 +10,12 @@ MENUS_CSS = """
   background:transparent;color:var(--text-muted);box-shadow:none;cursor:pointer}
 .kebab:hover,.kebab:focus-visible,button.kebab:hover{background:var(--surface-2);color:var(--text)}
 .kebab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
-/* a deck tile: the ⋮ at the end of the title line, outside the tile's link; a press and hold on
-   the tile opens the same menu, so nothing is selected or called out under the finger */
+/* a deck tile: the ⋮ at the end of the title line, under the picture at every card size (its height
+   is --deck-thumb), outside the tile's link; a press and hold on the tile opens the same menu, so
+   nothing is selected or called out under the finger */
 ul.decklist .deck{position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-ul.decklist .deck > .kebab{position:absolute;right:.4rem;top:calc(175px + .5rem + (75px - var(--ctl)) / 2)}
+ul.decklist .deck > .kebab{position:absolute;right:.4rem;
+  top:calc(var(--deck-thumb,175px) + .5rem + (75px - var(--ctl)) / 2)}
 ul.decklist .deck .info{padding-right:calc(var(--ctl) + .75rem)}
 ul.decklist.list .deck > .kebab{top:50%;transform:translateY(-50%)}
 ul.decklist.list .deck a{padding-right:calc(var(--ctl) + .5rem)}
@@ -29,11 +31,14 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 /* Card search: the ⋮ at the end of the name line of a tile or a row; the deck editor's rows and
    the Collection's keep their own buttons, the menu comes from a right-click or a hold */
 .cardgrid .nm .kebab.inline,.cardlist .nmc .kebab.inline{width:34px;height:34px;margin-left:auto}
-@media (pointer:coarse){.cardgrid .nm .kebab.inline,.cardlist .nmc .kebab.inline{width:44px;height:44px}}
+.cardgrid .nm .kebab.inline,.cardlist .nmc .kebab.inline{width:44px;height:44px}
 /* a table row's ⋮ sits with its open action; in a proposal row, after the title's words */
 .ui-table .tr .act + .kebab,.ui-table .tr .kebab{flex:none;align-self:center}
-.ui-table .title .kebab.inline{vertical-align:middle;margin-left:.25rem;width:34px;height:34px}
-@media (pointer:coarse){.ui-table .title .kebab.inline{width:44px;height:44px}}
+/* a title cell holding the row's ⋮ (the open action is the title's own link): the ⋮ floats at the
+   cell's right on the title's first line, never on a line of its own under the status, and the
+   lines below it keep the cell's full width */
+.ui-table .title > .kebab.inline{float:right;margin:-6px 0 0 .25rem;width:34px;height:34px}
+.ui-table .title .kebab.inline{width:44px;height:44px}
 /* the My decks heading: + New folder and New deck at its end (New deck the one orange button) */
 .ui-head.phead{align-items:center;justify-content:space-between;margin:0 0 12px}
 .ui-head.phead .acts{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
@@ -43,7 +48,10 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 .ui-head.hubhead{gap:12px}
 @media (max-width:599.98px){
   .ui-head.hubhead{display:grid;grid-template-columns:1fr}
-  .ui-head.hubhead .acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  /* three a row where each keeps whole words; fewer a row (one at 320 px with the browser's font
+     doubled) rather than a word overflowing its button (final audit F02) */
+  .ui-head.hubhead .acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5em),1fr));
+    gap:8px}
   .ui-head.hubhead .acts .btn,.ui-head.hubhead .acts button{width:100%;padding:0 .4rem;gap:.3rem;
     font-size:.93rem;white-space:normal;text-align:center;line-height:1.1}
   .ui-head.hubhead .acts svg{display:none} }

@@ -189,7 +189,9 @@
       scrolled.push({ el: el, top: el.scrollTop, left: el.scrollLeft });
     }
     open = { select: select, btn: btn, list: list, scrim: scrim, items: built.items, active: -1, sheet: sheet,
-             scrolled: scrolled };
+             scrolled: scrolled, layer: null };
+    // the open list is a layer (static/layers.js): on a phone Back closes it, not the page
+    if (Layers) { var mine = open; open.layer = Layers.open({ name: "select", close: function () { if (open === mine) close(true); } }); }
     btn.setAttribute("aria-expanded", "true");
     btn.setAttribute("aria-controls", list.id);
     var current = -1;
@@ -208,10 +210,12 @@
       }
     });
   }
-  function close() {
+  var Layers = window.MtgLayers;
+  function close(fromBack) {
     if (!open) return;
     var o = open;
     open = null;
+    if (o.layer && !fromBack && Layers) Layers.release(o.layer);
     o.list.parentNode.removeChild(o.list);
     if (o.scrim) o.scrim.parentNode.removeChild(o.scrim);
     o.btn.setAttribute("aria-expanded", "false");
@@ -347,7 +351,7 @@
   window.MtgSelect = {
     refresh: refresh,
     enhance: scan,
-    close: close,
+    close: function () { close(false); },
     isOpen: function () { return !!open; }
   };
 })();

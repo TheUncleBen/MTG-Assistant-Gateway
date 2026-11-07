@@ -57,7 +57,7 @@ def _words(page: str) -> str:
 
 
 def _table(page: str) -> str:
-    return page.split("<div class='ui-table act-table'", 1)[1].split("<nav class='ui-pager'", 1)[0]
+    return page.split("<div class='ui-table act-table'", 1)[1].split("<div class='loadmore'", 1)[0]
 
 
 def _row(page: str, event: str) -> str:
@@ -79,7 +79,7 @@ async def member_browser(h: Harness, sub: str = "user-2") -> Browser:
 
 
 async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -> None:
-    """Today's 200-row cap goes; 25 a page, "1–25 of N", Newer and Older."""
+    """Today's 200-row cap goes; 25 a page, then Load more ("25 of N"), to the last row."""
     b = await admin_browser(gw)
     _members(gw)
     _rows(gw, [(i * 60, "user-2", BROWSER, "browser_login", None) for i in range(230)])
@@ -87,14 +87,16 @@ async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -
         r = await b.http.get("/admin/activity", headers=NAVIGATE)
         assert r.status_code == 200
         total = gw.db._conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE client_id IS NOT '__admin__'"
+            # the one-time upgrade entry is listed only when asked for by name (activity_view.QUIET_EVENTS)
+            "SELECT COUNT(*) FROM audit_log WHERE client_id IS NOT '__admin__' "
+            "AND event != 'archidekt_sessions_sealed'"
         ).fetchone()[0]
         assert total > 230
-        assert f"1–25 of {total:,}" in r.text and _table(r.text).count("<div class='tr ev") == 25
-        assert "rel='next'" in r.text and "← Newer</button>" in r.text  # nothing newer on page 1
+        assert f"25 of {total:,}</p>" in r.text and _table(r.text).count("<div class='tr ev") == 25
+        assert "rel='next' data-load-more" in r.text and "ui-pager" not in r.text
         last = (total - 1) // 25 * 25
         r = await b.http.get(f"/admin/activity?offset={last}", headers=NAVIGATE)
-        assert f"{last + 1}–{total} of {total:,}" in r.text and "Older →</button>" in r.text
+        assert f"All {total:,} shown." in r.text and "data-load-more" not in r.text
         assert "<h1>Admin: activity</h1>" in r.text and "Kept for a year." in r.text
     finally:
         await b.aclose()
@@ -102,8 +104,8 @@ async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -
 
 async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None:
     """Plain names with the Activity labels (the code only in the tooltip and the
-    details), admin actions with the shield and no label, the member by username (a link that
-    filters), an app only when a client id is recorded, the detail as words."""
+    details), admin actions with the shield and no label, the member by username (plain text; the
+    row's "Show NAME only" filters), an app only when a client id is recorded, the detail as words."""
     b = await admin_browser(gw)
     _members(gw)
     _rows(
@@ -129,7 +131,8 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         )
         assert "A reused assistant token was refused" in reuse
         assert "<span class='k'>family</span> f-3" in reuse
-        assert "<a href='/admin/activity?sub=user-2'>bram</a>" in reuse
+        assert "<span class='c-who'>bram</span>" in reuse
+        assert "<a class='btn btn-plain' href='/admin/activity?sub=user-2'>Show bram only</a>" in reuse
         assert "<span class='nm'>Claude</span></span>" in reuse
         failed = _row(page, "proposal_failed")
         assert (
@@ -147,8 +150,11 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         assert "ui-lbl red" in denies[0] and "ui-lbl grey" in denies[1]  # newest first
         assert "ui-lbl green" in _row(page, "proposal_applied")
         report = _row(page, "report_created")
-        assert "<span class='ui-app none' title='No app'>" in report and "ui-lbl" not in report
-        assert "No app <span class='muted'>(no client id stored)</span>" in report
+        assert (
+            "<span class='ui-app none'><span class='sr-only'>No app</span></span>" in report
+            and "ui-lbl" not in report
+        )
+        assert "No app <span class='muted'>(no client ID stored)</span>" in report
         # an admin action: the shield, no label, written once (the admin's row, from the website)
         assert _table(page).count("title='admin_disable'") == 1
         disable = _row(page, "admin_disable")
@@ -206,6 +212,8 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
             "Refused or failed" in widgets and "Refused 1</span>" in widgets and "Failed 1</span>" in widgets
         )
         assert "1 setting changed" in widgets and "Most active: bram" in widgets
+        admin_tile = widgets.split("Admin actions</span>", 1)[1].split("</div>", 1)[0]
+        assert "Show them" in admin_tile and "href='/admin/users'" in admin_tile
         assert "Show bram only" in widgets
         refused = (await b.http.get("/admin/activity?kind=refused", headers=NAVIGATE)).text
         assert _table(refused).count("<div class='tr ev") == 1 and "title='approval_refused'" in refused
@@ -219,6 +227,13 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
         assert _table(week).count("<div class='tr ev") == 4
         none = (await b.http.get("/admin/activity?app=none&sub=user-2", headers=NAVIGATE)).text
         assert _table(none).count("<div class='tr ev") == 1 and "title='setting_changed'" in none
+        # the filter's new value, and the old one in kept links, find the same rows (Q4)
+        other = (await b.http.get("/admin/activity?app=other&sub=user-2", headers=NAVIGATE)).text
+        assert _table(other).count("<div class='tr ev") == 1 and "title='setting_changed'" in other
+        assert "no app" not in page  # the bucket is "Other" on the tiles
+        for q in ("other", "Oth", "no app"):
+            found = (await b.http.get(f"/admin/activity?q={q}&sub=user-2", headers=NAVIGATE)).text
+            assert "title='setting_changed'" in _table(found), q
         claude = (await b.http.get("/admin/activity?app=app%3AClaude", headers=NAVIGATE)).text
         assert _table(claude).count("<div class='tr ev") == 4
         for q, event in (
@@ -233,11 +248,12 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
         nothing = (await b.http.get("/admin/activity?q=zzzz-nothing", headers=NAVIGATE)).text
         assert "<div class='tr ev" not in nothing and "Nothing matches these filters." in nothing
         opts = page.split("aria-label='App'>", 1)[1].split("</select>", 1)[0]
-        assert [t for _v, t in re.findall(r"<option value='([^']*)'[^>]*>([^<]*)</option>", opts)] == [
-            "Any app",
-            "Claude",
-            "Website",
-            "No app",
+        # the rows with no client id are "Other" (polish re-check Q4; "No app" here was the bug)
+        assert re.findall(r"<option value='([^']*)'[^>]*>([^<]*)</option>", opts) == [
+            ("", "Any app"),
+            ("app:Claude", "Claude"),
+            ("website", "Website"),
+            ("other", "Other"),
         ]
         # a setting change opens its setting from the row's details
         assert "href='/admin/settings#s-row-snapshots_per_deck'>Open this setting</a>" in page
@@ -272,7 +288,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
     try:
         page = (await b.http.get("/activity", headers=NAVIGATE)).text
         total = gw.db._conn.execute("SELECT COUNT(*) FROM audit_log WHERE sub = 'user-2'").fetchone()[0]
-        assert total > 100 and f"1–25 of {total:,}" in page
+        assert total > 100 and f"25 of {total:,}</p>" in page
         assert "Kept for a year." in page
         table = _table(page)
         words = _words(table)
@@ -285,8 +301,8 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "An administrator revoked your assistants' access and your sign-ins" in words
         assert "By an administrator" in words and "<span class='nm'>Administrator</span></span>" in table
         assert "During deck sync" in words and "1 card row" in words
-        assert "<span class='ui-app none' title='No app'>" in table
-        assert "claude-app" not in page and "__browser__" not in page and "client id" not in page
+        assert "<span class='ui-app none'><span class='sr-only'>No app</span></span>" in table
+        assert "claude-app" not in page and "__browser__" not in page and "client id" not in page.casefold()
         assert "Rejected</span>" in table and "ui-lbl grey" in table
         assert "Refused</span>" in table and "Failed</span>" in table
         chips = page.split("<nav class='ui-chips' aria-label='Show'>", 1)[1].split("</nav>", 1)[0]
@@ -294,9 +310,9 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "Refused <span class='n'>1</span>" in chips and "Failed <span class='n'>1</span>" in chips
         widgets = page.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
         assert "Refused or failed" in widgets and "Your assistants" in widgets
-        assert "href='/account/details#apps'>Connected apps</a>" in widgets
+        assert "href='/account/assistants'>Assistants</a>" in widgets
         older = (await b.http.get("/activity?offset=125", headers=NAVIGATE)).text
-        assert f"126–{total} of {total:,}" in older
+        assert f"{min(150, total)} of {total:,}</p>" in older or f"All {total:,} shown." in older
         byadmin = (await b.http.get("/activity?kind=byadmin", headers=NAVIGATE)).text
         assert _table(byadmin).count("<div class='tr ev") == 1
         found = (await b.http.get("/activity?q=Meren", headers=NAVIGATE)).text
@@ -305,9 +321,10 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         for q in ("no+a", "No+app"):
             rows_no_app = _table((await b.http.get(f"/activity?q={q}", headers=NAVIGATE)).text)
             n = rows_no_app.count("<div class='tr ev")
-            assert n >= 2 and n == rows_no_app.count("title='No app'"), q  # the seeded two and the sign-in
+            no_app = "<span class='ui-app none'><span class='sr-only'>No app</span></span>"
+            assert n >= 2 and n == rows_no_app.count(no_app), q  # the seeded two and the sign-in
         pp = _table((await b.http.get("/activity?q=pp", headers=NAVIGATE)).text)
-        assert pp.count("<div class='tr ev") >= 1 and "title='No app'" not in pp  # the letters of "no app"
+        assert pp.count("<div class='tr ev") >= 1 and no_app not in pp  # the letters of "no app"
         assert "<span class='evt' title=" not in page  # no technical names on the member's page
     finally:
         await b.aclose()
@@ -400,3 +417,37 @@ def test_labels_follow_the_activity_definitions() -> None:
         assert "Failed" in lbl(e, {}), e
     assert lbl("admin_disable", {}) == "" and lbl("setting_changed", {}) == ""
     assert "Applied" in lbl("proposal_applied", {})
+
+
+def test_the_problem_widget_at_zero_shows_no_red_chips_and_no_button() -> None:
+    """Polish re-check Q3: with nothing refused or failed the tile said "Refused 0" and "Failed 0"
+    in red and offered "Show them" to an empty list. At 0 it says so in plain words and offers
+    nothing; with a problem the chips and the button are back."""
+    quiet = activity_view._problem_widget([], "/activity?kind=problems&time=7d")
+    assert "Refused or failed" in quiet and ">0<small>in 7 days</small>" in quiet
+    assert "Nothing refused or failed" in quiet
+    assert "ui-lbl" not in quiet and "Show them" not in quiet and "alert'" not in quiet.split(">", 1)[0]
+    busy = activity_view._problem_widget(
+        [{"event": "proposal_failed", "detail": {}}, {"event": "approval_refused", "detail": {}}],
+        "/activity?kind=problems&time=7d",
+    )
+    assert "Refused 1</span>" in busy and "Failed 1</span>" in busy and "Show them" in busy
+    assert busy.startswith("<div class='wdg alert'>")
+
+
+async def test_the_admin_actions_tile_at_zero_offers_no_show_them(gw: Harness) -> None:
+    """Audit 43b8 (low): with no admin action in 7 days the tile still offered "Show them" to an
+    empty list. At 0 it keeps only Users (a page, not a list); the problem tile is quiet too."""
+    b = await admin_browser(gw)
+    _members(gw)
+    _rows(gw, [(400, "user-2", "claude-app", "proposal_created", {"proposal_id": "p9", "deck_id": "45"})])
+    try:
+        page = (await b.http.get("/admin/activity", headers=NAVIGATE)).text
+        widgets = page.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
+        admin_tile = widgets.split("Admin actions</span>", 1)[1].split("</div>", 1)[0]
+        assert ">0<small>in 7 days</small>" in admin_tile
+        assert "Show them" not in admin_tile and "href='/admin/users'" in admin_tile, admin_tile
+        problems = widgets.split("Refused or failed</span>", 1)[1].split("</div>", 1)[0]
+        assert "Show them" not in problems and "Nothing refused or failed" in problems
+    finally:
+        await b.aclose()

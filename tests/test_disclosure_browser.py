@@ -73,6 +73,7 @@ def test_tick_box_unlocks_only_once_the_detail_is_opened() -> None:
             posts: list[str] = []
             page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
             page.click("text=Link account")
+            # fixed wait: a negative check: Link before the detail is open sends no POST within 300 ms
             page.wait_for_timeout(300)
             assert posts == []
             assert page.evaluate("() => document.activeElement.tagName") == "SUMMARY"

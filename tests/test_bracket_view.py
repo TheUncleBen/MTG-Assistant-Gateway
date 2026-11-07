@@ -22,7 +22,7 @@ EST = {
 }
 
 
-def test_label_is_the_one_ben_chose() -> None:
+def test_label_is_the_one_the_owner_chose() -> None:
     assert ESTIMATE_LABEL == "Archidekt's estimate from cards"
 
 
@@ -33,7 +33,11 @@ def test_banner_shows_one_bracket() -> None:
     assert html == "<span class='bracket-set'>Bracket: Core (2)</span>"
     assert "estimate" not in html
     unset = banner_bracket_html(SimpleNamespace(edh_bracket=None), stats)
-    assert unset == "<span class='bracket-est'>Archidekt's estimate from cards: Optimized (4)</span>"
+    # the label gives way to the bracket alone on a phone (.lg, deckpage's banner CSS, mockup screen 5)
+    assert unset == (
+        "<span class='bracket-est'><span class='lg'>Archidekt's estimate from cards: </span>"
+        "Optimized (4)</span>"
+    )
     assert banner_bracket_html(SimpleNamespace(edh_bracket=None), {}) == ""
 
 

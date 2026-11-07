@@ -88,4 +88,15 @@ object AppUpdate {
     /** Whether an automatic check is due: [lastCheck] is when the last one ran (0 = never), [every] the gap. */
     fun due(lastCheck: Long, now: Long, every: Long = INTERVAL_MS): Boolean =
         lastCheck <= 0 || now < lastCheck || now - lastCheck >= every
+
+    /** How long "Later" on the update bar keeps that version quiet: three days, not until the next check. */
+    const val SNOOZE_MS = 3L * 24 * 3600 * 1000
+
+    /**
+     * Whether the automatic check keeps quiet about the version [offerCode]: "Later" put off
+     * [snoozedCode] at [snoozedAt] (0 = never), less than [SNOOZE_MS] ago. A newer version is
+     * offered at once; "Check for app updates" always offers it.
+     */
+    fun snoozed(offerCode: Int, snoozedCode: Int, snoozedAt: Long, now: Long): Boolean =
+        snoozedAt > 0 && snoozedCode == offerCode && now >= snoozedAt && now - snoozedAt < SNOOZE_MS
 }

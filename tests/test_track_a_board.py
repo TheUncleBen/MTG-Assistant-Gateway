@@ -20,7 +20,9 @@ def _change(card: str, action: str = "add", **more: object) -> list[dict]:
 
 async def _propose(h, token: str, changes: list, **more: object) -> dict:
     p = structured(
-        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes, **more})
+        await call(
+            h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes, "separate": True, **more}
+        )
     )
     assert p["ok"], p
     return p
@@ -113,7 +115,7 @@ async def test_amend_keeps_the_number_writes_what_changed_and_restarts_the_expir
     assert out["ok"] and out["version"] == 2 and out["board_no"] == 1, out
     assert out["diff"] == "-1 Sol Ring" and out["expires_at"] > time.time() + 6 * 86400
     note = h.db.get_proposal(p["proposal_id"], SUB)["version_note"]
-    assert note.startswith("now -1 Sol Ring; no longer"), note
+    assert note.startswith("now takes out Sol Ring; no longer"), note
     line = structured(await call(h, token, "list_my_proposals", {"pending_only": True}))["proposals"][0]
     assert line["what_changed"] == note and line["changed_by"]
     # an amend of a version already replaced is refused with the design's words
@@ -193,10 +195,10 @@ async def test_combine_makes_one_note_in_order_and_marks_the_rest_replaced(stack
     h = stack.h
     token = await linked_user(stack)
     await _mode(h, "manual")
-    ids = [(await _propose(h, token, _change(n)))["proposal_id"] for n in ("Opt", "Ponder", "Brainstorm")]
+    ids = [(await _propose(h, token, _change(n)))["proposal_id"] for n in ("Opt", "Swamp", "Arcane Signet")]
     out = structured(await call(h, token, "combine_proposals", {"proposal_ids": ids[::-1]}))
-    assert out["ok"] and [c["card_name"] for c in out["changes"]] == ["Opt", "Ponder", "Brainstorm"], out
-    assert sorted(out["diff"].splitlines()) == ["+1 Brainstorm", "+1 Opt", "+1 Ponder"]
+    assert out["ok"] and [c["name"] for c in out["changes"]] == ["Opt", "Swamp", "Arcane Signet"], out
+    assert sorted(out["diff"].splitlines()) == ["+1 Arcane Signet", "+1 Opt", "+1 Swamp"]
     assert sorted(out["replaced"]) == sorted(ids)
     assert all(h.db.get_proposal(i, SUB)["state"] == "replaced" for i in ids)
     one = structured(await call(h, token, "combine_proposals", {"proposal_ids": [out["proposal_id"]]}))
@@ -217,7 +219,8 @@ def test_overlap_lines_name_both_sides() -> None:
 async def test_every_tool_that_changes_something_is_refused_to_a_read_only_token(stack: Stack) -> None:
     """Review of 0.7.29's own tools: amend, withdraw, combine and the card's Apply all change what
     waits (or Archidekt), so a read-only token (mtg.read) is refused them like every other tool
-    whose readOnlyHint is false."""
+    whose readOnlyHint is false. The proposal tools' hint is true (they never touch Archidekt,
+    owner decision 0.7.46), and a read-only token is still refused them."""
     import json
 
     from mtg_gateway.app import WRITE_TOOLS
@@ -229,7 +232,7 @@ async def test_every_tool_that_changes_something_is_refused_to_a_read_only_token
     r = await h.mcp(token, "tools/list", {}, rid=7)
     tools = sse_json(r)["result"]["tools"]
     writes = {t["name"] for t in tools if (t.get("annotations") or {}).get("readOnlyHint") is False}
-    assert {"amend_proposal", "withdraw_proposal", "combine_proposals"} <= writes
+    assert {"amend_proposal", "withdraw_proposal", "combine_proposals"} <= WRITE_TOOLS - writes
     assert writes <= WRITE_TOOLS, writes - WRITE_TOOLS
     assert "confirm_waiting" in WRITE_TOOLS
     await _mode(h, "manual")

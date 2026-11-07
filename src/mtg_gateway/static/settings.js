@@ -15,6 +15,9 @@
   }
 
   function offChecked(row) {
+    // an On/Off setting is a switch (its hidden "off" is what an unticked one sends)
+    var sw = row.querySelector(".set-ctl .set-sw input[type=checkbox]");
+    if (sw) return !sw.checked;
     var off = row.querySelector(".set-ctl input[type=radio][value=off]");
     return !!(off && off.checked);
   }

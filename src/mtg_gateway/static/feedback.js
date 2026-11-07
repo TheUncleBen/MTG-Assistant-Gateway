@@ -71,11 +71,23 @@
     setTimeout(function () { clear(form); }, button && button.dataset && button.dataset.busyLabel ? LONG_RESET_MS : RESET_MS);
   });
 
-  // Coming back with the Back button restores the page from memory: nothing is sending any more.
+  // Coming back with the Back button restores the page from memory, or from the browser's cache
+  // as it was: nothing is sending any more, and the page was drawn with the look of its time.
+  // After Theme changed on Account the theme is put right in place; after Layout changed (the
+  // viewport itself) the page is read again.
   window.addEventListener("pageshow", function (e) {
-    if (!e.persisted) return;
-    var forms = document.querySelectorAll("form[data-sending]");
+    var forms = e.persisted ? document.querySelectorAll("form[data-sending]") : [];
     for (var i = 0; i < forms.length; i++) clear(forms[i]);
+    var cookies = {};
+    document.cookie.split(";").forEach(function (part) {
+      var at = part.indexOf("=");
+      if (at > 0) cookies[part.slice(0, at).trim()] = part.slice(at + 1).trim();
+    });
+    var root = document.documentElement, theme = cookies.mtg_theme || "";
+    if (theme !== (root.getAttribute("data-theme") || "")) {
+      if (theme) root.setAttribute("data-theme", theme); else root.removeAttribute("data-theme");
+    }
+    if ((cookies.mtg_layout === "desktop") !== document.body.classList.contains("desktop")) window.location.reload();
   });
 
   function openMenus() { return document.querySelectorAll("details.dd[open]"); }
@@ -88,55 +100,36 @@
     closeMenus(inside);
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenus(null); });
-  // On phones (and in the app) one history entry stands for "a menu is open", so Back closes the
-  // menu instead of leaving the page. This block is the entry's only owner: `pushed` says the
-  // entry exists, `popping` that the page itself asked for it back. Opening the first menu
-  // pushes it; the last menu closing gives it back; and when that back lands late, after the
-  // person has already opened another menu, the entry is pushed again for that menu (never
-  // before it lands, so two entries or two backs can never be in flight), so Back never leaves
-  // the page while a menu is open and never goes back twice.
-  var pushed = false, popping = false;
-  // a phone, a touch screen in the rail range (to 1279.98 px, as theme.py draws the rail) or the app
-  function phoneLike() {
-    return window.matchMedia("(max-width: 599.98px)").matches ||
-      window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches ||
-      document.body.classList.contains("app");
-  }
-  function takeEntry() {
-    // while the page's own back() is still landing, the popstate handler takes the entry instead
-    if (pushed || popping || !phoneLike()) return;
-    history.pushState({ menu: 1 }, "");
-    pushed = true;
-  }
-  function giveEntryBack() {
-    if (!pushed || popping) return;
-    pushed = false;
-    popping = true;
-    history.back();
-  }
+  // a menu stays open only while the focus is in it: Tab out of it (or a focus put anywhere
+  // else) closes it, as the shared menu does (static/cardmenu.js; audit F-13)
+  document.addEventListener("focusin", function (e) {
+    var open = openMenus();
+    for (var i = 0; i < open.length; i++) if (!open[i].contains(e.target)) open[i].removeAttribute("open");
+  });
+  // An open drop-down is a layer (static/layers.js): on a phone (and in the app) Back closes the
+  // menu instead of leaving the page, over the one history entry every layer shares where the
+  // browser needs one. The menus open one at a time, so one layer stands for "a menu is open".
+  var Layers = window.MtgLayers, layer = null;
   document.addEventListener("toggle", function (e) {
     var d = e.target;
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("dd")) return;
     if (d.open) {
       closeMenus(d);
       keepOnScreen(d);
-      takeEntry();
+      if (!layer && Layers) layer = Layers.open({ name: "dropdown", close: function () { layer = null; closeMenus(null); } });
     } else {
       var m = d.querySelector(":scope > .menu");
       if (m) { m.style.left = ""; m.style.right = ""; }
-      if (!openMenus().length) giveEntryBack();
+      if (!openMenus().length && layer) { var l = layer; layer = null; Layers.release(l); }
     }
   }, true);
-  window.addEventListener("popstate", function () {
-    if (popping) {
-      // the page's own back() landed; a menu opened meanwhile needs the entry again
-      popping = false;
-      if (openMenus().length) takeEntry();
-      return;
-    }
-    // the person pressed Back: the entry is gone, close what is open without going back again
-    pushed = false;
-    if (openMenus().length) closeMenus(null);
+  // the window grown (or shrunk) past the width a menu is drawn at, its button hidden now: the
+  // menu closes, so its layer and history entry never outlive what the screen shows
+  window.addEventListener("resize", function () {
+    openMenus().forEach(function (d) {
+      var sm = d.querySelector(":scope > summary");
+      if (sm && !sm.getClientRects().length) d.removeAttribute("open");
+    });
   });
   // A menu panel hangs from one edge of its button: the right edge usually, the left edge for
   // the deck page's More menu (.menu.left). Near the matching edge of the window (the first
@@ -189,6 +182,9 @@
         if (parts[p].getAttribute("data-native-show").split(" ").indexOf(now) < 0) parts[p].setAttribute("hidden", "");
         else parts[p].removeAttribute("hidden");
       }
+      // A row drawn hidden (data-native-row) shows once the app answered: an older app, without
+      // the method, leaves it out rather than show an empty row.
+      if (box.hasAttribute("data-native-row") && now) box.removeAttribute("hidden");
       // Just saved with notifications on (?connect=1): press the connect button once for the person.
       var auto = box.querySelector("[data-native-auto]");
       if (auto && !auto.closest("[hidden]") && /[?&]connect=1(&|$)/.test(location.search)) {
@@ -272,7 +268,7 @@
     if (e.key !== "Escape" || e.defaultPrevented) return;
     var close = document.querySelector(".ui-split.with-panel .ui-drawer .close");
     if (!close || !close.offsetParent) return;
-    if (document.querySelector("details[open].dd, [aria-expanded=true], dialog[open]")) return;
+    if (document.querySelector("details[open].dd, [aria-expanded=true], dialog[open], .mtgbox-scrim")) return;
     close.click();
   });
   // "1 card" / "7 cards" next to a number field: the word follows the value (the odds form).
@@ -362,6 +358,18 @@
     navStart.timer = setTimeout(navEnd, 20000); // a download or a stopped load: never stuck on
   }
   function navEnd() { document.documentElement.classList.remove("navigating"); }
+  window.MtgDropdowns = {
+    // true while the layers' own history.back() has not landed yet (static/layers.js)
+    backPending: function () { return !!(Layers && Layers.inFlight()); },
+    backLanding: function () { return !!(Layers && Layers.landing()); },
+    // a menu item that opens a box (static/box.js) closes its menu first, at once (the toggle
+    // event, which gives the layer back, comes a task later)
+    close: function (d) {
+      if (!d || !d.open) return;
+      d.removeAttribute("open");
+      if (!openMenus().length && layer) { var l = layer; layer = null; Layers.release(l); }
+    }
+  };
   window.MtgNavStart = navStart;  // a menu link that waits for the menu's Back (static/cardmenu.js)
   document.addEventListener("click", function (e) {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -377,6 +385,61 @@
   });
   // Back to this page from memory (the Back button): nothing is loading any more.
   window.addEventListener("pageshow", function (e) { if (e.persisted) navEnd(); });
+
+  // 8. A page still being read from Archidekt (latepage.py) comes as the site's frame with a
+  //    skeleton: wait for the page to finish, then load its address, which the gateway answers
+  //    with the finished page. If the wait can't be asked, say so with a button that loads it.
+  var late = document.querySelector("[data-late]");
+  if (late) {
+    var lateTries = 0;
+    var lateWait = function () {
+      fetch(late.getAttribute("data-late"), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } })
+        .then(function (r) {
+          if (r.status === 202 && ++lateTries < 10) { lateWait(); return; }
+          location.replace(late.getAttribute("data-href"));
+        })
+        .catch(function () {
+          if (++lateTries < 4) { setTimeout(lateWait, 2000); return; }
+          var note = late.querySelector(".late-note");
+          if (note) note.textContent = "The gateway can't be reached right now.";
+          var again = document.createElement("a");
+          again.className = "btn";
+          again.href = late.getAttribute("data-href");
+          again.textContent = "Try again";
+          late.appendChild(again);
+        });
+    };
+    lateWait();
+  }
+
+  // 9. A deck shown as last read while the gateway reads it again (deckpage.deck_check_html):
+  //    after a Reload, a deck that changed is loaded again at once; on another view the strip
+  //    offers the changes. When Archidekt could not be asked, the strip says how old the copy is.
+  var check = document.querySelector("[data-check]");
+  if (check) {
+    fetch(check.getAttribute("data-check"), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (d) {
+        var reload = check.getAttribute("data-reload") === "1";
+        if (d.changed && reload) { location.replace(location.href); return; }
+        if (d.changed) {
+          check.textContent = "This deck changed on Archidekt. ";
+          var show = document.createElement("a");
+          show.className = "btn";
+          show.href = location.href;
+          show.textContent = "Show the changes";
+          check.appendChild(show);
+        } else if (d.failed) {
+          check.className += " warn";
+          check.textContent = check.getAttribute("data-failed");
+        } else {
+          check.hidden = true;
+          return;
+        }
+        check.hidden = false;
+      })
+      .catch(function () { check.hidden = true; });
+  }
 
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});

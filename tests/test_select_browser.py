@@ -15,6 +15,7 @@ import pytest
 from .test_editor_browser import PNG, _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import expect, quiet, settled
 
 pytest.importorskip("playwright")
 
@@ -149,7 +150,7 @@ def test_keyboard_only(server: Server) -> None:
         assert page.locator("#msel-list").count() == 0
         assert page.locator("#format option:checked").inner_text().strip() == texts[-1]
         # that Escape closed the list only: the New deck box around it stays open, focus on the button
-        page.wait_for_timeout(500)  # past the box's closing transition, were it closing
+        quiet(page)  # the list's Back landed and no box is closing
         assert page.locator(".mtgbox-scrim .mtgbox").is_visible()
         assert page.evaluate("() => document.activeElement.id") == "format-btn"
         # type-ahead: the first letters of a choice jump to it; Tab closes and moves on
@@ -178,7 +179,7 @@ def test_phone_width_opens_a_bottom_sheet(server: Server) -> None:
         page.locator(".rbar .sortcw .msel-btn").click()
         listbox = page.locator("#msel-list[role=listbox].sheet")
         listbox.wait_for(state="visible", timeout=3000)
-        page.wait_for_timeout(300)  # the sheet slides in
+        settled(page)  # the sheet slid in
         box = page.evaluate(
             "() => { const l = document.getElementById('msel-list'); const r = l.getBoundingClientRect();"
             " return { left: r.left, right: r.right, bottom: r.bottom,"
@@ -251,7 +252,7 @@ def test_editor_rows_are_enhanced_as_they_appear(server: Server) -> None:
         box.press_sequentially("oathsw", delay=30)
         page.locator(".suggest-list[role=listbox]:visible [role=option]").first.wait_for(timeout=3000)
         box.press("Enter")
-        page.wait_for_timeout(300)
+        expect(page.locator(".erow.new").first.locator(".sel select")).to_have_count(1)
         new_row = page.locator(".erow.new").first
         new_sel = new_row.locator(".sel select")
         assert new_sel.count() == 1
@@ -315,7 +316,8 @@ def test_natives_stay_and_triggers_take_the_focus(server: Server) -> None:
         page.locator("#file").set_input_files(
             {"name": "mine.txt", "mimeType": "text/plain", "buffer": b"1 Sol Ring\n"}
         )
-        page.wait_for_timeout(200)
+        expect(page.locator(".filepick .fname")).to_have_text("mine.txt")
+        expect(page.locator("#source")).to_have_value("1 Sol Ring\n")
         assert page.locator(".filepick .fname").inner_text() == "mine.txt"
         assert page.locator("#source").input_value() == "1 Sol Ring\n"
         assert errors == []
@@ -346,17 +348,23 @@ def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int
         page.touchscreen.tap(btn["x"] + btn["width"] / 2, btn["y"] + btn["height"] / 2)
         listbox = page.locator("#msel-list[role=listbox].sheet")
         listbox.wait_for(state="visible", timeout=3000)
-        page.wait_for_timeout(300)  # the sheet slides in
+        settled(page)  # the sheet slid in
         brand = page.locator(".topbar .brand").bounding_box()
         assert brand is not None
         page.touchscreen.tap(brand["x"] + brand["width"] / 2, brand["y"] + brand["height"] / 2)
+        # fixed wait: a negative check: the tap on the brand under the sheet's scrim does not follow the
+        # link within 500 ms
         page.wait_for_timeout(500)
         assert page.locator("#msel-list").count() == 0
         assert page.url.endswith("/decks"), page.url  # the brand link under the tap was not followed
-        # the sheet still works after that: a row tap picks
+        # the sheet still works after that: a row tap picks. The button is measured again: the
+        # sheet scrolls the page to keep the button above it (select.js keepAbove), and on a
+        # phone Sort sits on the bar's second row, under the count and Select, so it did
+        btn = page.locator(".rbar .sortcw .msel-btn:visible, #f-order-btn:visible").first.bounding_box()
+        assert btn is not None
         page.touchscreen.tap(btn["x"] + btn["width"] / 2, btn["y"] + btn["height"] / 2)
         listbox.wait_for(state="visible", timeout=3000)
-        page.wait_for_timeout(300)
+        settled(page)
         row = listbox.locator("[role=option]").last.bounding_box()
         assert row is not None
         page.touchscreen.tap(row["x"] + row["width"] / 2, row["y"] + row["height"] / 2)

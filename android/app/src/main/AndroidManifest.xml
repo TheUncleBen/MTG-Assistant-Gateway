@@ -6,7 +6,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- The app installs its own updates from the project's GitHub releases (Updater.kt). Android asks
+    <!-- The app installs its own updates, the APK the gateway it is set up for ships (Updater.kt). Android asks
          the person once to allow installs from this app; from Android 12 an app updating itself may
          then skip the confirmation, which is what the second permission asks for. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -31,6 +31,27 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+    <!-- Sign-in through the phone's browser (BrowserSignIn.kt): from Android 11 an app sees other
+         apps only when it asks to. Without these, CustomTabsClient finds no browser at all, so no
+         Auth Tab is opened and every sign-in ends on the page that waits for a tap. The first lists
+         the browsers that offer Custom Tabs (and Auth Tabs), the second the browsers themselves. -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <!-- Android's install confirmation, which Updater checks is a system app before starting it:
+             without this the phone may hide the installer from the app, and an update that needs a
+             tap would then do nothing. -->
+        <intent>
+            <action android:name="android.content.pm.action.CONFIRM_INSTALL" />
+        </intent>
+    </queries>
 
     <!-- Nothing the app stores leaves the phone: sign-in cookies and page storage live under
          app_webview/. allowBackup=false covers Android 11 and earlier; from Android 12 it no longer
@@ -108,6 +129,12 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- NotifyService's alarm: the next try, or the check on a quiet connection, in deep sleep
+             too. Not exported: only the app's own alarm reaches it. -->
+        <receiver
+            android:name="local.mtgassistantgateway.app.NotifyService$Tick"
+            android:exported="false" />
 
         <!-- PackageInstaller's answer to an update (Updater.kt). Not exported: only the install
              session's own PendingIntent reaches it. -->

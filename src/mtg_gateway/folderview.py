@@ -258,7 +258,8 @@ def _count_text(decks: int, subfolders: int) -> str:
 
 
 def breadcrumb_html(level: Level, *, order: str) -> str:
-    """Decks › Commander › Precons: every step a link but the last (the open folder)."""
+    """Decks › Commander › Precons: every step a way back (the theme's grey capsule) but the last
+    (the open folder)."""
     if level.current is None:
         return ""
     items = []
@@ -267,7 +268,9 @@ def breadcrumb_html(level: Level, *, order: str) -> str:
         if i == last:
             items.append(f"<li aria-current='page'><span>{esc(name)}</span></li>")
         else:
-            items.append(f"<li><a href='{esc(level_href(fid, order=order))}'>{esc(name)}</a></li>")
+            items.append(
+                f"<li><a class='ui-cap' href='{esc(level_href(fid, order=order))}'>{esc(name)}</a></li>"
+            )
     return f"<nav class='crumbs' aria-label='Folder path'><ol>{''.join(items)}</ol></nav>"
 
 
@@ -291,7 +294,8 @@ def folder_tile_html(t: dict[str, Any], *, order: str) -> str:
     )
     backup = " data-backup" if t.get("backup") else ""
     return (
-        f"<li class='folder' data-folder-id='{esc(str(t['id']))}' data-folder-name='{esc(t['name'])}'"
+        f"<li class='folder' data-folder-id='{esc(str(t['id']))}' data-folder-name='{esc(t['name'])}' "
+        f"data-decks='{int(t.get('decks') or 0)}'"
         f"{backup}>"
         f"<a href='{esc(level_href(t['id'], order=order))}'>{ic}"
         f"<span class='text'><span class='name' title='{esc(t['name'])}'>{esc(t['name'])}</span>"
@@ -306,8 +310,10 @@ def level_html(
     q: str,
     view: str,
     order: str,
+    tick: bool = False,
 ) -> str:
-    """The breadcrumb, the Folders area (when there are folders to show) and the Decks area."""
+    """The breadcrumb, the Folders area (when there are folders to show) and the Decks area.
+    ``tick``: Select's tick boxes on the deck tiles (deck_bulk.py)."""
     out = breadcrumb_html(level, order=order)
     if not level.tree:
         out += f"<p class='notice'>{esc(FOLDERS_UNREADABLE)}</p>"
@@ -319,7 +325,7 @@ def level_html(
             f"<ul class='plain folderlist {esc(view)}'>{tiles}</ul></section>"
         )
     if level.decks:
-        listing = deck_list_html(level.decks, covers=covers, q=q, view=view, own=True)
+        listing = deck_list_html(level.decks, covers=covers, q=q, view=view, own=True, tick=tick)
     elif level.searching and q:
         listing = f"<p class='empty'>No decks matching “{esc(q)}” in any folder.</p>"
     elif level.searching:
@@ -349,12 +355,12 @@ FOLDER_CSS = """
 /* My decks' Show filter (Decks and packages, Decks only, Packages only), the package tiles
    static/decks.js marks (the package icon in place of the initial, a Package label in the
    detail line) and the tiles it hides */
-.spanel .fgrid > .showf{--gw:200px}
+.spanel .fgrid > .showf{--gw:14.286em}
 ul.decklist li.deck.sh-off{display:none}
 ul.decklist .deck.pkg .thumb .ini svg.i{width:3.5rem;height:3.5rem;color:rgba(255,255,255,.45);
   stroke-width:1.6}
 ul.decklist.list .deck.pkg .thumb .ini svg.i{width:1.6rem;height:1.6rem}
-ul.decklist .info .fmt .ui-lbl{height:20px;font-size:.78rem;padding:0 .45rem 0 .35rem;vertical-align:-5px}
+ul.decklist .info .fmt .ui-lbl{min-height:20px;font-size:.78rem;padding:0 .45rem 0 .35rem;vertical-align:-5px}
 ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
 #pk-note{margin:0 0 8px}
 #pk-note[hidden]{display:none}
@@ -366,7 +372,7 @@ ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
 .crumbs li{display:inline-flex;align-items:center;gap:.4rem;min-width:0;max-width:100%}
 .crumbs li + li::before{content:'›';color:var(--text-muted)}
 .crumbs a,.crumbs span{overflow-wrap:anywhere}
-.crumbs a{display:inline-flex;align-items:center;min-height:44px;color:var(--link,var(--text))}
+.crumbs a.ui-cap{overflow-wrap:normal;white-space:nowrap;flex:none}
 .crumbs li[aria-current] span{font-weight:700}
 .fv-area{margin:0 0 14px}
 .fv-area > h2{display:flex;align-items:center;gap:.45rem;margin:0 0 8px;font-size:1.05rem;
@@ -379,7 +385,9 @@ ul.folderlist{display:grid;gap:10px;margin:0}
 ul.folderlist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))}
 ul.folderlist.list{grid-template-columns:minmax(0,1fr);gap:.5rem}
 ul.folderlist .folder,ul.folderlist .folder a,ul.folderlist .text{min-width:0}
-ul.folderlist .folder a{display:flex;align-items:center;gap:.75rem;min-height:64px;padding:.65rem .85rem;
+/* the right padding keeps the tile's ⋮ (menus.py, absolute at the row's end) off the name */
+ul.folderlist .folder a{display:flex;align-items:center;gap:.75rem;min-height:64px;
+  padding:.65rem calc(var(--ctl) + .85rem) .65rem .85rem;
   border:1px solid var(--border);border-radius:5px;background:var(--surface-2);color:var(--text);
   text-decoration:none}
 ul.folderlist.list .folder a{min-height:52px}

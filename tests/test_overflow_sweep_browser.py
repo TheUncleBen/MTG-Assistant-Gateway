@@ -21,6 +21,7 @@ from .test_editor_browser import PNG, _link
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -351,8 +352,8 @@ def _seed(server: Server) -> tuple[str, str]:
                     (f"id-{i}", f"-{d} day", 1234.5 + d),
                 )
         c.execute(
-            "INSERT INTO watch_decks (sub, deck_id, deck_name, cards_json, created_at) "
-            "VALUES ('user-1', '45', ?, '[]', 0)",
+            "INSERT INTO watch_decks (sub, deck_id, deck_name, cards_json, refreshed_at, created_at) "
+            "VALUES ('user-1', '45', ?, '[]', 0, 0)",
             (UNBROKEN,),
         )
         for d in range(3):
@@ -383,6 +384,11 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
             re.compile(r"https://cards\.scryfall\.io/.*"),
             lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
         )
+        # a deck view loaded after the page's kept read has aged (20 s) starts the
+        # /decks/{id}/check long-poll (up to 25 s), which "networkidle" would wait out on a starved
+        # runner (audit, section 6); without an answer the strip hides, as it does for an
+        # unchanged deck, so every other request still settles before the measurement
+        ctx.route(re.compile(r"/decks/[^/]+/check(\?|$)"), lambda route: route.abort())
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -398,7 +404,7 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
             page.wait_for_function(SHEETS_LOADED, timeout=10_000)
             for w in WIDTHS:
                 page.set_viewport_size({"width": w, "height": 900})
-                page.wait_for_timeout(20)
+                redrawn(page)
                 found = page.evaluate(MEASURE) + page.evaluate(MENUS)
                 problems += [f"{path} @{w}px: {f}" for f in found]
         browser.close()
@@ -433,6 +439,11 @@ def test_follow_question_can_be_answered(server: Server, touch: bool) -> None:
             re.compile(r"https://cards\.scryfall\.io/.*"),
             lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
         )
+        # a deck view loaded after the page's kept read has aged (20 s) starts the
+        # /decks/{id}/check long-poll (up to 25 s), which "networkidle" would wait out on a starved
+        # runner (audit, section 6); without an answer the strip hides, as it does for an
+        # unchanged deck, so every other request still settles before the measurement
+        ctx.route(re.compile(r"/decks/[^/]+/check(\?|$)"), lambda route: route.abort())
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))

@@ -32,10 +32,11 @@ from .pages import (
     browser_session,
     csrf_form_ok,
     csrf_header_ok,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .theme import display_name, icon, plural, render
+from .timing import SLOW_REQUEST_SECONDS, speed_log
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -140,7 +141,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
                 return JSONResponse(
                     {"ok": False, "error": "unauthenticated", "login": "/login?next=/admin"}, 401
                 )
-            return login_redirect(request.url.path)
+            return login_redirect_here(request)
         if not is_admin(state, sub):
             return not_found(api)
         if write and api:
@@ -171,7 +172,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             if target == admin_sub:
                 raise AdminError("invalid", "You cannot disable your own account.", code="self_disable")
             state.db.set_user_disabled(target, True)
-            out.update(state.db.revoke_all_for_user(target))
+            out.update(state.db.revoke_all_for_user(target, "disabled"))
             # A disabled account cannot sign in, so its Archidekt session is not kept either.
             state.decks.unlink(target)
         elif action == "enable":
@@ -599,7 +600,7 @@ def system_data(state: Any) -> dict[str, Any]:
 
 # -- HTML -------------------------------------------------------------------------
 USERS_PURPOSE = "Everyone who has signed in. Disabling blocks this gateway only."
-MODELS_PURPOSE = "Each model is used only in its owner's simulations. Only admins see who added it."
+MODELS_PURPOSE = "Each model is used only in its owner's solo tests. Only admins see who added it."
 CURRENT = " aria-current='page'"
 NO_NAME = activity_view.NO_NAME  # a member with neither a username nor an email on record
 PER_PAGE = ui.PER_PAGE
@@ -634,7 +635,7 @@ KIND_ICONS = {"tool": "activity", "error": "alert", "api": "link", "admin": "shi
 ADMIN_CSS = """
 /* the admin pages (admin.py): dashboards in the 1200 px width, the tab bar in the same place on
    every tab, the System rows lined up as on Settings */
-.adm .adm-nav{margin:0 0 1rem}
+.adm .adm-nav{margin:0 0 1rem;display:flex;width:100%}
 .adm .notice{margin:0 0 1rem}
 .adm .ui-widgets .wdg .det{overflow-wrap:anywhere;min-width:0}
 /* the number and its unit ("0.7.37 running") may part at 200% text: two flex items, not one word */
@@ -652,7 +653,7 @@ ADMIN_CSS = """
 .adm .wdg .go .btn,.adm .wdg .go a.btn-plain{white-space:normal;overflow-wrap:anywhere;height:auto;
   text-align:center}
 .adm .ui-table .title .labs{display:inline-flex;flex-wrap:wrap;gap:.3rem;align-items:center}
-.adm .ui-table .title .sub .ui-lbl,.adm .ui-table .title .sm-only .ui-lbl{height:22px;font-size:.78rem}
+.adm .ui-table .title .sub .ui-lbl,.adm .ui-table .title .sm-only .ui-lbl{min-height:22px;font-size:.78rem}
 .adm .ui-table .sm-only{display:none}
 .adm .ui-table .sub{font-weight:400;color:var(--text-muted);font-size:.86rem}
 .adm .ui-table .tr > span{min-width:0;overflow-wrap:anywhere}
@@ -662,14 +663,28 @@ ADMIN_CSS = """
   .adm .ui-table .sm-only{display:flex;flex-wrap:wrap;gap:.3rem .5rem;align-items:center;flex-basis:100%;
     margin-top:.25rem;color:var(--text-muted);font-size:.86rem;font-weight:400}
 }
-/* Overview: six widgets three a row, then System left, Updates and Activity by day right */
-@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* Overview: six widgets three a row, then System left, Updates and Activity by day right. Three a
+   row gave a tile 10 em at 200% text on a 900-1024 px window, where System's "Gateway" ran out
+   of its tile (audit 71911eba M1); the row is a container (theme .ui-widgets) measured in its own
+   em, and below 39 em (three tiles of 12.5 em and the gaps) each tile takes the row */
+@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}
+  @container (max-width:39em){ .ao .ui-widgets .wdg{grid-column:1 / -1} }}
 .ao .ao-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;align-items:start}
 .ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
 .ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}
 .ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;min-height:22px;padding-top:2px;padding-bottom:2px}
-.ao .ui-row .ctl{overflow-wrap:anywhere;font-size:.95rem}
+/* break-word: a word breaks inside only when wider than the whole control, never because the
+   label took its share ("Not configur/ed", "AUTHENTIK.md."; batch 10, AB7) */
+.ao .ui-row .ctl{overflow-wrap:break-word;font-size:.95rem}
+/* a card narrow in its own text (under 27em: a 378 px card at 14px, never one on a 600 px screen;
+   864 px at 200% text) stacks the label over the control, as a phone does */
+.ao .ui-card{container-type:inline-size}
+@media (min-width:600px){ @container (max-width:27em){
+  .ao .ui-row{grid-template-columns:minmax(0,1fr)} .ao .ui-row .ctl{grid-column:1;grid-row:auto} } }
 .ao .ui-row .lab .muted{font-weight:400;margin-left:.35rem}
+/* the Speed card's labels are page addresses (/history/reports/{rid}/head-to-head): they wrap
+   anywhere, so at 200% text on a phone they never push the page wider than the screen */
+.ao #speed .ui-row .lab{overflow-wrap:anywhere;min-width:0}
 .ao .ui-card .notice{margin:.75rem 0 0}
 .ao .ui-card details{margin:.5rem 0 0}
 .ao .ui-card details > summary:not(.fold-btn){display:flex;align-items:center;gap:.4rem;min-height:44px;
@@ -687,9 +702,24 @@ ADMIN_CSS = """
 .au .ui-table .tr.mem{cursor:pointer}
 .au .ui-table .tr.mem.on{background:var(--orange-tint)}
 .au .ui-table .tr.mem .title .t{font-weight:700}
+/* the email breaks at its <wbr> (after the @, before a dot) when it does not fit, and inside a
+   word only when a piece is wider than the column; the table's overflow-wrap:anywhere (.adm above)
+   broke it "alice@e/xample./test" on a 320 px phone at 200% text (audit 71911eba Z2) */
+.au .ui-table .title .deck{overflow-wrap:break-word}
 .au .ui-table .labs,.au .ui-table .apps{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
 @media (max-width:899.98px){.au .ui-table .md-hide{display:none}}
 @media (min-width:1100px){.au .with-panel .ui-table .md-hide{display:none}}
+/* The lined-up columns from 900 px (11, 10 and 6.5 rem beside the two fluid ones) doubled at
+   200% text and left Member and Apps a few em at 1024-1440 px: "MEMBE/R", "APP/S",
+   "alice@e/xample./test", "non/e" (final polish Z2). The table is a container measured in its
+   own em: below 51 em (the 27.5 em of sized columns, about 4 em of gaps, padding and the ⋮, and
+   19 em for Member and Apps) the 600-899 px layout stays, Status, Archidekt and Apps in the
+   row's second line, whatever the window's width. At 100% the table has 61 em at 900 px. */
+.au .ui-table{container-type:inline-size}
+@media (min-width:900px){ @container (max-width:51em){
+  .au .ui-table .tr{grid-template-columns:var(--cols-md)}
+  .au .ui-table .md-hide{display:none}
+  .au .ui-table .sub{display:flex} } }
 .au .arch .u{font-size:.86rem;color:var(--text-muted)}
 .au .ui-drawer .ui-actions .btn,.au .ui-drawer .ui-actions button{margin:0}
 .au .au-del{border-top:1px solid var(--border-soft);margin-top:.75rem;padding-top:.75rem}
@@ -697,9 +727,25 @@ ADMIN_CSS = """
 .au .ui-drawer .ui-meta code{font-size:.8rem;overflow-wrap:anywhere}
 @media (min-width:1100px){.au .with-panel .ui-table .tr.mem .arch{display:none}}
 /* Metrics: one table, the share bar, a row opens its details in place */
+/* the counted things' table folds by its own width in its em (as the Users table does): below
+   37 em the 600-899 px layout, below 26 em the phone's one-column rows, whatever the window's
+   width, so the 9.5 and 10 rem columns never leave a name 40 px at 600 px with large text. At
+   100% the table has 38 em at 600 px and 62 em at 900 px. */
+.am .ui-table{container-type:inline-size}
+@media (min-width:900px){ @container (max-width:37em){
+  .am .ui-table .tr{grid-template-columns:var(--cols-md)}
+  .am .ui-table .md-hide{display:none}
+  .am .ui-table .sub{display:flex} } }
+@media (min-width:600px){ @container (max-width:26em){
+  .am .ui-table .tr{grid-template-columns:var(--cols-sm);padding:.55rem 8px}
+  .am .ui-table .th{display:none}
+  .am .ui-table .sm-hide{display:none}
+  .am .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%} } }
 .am .ui-table .tr.mrow{cursor:pointer}
 .am .ui-table .tr.mrow:hover{background:var(--surface-2)}
-.am .ui-table .tr.mrow .title .t{display:inline-block;text-decoration:none;color:var(--text);font-weight:700}
+/* the row's toggle is the title's whole line (block): its 44 px finger height then pushes the
+   line under it down instead of lying over it */
+.am .ui-table .tr.mrow .title .t{display:block;text-decoration:none;color:var(--text);font-weight:700}
 .am .am-bar{display:inline-block;width:6rem;max-width:40vw;height:8px;border-radius:4px;
   background:var(--surface-3,var(--surface-2));vertical-align:middle;overflow:hidden}
 .am .am-bar i{display:block;height:100%;background:var(--orange)}
@@ -720,8 +766,9 @@ ADMIN_HEAD = f"<style>{ADMIN_CSS}</style><script src='/static/admin.js' defer></
 
 
 def _nav(active: str) -> str:
-    """The admin pages' own tabs (all six pages): even links in full rows, the current one tinted
-    and marked aria-current, not a second orange button (one orange main button per page)."""
+    """The admin pages' own tabs (all six pages): the site's one switch (theme.hub_switch's
+    .hubseg), the current one marked aria-current, not a second orange button (one orange main
+    button per page). Six parts don't fit a phone: the switch scrolls sideways (static/topbar.js)."""
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
     links += (
         ("/admin/metrics", "Metrics"),
@@ -729,7 +776,7 @@ def _nav(active: str) -> str:
         ("/admin/models", "Card models"),
     )
     return (
-        "<nav class='adm-nav' aria-label='Admin'>"
+        "<nav class='hubseg adm-nav' aria-label='Admin'>"
         + "".join(f"<a href='{href}'{CURRENT if href == active else ''}>{label}</a>" for href, label in links)
         + "</nav>"
     )
@@ -797,10 +844,13 @@ class _Html(str):
 
 
 def _row(label: str, value: Any, *, note: str = "") -> str:
-    """One lined-up row of a panel (``.ui-row``, as on Settings): the label, then the value."""
+    """One lined-up row of a panel (``.ui-row``, as on Settings): the label, then the value. A
+    label that is a page address (the Speed card's /decks/{deck_id}/export) may break after any
+    of its slashes, so a segment moves down whole; the column's overflow-wrap:anywhere is left
+    for a segment wider than the column (final polish AA1: "expor" then "t" at 1280 px)."""
     shown = value if isinstance(value, _Html) else html.escape(str(value))
     extra = f" <span class='muted'>{html.escape(note)}</span>" if note else ""
-    lab = f"<p class='lab'>{html.escape(label)}{extra}</p>"
+    lab = f"<p class='lab'>{html.escape(label).replace('/', '/<wbr>')}{extra}</p>"
     return f"<div class='ui-row'>{lab}<div class='ctl'>{shown}</div></div>"
 
 
@@ -816,10 +866,10 @@ def _spark(values: list[int], *, label: str) -> str:
 
 
 def _mode_name(mode: object) -> str:
-    """An approval mode as the Guide names it, with the word its setting takes: "Semi-auto (semi)"."""
-    from .modes import MODE_NAMES
+    """An approval mode as the Account and Settings pages name it ("Ask me every time")."""
+    from .modes import MODE_LABELS
 
-    return f"{MODE_NAMES.get(str(mode), str(mode))} ({mode})"
+    return MODE_LABELS.get(str(mode), str(mode))
 
 
 def _service_label(status: str) -> _Html:
@@ -889,7 +939,7 @@ def _overview_body(state: Any, now: float | None = None) -> str:
             "user",
             int(d["users"]),
             unit="signed in",
-            detail=f"{d['disabled']} disabled · {d['linked']} linked to Archidekt",
+            detail_html=ui.facts([f"{d['disabled']} disabled", f"{d['linked']} linked to Archidekt"]),
             actions=[ui.button_link("Users", "/admin/users")],
         ),
         ui.widget(
@@ -918,9 +968,18 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         ui.widget(
             "System",
             "box",
-            working,
-            unit=f"of {len(counted)} services working" if counted else "services set up",
-            detail_html=f"{backup_line} · {copies_line}",
+            working if counted else "Gateway only",
+            unit=f"of {len(counted)} services working" if counted else "",
+            detail_html="<span class='ui-dots'>"
+            + "".join(
+                f"<span>{part}</span>"
+                for part in (
+                    *(() if counted else ("Mystic Forge, Forge and member clean-up are not set up",)),
+                    backup_line,
+                    copies_line,
+                )
+            )
+            + "</span>",
             actions=[ui.button_link("System details", "#system")],
             tone="alert" if system_bad else "",
         ),
@@ -936,13 +995,13 @@ def _overview_body(state: Any, now: float | None = None) -> str:
     ]
     # the System panel: every row as today, the same wording
     if not sysd["backups_enabled"]:
-        backup: Any = "off (MTG_BACKUP_DIR not set)"
+        backup: Any = _Html(f"off ({ui.breakable('MTG_BACKUP_DIR')} not set)")
     elif sysd["last_backup_at"]:
         backup = _Html(ui.when(sysd["last_backup_at"], now=now))
     else:
         backup = "none yet"
     if not sysd["backup_copies_enabled"]:
-        copies: Any = "off (MTG_BACKUP_COPY_DIR not set)"
+        copies: Any = _Html(f"off ({ui.breakable('MTG_BACKUP_COPY_DIR')} not set)")
     elif sysd["last_backup_copy_at"]:
         copies = _Html(ui.when(sysd["last_backup_copy_at"], now=now))
     else:
@@ -957,10 +1016,10 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         + _row("Newest backup copy", copies)
         + _row("Newest before-upgrade copy", _before_upgrade_text(sysd.get("before_upgrade"), now=now))
         + _row("Research service (Mystic Forge)", _service_label(sysd["mystic_forge"]))
-        + _row("Simulation engine (Forge)", _service_label(sysd["forge"]))
+        + _row("Test engine (Forge)", _service_label(sysd["forge"]))
         + _row("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"], now=now))
         + _archidekt_stats(sysd.get("archidekt"))
-        # the live settings; each by its name, with the setting's own word
+        # the live settings, each by the name members see
         + _row("Default approval mode", _mode_name(state.decks.live.get("approval_mode_default")))
         + _row("Highest approval mode allowed", _mode_name(state.decks.live.get("approval_mode_max")))
         + (
@@ -990,8 +1049,78 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         "<div class='adm ao'>"
         + _head("Admin: overview", "Members, the last 30 days and the system.", "/admin")
         + ui.widgets(widgets)
-        + f"<div class='ao-cols'>{system}<div>{_updates_card(u, now=now)}{by_day_card}</div></div></div>"
+        + f"<div class='ao-cols'>{system}<div>{_updates_card(u, now=now)}"
+        f"{_speed_card(speed_log.summary(now))}{by_day_card}</div></div></div>"
     )
+
+
+SPEED_ROUTES = 5  # the slowest pages the Speed card lists
+
+
+def _seconds(value: float) -> str:
+    # a non-breaking space: at large text the unit never breaks away from its number
+    return f"{value:.1f}\u00a0s" if value < 60 else f"{value / 60:.1f}\u00a0min"
+
+
+def _speed_why(r: Mapping[str, Any]) -> str:
+    """Why a page was slow, from where its time went (timing.SpeedLog.summary's route row)."""
+    if r["failures"]:
+        n = r["failures"]
+        return f"Archidekt failed or asked to slow down {n} time{'' if n == 1 else 's'}"
+    if r.get("idp", 0.0) >= 0.5 and r["idp"] >= max(r["pacer"], r["archidekt"]):
+        return "mostly asking the identity provider whether the member may still come in"
+    if r["pacer"] >= 0.5 and r["pacer"] >= r["archidekt"]:
+        return "mostly waiting for a turn with Archidekt (the shared pacing)"
+    if r["archidekt"] >= 0.5:
+        return "mostly Archidekt answering slowly"
+    return "the gateway itself"
+
+
+def _speed_card(d: Mapping[str, Any]) -> str:
+    """Admin's "Speed, last 24 h" card (owner decision, 0.7.46): page views, the slow ones, and
+    where their time went (the shared pacer's waits, Archidekt's answers, Archidekt's failures).
+    Pages by their address pattern only: never a member, a deck or a query."""
+    head = (
+        "<section class='ui-card' id='speed' aria-labelledby='speed-h'>"
+        "<h2 id='speed-h'>Speed, last 24\u00a0h</h2>"
+    )
+    since = _dt.datetime.fromtimestamp(d["since"], tz=_dt.UTC).strftime("%d %b %H:%M UTC")
+    foot = (
+        f"<p class='muted small' style='margin:.5rem 0 0'>Since {html.escape(since)}, kept in memory: "
+        "a restart starts it again. A page that drew its frame first counts when its content was there.</p>"
+    )
+    if not d["views"]:
+        return head + "<p class='muted'>No page views yet.</p>" + foot + "</section>"
+    slow = int(d["slow"])
+    rows = (
+        _row(
+            "Page views",
+            f"{d['views']:,}, {slow:,} slower than {SLOW_REQUEST_SECONDS:g}\u00a0s",
+        )
+        + _row(
+            "Where the time went",
+            f"{_seconds(d['pacer'])} waiting for a turn with Archidekt, {_seconds(d['archidekt'])} "
+            f"Archidekt answering, {d['failures']:,} failed Archidekt "
+            f"call{'' if d['failures'] == 1 else 's'}",
+        )
+        + _row(
+            # every page view first asks the identity provider whether the member may still come in,
+            # once its last answer is older than the membership check's cache (membership.py)
+            "Identity provider",
+            f"{_seconds(d.get('idp', 0.0))} asking whether members may still come in",
+        )
+    )
+    listed = [r for r in d["routes"] if r["max"] >= 1.0][:SPEED_ROUTES]
+    for r in listed:
+        rows += _row(
+            r["route"],
+            f"{_seconds(r['p95'])} for 95 in 100 views, at most {_seconds(r['max'])}; "
+            f"{_seconds(r.get('idp', 0.0))} identity provider on average; {_speed_why(r)}",
+            note=f"{r['views']:,} view{'' if r['views'] == 1 else 's'}",
+        )
+    if not listed:
+        rows += "<p class='muted'>No page took a second or more.</p>"
+    return head + rows + foot + "</section>"
 
 
 def _update_state_text(u: dict[str, Any]) -> str:
@@ -1058,7 +1187,7 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
     if u["check"] == "off":
-        state: Any = "off (MTG_UPDATE_CHECK=false)"
+        state: Any = _Html("off (<code>MTG_<wbr>UPDATE_<wbr>CHECK=false</code>)")
     elif u.get("error"):
         state = f"last check failed ({u['error']}), trying again within the hour"
     elif u.get("latest"):
@@ -1083,14 +1212,17 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     steps = (
         f"<details id='how-to-update'><summary class='fold-btn'>How to update</summary>"
         "<p>The gateway never updates itself. An update is a fresh install on top of your data "
-        "(docs/UPGRADING.md has every step): take the newest stack file and the newest example "
+        "(<code>docs/<wbr>UPGRADING.md</code> has every step): take the newest stack file and the newest "
+        "example "
         "variables file, copy your own values into the example, and deploy. Your data, backups and "
         "Docker secrets stay as they are. There is no backup to take first: before the new version "
         "upgrades the database, the gateway saves a copy of it in the before-upgrade folder, inside "
         "your backup folder.</p>"
         "<p><strong>Portainer (Swarm stack)</strong>: copy your values into the newest "
-        f"<code>deploy/stack.env.example</code> (with <code>MTG_TAG</code> at <code>{tag}</code>, or "
-        "<code>latest</code>), and create any secret docs/DEPLOY.md step 4 lists that you don't have "
+        "<code>deploy/<wbr>stack.<wbr>env.<wbr>example</code> "
+        f"(with <code>MTG_TAG</code> at <code>{tag}</code>, or "
+        "<code>latest</code>), and create any secret <code>docs/<wbr>DEPLOY.md</code> step 4 lists that you "
+        "don't have "
         "yet. Then Stacks, your stack, Editor: replace the text with the newest "
         "<code>deploy/portainer-stack.yml</code>, unchanged (with the Repository build method, the "
         "update brings it), and the environment variables (Advanced mode) with your new file. Then "
@@ -1099,13 +1231,17 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
         "sure?”, make sure <strong>Re-pull image and redeploy</strong> is on, then click "
         "<strong>Update</strong>.</p>"
         "<p><strong>Swarm without Portainer</strong>: <code>git pull</code> in your copy of the "
-        "repository, copy your values into a new copy of <code>deploy/stack.env.example</code>, "
-        "create any missing secret (docs/DEPLOY.md step 4), load the variables into a new shell as "
-        "in docs/DEPLOY.md, then run <code>docker stack deploy -c deploy/portainer-stack.yml "
+        "repository, copy your values into a new copy of "
+        "<code>deploy/<wbr>stack.<wbr>env.<wbr>example</code>, "
+        "create any missing secret (<code>docs/<wbr>DEPLOY.md</code> step 4), load the variables into a new "
+        "shell as in <code>docs/<wbr>DEPLOY.md</code>, then run "
+        "<code>docker stack deploy -c deploy/portainer-stack.yml "
         "mtg</code> again (your stack's name in place of <code>mtg</code>).</p>"
         "<p><strong>docker compose</strong>: in the folder with <code>docker-compose.yml</code>, get "
         "the newest <code>docker-compose.yml</code>, <code>make-secrets.sh</code> and "
-        "<code>.env.example</code> (docs/UPGRADING.md has the commands), copy your values from "
+        "<code>.env.<wbr>example</code> (<code>docs/<wbr>UPGRADING.md</code> has the commands), "
+        "copy your values "
+        "from "
         f"<code>.env</code> into the example and save it as <code>.env</code> (<code>MTG_TAG={tag}</code> "
         "or <code>latest</code>), run <code>./make-secrets.sh</code>, then "
         "<code>docker compose pull</code> and <code>docker compose up -d</code>.</p>"
@@ -1131,14 +1267,15 @@ def _archidekt_stats(a: dict[str, Any] | None) -> str:
     )
     counts = (
         f"{a['requests']} sent, {a['cache_hits']} answered from cache, {a['retries']} retried, "
-        f"{a['rate_limited']} slowed down by Archidekt"
+        f"{a['rate_limited']} slowed down by Archidekt, {a.get('shared', 0)} shared with the same read "
+        "under way"
     )
     return _row("Archidekt request limits", limits) + _row("Archidekt requests since start", counts)
 
 
 def _cleanup_text(c: dict[str, Any], *, now: float | None = None) -> str:
     """The removed-member clean-up's state in one line that ends with what to do next
-    (idp_sweep.AuthentikSweep.status). docs/IDP-AUTHENTIK.md section 12 explains each one."""
+    (idp_sweep.AuthentikSweep.status). docs/IDP-AUTHENTIK.md, section 12, explains each one."""
     st = c.get("state")
     setup = idp_sweep.SETUP
     if st == "off":
@@ -1333,7 +1470,7 @@ def _users_body(
             actions=[ui.button_link("Not linked", _href(path, chip="notlinked"))],
         ),
         ui.widget(
-            "Connected apps",
+            "Assistants",
             "layers",
             connections,
             unit="connections",
@@ -1394,7 +1531,7 @@ def _users_body(
     tools = ui.toolbar(
         path,
         search_label="Search members",
-        placeholder="Search name, email or username",
+        placeholder="Search",
         q=q,
         filters=[
             ui.filter_select("app", "App", app_opts, app),
@@ -1412,8 +1549,10 @@ def _users_body(
         sub = u["sub"]
         status = _status_labels(u, admin_sub, is_admin=sub in admins)
         when = ui.when(_seen_at(u), now=now)
+        # the email may break after its @ and before a dot of its domain when it does not fit
+        # its column (a 320 px phone at 200% text: audit 71911eba Z2), never inside a word
         email = (
-            f"<span class='deck'>{html.escape(u['email'])}</span>"
+            f"<span class='deck'>{_email_html(u['email'])}</span>"
             if u.get("email") and u.get("preferred_username")
             else ""
         )
@@ -1462,7 +1601,8 @@ def _users_body(
     else:
         table = (
             "<div class='ui-card'><p>Nobody matches these filters. "
-            f"<a href='{path}'>Show everyone</a></p></div>"
+            + ui.cap_link("Show everyone", path)
+            + "</p></div>"
         )
     newer = (
         _href(path, chip=chip, app=app, seen=seen, q=q, offset=max(0, offset - PER_PAGE))
@@ -1507,6 +1647,11 @@ def _users_body(
     )
 
 
+def _email_html(email: str) -> str:
+    """The address with a break opportunity after its @ and each dot (ui.breakable)."""
+    return ui.breakable(email)
+
+
 def _user_panel(
     u: Mapping[str, Any],
     admin_sub: str,
@@ -1528,7 +1673,8 @@ def _user_panel(
     apps = (
         "".join(
             f"<div>{ui.app_chip(c['name'], unnamed=True, client_id=c['client_id'])} "
-            f"<code>{html.escape(c['client_id'])}</code></div>"
+            f"<code>{html.escape(c['client_id'])}</code>"
+            f"<div class='muted small'>{ui.client_brand_note(c['client_id'])}</div></div>"
             for c in u["clients"]
         )
         or "none"
@@ -1541,7 +1687,7 @@ def _user_panel(
         ("First sign-in", ui.when(u["first_login_at"], now=now)),
         ("Last seen", ui.when(_seen_at(u), now=now)),
         ("Archidekt", html.escape(u["archidekt_username"] or "not linked")),
-        ("Connected apps", apps),
+        ("Assistants", apps),
         ("Active tokens", str(u["active_tokens"])),
         ("Browser sessions", str(u["browser_sessions"])),
     ]
@@ -1562,7 +1708,11 @@ def _user_panel(
     if u["archidekt_username"]:
         buttons += "<button name='action' value='unlink' class='btn-plain'>Unlink Archidekt</button>"
     buttons += ui.button_link("Activity", f"/admin/activity?sub={quote(sub, safe='')}")
-    actions = f"<form method='post' action='{action}' class='ui-actions'>{csrf_in}{buttons}</form>"
+    # the name and "this is you" for the scripts' confirm of Revoke and Unlink (static/admin.js)
+    actions = (
+        f"<form method='post' action='{action}' class='ui-actions' data-name='{html.escape(name)}'"
+        f"{' data-you' if you else ''}>{csrf_in}{buttons}</form>"
+    )
     boxes = ""
     delete = ""
     if not you:
@@ -1577,7 +1727,7 @@ def _user_panel(
             "account again. Their tokens and sessions are revoked now. The account at the identity provider "
             "is not changed.</p></form>",
             actions=[
-                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Keep it", cancel=True),
                 ui.box_button("Disable account", kind="danger-solid", form="disf"),
             ],
             open=box == "disable" and not u["disabled"],
@@ -1595,7 +1745,7 @@ def _user_panel(
             "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
             "Delete everything the gateway keeps about this person</label></form>",
             actions=[
-                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Keep it", cancel=True),
                 ui.box_button("Delete data", kind="danger-solid", form="delf", attrs="data-needs-tick"),
             ],
             open=box == "delete",
@@ -1726,7 +1876,7 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
     tools = ui.toolbar(
         path,
         search_label="Search names",
-        placeholder="Search name",
+        placeholder="Search name|Name",
         q=q,
         filters=[
             ui.filter_select("days", "Period", [(str(n), f"Last {n} days") for n in METRIC_DAYS], str(days))
@@ -1799,7 +1949,8 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
     else:
         table = (
             "<div class='ui-card'><p>Nothing counted matches these filters. "
-            f"<a href='{path}'>Show everything</a></p></div>"
+            + ui.cap_link("Show everything", path)
+            + "</p></div>"
         )
     newer = (
         _href(path, kind=kind, days=days if days != DAYS else "", q=q, offset=max(0, offset - PER_PAGE))
@@ -1945,7 +2096,7 @@ def _models_body(
     tools = ui.toolbar(
         path,
         search_label="Search card models",
-        placeholder="Search card name",
+        placeholder="Name",
         q=q,
         filters=[ui.filter_select("member", "Member", member_opts, member)],
         keep={"changed": changed},
@@ -1998,7 +2149,7 @@ def _models_body(
             + "</div>"
         )
     else:
-        table = f"<div class='ui-card'><p>No card models match. <a href='{path}'>Show all</a></p></div>"
+        table = f"<div class='ui-card'><p>No card models match. {ui.cap_link('Show all', path)}</p></div>"
     newer = (
         _href(path, q=q, member=member, changed=changed, offset=max(0, offset - PER_PAGE))
         if offset > 0
@@ -2026,10 +2177,10 @@ def _models_body(
                 f"<input type='hidden' name='added_by' value='{html.escape(remove_by)}'>"
                 f"<input type='hidden' name='back' value='{html.escape(list_href)}'>"
                 f"<p>“{html.escape(adder_name)}” added it. "
-                f"The simulator stops using it in {html.escape(adder_name)}'s "
-                "simulations. This can't be undone.</p></form>",
+                f"{html.escape(adder_name)}'s solo tests stop using it. "
+                "This can't be undone.</p></form>",
                 actions=[
-                    ui.box_button("Cancel", cancel=True),
+                    ui.box_button("Keep it", cancel=True),
                     ui.box_button(
                         "Remove model",
                         kind="danger-solid",

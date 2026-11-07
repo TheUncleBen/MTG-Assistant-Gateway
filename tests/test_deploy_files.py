@@ -102,17 +102,24 @@ ENV_FILES = ["deploy/stack.env.example", "deploy/compose/.env.example"]
 STACK_FILES = ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"]
 
 
+# The one text setting with a stack variable: commented out in the example files.
+NAME_VAR = "MTG_SERVER_NAME"
+
+
 def _switches() -> list[str]:
     from mtg_gateway.config import MANAGED_SETTINGS
 
-    return [s.env for s in MANAGED_SETTINGS.values() if s.env]
+    return [s.env for s in MANAGED_SETTINGS.values() if s.env and s.env != NAME_VAR]
 
 
 def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
-    """The owner, 2026-10-25: every feature is on by default; an env variable only turns one off."""
+    """The owner, 2026-10-25: every feature is on by default; an env variable only turns one off. The owner,
+    2026-10-28: MTG_SERVER_NAME is back too, for the Gateway name, and the three sign-in times
+    that had a stack variable keep it (their Settings page rows, 0.7.46)."""
     from mtg_gateway.config import MANAGED_SETTINGS, Settings
 
-    on = {s.env: s.default for s in MANAGED_SETTINGS.values() if s.env}
+    assert MANAGED_SETTINGS["server_name"].env == NAME_VAR
+    on = {s.env: s.default for s in MANAGED_SETTINGS.values() if s.env and s.env != NAME_VAR}
     assert set(on) == {
         "MTG_WATCHLISTS_ENABLED",
         "MTG_ARCHIDEKT_BACKUPS",
@@ -120,8 +127,18 @@ def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
         "MTG_SCAN_ART_ENABLED",
         "MTG_UPDATE_CHECK",
         "MTG_DECK_SYNC_MINUTES",
+        "MTG_ACCESS_TOKEN_TTL",
+        "MTG_REFRESH_TOKEN_TTL",
+        "MTG_BROWSER_SESSION_TTL",
     }
-    assert all(v is True for k, v in on.items() if k != "MTG_DECK_SYNC_MINUTES")
+    times = {
+        "MTG_DECK_SYNC_MINUTES",
+        "MTG_ACCESS_TOKEN_TTL",
+        "MTG_REFRESH_TOKEN_TTL",
+        "MTG_BROWSER_SESSION_TTL",
+    }
+    assert all(v is True for k, v in on.items() if k not in times)
+    assert all(on[k] > 0 for k in times)
     assert on["MTG_DECK_SYNC_MINUTES"] > 0
     assert Settings.__dataclass_fields__["writes_enabled"].default is True
 
@@ -133,6 +150,25 @@ def test_example_env_files_leave_each_switch_empty_so_the_page_can_change_it(nam
     for var in _switches():
         assert env.get(var) == "", var
     assert env["MTG_WRITES_ENABLED"] == "true"
+
+
+@pytest.mark.parametrize("name", ENV_FILES)
+def test_example_env_files_have_the_gateway_name_empty_with_its_reason(name: str):
+    """The owner, 2026-10-28: MTG_SERVER_NAME is in each example under a one-line note, and the Settings
+    page keeps the Gateway name until someone sets it in the stack. Empty like every other optional
+    line (0.7.46 review): a name typed after a commented-out ``#MTG_SERVER_NAME=`` in Portainer's
+    Advanced mode was silently ignored."""
+    lines = (ROOT / name).read_text().splitlines()
+    at = lines.index(f"{NAME_VAR}=")
+    assert "Gateway name" in lines[at - 1] and lines[at - 1].startswith("# ")
+    assert f"#{NAME_VAR}=" not in lines
+    assert _env(ROOT / name)[NAME_VAR] == ""
+
+
+@pytest.mark.parametrize("name", STACK_FILES)
+def test_stack_files_pass_the_gateway_name_empty(name: str):
+    text = (ROOT / name).read_text()
+    assert re.findall(rf"^\s*{NAME_VAR}:.*$", text, re.M) == [f"      {NAME_VAR}: ${{{NAME_VAR}:-}}"]
 
 
 @pytest.mark.parametrize("name", STACK_FILES)
@@ -209,10 +245,10 @@ def test_no_removed_variable_is_left_in_the_deploy_files(name: str):
     """Settings that moved to the Settings page, and values the stack fixes, are gone (2026-10-25)."""
     text = (ROOT / name).read_text()
     for gone in (
-        "MTG_SERVER_NAME", "MTG_CHATGPT_NAME", "MTG_LOG_LEVEL", "MTG_APPROVAL_MODE", "MTG_FORGE_GAMES",
+        "MTG_CHATGPT_NAME", "MTG_LOG_LEVEL", "MTG_APPROVAL_MODE", "MTG_FORGE_GAMES",
         "MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG_AUTHENTIK_API_URL", "MTG_ALLOWED_HOSTS", "MTG_IMAGE",
         "MF_NODE", "MF_TAG", "FORGE_TAG", "FORGE_XMX", "FORGE_MAX_PARALLEL", "COMPOSE_PROFILES",
-        "MTG_PLUGIN_DIR", "MTG_APP_DIR", "MTG_SCAN_GLARE",
+        "MTG_PLUGIN_DIR", "MTG_APP_DIR", "MTG_SCAN_GLARE", "MTG_REAUTH_INTERVAL",
     ):  # fmt: skip
         assert gone not in text, gone
 
@@ -274,3 +310,84 @@ def test_the_release_manifest_check_finds_the_hook_and_never_passes_on_nothing(t
     assert r.returncode == 1 and "PushTestHooks" in r.stderr
     # another flavor's manifests are not this build's
     assert subprocess.run(["bash", str(check), str(build), "applinks"], capture_output=True).returncode == 1
+
+
+# Values the 0.7.45 example files set for the operator that are empty from 0.7.46 (a value there
+# locks a Settings row, or means something else now). Copying them over from an old file is the
+# trap the update steps warn about (0.7.46 review).
+EMPTIED_IN_0746 = {
+    "MTG_ACCESS_TOKEN_TTL": "3600",
+    "MTG_REFRESH_TOKEN_TTL": "2592000",
+    "MTG_BROWSER_SESSION_TTL": "7200",
+}
+
+
+@pytest.mark.parametrize("name", ENV_FILES)
+def test_every_value_the_older_examples_set_and_these_leave_empty_is_named_in_the_update_steps(name: str):
+    env = _env(ROOT / name)
+    upgrading = (ROOT / "docs" / "UPGRADING.md").read_text()
+    step_one = upgrading.split("1. **Your values.**", 1)[1].split("2. **Secrets.**", 1)[0]
+    bullet = upgrading.split("- **0.7.45 or older:** the older example files", 1)[1].split("\n- **", 1)[0]
+    for var, old in EMPTIED_IN_0746.items():
+        assert env[var] == "", var
+        assert f"`{var}={old}`" in step_one, var
+        assert f"`{var}={old}`" in bullet, var
+
+
+def test_the_stacks_pass_no_variable_that_nothing_reads() -> None:
+    """DISABLE_IPV6 came from another project's image convention: the gateway, its Mystic Forge
+    image and Forge never read it, so the Swarm stack set it for nothing and Compose didn't at all."""
+    for name in ("deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"):
+        assert "DISABLE_IPV6" not in (ROOT / name).read_text(), name
+    code = list((ROOT / "src").rglob("*.py")) + [p for p in (ROOT / "docker").rglob("*") if p.is_file()]
+    assert not any("DISABLE_IPV6" in p.read_text(errors="ignore") for p in code)
+
+
+def test_the_push_test_gives_up_on_an_emulator_that_never_comes_back(tmp_path: Path):
+    """push-test.sh's boot() waits for the emulator a bounded time and then fails, so a reboot the
+    emulator never returns from is one FAIL line instead of the CI step hanging until its 30 minutes
+    run out (CI on a0bc0e23 hung after "message after an update", at the reboot)."""
+    import re
+    import subprocess
+    import time
+
+    script = (ROOT / "android/scripts/push-test.sh").read_text(encoding="utf-8")
+    boot = re.search(r"(?ms)^boot\(\) \{\n.*?^\}\n", script)
+    helpers = re.search(r"(?m)^until_ok\(\) .*$", script)
+    assert boot is not None and helpers is not None
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "adb").write_text('#!/usr/bin/env bash\n[ "$1" = wait-for-device ] && exec sleep 600\nexit 0\n')
+    (fake / "adb").chmod(0o755)
+    body = f'{helpers.group(0)}\n{boot.group(0)}\nPORT=1\nboot; echo "boot=$?"\n'
+    started = time.monotonic()
+    r = subprocess.run(
+        ["bash", "-c", body],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={"PATH": f"{fake}:/usr/bin:/bin", "PUSH_TEST_BOOT_WAIT": "2"},
+    )
+    assert "boot=1" in r.stdout, (r.stdout, r.stderr)
+    assert time.monotonic() - started < 30
+
+
+def test_every_variable_the_gateway_reads_is_documented() -> None:
+    """0.7.46 sweep B-10: each variable config.py reads is either passed by both stack files (and
+    so listed in their examples, above) or, when only a test stack sets it, named in both example
+    files and in DEPLOY.md, which say what it is for."""
+    src = (ROOT / "src" / "mtg_gateway" / "config.py").read_text(encoding="utf-8")
+    read = set(re.findall(r'_env\w*\(\s*"([A-Z0-9_]+)"', src))
+    assert "MTG_PUBLIC_URL" in read and len(read) > 20  # the pattern still finds them
+    stacks = [(ROOT / f).read_text(encoding="utf-8") for f in STACK_FILES]
+    docs = [(ROOT / f).read_text(encoding="utf-8") for f in (*ENV_FILES, "docs/DEPLOY.md")]
+
+    def named(name: str, text: str) -> bool:
+        return bool(re.search(rf"\b{name}\b", text))
+
+    missing = [
+        name
+        for name in sorted(read)
+        if not all(named(name, t) for t in stacks) and not all(named(name, t) for t in docs)
+    ]
+    assert missing == []

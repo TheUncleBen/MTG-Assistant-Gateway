@@ -13,6 +13,7 @@ import pytest
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import expect
 
 pytest.importorskip("playwright")
 
@@ -111,8 +112,9 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         )
         _shot(page, f"history-{width}-{scheme}")
         assert hist["scrollWidth"] <= hist["innerWidth"], hist
-        # deck 42's 15 snapshots, its restore and the two reports, under day rows
-        assert hist["rows"] == 18 and hist["days"] >= 2, hist
+        # deck 42's 15 snapshots, its 15 applied changes (the restore among them) and the two tests
+        # (owner decision C7: History is the timeline): a page of 25, under day rows
+        assert hist["rows"] == 25 and hist["days"] >= 2, hist
         assert hist["selectArrow"] == "none" and 0 < hist["selectWidth"] <= hist["innerWidth"]
         assert hist["trendBorder"] == "solid", "trend cards are styled"
         # a snapshot's Details: the side panel on a wide screen, its own page on a phone, with
@@ -193,7 +195,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
         assert page.locator(".forge[data-forge-live]").count() == 1
         assert "updates by itself" in page.locator(".forge").inner_text()
-        assert page.locator("#rep-status").inner_text().startswith("Forge going")  # the overall status
+        assert page.locator("#rep-status").inner_text().startswith("Forge running")  # the overall status
         page.evaluate("window.__same_page = true")  # gone if the page reloads
         # a poll that brings nothing new leaves the live card's nodes untouched, so
         # screen readers are not told the whole card again every 5 seconds
@@ -201,9 +203,16 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
             "() => { const els = [...document.querySelectorAll('.forge > *, #rep-status > *')];"
             " els.forEach(n => { n.__kept = true; }); window.__nodes = els.length; }"
         )
+        # the answer is read and applied once forge-live.js schedules its next look (a 5 s timer
+        # it sets only then); fetch is not on the page clock, so that is waited on, not the time
+        page.evaluate(
+            "() => { window.__rescheduled = false; const st = window.setTimeout;"
+            " window.setTimeout = function (f, ms) { if (ms === 5000) window.__rescheduled = true;"
+            " return st.apply(this, arguments); }; }"
+        )
         with page.expect_response(lambda r: r.url.endswith("/api/v1/reports/rep_forge/forge")):
             page.clock.run_for(6000)
-        time.sleep(0.5)  # the answer is read and applied (fetch is not on the page clock)
+        page.wait_for_function("() => window.__rescheduled === true")
         kept = page.evaluate(
             "() => [...document.querySelectorAll('.forge > *, #rep-status > *')].filter(n => n.__kept).length"
         )
@@ -479,6 +488,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/reports", wait_until="networkidle")
+        fold = page.locator("label.glance-lbl")
+        if fold.is_visible():  # a phone: the tiles sit behind one line until it is tapped
+            fold.click()
+            page.locator(".wdg .go .btn").first.wait_for(state="visible")
         if shots:
             page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}.png", full_page=True)
         state = page.evaluate(
@@ -633,15 +646,15 @@ def test_saved_descriptions_and_remove_fit_and_read(
         assert "Played with their effect" in coverage and "Known:" in coverage
         # Remove asks first (2026-10-21, POPUP-INVENTORY): the red outline opens a box whose solid
         # red button removes
-        page.get_by_role("button", name="Remove the saved description of Sol Ring").click()
+        page.get_by_role("button", name="Remove the card model of Sol Ring").click()
         box = page.locator("#rm-model-sol-ring")
         box.wait_for(state="visible")
-        assert "Remove the saved description of “Sol Ring”?" in box.inner_text()
+        assert "Remove the card model of “Sol Ring”?" in box.inner_text()
         assert any(k[1] == "sol ring" for k in store.rows)  # nothing removed yet
         box.locator("button.danger").click()
         page.wait_for_load_state("networkidle")
         assert "models=removed" in page.url and not any(k[1] == "sol ring" for k in store.rows)
-        assert "The saved description was removed." in page.locator("main").inner_text()
+        assert "The card model was removed." in page.locator("main").inner_text()
         assert page.locator(".report .kept button").count() == 0
         assert not errors, errors
         browser.close()
@@ -771,7 +784,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         page.locator("#forge-more button").click()
         page.wait_for_load_state("networkidle")
         assert page.url.endswith("/history/reports/rep_more")
-        assert len(fake.started) == 1 and fake.started[0]["games"] == 4
+        assert len(fake.started) == 1 and fake.started[0]["games"] == 5  # the games-per-report default
         assert [d.get("precon") for d in fake.started[0]["decks"][1:]] == seats[1:]
         assert page.locator("#forge-more button").count() == 0  # none while the games play
         # a refusal, shown from its code
@@ -787,7 +800,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         assert h.post("/history/reports/rep_more/forge/more", data={}).status_code == 403
         csrf = h.get("/history/reports/rep_more").text.split("name='csrf' value='", 1)[1].split("'", 1)[0]
         ended = h.post("/history/reports/rep_more/forge/more", data={"csrf": csrf})
-        assert ended.status_code == 303 and ended.headers["location"].endswith("?more=ended")
+        assert ended.status_code == 303 and ended.headers["location"].endswith("?more=forge_running")
         assert h.post("/history/reports/nope/forge/more", data={"csrf": csrf}).status_code == 404
 
 
@@ -836,6 +849,6 @@ def test_each_compare_row_has_a_menu_button_beside_the_card(server: Server, widt
         assert name in menu.inner_text()
         assert "Copy name" in [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
         page.keyboard.press("Escape")
-        page.wait_for_timeout(100)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
         assert page.locator(".ctxmenu").count() == 0
         browser.close()

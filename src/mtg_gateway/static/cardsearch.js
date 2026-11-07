@@ -130,6 +130,7 @@
     if (!badge) return;
     var n = chosenCount(p);
     badge.textContent = n ? String(n) : "";
+    $$(".sp-clear", form).forEach(function (c) { c.hidden = !n; });  // nothing to clear: no button (C4)
     var show = $(".sp-show", form);
     if (show) show.textContent = countEl && /\d/.test(countEl.textContent) ? "Show " + countEl.textContent : "Show cards";
   }
@@ -180,7 +181,10 @@
     var addr = new URLSearchParams(qs);
     addr.delete("view");
     addr = addr.toString();
-    try { history.replaceState(null, "", "/cards" + (addr ? "?" + addr : "")); } catch (e) { /* a sandboxed frame */ }
+    // through the panel (static/searchpanel.js address): the entry keeps its state, the sheet's
+    // while it is open (audit N1: a null state wiped the sheet's entry)
+    var addrUrl = "/cards" + (addr ? "?" + addr : "");
+    if (Panel && Panel.address) Panel.address(addrUrl); else try { history.replaceState(history.state, "", addrUrl); } catch (e) { /* a sandboxed frame */ }
     if (ctrl) ctrl.abort();
     ctrl = window.AbortController ? new AbortController() : null;
     stopMore();
@@ -475,7 +479,9 @@
       else if (e.key === "Escape") { if (!list.hidden) { e.stopPropagation(); close(); } }
       else if (e.key === "Backspace" && !box.value) { var last = $(".chips li:last-child", pk); if (last) { last.remove(); run(true); } }
     });
-    box.addEventListener("blur", function () { setTimeout(function () { if (!pk.contains(document.activeElement)) close(); }, 150); });
+    // the list goes when the focus leaves the picker, from the box or from a chip's button: left
+    // open behind the focus it swallowed the Escape meant for the Filters sheet (audit C3)
+    pk.addEventListener("focusout", function () { setTimeout(function () { if (!pk.contains(document.activeElement)) close(); }, 150); });
     list.addEventListener("mousedown", function (e) { e.preventDefault(); });
     list.addEventListener("click", function (e) { var li = e.target.closest("li.opt"); if (li) pick(+li.getAttribute("data-i")); });
     pk.addEventListener("click", function (e) {
@@ -516,14 +522,7 @@
       });
       acts.push(add);
     }
-    var scry = node.getAttribute("data-scry");
-    if (scry) {
-      var a = el("a", "btn ext");
-      a.href = scry; a.target = "_blank"; a.rel = "noreferrer noopener";
-      a.appendChild(icon("external"));
-      a.appendChild(document.createTextNode(" Scryfall"));
-      acts.push(a);
-    }
+    // Scryfall is the viewer's own pill, with EDHREC and TCGplayer (cardview.js reads data-scry)
     return acts;
   }
   /* The rules text (every face), power and toughness, flavour, price and legality are read when a
@@ -612,6 +611,7 @@
     var l2 = el("label", null, "Copies"); l2.htmlFor = "ad-qty";
     qtyIn = el("input"); qtyIn.id = "ad-qty"; qtyIn.name = "quantity"; qtyIn.type = "number";
     qtyIn.min = "1"; qtyIn.max = "99"; qtyIn.step = "1"; qtyIn.value = "1"; qtyIn.inputMode = "numeric";
+    qtyIn.autocomplete = "off";
     f2.appendChild(l2); f2.appendChild(qtyIn);
     var f3 = el("div", "field");
     var l3 = el("label", null, "Category"); l3.htmlFor = "ad-cat";
@@ -730,14 +730,20 @@
     lastFocus = document.activeElement;
     sheet.classList.add("open");
     document.documentElement.classList.add("cardview-open");
+    // the open sheet is a layer (static/layers.js): on a phone Back closes it, not the page
+    if (!sheetLayer && window.MtgLayers) sheetLayer = window.MtgLayers.open({ name: "addsheet", close: function () { closeSheet(true); } });
     loadDecks();
     if (window.MtgSelect) window.MtgSelect.enhance(sheet);
     setTimeout(function () { var first = $(".msel-btn", sheet) || deckSel; first.focus(); }, 0);
   }
-  function closeSheet() {
+  var sheetLayer = null;
+  function closeSheet(fromBack) {
     if (!sheet) return;
     sheet.classList.remove("open");
     document.documentElement.classList.remove("cardview-open");
+    var l = sheetLayer;
+    sheetLayer = null;
+    if (l && !fromBack && window.MtgLayers) window.MtgLayers.release(l);
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
   // a category whose rows sit outside the deck (Sideboard, Considering...) puts the card in the
@@ -786,19 +792,21 @@
         return;
       }
       if (d.ok && d.needs_confirm) {
-        // the hand-edit rule asks first; No rejects the proposal made for the question
+        // the hand-edit rule asks first, in the pop-up box every risky confirm uses (audit F-7:
+        // Save anyway focused in the sheet); Keep it, or closing the box, rejects the proposal
+        // made for the question
         busy(false);
-        setMsg(d.why + " Save anyway?", false);
-        var yes = el("button", "btn-primary", "Save anyway"); yes.type = "button";
-        var no = el("button", "", "No"); no.type = "button";
-        msg.appendChild(document.createTextNode(" "));
-        msg.appendChild(yes); msg.appendChild(document.createTextNode(" ")); msg.appendChild(no);
-        yes.addEventListener("click", function () { save({ proposal_id: d.proposal_id, version: d.version }); });
-        no.addEventListener("click", function () {
-          api("POST", "/api/v1/proposals/" + enc(d.proposal_id) + "/reject", {}).catch(function () {});
-          setMsg("Nothing was changed.");
+        setMsg("");
+        var answered = false;
+        window.MtgBox.confirm({
+          title: "Save anyway?", text: d.why, ok: "Save anyway", danger: true, cancel: "Keep it", focus: "cancel",
+          onOk: function () { answered = true; save({ proposal_id: d.proposal_id, version: d.version }); },
+          onClose: function () {
+            if (answered) return;
+            api("POST", "/api/v1/proposals/" + enc(d.proposal_id) + "/reject", {}).catch(function () {});
+            setMsg("Nothing was changed.");
+          }
         });
-        yes.focus();
         return;
       }
       if (d.ok && d.status === 202 && d.proposal_id) {
@@ -819,10 +827,16 @@
   // goes through the shared static/cardmenu.js (a printing search sends the shown printing), as
   // do the menu and its toast with Undo.
   var norm = Menu.norm;
-  function setWatched(name, on) {
+  // what: {name, set_code, collector_number}; a printing's own button (a printing search) follows
+  // that printing only
+  function setWatched(what, on) {
     $$(".wbtn[data-watch]", results).forEach(function (b) {
       var n = b.getAttribute("data-watch");
-      if (norm(n) === norm(name)) Menu.drawButton(b, n, on);
+      if (norm(n) !== norm(what.name)) return;
+      var code = b.getAttribute("data-set-code"), num = b.getAttribute("data-number");
+      if (code && num && !(what.set_code && String(what.set_code).toLowerCase() === code.toLowerCase() &&
+        String(what.collector_number) === num)) return;
+      Menu.drawButton(b, n, on);
     });
   }
   function isWatched(name) {
@@ -830,7 +844,7 @@
   }
   // what: {name, set_code, collector_number, finish}; resolves with the watch, rejects on a refusal
   function watch(what, btn) {
-    return Menu.watch(what, { btn: btn, was: isWatched(what.name), onState: function (on) { setWatched(what.name, on); } });
+    return Menu.watch(what, { btn: btn, was: btn ? btn.classList.contains("on") : isWatched(what.name), onState: function (on) { setWatched(what, on); } });
   }
   function watchOf(btn) {
     var p = pinOf(btn) || {};
@@ -864,7 +878,7 @@
         onWatch: function () { watch(watchOf(wbtn), wbtn).catch(function () {}); },
         onArt: function () {
           Menu.artVariants(pic.getAttribute("data-card") || "", {
-            returnFocus: pic, onState: function (on) { setWatched(name, on); }, was: function () { return isWatched(name); }
+            returnFocus: pic, onState: function (on) { setWatched({ name: name }, on); }, was: function () { return isWatched(name); }
           });
         }
       } : null,

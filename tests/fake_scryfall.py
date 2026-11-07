@@ -87,6 +87,10 @@ def _archidekt_cards() -> dict[str, dict[str, Any]]:
     return out
 
 
+# Layouts Scryfall's search counts as extras (left out unless include_extras=true).
+EXTRA_LAYOUTS = ("token", "double_faced_token", "emblem", "art_series", "planar", "scheme", "vanguard")
+
+
 class FakeScryfall:
     def __init__(self) -> None:
         self.cards: list[dict[str, Any]] = []
@@ -158,6 +162,13 @@ class FakeScryfall:
                 "digital": False,
             },
         ]
+        # Scryfall's bulk data (scan/bulk.py): the index's entries (None answers 404, so a gateway
+        # under test downloads nothing unless a test gives it some), the files by URL path, and the
+        # requests for them, kept apart from ``requests`` so the counts other tests make stay as
+        # they are.
+        self.bulk_index: list[dict[str, Any]] | None = None
+        self.bulk_files: dict[str, bytes] = {}
+        self.bulk_requests: list[str] = []
         self.catalogs: dict[str, list[str]] = {
             "card-types": ["Artifact", "Creature", "Instant", "Land", "Sorcery"],
             "supertypes": ["Basic", "Legendary"],
@@ -183,7 +194,7 @@ class FakeScryfall:
         return None
 
     def by_print(self, set_code: str, number: str) -> dict[str, Any] | None:
-        for c in self.cards:
+        for c in self.cards + self.extra_cards:
             if c["set"] == set_code.lower() and c["collector_number"].lower() == number.lower():
                 return c
         return None
@@ -265,10 +276,25 @@ class FakeScryfall:
         ``next_page`` (this same search, ``page`` one higher)."""
         self.print_searches.append(dict(q))
         terms = q.get("q", "").split()
+        # several cards' printings at once: "oracleid:a or oracleid:b" (prices.py, cheapest printing)
+        wanted: set[str] = set()
+        while len(terms) >= 3 and terms[1] == "or" and terms[0].startswith("oracleid:"):
+            wanted.add(terms[0].split(":", 1)[1])
+            terms = terms[2:]
         m2 = re.fullmatch(r"oracleid:([0-9a-f-]+)", terms[0] if terms else "")
         if not m2:
             return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
-        found = [c for c in self.cards + self.extra_cards if _oracle(c) == m2.group(1)]
+        wanted.add(m2.group(1))
+        found = [c for c in self.cards + self.extra_cards if _oracle(c) in wanted]
+        if self.prices:  # today's prices a test set, as /cards/collection answers them
+            found = [
+                {**c, "prices": {**(c.get("prices") or {}), **self.prices[c["id"]]}}
+                if c["id"] in self.prices
+                else c
+                for c in found
+            ]
+        if q.get("include_extras") != "true":  # Scryfall leaves tokens, emblems and the like out
+            found = [c for c in found if c.get("layout") not in EXTRA_LAYOUTS]
         for t in terms[1:]:
             key, _, value = t.partition(":")
             if key == "is" and value in ("nonfoil", "foil", "etched"):
@@ -314,8 +340,23 @@ class FakeScryfall:
             404, json={"object": "error", "code": "not_found", "status": 404, "details": detail}
         )
 
+    def bulk(self, request: httpx.Request) -> httpx.Response:
+        self.bulk_requests.append(str(request.url))
+        assert request.headers.get("user-agent"), "Scryfall requires a User-Agent"
+        assert request.headers.get("accept") == "application/json"
+        if request.url.path == "/bulk-data":
+            if self.bulk_index is None:
+                return self.not_found("no bulk data in this fake")
+            return httpx.Response(200, json={"object": "list", "has_more": False, "data": self.bulk_index})
+        body = self.bulk_files.get(request.url.path)
+        if body is None:
+            return self.not_found("no such bulk file")
+        return httpx.Response(200, content=body, headers={"content-type": "application/gzip"})
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if path == "/bulk-data" or path in self.bulk_files:
+            return self.bulk(request)
         self.requests.append((request.method, str(request.url)))
         assert request.headers.get("user-agent"), "Scryfall requires a User-Agent"
         assert request.headers.get("accept") == "application/json"
@@ -409,6 +450,10 @@ class FakeScryfall:
                     card = next((c for c in self.cards if c["id"] == ident["id"]), None)
                 elif "collector_number" in ident:
                     card = self.by_print(ident["set"], ident["collector_number"])
+                elif "//" in ident["name"]:
+                    # Scryfall's collection lookup knows a two-part card by its front face only:
+                    # {"name": "Fire // Ice"} is not_found (checked 2026-10-28)
+                    card = None
                 else:
                     card = self.by_name(ident["name"], ident.get("set"))
                 if card and card["id"] in self.prices:

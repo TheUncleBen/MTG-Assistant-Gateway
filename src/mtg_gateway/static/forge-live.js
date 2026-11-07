@@ -1,16 +1,22 @@
 "use strict";
-// Report page: while a Forge run is queued or running (the Forge section, or the solo test played by
-// Forge, carries data-forge-live and the report's id), ask the JSON status route (/api/v1/reports/<id>/forge)
-// every 5 seconds and swap in the new section(s) and status, until every run has ended; then the page is
-// fetched once more so the Markdown copy matches. No polling while the tab is hidden; it stops for good
-// after a failed fetch or after five hours (the gateway gives a run up after four).
+// Report page: while a Forge run is queued or running (the progress panel, the Forge section, or the solo
+// test played by Forge, carries data-forge-live and the report's id), ask the JSON status route
+// (/api/v1/reports/<id>/forge) every 5 seconds and swap in the new section(s) and status, until every run
+// has ended; then the page is
+// fetched once more so the Markdown copy matches. While the quick solo test still runs on the research
+// service (its section carries data-research; the report is stored before it is done), the page asks
+// every 2 seconds and is read again whole once that section is no longer live: the test fills most of
+// the page. No polling while the tab is hidden; it stops for good after a failed fetch or after five
+// hours (the gateway gives a run up after four).
 (function () {
   var INTERVAL = 5000;  // each finished game shows within about 8 s (the gateway asks Forge every 3 s)
+  var RESEARCH_INTERVAL = 2000;
   var LIMIT = 5 * 3600 * 1000;
   var started = Date.now();
   var timer = null;
   // the live sections and the JSON field each is redrawn from
   var PARTS = [
+    { sel: "#rv-progress", field: "progress_html" },
     { sel: ".forge", field: "forge_html" },
     { sel: "#rv-solo-forge", field: "forge_solo_html" }
   ];
@@ -24,6 +30,18 @@
   // Only what changed is replaced: an unchanged poll leaves every node as it is, and a changed one
   // swaps just the parts that differ, so the aria-live section announces only the news (a finished
   // game), never the whole section every 5 seconds.
+  // An element whose tag and attributes are unchanged is kept and patched inside, so a live region
+  // in it (the progress panel's step) stays in place and announces its new words, and the time so far
+  // beside it changes quietly.
+  function sameShell(a, b) {
+    if (a.nodeType !== 1 || b.nodeType !== 1 || a.tagName !== b.tagName) return false;
+    if (a.attributes.length !== b.attributes.length) return false;
+    for (var i = 0; i < b.attributes.length; i++) {
+      if (a.getAttribute(b.attributes[i].name) !== b.attributes[i].value) return false;
+    }
+    return true;
+  }
+
   function patch(target, nodes) {
     var old = target.childNodes;
     if (old.length !== nodes.length) {
@@ -31,7 +49,9 @@
       return;
     }
     for (var i = 0; i < nodes.length; i++) {
-      if (!old[i].isEqualNode(nodes[i])) target.replaceChild(document.importNode(nodes[i], true), old[i]);
+      if (old[i].isEqualNode(nodes[i])) continue;
+      if (sameShell(old[i], nodes[i])) patch(old[i], Array.prototype.slice.call(nodes[i].childNodes));
+      else target.replaceChild(document.importNode(nodes[i], true), old[i]);
     }
   }
 
@@ -45,6 +65,7 @@
     // The section itself stays (it is the aria-live region); the live mark goes once the run has ended.
     patch(card, Array.prototype.slice.call(fresh.childNodes));
     if (!fresh.hasAttribute("data-forge-live")) card.removeAttribute("data-forge-live");
+    card.hidden = fresh.hidden;  // the progress panel goes once the test has ended
     return fresh.hasAttribute("data-forge-live");
   }
 
@@ -86,6 +107,11 @@
       .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then(function (data) {
         if (!data || data.ok !== true) return;
+        if (document.querySelector("[data-research]")) {
+          if (data.research === "running") { schedule(); return; }
+          location.reload();
+          return;
+        }
         var still = false;
         PARTS.forEach(function (p) { if (swapSection(p.sel, data[p.field])) still = true; });
         swapStatus(data.status_html);
@@ -94,8 +120,35 @@
       .catch(function () { /* signed out or offline: leave the page as it is */ });
   }
 
-  function schedule() { if (!timer) timer = setTimeout(tick, INTERVAL); }
+  function schedule() {
+    if (!timer) timer = setTimeout(tick, document.querySelector("[data-research]") ? RESEARCH_INTERVAL : INTERVAL);
+  }
 
   document.addEventListener("visibilitychange", function () { if (!document.hidden && live()) schedule(); });
   if (live()) schedule();
+
+  // Head to head (a Forge pair's view, data-pair-live with both reports' ids): the page is read again
+  // whole when either deck's games move on, until both runs have ended.
+  var pair = document.querySelector("[data-pair-live]");
+  if (pair) {
+    var ids = [pair.getAttribute("data-pair-0"), pair.getAttribute("data-pair-1")].filter(Boolean);
+    var seen = null;
+    var pairTick = function () {
+      if (document.hidden || Date.now() - started > LIMIT) { setTimeout(pairTick, INTERVAL); return; }
+      Promise.all(ids.map(function (rid) {
+        return fetch("/api/v1/reports/" + encodeURIComponent(rid) + "/forge", {
+          credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }
+        }).then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); });
+      })).then(function (all) {
+        var sig = all.map(function (d) {
+          var f = (d && d.forge) || {};
+          return [d && d.state, f.games_done || 0].join(":");
+        }).join("|");
+        if (seen !== null && sig !== seen) { location.reload(); return; }
+        seen = sig;
+        if (all.some(function (d) { return d && d.live; })) setTimeout(pairTick, INTERVAL);
+      }).catch(function () { /* signed out or offline: leave the page as it is */ });
+    };
+    setTimeout(pairTick, INTERVAL);
+  }
 })();

@@ -36,6 +36,8 @@ import hmac
 import html
 import time
 
+from .theme import icon
+
 GUARD_SCRIPT = "/static/clickguard.js"
 # The script's timings (kept in step with static/clickguard.js, which reads them from data-*).
 GUARD_DWELL_MS = 800
@@ -68,6 +70,14 @@ def submitted_too_soon(secret: str, scope: str, value: str | None, now: float | 
     return age < MIN_FORM_AGE or age > _MAX_STAMP_AGE
 
 
+GUARD_HINT = "Locked for a moment: on a phone, tap once to unlock, then tap your choice."
+# the same, said for the screen in use (theme.py shows one of the two: final audit F09)
+GUARD_HINT_HTML = (
+    "Locked for a moment: <span class='on-touch'>tap once to unlock, then tap your choice.</span>"
+    "<span class='on-mouse'>it opens once you move the mouse or press a key.</span>"
+)
+
+
 def guarded_form(
     *,
     hidden: dict[str, str],
@@ -75,6 +85,8 @@ def guarded_form(
     action: str | None = None,
     extra: str = "",
     tab_reachable: bool = False,
+    form_id: str = "",
+    opens: dict[str, str] | None = None,
 ) -> str:
     """HTML for a form whose submit buttons start disabled until ``clickguard.js`` enables them,
     plus a ``<noscript>`` copy with working buttons for browsers without JavaScript.
@@ -84,8 +96,12 @@ def guarded_form(
     ``hidden`` values and labels are escaped here. With ``tab_reachable`` the locked buttons are
     marked ``aria-disabled`` instead of ``disabled``, so a fast keyboard user can still Tab to
     them; the script refuses their press until they unlock, as it does for a disabled one.
+    ``opens`` maps a button's value to the id of a box the page holds (ui.box): with scripts that
+    button opens the box instead of submitting (its label ends in an ellipsis), and the box's own
+    button submits this form by its ``form_id``; the ``<noscript>`` copy keeps the plain submit.
     """
     act = f" action='{html.escape(action)}'" if action else ""
+    fid = f" id='{html.escape(form_id)}'" if form_id else ""
     fields = "".join(
         f"<input type='hidden' name='{html.escape(k)}' value='{html.escape(v)}'>" for k, v in hidden.items()
     )
@@ -93,20 +109,31 @@ def guarded_form(
     def row(disabled: bool) -> str:
         locked = " aria-disabled='true'" if tab_reachable else " disabled"
         attrs = f"{locked} data-guard" if disabled else ""
-        return "".join(
-            f"<button type='submit' name='action' value='{html.escape(value)}' "
-            f"class='{html.escape(cls)}'{attrs}>{html.escape(label)}</button>"
-            for value, label, cls in buttons
-        )
+        # the small lock a guarded button wears while locked (theme.py hides it once it opens)
+        lk = f"<span class='lk' aria-hidden='true'>{icon('lock')}</span>" if disabled else ""
+        out = []
+        for value, label, cls in buttons:
+            if disabled and opens and value in opens:
+                out.append(
+                    f"<button type='button' class='{html.escape(cls)}' "
+                    f"data-box-open='{html.escape(opens[value])}'{attrs}>{lk}{html.escape(label)}…</button>"
+                )
+            else:
+                out.append(
+                    f"<button type='submit' name='action' value='{html.escape(value)}' "
+                    f"class='{html.escape(cls)}'{attrs}>{lk}{html.escape(label)}</button>"
+                )
+        return "".join(out)
 
     return (
-        f"<form method='post'{act} class='guarded'{' data-tab' if tab_reachable else ''} "
+        f"<form{fid} method='post'{act} class='guarded'{' data-tab' if tab_reachable else ''} "
         f"data-dwell='{GUARD_DWELL_MS}' "
         f"data-settle='{GUARD_SETTLE_MS}'>{fields}"
-        f"<div class='choice'>{row(True)}{extra}</div>"
-        "<p class='muted small guard-hint'>The buttons unlock a moment after this page opens, once "
-        "you move the pointer, touch the screen or press a key here. On a phone, tap once to "
-        "unlock, then tap your choice.</p></form>"
+        # the lock's note sits in the buttons' row, above them, so it is in the pinned bar on a phone
+        # (the sentence is one span, so the note's flex row holds the icon and one text)
+        f"<div class='choice'><p class='muted small guard-hint'>{icon('lock')}"
+        f"<span class='t'>{GUARD_HINT_HTML}</span></p>"
+        f"{row(True)}{extra}</div></form>"
         "<noscript><style>form.guarded{display:none}</style>"
         f"<form method='post'{act}>{fields}<div class='choice'>{row(False)}{extra}</div></form></noscript>"
         f"<script src='{GUARD_SCRIPT}' defer></script>"

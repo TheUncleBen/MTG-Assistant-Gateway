@@ -61,7 +61,9 @@ def test_the_result_card_uses_labels_a_strip_and_updates_in_place() -> None:
     body = pages._result_body(_run("applying"), "csrf-1")
     assert body.startswith("<div class='card' id='applied-result' aria-live='polite' data-applied-live>")
     assert re.search(
-        r"<div class='notice'><span class='ui-lbl blue'>(<svg.*?</svg>)?Applying</span> One", body
+        r"<div class='notice'><span class='ui-lbl blue'>"
+        r"(<span class='ui-spin' aria-hidden='true'></span>)Applying</span> One",
+        body,
     )
     assert "it updates by itself.</div>" in body and "refreshes" not in body
     for colour, word in (("green", "Applied"), ("red", "Failed"), ("grey", "Not sent")):
@@ -113,3 +115,28 @@ async def test_the_pages_carry_the_scripts_and_the_reload_only_without_them(stac
         assert "data-undo-box" in page and "/static/applied-live.js" not in page
     finally:
         await b.aclose()
+
+
+def test_the_undo_list_says_each_card_in_words() -> None:
+    """Independent review 2, L14: the Undo box listed "-1 Acidic Slime (cmr 421) [Commander]"."""
+    from mtg_gateway.pages import undo_lines
+
+    rows = [
+        {"kind": "add", "name": "Acidic Slime", "qty": 1, "printing": "(cmr 421)", "category": "Ramp"},
+        {
+            "kind": "remove",
+            "name": "Acidic Slime",
+            "qty": 1,
+            "printing": "(cmr 421)",
+            "category": "Commander",
+        },
+        {"kind": "add", "name": "Sol Ring", "qty": 2, "category": "Artifacts"},
+        {"kind": "remove", "name": "Arcane Signet", "qty": 1},
+        {"kind": "change", "name": "Forest", "before": 3, "after": 1},
+    ]
+    assert undo_lines(rows) == [
+        "Acidic Slime: Commander → Ramp",
+        "Put back 2 copies of Sol Ring in Artifacts",
+        "Take out 1 copy of Arcane Signet from no category",
+        "Forest: 3 → 1 copy",
+    ]

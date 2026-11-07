@@ -4,8 +4,10 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -23,10 +25,13 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -48,7 +53,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.browser.auth.AuthTabIntent
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.browser.customtabs.CustomTabsService
 import androidx.core.util.Consumer
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
@@ -102,6 +109,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var prefs: Prefs
     private lateinit var origin: String
     private lateinit var web: WebView
+    /** Pull to refresh over the page ([PullRefresh]): on for the list pages, off elsewhere. */
+    private lateinit var refresh: SwipeRefreshLayout
+    /**
+     * The page's word on the last touch: whether it may start a pull (static/topbar.js, through
+     * [NativeBridge.pullAllowed]). A page that is scrolled, has a box or menu open, or was touched
+     * on a part that scrolls on its own says no. Read on the UI thread while the pull layer decides.
+     */
+    @Volatile private var pagePull = true
     private lateinit var progress: ProgressBar
     private lateinit var errorBox: View
     private lateinit var errorText: TextView
@@ -116,12 +131,39 @@ class MainActivity : ComponentActivity() {
     @Volatile private var pageGen = 0
     @Volatile private var gatewayPage = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    /** The open file picker is for an input that takes several files. */
+    private var fileMultiple = false
     private var pendingCameraPermission: PermissionRequest? = null
     private var pendingCamera = false // open the camera as soon as the /scan page is ready
+    private var pendingAuto = false // ...with Auto on (the page's Auto switch asked for it)
     private var scanReloaded = false // the /scan page was reloaded once to get its hooks; never loop
-    private val backCallback = object : OnBackPressedCallback(false) {
+    private var layerOpen = false // the page says a layer (a menu, a box, a sheet) is open over it
+    private val backCallback: OnBackPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            if (camera != null) closeCamera() else if (web.canGoBack()) web.goBack()
+            if (camera != null) {
+                closeCamera()
+                return
+            }
+            // A layer over a gateway page (a menu, a box, a sheet: static/layers.js) closes first;
+            // the page holds no history entry for it, so Back goes back in the history only when no
+            // layer took it. Only a gateway page is asked: another site's page (the sign-in
+            // provider's) could answer the hook and keep Back. On the first page with nothing open
+            // the system's own back runs.
+            if (gatewayPage) {
+                web.evaluateJavascript(BACK_KEY) { closed -> if (closed != "true") historyBack() }
+            } else {
+                historyBack()
+            }
+        }
+
+        private fun historyBack() {
+            layerOpen = false
+            if (web.canGoBack()) {
+                web.goBack()
+            } else {
+                syncBackCallback()
+                if (!isEnabled) onBackPressedDispatcher.onBackPressed()
+            }
         }
     }
     private val windowInfo = WindowInfoTrackerCallbackAdapter(WindowInfoTracker.getOrCreate(this))
@@ -185,6 +227,7 @@ class MainActivity : ComponentActivity() {
         root = findViewById(R.id.root)
         Insets.padSystemBars(root)
         web = findViewById(R.id.web)
+        setUpPullRefresh()
         progress = findViewById(R.id.progress)
         errorBox = findViewById(R.id.error_box)
         errorText = findViewById(R.id.error_text)
@@ -310,10 +353,54 @@ class MainActivity : ComponentActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, false)
         web.addJavascriptInterface(NativeBridge(), "MtgNative")
         web.webViewClient = Client()
+        // The /scan page's service worker sees the page's photo request first. Should WebView hand
+        // the request it leaves alone to the service worker side rather than to Client, the photo is
+        // answered there the same way (one process-wide client; this activity's replaces any older one).
+        ServiceWorkerController.getInstance().setServiceWorkerClient(ServiceWorkerClients.photo(this))
         web.webChromeClient = Chrome()
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             download(url, userAgent, contentDisposition, mimeType)
         }
+    }
+
+    // -- pull to refresh ----------------------------------------------------
+
+    /**
+     * A pull from the top of a list page ([PullRefresh.offered], set per page in
+     * [Client.onPageStarted]) shows the orange disc under the page's own top bar and, let go past
+     * the threshold, loads the page again with the pull's header ([pull]); the disc goes when the
+     * new page has drawn or the load failed ([Client]). The layer only pulls when the page is at its top
+     * and the page's own word on the touch ([pagePull]) allows it.
+     */
+    private fun setUpPullRefresh() {
+        refresh = findViewById(R.id.refresh)
+        refresh.setProgressBackgroundColorSchemeResource(R.color.accent)
+        refresh.setColorSchemeResources(R.color.on_accent)
+        val dp = resources.displayMetrics.density
+        refresh.setProgressViewOffset(false, (8 * dp).toInt(), (72 * dp).toInt())
+        refresh.setOnChildScrollUpCallback { _, _ -> !pagePull || web.canScrollVertically(-1) }
+        refresh.setOnRefreshListener { pull() }
+        refresh.isEnabled = false // per page, from onPageStarted
+    }
+
+    /**
+     * A pull: the page's own address loaded again with [PullRefresh.HEADERS]
+     * (WebView.loadUrl(String, Map), Android API level 8), so the gateway reads Archidekt now rather
+     * than show what it keeps ([PullRefresh]). A GET: a page drawn from a form's POST is never
+     * posted again. The page is at its top when a pull starts, so there is no scroll to keep.
+     */
+    private fun pull() {
+        val url = web.url
+        if (url == null || !PullRefresh.offered(origin, url)) {
+            pullDone()
+            return
+        }
+        web.loadUrl(PullRefresh.target(url), PullRefresh.HEADERS)
+    }
+
+    /** The disc goes: the page has drawn, or its load failed and the error box says so. */
+    private fun pullDone() {
+        if (refresh.isRefreshing) refresh.isRefreshing = false
     }
 
     // -- app updates --------------------------------------------------------
@@ -323,7 +410,10 @@ class MainActivity : ComponentActivity() {
         updateText = findViewById(R.id.update_text)
         updateNow = findViewById(R.id.update_now)
         updateLater = findViewById(R.id.update_later)
-        updateLater.setOnClickListener { updateBar.visibility = View.GONE } // asked again at the next check
+        updateLater.setOnClickListener {
+            updateOffer?.let(updater::later) // that version waits three days; Check for app updates still offers it
+            updateBar.visibility = View.GONE
+        }
         updateNow.setOnClickListener { updateOffer?.let(updater::install) }
         updater = Updater(this, object : Updater.Ui {
             override fun showOffer(offer: AppUpdate.Offer) {
@@ -354,7 +444,7 @@ class MainActivity : ComponentActivity() {
         menu.menuInflater.inflate(R.menu.main, menu.menu)
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                R.id.menu_scan -> startScan()
+                R.id.menu_scan -> startScan(auto = false)
                 R.id.menu_reload -> web.reload()
                 R.id.menu_paste -> pasteLink()
                 R.id.menu_gateway -> changeGateway()
@@ -510,9 +600,14 @@ class MainActivity : ComponentActivity() {
         fab.visibility = if (camera == null && !gatewayPage) View.VISIBLE else View.GONE
     }
 
-    /** Opens the phone-camera scan panel, going to the /scan page first if needed. */
-    private fun startScan() {
+    /**
+     * Opens the phone-camera scan panel, going to the /scan page first if needed; with [auto], it
+     * starts scanning on its own (the page's Auto switch). Calls that resume a deferred open keep the
+     * choice made when it was asked for.
+     */
+    private fun startScan(auto: Boolean = pendingAuto) {
         if (camera != null) return
+        pendingAuto = auto
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             pendingCamera = true
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_PERM_NATIVE_CAMERA)
@@ -523,7 +618,10 @@ class MainActivity : ComponentActivity() {
                 if (ready == "true") {
                     scanReloaded = false
                     // Park the page on its list tab (stops its own camera) while the panel has the lens.
-                    web.evaluateJavascript(ScanGlue.BEGIN) { if (camera == null && !isDestroyed) openCamera() }
+                    web.evaluateJavascript(ScanGlue.BEGIN) {
+                        if (camera == null && !isDestroyed) openCamera(pendingAuto)
+                        pendingAuto = false
+                    }
                 } else if (!scanReloaded) {
                     scanReloaded = true
                     pendingCamera = true
@@ -543,29 +641,89 @@ class MainActivity : ComponentActivity() {
 
     /** The Auth Tab's answer: registered before the activity starts, as Android requires. */
     private val authTab = AuthTabIntent.registerActivityResultLauncher(this) { onAuthTabResult(it) }
-    /** The sign-in the Auth Tab is running, to start again in a Custom Tab if the gateway can't vouch for this app. */
-    private var authTabSignIn: Pair<String?, Boolean>? = null
+    /** The ways the browser's part can return, tried in this order ([BrowserSignIn]). */
+    private enum class SignInLeg { HTTPS_AUTH_TAB, SCHEME_AUTH_TAB, CUSTOM_TAB }
+    private data class AuthTabSignIn(val next: String?, val fresh: Boolean, val leg: SignInLeg)
+    /** The sign-in the Auth Tab is running, to start again the next way if it can't finish. */
+    private var authTabSignIn: AuthTabSignIn? = null
 
-    private fun startBrowserSignIn(next: String?, fresh: Boolean, authTabAllowed: Boolean = true) {
+    /** The browser to open an Auth Tab in ([BrowserSignIn.pickAuthTabBrowser]), or null. */
+    private fun authTabBrowser(): String? {
+        val default = CustomTabsClient.getPackageName(this, emptyList())
+        @Suppress("DEPRECATION")
+        val installed = packageManager.queryIntentServices(Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION), 0)
+            .mapNotNull { it.serviceInfo?.packageName }
+        val browser = BrowserSignIn.pickAuthTabBrowser(default, installed, ::isSystemApp) {
+            CustomTabsClient.isAuthTabSupported(this, it)
+        }
+        Log.i(TAG, "sign-in: default browser $default, Custom Tabs browsers $installed, Auth Tab in ${browser ?: "none"}")
+        return browser
+    }
+
+    /** The browser a Custom Tab sign-in opens in ([BrowserSignIn.customTabBrowser]), or null. */
+    private fun customTabBrowser(): String? {
+        // Any https address but the gateway's: the applinks build claims the gateway's own.
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com/")).addCategory(Intent.CATEGORY_BROWSABLE)
+        @Suppress("DEPRECATION")
+        val default = packageManager.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        @Suppress("DEPRECATION")
+        val browsers = packageManager.queryIntentActivities(probe, PackageManager.MATCH_ALL).mapNotNull { it.activityInfo?.packageName }
+        return BrowserSignIn.customTabBrowser(default, browsers, packageName, ::isSystemApp)
+    }
+
+    /** Whether [pkg] came with the phone (a system app, or an update of one). */
+    private fun isSystemApp(pkg: String): Boolean = try {
+        val flags = packageManager.getApplicationInfo(pkg, 0).flags
+        flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    private fun startBrowserSignIn(next: String?, fresh: Boolean, first: SignInLeg = SignInLeg.HTTPS_AUTH_TAB) {
         val verifier = BrowserSignIn.newVerifier()
         prefs.setPendingSignIn(origin, verifier, System.currentTimeMillis())
-        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, BrowserSignIn.challengeOf(verifier), fresh))
-        val host = BrowserSignIn.authTabHost(origin)
-        val browser = CustomTabsClient.getPackageName(this, emptyList())
-        if (authTabAllowed && host != null && browser != null && CustomTabsClient.isAuthTabSupported(this, browser)) {
+        val challenge = BrowserSignIn.challengeOf(verifier)
+        val browser = if (first != SignInLeg.CUSTOM_TAB) authTabBrowser() else null
+        if (browser != null) {
+            // First the Auth Tab on the gateway's own https address, which the browser returns
+            // only to this app (Digital Asset Links); the one on this app's scheme only as a retry,
+            // or when the address can't take an https return (the gateway then asks for a new
+            // sign-in at the identity provider).
+            val host = if (first == SignInLeg.HTTPS_AUTH_TAB) BrowserSignIn.authTabHost(origin) else null
+            val leg = if (host != null) SignInLeg.HTTPS_AUTH_TAB else SignInLeg.SCHEME_AUTH_TAB
+            if (first == SignInLeg.HTTPS_AUTH_TAB && host == null) {
+                Log.i(TAG, "sign-in: the gateway's address can't take an https Auth Tab return; the app's scheme instead")
+            }
             try {
-                // Returns, and closes itself, once the gateway sends it to its own RETURN_PATH.
+                val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, schemeReturn = host == null))
                 val tab = AuthTabIntent.Builder().build()
                 tab.intent.setPackage(browser)
-                tab.launch(authTab, url, host, BrowserSignIn.RETURN_PATH)
-                authTabSignIn = next to fresh
+                if (host != null) tab.launch(authTab, url, host, BrowserSignIn.RETURN_PATH)
+                else tab.launch(authTab, url, BrowserSignIn.SCHEME)
+                authTabSignIn = AuthTabSignIn(next, fresh, leg)
+                Log.i(TAG, "sign-in: Auth Tab ($leg) opened in $browser")
                 return
             } catch (e: ActivityNotFoundException) {
-                // the Custom Tab below
+                Log.i(TAG, "sign-in: Auth Tab could not open in $browser; a Custom Tab instead")
             }
         }
+        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, customTab = true))
         try {
-            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, url)
+            val tab = CustomTabsIntent.Builder().setShowTitle(true).build()
+            val pick = customTabBrowser()
+            if (pick != null) {
+                tab.intent.setPackage(pick)
+                tab.launchUrl(this, url)
+            } else {
+                // No default browser and no single built-in one: the person picks, this app left
+                // out, so the sign-in never comes back into the app's own page.
+                tab.intent.data = url
+                startActivity(
+                    Intent.createChooser(tab.intent, null)
+                        .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(this, MainActivity::class.java))),
+                )
+            }
+            Log.i(TAG, "sign-in: Custom Tab opened in ${pick ?: "the browser picked"}; it ends on the page that opens the app")
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, getString(R.string.sign_in_no_browser), Toast.LENGTH_LONG).show()
         }
@@ -574,16 +732,36 @@ class MainActivity : ComponentActivity() {
     private fun onAuthTabResult(result: AuthTabIntent.AuthResult) {
         val started = authTabSignIn
         authTabSignIn = null
+        Log.i(TAG, "sign-in: Auth Tab (${started?.leg}) result ${result.resultCode}")
         when (result.resultCode) {
             AuthTabIntent.RESULT_OK -> {
-                val code = BrowserSignIn.codeOfReturn(origin, result.resultUri?.toString())
-                if (code != null) finishBrowserSignIn(code)
-                else Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+                val returned = result.resultUri?.toString()
+                val code = BrowserSignIn.codeOfReturn(origin, returned) ?: BrowserSignIn.codeOfSchemeReturn(returned)
+                when {
+                    code != null -> finishBrowserSignIn(code)
+                    BrowserSignIn.isSchemeRefusal(returned) -> {
+                        // The gateway saw no new sign-in on the scheme leg, so it gave no code.
+                        Log.i(TAG, "sign-in: the gateway refused the scheme return; a Custom Tab instead")
+                        Toast.makeText(this, getString(R.string.sign_in_finish_in_browser), Toast.LENGTH_LONG).show()
+                        started?.let { startBrowserSignIn(it.next, it.fresh, SignInLeg.CUSTOM_TAB) }
+                    }
+                    else -> Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+                }
             }
-            // The browser could not confirm the gateway vouches for this app (a build signed with
-            // another key, say): the same sign-in in a Custom Tab, ending on the page with the button.
-            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT ->
-                started?.let { (next, fresh) -> startBrowserSignIn(next, fresh, authTabAllowed = false) }
+            // The browser could not verify this app for the gateway's address: the same sign-in on
+            // this app's scheme; and should that report it too, in a Custom Tab.
+            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT -> {
+                if (started == null) {
+                    // Android closed the app while the browser was open, so which sign-in this was is
+                    // gone: say so rather than leave the person signed out with no word.
+                    Log.i(TAG, "sign-in: Auth Tab could not verify the app, and the sign-in it ran is gone")
+                    Toast.makeText(this, getString(R.string.sign_in_interrupted), Toast.LENGTH_LONG).show()
+                } else {
+                    val nextLeg = if (started.leg == SignInLeg.HTTPS_AUTH_TAB) SignInLeg.SCHEME_AUTH_TAB else SignInLeg.CUSTOM_TAB
+                    Log.i(TAG, "sign-in: Auth Tab could not verify the app; trying $nextLeg")
+                    startBrowserSignIn(started.next, started.fresh, nextLeg)
+                }
+            }
             else -> Unit // closed by the person: nothing to finish
         }
     }
@@ -626,7 +804,7 @@ class MainActivity : ComponentActivity() {
 
     // -- the scan panel ----------------------------------------------------------
 
-    private fun openCamera() {
+    private fun openCamera(auto: Boolean = false) {
         lateinit var panel: CameraPanel
         panel = CameraPanel(this, root, object : CameraPanel.Host {
             override fun photo(jpeg: ByteArray, guide: FloatArray?) {
@@ -641,7 +819,7 @@ class MainActivity : ComponentActivity() {
                     panel.handoffFailed() // an origin the glue cannot quote; never crash the UI thread
                     return
                 }
-                photo = n to jpeg // served to the page by Client.shouldInterceptRequest, never sent anywhere
+                photo = n to jpeg // served to the page by photoResponse (or photoDirect), never sent anywhere
                 web.evaluateJavascript(js) { result ->
                     val seq = ScanGlue.acceptedSeq(result)
                     if (seq != null) panel.photoAccepted(seq) else panel.handoffFailed()
@@ -650,6 +828,17 @@ class MainActivity : ComponentActivity() {
 
             override fun continuous(on: Boolean) {
                 web.evaluateJavascript(ScanGlue.setContinuous(on), null)
+            }
+
+            override fun photoDirect(seq: Int) {
+                if (!onScanPage()) return
+                // Only the photo the page asked for, once; anything else is an empty answer, which
+                // the page reports at once as a photo that never arrived.
+                val current = photo
+                val jpeg = if (current != null && current.first == seq) current.second else ByteArray(0)
+                if (current != null && current.first == seq) photo = null
+                val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+                web.evaluateJavascript(ScanGlue.photoData(seq, b64), null)
             }
 
             override fun undo() {
@@ -663,6 +852,7 @@ class MainActivity : ComponentActivity() {
         fab.visibility = View.GONE
         panel.onFold(fold)
         panel.resume()
+        if (auto) panel.startAuto()
         syncBackCallback()
     }
 
@@ -687,7 +877,21 @@ class MainActivity : ComponentActivity() {
             REQ_FILE -> {
                 val cb = fileCallback ?: return
                 fileCallback = null
-                cb.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+                val clip = data?.clipData
+                val uris = if (resultCode != android.app.Activity.RESULT_OK || data == null) emptyList() else FilePick.picked(
+                    data.data,
+                    if (clip == null) emptyList() else (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri },
+                    fileMultiple,
+                )
+                if (uris.isEmpty()) {
+                    cb.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+                    return
+                }
+                // A HEIC photo becomes a JPEG the page can read; off the main thread, it can take a moment.
+                Thread({
+                    val out = FilePick.forPage(applicationContext, uris)
+                    runOnUiThread { cb.onReceiveValue(out) }
+                }, "file-pick").start()
             }
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
@@ -870,7 +1074,7 @@ class MainActivity : ComponentActivity() {
      * back on Android 13+) animation runs.
      */
     private fun syncBackCallback() {
-        backCallback.isEnabled = camera != null || web.canGoBack()
+        backCallback.isEnabled = camera != null || web.canGoBack() || layerOpen
     }
 
     /**
@@ -970,23 +1174,33 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         camera?.destroy {}
         camera = null
+        ServiceWorkerClients.release(this)
         if (this::web.isInitialized) web.destroy()
         super.onDestroy()
     }
 
     // -- WebView clients -----------------------------------------------------
 
-    private inner class Client : WebViewClient() {
-        /** The current phone photo, for the one URL the glue loads it from. Runs off the UI thread. */
-        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            val wanted = ScanGlue.photoSeqOf(origin, request.url.toString()) ?: return null
-            val current = photo
-            if (current == null || wanted != current.first) {
-                return WebResourceResponse("text/plain", "utf-8", 404, "Gone", emptyMap(), ByteArrayInputStream(ByteArray(0)))
-            }
-            val headers = mapOf("Cache-Control" to "no-store", "Content-Length" to current.second.size.toString())
-            return WebResourceResponse("image/jpeg", null, 200, "OK", headers, ByteArrayInputStream(current.second))
+    /**
+     * The current phone photo, for the one URL the glue loads it from, or null for any other request
+     * (it goes on as usual). Shared by [Client] and the service worker client ([ServiceWorkerClients]),
+     * whichever WebView asks. Only on the gateway's origin, only the photo number in flight. Runs off
+     * the UI thread.
+     */
+    internal fun photoResponse(url: String): WebResourceResponse? {
+        if (!this::origin.isInitialized) return null
+        val wanted = ScanGlue.photoSeqOf(origin, url) ?: return null
+        val current = photo
+        if (current == null || wanted != current.first) {
+            return WebResourceResponse("text/plain", "utf-8", 404, "Gone", emptyMap(), ByteArrayInputStream(ByteArray(0)))
         }
+        val headers = mapOf("Cache-Control" to "no-store", "Content-Length" to current.second.size.toString())
+        return WebResourceResponse("image/jpeg", null, 200, "OK", headers, ByteArrayInputStream(current.second))
+    }
+
+    private inner class Client : WebViewClient() {
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+            photoResponse(request.url.toString())
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             return when (nav.decide(request.url.toString(), request.isForMainFrame, request.isRedirect, request.hasGesture())) {
@@ -1011,7 +1225,13 @@ class MainActivity : ComponentActivity() {
             val allowed = nav.pageStarted(url)
             gatewayPage = GatewayUrl.isGateway(origin, url)
             pageGen++
+            // a new page starts with nothing open over it; a layer it opens before it has finished
+            // loading tells the app so itself (layer())
+            layerOpen = false
             syncFab()
+            // pull to refresh on the list pages only; a new page starts with the touch allowed
+            pagePull = true
+            refresh.isEnabled = allowed && PullRefresh.offered(origin, url)
             if (!allowed) {
                 // A page from elsewhere that no navigation check saw (WebView does not ask about the
                 // redirect after a form post): it never stays behind the app's chrome. The browser
@@ -1035,6 +1255,7 @@ class MainActivity : ComponentActivity() {
 
         override fun onPageFinished(view: WebView, url: String) {
             progress.visibility = View.GONE
+            pullDone()
             if (url == BLANK) {
                 // Back must not reload the refused page under it; Retry takes the person home.
                 view.clearHistory()
@@ -1084,10 +1305,16 @@ class MainActivity : ComponentActivity() {
             // The reverse proxy answers 502/503/504 with its own bare page while the gateway is down or
             // restarting: show the app's own message with Retry instead. The pages' service worker
             // answers a navigation with its own 503 when the phone is offline, marked with
-            // X-MTG-Offline, which is the offline message, not the gateway's.
+            // X-MTG-Offline, which is the offline message, not the gateway's. The gateway's own
+            // busy answer (its database locked for a moment) is a 503 marked X-MTG-Busy, with its
+            // own page whose Try again posts the person's form again: that page stays, as the
+            // box's Retry would reload and lose what was posted.
             if (GatewayUrl.isGateway(origin, url) && errorResponse.statusCode in 502..504) {
                 progress.visibility = View.GONE
-                val offline = errorResponse.responseHeaders?.keys?.any { it.equals(OFFLINE_HEADER, ignoreCase = true) } == true
+                pullDone()
+                val names = errorResponse.responseHeaders?.keys
+                if (names?.any { it.equals(BUSY_HEADER, ignoreCase = true) } == true) return
+                val offline = names?.any { it.equals(OFFLINE_HEADER, ignoreCase = true) } == true
                 errorText.text = getString(if (offline) R.string.page_offline else R.string.gateway_down)
                 errorBox.visibility = View.VISIBLE
                 return
@@ -1107,6 +1334,7 @@ class MainActivity : ComponentActivity() {
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
             progress.visibility = View.GONE
+            pullDone()
             errorText.text = when (error.errorCode) {
                 WebViewClient.ERROR_HOST_LOOKUP, WebViewClient.ERROR_CONNECT, WebViewClient.ERROR_TIMEOUT -> getString(R.string.page_offline)
                 else -> {
@@ -1127,11 +1355,13 @@ class MainActivity : ComponentActivity() {
             if (view !== web) return true // a pop-up's renderer: nothing of ours to rebuild
             val url = view.url?.takeIf { GatewayUrl.isGateway(origin, it) } ?: (origin + "/")
             if (camera != null) closeCamera()
+            pullDone()
             val params = view.layoutParams
-            val index = root.indexOfChild(view)
-            root.removeView(view)
+            val holder = view.parent as ViewGroup // the pull layer
+            val index = holder.indexOfChild(view)
+            holder.removeView(view)
             view.destroy()
-            web = WebView(this@MainActivity).also { root.addView(it, index, params) }
+            web = WebView(this@MainActivity).also { holder.addView(it, index, params) }
             configureWebView()
             web.loadUrl(url)
             Toast.makeText(this@MainActivity, getString(R.string.page_reloaded), Toast.LENGTH_LONG).show()
@@ -1168,7 +1398,9 @@ class MainActivity : ComponentActivity() {
             if (!GatewayUrl.isGateway(origin, web.url)) return false
             fileCallback?.onReceiveValue(null)
             fileCallback = filePathCallback
+            fileMultiple = fileChooserParams.mode == FileChooserParams.MODE_OPEN_MULTIPLE
             val intent = fileChooserParams.createIntent()
+            if (fileMultiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
             try {
                 startActivityForResult(intent, REQ_FILE)
             } catch (e: ActivityNotFoundException) {
@@ -1214,14 +1446,42 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
-        fun openCamera() = onGatewayPage { startScan() }
+        fun openCamera() = onGatewayPage { startScan(auto = false) }
+
+        /** The scan page's Auto switch: the phone camera, scanning on its own. */
+        @JavascriptInterface
+        fun openCameraAuto() = onGatewayPage { startScan(auto = true) }
 
         @JavascriptInterface
         fun version(): String = if (gatewayPage) BuildConfig.VERSION_NAME else ""
 
+        /**
+         * The page's layers (static/layers.js): true while one is open, so the Back key reaches
+         * the page first (the callback is enabled) even on the first page.
+         */
+        @JavascriptInterface
+        fun layer(open: Boolean) = onGatewayPage {
+            layerOpen = open
+            syncBackCallback()
+        }
+
+        /** Says the Back key asks the page first (MtgBackKey), so a layer needs no history entry. */
+        @JavascriptInterface
+        fun backKey(): Boolean = true
+
         /** The Account page's This app list: the actions the floating button offers elsewhere. */
         @JavascriptInterface
         fun reload() = onGatewayPage { web.reload() }
+
+        /**
+         * The page's word on the touch that just began (static/topbar.js): whether it may start a
+         * pull to refresh. Kept as a flag the pull layer reads while the finger moves, so a touch
+         * inside a sheet, a menu or a pane that scrolls on its own never pulls the page.
+         */
+        @JavascriptInterface
+        fun pullAllowed(allowed: Boolean) {
+            if (gatewayPage) pagePull = allowed
+        }
 
         /** The deck page's Share: the phone's share sheet ([DeckShare]). */
         @JavascriptInterface
@@ -1254,6 +1514,10 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun signInWithBrowser(next: String?, fresh: Boolean) = onGatewayPage { startBrowserSignIn(next, fresh) }
 
+        /** The Account page's Sign-in line: "auto" or "tap" ([BrowserSignIn.returnStatus]). */
+        @JavascriptInterface
+        fun signInReturn(): String = if (gatewayPage) BrowserSignIn.returnStatus(authTabBrowser()) else ""
+
         /** The /scan page reporting what it did with a photo (see [ScanGlue]). */
         @JavascriptInterface
         fun scanEvent(json: String) = onGatewayPage { camera?.onScanEvent(json) }
@@ -1262,11 +1526,42 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MtgAssistant"
         private const val BLANK = "about:blank"
+
+        /** Asks the page to close its top layer (static/layers.js); "true" when one closed. */
+        private const val BACK_KEY =
+            "(function(){try{return !!(window.MtgBackKey&&window.MtgBackKey());}catch(e){return false;}})();"
         /** Header the gateway's service worker puts on its own offline page (companion.py, /sw.js). */
         private const val OFFLINE_HEADER = "X-MTG-Offline"
+        private const val BUSY_HEADER = "X-MTG-Busy"
         private const val REQ_FILE = 2
         private const val REQ_PERM_WEB_CAMERA = 3
         private const val REQ_PERM_NATIVE_CAMERA = 4
         private const val REQ_PERM_NOTIFY = 5
+    }
+}
+
+/**
+ * The process-wide [ServiceWorkerClient] (WebView has one for all its instances), answering the
+ * photo hand-off for the activity that set it through the same [MainActivity.photoResponse] its
+ * WebViewClient uses. Holds the activity weakly, so a finished one is never kept alive by it.
+ */
+private object ServiceWorkerClients {
+    private var owner: java.lang.ref.WeakReference<MainActivity>? = null
+
+    /** Called on the UI thread. */
+    fun photo(activity: MainActivity): ServiceWorkerClient {
+        val ref = java.lang.ref.WeakReference(activity)
+        owner = ref
+        return object : ServiceWorkerClient() {
+            override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
+                ref.get()?.photoResponse(request.url.toString())
+        }
+    }
+
+    /** Called on the UI thread when [activity] is destroyed: unhooks its client unless a newer activity's replaced it. */
+    fun release(activity: MainActivity) {
+        if (owner?.get() !== activity) return
+        owner = null
+        ServiceWorkerController.getInstance().setServiceWorkerClient(null)
     }
 }

@@ -4,7 +4,7 @@ The gateway runs on any 64-bit ARM or x86 machine with Docker. Forge games have 
 Raspberry Pi 5; a Pi 4 has not been timed.
 Forge, the game engine, is the only part that needs real power. It is on in the example files;
 turn it off on a machine below the "With Forge on" minimum in the table below
-([how](DEPLOY.md#forge-simulations-on-by-default)).
+([how](DEPLOY.md#forge-games-on-by-default)).
 
 ## Minimum and recommended
 
@@ -13,11 +13,25 @@ turn it off on a machine below the "With Forge on" minimum in the table below
 | Without Forge | 2 CPU cores, 2 GB of memory (for example a Raspberry Pi with 2 GB) | 4 cores, 4 GB |
 | With Forge on | 4 cores, 4 GB (for example a Raspberry Pi 5 with 4 GB) | 4 or more cores and 8 GB, such as a Pi 5 or an x86 PC |
 
-These are estimates from the memory limits the stack files set, not tested limits: the gateway
-256 MB, the research service 512 MB, the notification server 128 MB, and Forge 1.5 GB and 2 CPU
-cores, plus room for the operating system. Measured use is lower: the research service used about
-115 MB on an x86 machine, and one Forge game peaked at about 600 MB on GitHub's build machines and
-about 740 MB on a Pi 5.
+These sizes are worked out from the measured use below, with room for the operating system and
+Docker; the gateway has not been run on a 2 GB or a 4 GB machine to try them. Without Forge the
+stack measured under 200 MB plus the notification server, which is held to 128 MB, so 2 GB leaves
+well over a gigabyte free. Forge adds up to about 740 MB while it plays a game (its limit is 1.5 GB
+and 2 cores), which 4 GB holds with room; 8 GB and more cores leave room to play two games at once
+(raise `FORGE_MEMORY_LIMIT` and `FORGE_CPUS` first, as below).
+
+### Measured use
+
+| Part | Measured | Where | Its limit in the stack files |
+| --- | --- | --- | --- |
+| Gateway | about 82 MB, after the whole end-to-end test suite; about 17 MB more while the daily printings copy is built (an x86 machine, 0.7.46) | GitHub's x86 build machines, 0.7.46, two runs | 256 MB |
+| Research service (Mystic Forge) | about 91 MB after the same suite; about 115 MB in an earlier measurement | GitHub's x86 build machines; an x86 machine | 512 MB |
+| Notification server (ntfy) | not measured | | 128 MB |
+| Forge, one game | peak about 600 MB; about 740 MB | GitHub's build machines (x86 and arm64); a Raspberry Pi 5 | 1.5 GB and 2 cores |
+| Forge, two games at once | peak about 970 to 1,050 MB | GitHub's build machines | the same |
+
+The gateway and research figures are `docker stats` readings; the Forge figures are the peak of
+its container's memory while it played.
 
 ## How long a test takes
 
@@ -43,7 +57,7 @@ More CPU cores and memory for Forge is what helps. Forge plays one game per 2 co
 - `FORGE_CPUS` and `FORGE_MEMORY_LIMIT` give Forge more of the machine (defaults 2 and 1536M).
   Forge works out how many games it can play at once from these.
 - **Forge games per report** on the admin Settings page sets how many games a report plays
-  (default 4). Fewer games finish sooner; more games give steadier numbers.
+  (default 5). Fewer games finish sooner; more games give steadier numbers.
 - A game that runs longer than four minutes is stopped and counted as a draw.
 
 Every variable is in [DEPLOY.md](DEPLOY.md#environment-reference). Start from the defaults and

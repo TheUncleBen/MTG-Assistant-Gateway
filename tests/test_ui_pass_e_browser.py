@@ -18,7 +18,7 @@ import copy
 
 import pytest
 
-from mtg_gateway import account_lists
+from mtg_gateway import account_lists, lists_page
 
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import _chromium, _page
@@ -30,6 +30,7 @@ from .test_profile_browser import NOTES
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
 from .test_ui_pass_c_browser import _close_box, _close_menu, _seed
+from .waits import settled
 
 BOX_TEXT = ".mtgbox h2, .mtgbox p, .mtgbox label, .mtgbox .acts button"
 
@@ -83,15 +84,19 @@ def _box(page, sel: str):
     )
 
 
-def _account(page, base: str) -> None:
-    """The Account page with its Archidekt cards (a slow first read draws the page without them)."""
-    page.goto(f"{base}/account/details", wait_until="networkidle")
+def _account(page, base: str, section: str = "defaults", ready: str = "#pr-group_by-btn") -> None:
+    """One of Account details' Archidekt pages (0.7.46: each card on its own page) with its card
+    drawn (a slow first read draws the page without it); ``ready`` is a control of that card."""
+    page.goto(f"{base}/account/details/{section}", wait_until="networkidle")
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
     for _ in range(3):
-        if page.locator("#pr-group_by-btn").count():
+        try:
+            page.locator(ready).first.wait_for(state="attached", timeout=1500)
             break
-        page.wait_for_timeout(1500)
-        page.reload(wait_until="networkidle")
-    page.locator("#pr-group_by-btn").wait_for(state="visible")
+        except PlaywrightTimeoutError:
+            page.reload(wait_until="networkidle")
+    page.locator(ready).first.wait_for(state="visible")
 
 
 def _hold(page, loc) -> None:
@@ -101,8 +106,10 @@ def _hold(page, loc) -> None:
     cdp = page.context.new_cdp_session(page)
     x, y = b["x"] + min(b["width"] / 2, 40), b["y"] + b["height"] / 2
     cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-    page.wait_for_timeout(650)
+    page.locator(".ctxmenu").first.wait_for(state="visible")  # the hold opened the menu, the finger down
     cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    # fixed wait: a negative check: the lift's click lands on the sheet's scrim at once; 500 ms (past
+    # the scrim's 400 ms guard, cardmenu.js) proves it leaves the menu open
     page.wait_for_timeout(500)
 
 
@@ -119,7 +126,7 @@ def test_the_current_option_of_a_list_meets_contrast(server: Server, width: int,
         btn.scroll_into_view_if_needed()
         btn.click()
         page.locator(".msel-list").wait_for(state="visible")
-        page.wait_for_timeout(300)
+        settled(page)
         current = page.locator(".msel-list [role=option][aria-selected=true]")
         assert current.count() == 1
         # the orange words of the current option on their fill: 4.5:1 (they were 3.7:1 light, 2.6:1 dark)
@@ -136,7 +143,7 @@ def test_the_account_switch_rows_and_the_price_sources_row(server: Server, width
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        _account(page, server.base)
+        _account(page, server.base, "email", "#email .ui-row.sw .switch")
         page.locator("#email").scroll_into_view_if_needed()
         # no repeated label beside the switch: the row's bold label alone, the switch's for readers
         assert page.locator("#email .sw-text").count() == 0
@@ -156,7 +163,10 @@ def test_the_account_switch_rows_and_the_price_sources_row(server: Server, width
             assert sw["x"] >= lab["x"] + lab["width"] - 1, (i, lab, sw)
             lefts.append(round(sw["x"]))
         assert max(lefts) - min(lefts) <= 1, lefts  # no zigzag
-        # Price sources: the label and its help at the top, level with the first picker
+        assert page.evaluate(MEASURE) == []
+        # Price sources (on New device defaults): the label and its help at the top, level with the
+        # first picker
+        _account(page, server.base)
         two = page.locator("#defaults .ui-row.two")
         two.scroll_into_view_if_needed()
         lab = two.locator(".lab").bounding_box()
@@ -180,19 +190,24 @@ def _reload_with_the_list_script_late(page, server: Server) -> None:
     cardmenu.js now settles at DOMContentLoaded, and this makes the late script happen every run."""
     cdp = page.context.new_cdp_session(page)
     held: list[str] = []
+    answered: list[str] = []
+    page.on("requestfinished", lambda r: answered.append(r.url) if r.url.endswith("/reject") else None)
     cdp.on("Fetch.requestPaused", lambda e: held.append(e["requestId"]))
     cdp.send("Fetch.enable", {"patterns": [{"urlPattern": "*/static/proposals.js*"}]})
     page.reload(wait_until="commit")
     for _ in range(100):  # the request for the script, at most 5 s
         if held:
             break
-        page.wait_for_timeout(50)
+        page.wait_for_timeout(50)  # fixed wait: poll interval (held fills as CDP events land)
     assert held, "the deck page did not ask for static/proposals.js"
     for _ in range(30):  # the server takes the reject (the page is not told yet), at most 1.5 s
         if server.db.count_pending_proposals("user-1") == 0:
             break
-        page.wait_for_timeout(50)
-    page.wait_for_timeout(200)  # time for its answer to reach the page
+        page.wait_for_timeout(50)  # fixed wait: poll interval of the server-side check
+    for _ in range(30):  # its answer reaches the page, at most 1.5 s
+        if answered or server.db.count_pending_proposals("user-1"):
+            break
+        page.wait_for_timeout(50)  # fixed wait: poll interval (answered fills as events land)
     for rid in held:
         cdp.send("Fetch.continueRequest", {"requestId": rid})
     cdp.send("Fetch.disable")
@@ -222,7 +237,7 @@ def test_a_big_removal_asks_in_a_box_and_a_question_left_open_is_rejected(
         page.locator(".ctxmenu[role=menu]").wait_for(state="visible")
         page.locator(".ctxmenu [role=menuitem]", has_text="Remove from deck").click()
         page.locator(".mtgbox-scrim .mtgbox").wait_for(state="visible", timeout=8000)
-        page.wait_for_timeout(400)
+        settled(page)
 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
@@ -262,9 +277,9 @@ def test_a_big_removal_asks_in_a_box_and_a_question_left_open_is_rejected(
         assert copies() == 20 and page.locator(".banner .soc.prop .nb").count() == 0
         # saying no rejects it too, and the card is back where it was
         ask(page)
-        page.locator(".mtgbox .acts button", has_text="Keep them").click()
+        with page.expect_response(lambda r: r.url.endswith("/reject")):
+            page.locator(".mtgbox .acts button", has_text="Keep them").click()
         page.locator(".mtgbox-scrim").wait_for(state="detached")
-        page.wait_for_timeout(400)
         assert server.db.count_pending_proposals("user-1") == 0
         assert page.locator(".deckview .row[data-custom-id='45']").count() == 1 and copies() == 20
         browser.close()
@@ -288,7 +303,7 @@ def test_enter_a_deck_starts_on_a_pick_and_leaves_packages_out(
         page.wait_for_function(
             "() => !document.querySelector('#enter select[name=deck]').disabled", timeout=8000
         )
-        page.wait_for_timeout(300)
+        settled(page)
         opts = page.evaluate(
             "() => [...document.querySelectorAll('#enter select[name=deck] option')]"
             ".map(o => [o.value, o.textContent, o.disabled, o.selected])"
@@ -321,7 +336,7 @@ def test_the_two_new_controls_are_finger_sized_on_touch(server: Server) -> None:
     with sync_playwright() as p:
         # a phone: Approval mode's chevron is 44 px and each mode's name keeps its one row
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
-        _account(page, server.base)
+        page.goto(f"{server.base}/account/assistants/default", wait_until="networkidle")
         page.locator("#mode .mode-list").scroll_into_view_if_needed()
         for i in range(page.locator("#mode details.mode-info > summary").count()):
             b = page.locator("#mode details.mode-info > summary").nth(i).bounding_box()
@@ -339,7 +354,7 @@ def test_the_two_new_controls_are_finger_sized_on_touch(server: Server) -> None:
         page.locator(".lp .btn", has_text="New custom card").first.click()
         box = page.locator("#cc-box")
         box.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        settled(page)
         sw = box.locator(".lp-switch")
         sw.scroll_into_view_if_needed()
         assert sw.bounding_box()["height"] >= 44
@@ -358,22 +373,21 @@ def test_phone_thread_rows_have_two_lines(server: Server) -> None:
         row = page.locator(".fm a.tr[data-id='700002']")
         sub = row.locator(".sub")
         # text_content: innerText breaks between flex items even when they sit on one line
-        words = " ".join(sub.text_content().split())
-        assert words.startswith("amy · ") and words.count(" · ") == 2 and words.endswith("ago"), words
+        facts = sub.locator(".ui-dots > span").all_text_contents()
+        assert len(facts) == 3 and facts[0] == "amy" and facts[2].strip().endswith("ago"), facts
         # one line: owner · replies · when (the date was a third line)
         size = sub.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
         assert sub.bounding_box()["height"] <= size * 1.6
         # on the same line (the date's smaller print sits a pixel or two lower)
         assert abs(sub.locator(".fm-when").bounding_box()["y"] - sub.bounding_box()["y"]) < 3
-        # the date's dot follows the replies at one space, as the first dot does (the row's flex
-        # gap opened a wider space before it)
-        gap = sub.evaluate(
-            """e => { const w = e.querySelector('.fm-when'), r = document.createRange();
-              r.setStart(w.previousSibling, w.previousSibling.length - 1);
-              r.setEnd(w.previousSibling, w.previousSibling.length);
-              return w.getBoundingClientRect().left - r.getBoundingClientRect().right; }"""
+        # the date's dot follows the replies at the gap the first dot has (the row's flex gap
+        # opened a wider space before it)
+        gaps = sub.evaluate(
+            """e => { const f = [...e.querySelectorAll('.ui-dots > span')]
+                .map(x => x.getBoundingClientRect());
+              return [f[1].left - f[0].right, f[2].left - f[1].right]; }"""
         )
-        assert gap < 1, gap
+        assert abs(gaps[0] - gaps[1]) < 1, gaps
         assert page.evaluate(MEASURE) == []
         browser.close()
     assert errors == []
@@ -467,11 +481,18 @@ def test_my_lists_tabs_count_and_the_current_tab_stays_in_view(server: Server) -
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
-        # a first visit: every tab has its count, not the open one alone
-        assert page.locator(".lp-tabs a .n").count() == 5
+        # a first visit: every tab has its count, not the open one alone (six lists: Pinned cards
+        # is a tab again, at /collection/wants, since the Binder redesign, and Binder tags joined
+        # them in 0.7.46: lists_page.TABS)
+        assert len(lists_page.TABS) == 6
+        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 6")
         # larger text after the load: the current tab is brought back into view
         page.evaluate(TEXT_200)
-        page.wait_for_timeout(400)
+        page.wait_for_function(
+            "() => { const r = document.querySelector('.lp-tabs a[aria-current]').getBoundingClientRect();"
+            " return r.left >= 0 && r.right <= 390; }"
+        )
+        settled(page)
         cur = page.locator(".lp-tabs a[aria-current]").bounding_box()
         assert cur["x"] >= 0 and cur["x"] + cur["width"] <= 390, cur
         assert page.evaluate(MEASURE) == []
@@ -490,7 +511,7 @@ def test_the_tag_preview_words_and_the_custom_card_box_layout(server: Server) ->
         page.locator(".lp .btn", has_text="New").first.click()
         box = page.locator("#tag-box")
         box.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        settled(page)
         # the preview chip: the colour on its dot and border, the name in the text colour
         name = box.locator("#tag-pv .nm")
         assert name.evaluate("e => getComputedStyle(e).color") == page.evaluate(
@@ -502,7 +523,7 @@ def test_the_tag_preview_words_and_the_custom_card_box_layout(server: Server) ->
         page.locator(".lp .btn", has_text="New custom card").first.click()
         box = page.locator("#cc-box")
         box.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        settled(page)
         # the three type fields line up at their inputs
         bottoms = page.evaluate(
             "() => [...document.querySelector('#cc-face-f .lp-three').querySelectorAll('input')]"
@@ -567,7 +588,7 @@ def test_the_card_viewers_controls_are_finger_sized_on_touch(server: Server) -> 
         row.scroll_into_view_if_needed()
         row.tap()
         page.locator(".cardview.open").wait_for(timeout=5000)
-        page.wait_for_timeout(400)
+        settled(page)
         close = _box(page, ".cardview .close")
         assert close["w"] >= 44 and close["h"] >= 44, close
         steps = page.evaluate(

@@ -255,7 +255,9 @@ def test_add_to_deck_from_the_card_page_saves_through_the_edit_endpoint(
         viewer.wait_for(timeout=3000)
         assert viewer.locator("h3").inner_text().startswith("Sol Talisman")
         # the printing reads "SET #number", as every screen writes it
-        assert re.search(r"\b[A-Z0-9]{2,6} #\w+", viewer.locator("dl.facts").inner_text())
+        # (0.7.46: with watchlists on the printing is the Printing row that opens the Printings sheet)
+        said = " ".join(viewer.locator("dl.facts, .printrow").all_inner_texts())
+        assert re.search(r"\b[A-Z0-9]{2,6} #\w+", said), said
         viewer.locator("button", has_text="Add to deck").click()
         sheet = page.locator(".addsheet.open")
         sheet.wait_for(timeout=3000)
@@ -324,8 +326,10 @@ def test_save_anyway_in_the_add_dialog_sends_the_version_it_was_asked_about(serv
             " s.dispatchEvent(new Event('change', {bubbles: true})); }"
         )
         page.locator(".addsheet.open button[type=submit]").click()
-        yes = page.locator(".addsheet.open button", has_text="Save anyway")
+        # the question is the pop-up box over the sheet (audit F-7), Keep it focused, Save anyway last
+        yes = page.locator(".mtgbox-scrim .mtgbox[role=dialog] .acts button", has_text="Save anyway")
         yes.wait_for(timeout=8000)
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
         yes.click()
         page.locator(".cards-toast").wait_for(timeout=8000)
         assert errors == [], errors

@@ -25,10 +25,12 @@ async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch)
 
 
 async def test_skill_pages_need_a_browser_login(harness: Harness) -> None:
-    for path in ("/skill", "/skill/mtg-gateway.zip"):
-        r = await harness.http.get(path)
-        assert r.status_code == 302
-        assert r.headers["location"] == "/login?next=/skill"
+    r = await harness.http.get("/skill/mtg-gateway.zip")
+    assert r.status_code == 302
+    assert r.headers["location"] == "/login?next=/skill"
+    # the skill's steps are the setup hub's section, which reads signed out (C2)
+    r = await harness.http.get("/skill")
+    assert r.status_code == 302 and r.headers["location"] == "/install?for=skill"
 
 
 async def test_signed_in_user_gets_page_and_zip(harness: Harness) -> None:

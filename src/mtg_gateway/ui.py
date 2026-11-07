@@ -17,9 +17,20 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from .theme import ASSISTANT_PAGES, card_size_control, esc, hub_switch, icon
+from .theme import (
+    ASSISTANT_PAGES,
+    SPINNER,
+    binder_pages,
+    card_size_control,
+    esc,
+    hub_switch,
+    icon,
+    natural_key,
+)
 
-__all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
+# re-exported: the one card size switch (R-175) and the names' sort key, theme.card_size_control
+# and theme.natural_key
+__all__ = ["card_size_control", "natural_key"]
 
 # --- status labels: a word, a colour and an icon -------------------------------------------------
 
@@ -56,7 +67,7 @@ LABELS: dict[str, Label] = {
     "expired": Label("Expired", "grey", "hourglass", "Not approved in time."),
     "failed": Label("Failed", "red", "alert", "Archidekt refused it, or something broke."),
     # risk
-    "low": Label("Low", "green", "shield", "A small deck or collection change."),
+    "low": Label("Low", "green", "shield", "A small deck or binder change."),
     "high": Label("High", "orange", "triangle", "Bigger, or touches commanders or deck details."),
     "your_press": Label("Your press", "blue", "hand", "An account action. It always waits for you."),
     "delete": Label(
@@ -99,7 +110,9 @@ def label(word: str, colour: str, icon_name: str, *, title: str = "", cls: str =
         raise ValueError(f"unknown label colour {colour!r}")
     extra = f" {esc(cls)}" if cls else ""
     tip = f" title='{esc(title)}'" if title else ""
-    return f"<span class='ui-lbl {colour}{extra}'{tip}>{icon(icon_name)}{esc(word)}</span>"
+    # a run in progress draws the theme's one animated spinner, not a still icon
+    mark = SPINNER if icon_name == "spinner" else icon(icon_name)
+    return f"<span class='ui-lbl {colour}{extra}'{tip}>{mark}{esc(word)}</span>"
 
 
 def label_for(key: str, *, title: str = "", cls: str = "", word: str = "") -> str:
@@ -122,12 +135,9 @@ NO_RISK = "Risk not judged"
 
 
 def no_risk_label() -> str:
-    """A closed proposal whose risk could not be judged: a muted dash, never High for want of
-    evidence; a screen reader hears why."""
-    return (
-        f"<span class='ui-none' title='{NO_RISK}'><span aria-hidden='true'>—</span>"
-        f"<span class='sr-only'>{NO_RISK}</span></span>"
-    )
+    """A closed proposal whose risk could not be judged: nothing shown (a bare dash read as a
+    stray mark: polish C2), never High for want of evidence; a screen reader hears why."""
+    return f"<span class='ui-none'><span class='sr-only'>{NO_RISK}</span></span>"
 
 
 def risk_label(risk: str, *, title: str = "", cls: str = "") -> str:
@@ -220,15 +230,59 @@ def client_brand(client_id: str | None, info: Mapping[str, object] | None = None
     return brands.pop() if len(brands) == 1 and None not in brands else None
 
 
+_BRAND_NAMES = {"claude": "Claude’s", "openai": "OpenAI’s"}
+
+
+def _host_of(url: object) -> str:
+    try:
+        return (urlsplit(url).hostname or "").casefold() if isinstance(url, str) else ""
+    except ValueError:
+        return ""
+
+
+def client_brand_note(client_id: str | None) -> str:
+    """Why an app's chip shows its logo or the neutral icon, for the admin's member panel: the
+    hosts it sends members back to (never a path or a query), read as ``client_brand`` reads them."""
+    if not client_id:
+        return "No logo: no app is recorded."
+    brand = client_brand(client_id)
+    if client_id.startswith("https://"):
+        where = _host_of(client_id) or "no host"
+        return f"{_BRAND_NAMES.get(brand or '', 'No')} logo: its address is on {esc(where)}."
+    try:
+        info = _client_info(client_id)
+    except Exception:  # a note never breaks a page
+        info = None
+    if not isinstance(info, Mapping):
+        return "No logo: no registration is kept for it."
+    uris = info.get("redirect_uris")
+    hosts = (
+        sorted({_host_of(u) or "an address that is not a web address" for u in uris or []})
+        if isinstance(uris, list)
+        else []
+    )
+    if not hosts:
+        return "No logo: its registration names no address to send members back to."
+    listed = " and ".join(hosts) if len(hosts) < 3 else ", ".join(hosts[:-1]) + " and " + hosts[-1]
+    if brand:
+        return f"{_BRAND_NAMES[brand]} logo: it sends members back only to {esc(listed)}."
+    if any(not str(u).startswith("https://") for u in uris):
+        return f"No logo: it sends members back to {esc(listed)}, and not every address is https."
+    return f"No logo: it sends members back to {esc(listed)}, not only to one company’s addresses."
+
+
 def app_logo(brand: str | None) -> str:
     """The logo markup for a verified app (``client_brand``): its own mark (``<img>`` with an empty
     alt, so the name beside it is read once), or the neutral "connected app" icon otherwise."""
     if brand == "claude":
         return f"<img class='logo' src='{CLAUDE_LOGO}' alt='' width='16' height='16'>"
     if brand == "openai":
+        # both in one 16 px slot, which their larger pictures overhang (theme.py, .logo-box)
         return (
+            "<span class='logo-box'>"
             f"<img class='logo on-light' src='{OPENAI_LOGO_LIGHT}' alt='' width='16' height='16'>"
             f"<img class='logo on-dark' src='{OPENAI_LOGO_DARK}' alt='' width='16' height='16'>"
+            "</span>"
         )
     return icon("app")
 
@@ -238,14 +292,11 @@ def app_chip(name: str | None, *, unnamed: bool = False, client_id: str | None =
     Anthropic's or OpenAI's, ``client_brand``: the official marks, unmodified, only to tell the
     connected app apart) or the one neutral "connected app" icon for any other app or a row
     without its client id; never initials. A row with no app recorded shows a
-    grey dash with the tooltip "No app", never a guessed app; where the row *is* an app that gave
-    no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
+    nothing (a screen reader hears "No app"), never a guessed app; where the row *is* an app that
+    gave no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
     name = (name or "").strip()
     if not name and not unnamed:
-        return (
-            f"<span class='ui-app none' title='{NO_APP}'><span aria-hidden='true'>—</span>"
-            f"<span class='sr-only'>{NO_APP}</span></span>"
-        )
+        return f"<span class='ui-app none'><span class='sr-only'>{NO_APP}</span></span>"
     cls = "ui-app" if name else "ui-app unnamed"
     logo = app_logo(client_brand(client_id))
     return f"<span class='{cls}'>{logo}<span class='nm'>{esc(app_name(name))}</span></span>"
@@ -356,11 +407,51 @@ def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "
     return f"<div class='hubbar'><h1 class='sr-only'>{esc(title)}</h1>{switch}</div>{line}"
 
 
-def list_head(title: str, total: int | None = None, note: str = "") -> str:
-    """The full list's heading with its total count, and an optional note beside it."""
+def binder_head(
+    current: str,
+    title: str,
+    sub: str = "",
+    *,
+    actions_html: str = "",
+    badges: Mapping[str, int] | None = None,
+) -> str:
+    """The head of the Binder place's pages (Cards, Lists, Watchlist; decision C8 and mockup
+    screen 8): their switch, which names the page, so the page's heading is for screen readers
+    only, the page's actions at the row's end (the one orange button among them), then the purpose
+    line. ``current``: the page's path (theme.BINDER_PAGES). ``badges``: a count on a switch part
+    (Cards 18, Watchlist 3), by path, when the page knows it cheaply."""
+    line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
+    acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
+    counts = badges or {}
+    links = "".join(
+        f"<a href='{esc(href)}'{' aria-current=page' if href == current else ''}>{esc(text)}"
+        + (
+            f"<span class='cn'>{counts[href]:,}</span><span class='sr-only'>, {counts[href]:,}</span>"
+            if counts.get(href)
+            else ""
+        )
+        + "</a>"
+        for href, text, _ic in binder_pages()
+    )
+    switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
+    return (
+        f"<div class='ui-head phead hubhead'><h1 class='sr-only'>{esc(title)}</h1>{switch}{acts}</div>{line}"
+    )
+
+
+def list_head(title: str, total: int | None = None, note: str = "", *, note_html: str = "") -> str:
+    """The full list's heading with its total count, and an optional note beside it (``note`` as
+    text, or ``note_html`` already escaped: the order with its switch, as a capsule)."""
     count = f" <span class='ui-sub'>{total:,}</span>" if total is not None else ""
-    side = f"<span class='ui-sub'>{esc(note)}</span>" if note else ""
+    note_html = note_html or esc(note)
+    side = f"<span class='ui-sub'>{note_html}</span>" if note_html else ""
     return f"<div class='list-head'><h2>{esc(title)}{count}</h2>{side}</div>"
+
+
+def order_note(current: str, other: str, href: str) -> str:
+    """The list's order beside its heading, with the switch to the other order as a capsule:
+    "Newest first · Show oldest first", as facts (``facts``: never a dot left at a line's end)."""
+    return facts([esc(current), cap_link(f"Show {other.lower()}", href)], html=True)
 
 
 BUTTON_KINDS = {
@@ -415,9 +506,47 @@ def widget(
     )
 
 
-def widgets(items: Iterable[str], *, label: str = "At a glance") -> str:
-    """The row of 3 to 6 widgets (two a row on the open Fold and on phones)."""
-    return f"<section class='ui-widgets' aria-label='{esc(label)}'>{''.join(items)}</section>"
+def facts(parts: Iterable[str], *, html: bool = False) -> str:
+    """A widget's detail line of facts set apart by dots ("From 1 member · Website 1 · Other 2"), for
+    ``widget``'s ``detail_html``: one span per fact, so a fact is kept whole where it fits and the
+    dot drawn before it (theme .ui-dots.balanced) goes with it to the next line. As running text,
+    the dot stayed behind at the end of a line when the tile was narrow (re-check S5). Empty
+    facts are left out; no facts give "". ``html``: the facts are markup already."""
+    kept = [p for p in parts if p]
+    if not kept:
+        return ""
+    inner = "".join(f"<span>{p if html else esc(p)}</span>" for p in kept)
+    # the line starts a gap early (the dot's strip, clipped): its frame (.ui-dots-w) holds it
+    # inside the box, so it never reaches past a window's edge where the box has no padding
+    return f"<span class='ui-dots-w'><span class='tx ui-dots balanced'>{inner}</span></span>"
+
+
+def dotted(text: str) -> str:
+    """Plain text whose facts are set apart by " · " ("10 entries · 2 added this week"), as
+    ``facts``: the dot goes with the fact after it to the next line, never left at the end of a
+    line or the start of one (confirmation P-15). Text with no dot is only escaped."""
+    parts = text.split(" · ")
+    return facts(parts) if len(parts) > 1 else esc(text)
+
+
+def counted(n: int, limit: int | str) -> str:
+    """A count against its limit ("7 / 150"), kept on one line so the "/" never ends or starts
+    one (confirmation P-15); counters that scripts update write the same spaces."""
+    return f"{n}\u00a0/\u00a0{limit}"
+
+
+def widgets(items: Iterable[str], *, label: str = "At a glance", line: str = "") -> str:
+    """The row of 3 to 6 widgets (two a row on the open Fold). On a phone the row is folded
+    behind one line (``line``, or the label) so the list comes first on the screen (re-audit
+    N11); the fold is a tick box and its label, which works without scripts, and the widgets
+    show whole from 600 px, where the tick box and its label are hidden (theme.py)."""
+    fid = "glance-" + "".join(c if c.isalnum() else "-" for c in label.casefold())
+    return (
+        f"<input type='checkbox' class='glance-tgl' id='{fid}'>"
+        f"<label class='glance-lbl' for='{fid}'>{icon('stats')}<span>{dotted(line or label)}</span>"
+        f"{icon('chev')}</label>"
+        f"<section class='ui-widgets' aria-label='{esc(label)}'>{''.join(items)}</section>"
+    )
 
 
 class Chip(NamedTuple):
@@ -462,10 +591,13 @@ def toolbar(
     hidden = "".join(
         f"<input type='hidden' name='{esc(k)}' value='{esc(v)}'>" for k, v in (keep or {}).items() if v
     )
+    # .nN says how many filters there are: three share one row on a phone, as two do (audit D31),
+    # and the row the search takes follows the toolbar's width and that count (theme.py, polish R5)
+    cls = f"ui-tools n{len(filters)}" if len(filters) >= 2 else "ui-tools"
     return (
-        f"<form class='ui-tools' role='search' method='get' action='{esc(action)}'>{hidden}"
+        f"<form class='{cls}' role='search' method='get' action='{esc(action)}'>{hidden}"
         f"<label class='search'><span class='sr-only'>{esc(search_label)}</span>{icon('search')}"
-        f"<input type='search' name='{esc(name)}' value='{esc(q)}' placeholder='{esc(placeholder)}'></label>"
+        f"<input type='search' name='{esc(name)}' value='{esc(q)}'{hint_attrs(placeholder)}></label>"
         f"{''.join(filters)}"
         "<noscript><button type='submit' class='btn-plain'>Search</button></noscript></form>"
     )
@@ -509,22 +641,72 @@ def check_cell(name: str, value: str, label: str, *, checked: bool = False, form
     )
 
 
-def group_row(title_html: str, meta_html: str = "", *, check_html: str = "") -> str:
-    """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta line."""
+def group_row(title_html: str, meta_html: str = "", *, check_html: str = "", action_html: str = "") -> str:
+    """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta
+    line. With ``action_html`` (a row list, ``.ui-rows``): the meta line sits under the title and
+    the action (Open deck, as a capsule) ends the row."""
     chk = check_html or "<span></span>"
+    if action_html:
+        small = f"<small>{meta_html}</small>" if meta_html else ""
+        return (
+            f"<div class='tr group'>{chk}<span class='m'>{title_html}{small}</span>"
+            f"<span class='act'>{action_html}</span></div>"
+        )
     meta = f"<span class='meta'>{meta_html}</span>" if meta_html else ""
     return f"<div class='tr group'>{chk}<span>{title_html}</span>{meta}</div>"
 
 
+def row_menu(href: str, name: str) -> str:
+    """A row's ⋮ (the menu static/menus.js opens; a right-click or a hold on the row opens it
+    too): a 44 px button at the row's end, beside its main action. Without scripts it is a link to
+    ``href``, the row's own page, where the same actions are."""
+    return (
+        f"<a class='kebab' href='{esc(href)}' aria-label='Menu for {esc(name)}' aria-haspopup='menu' "
+        f"title='Menu'>{icon('more')}</a>"
+    )
+
+
+def row_open(href: str, word: str) -> str:
+    """A row list's main action (Review, Details, Open): the word in a capsule from 600 px; on a
+    phone a 44 px chevron, so the title keeps its line at any text size (the word stays for
+    screen readers)."""
+    return (
+        f"<a class='ui-cap' href='{esc(href)}' aria-label='{esc(word)}'>"
+        f"<span class='sm-hide'>{esc(word)}</span>"
+        "<span class='sm-only chev' aria-hidden='true'>›</span></a>"
+    )
+
+
+def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str:
+    """A row list's action cell: the one main action as a capsule (cap_link), then the ⋮
+    (row_menu). ``hidden_html``: forms the menu submits (a snapshot's Restore) that the row no
+    longer shows; the row's page has them in view."""
+    hid = f"<span class='acts' hidden>{hidden_html}</span>" if hidden_html else ""
+    return f"<span class='act'>{hid}{main_html}{menu_html}</span>"
+
+
 def day_row(text: str) -> str:
-    """A quiet day heading between rows ("Today", "Oct 12")."""
-    return f"<div class='tr daygroup'>{esc(text)}</div>"
+    """A quiet day heading between rows ("Today", "Oct 12", "October 2026 · 3"): its facts in a
+    row of their own (.ui-dots), the dots in the gaps, from the row's own edge."""
+    parts = [p for p in text.split(" · ") if p]
+    if len(parts) < 2:
+        return f"<div class='tr daygroup'>{esc(text)}</div>"
+    inner = "".join(f"<span>{esc(p)}</span>" for p in parts)
+    return f"<div class='tr daygroup'><span class='ui-dots'>{inner}</span></div>"
+
+
+def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> str:
+    """A small action or way to go inside a line of text or a row (Why, Group by deck, Open as a
+    full page): the theme's grey capsule, 36 px inside a 44 px tap area, never bare blue text."""
+    ic = icon(icon_name) if icon_name else ""
+    extra = f" {attrs}" if attrs else ""
+    return f"<a class='ui-cap' href='{esc(href)}'{extra}>{ic}{esc(text)}</a>"
 
 
 def open_link(href: str, text: str) -> str:
-    """The row's open action: the word from 600 px, a 44 px chevron on phones."""
+    """The row's open action: the word in a capsule from 600 px, a 44 px chevron on phones."""
     return (
-        f"<a class='act linkbtn' href='{esc(href)}' aria-label='{esc(text)}'>"
+        f"<a class='act ui-cap' href='{esc(href)}' aria-label='{esc(text)}'>"
         f"<span class='sm-hide'>{esc(text)}</span><span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )
 
@@ -565,33 +747,117 @@ def pager(
     )
 
 
+def hint_attrs(hint: str) -> str:
+    """A text box's ``placeholder`` attribute (with its leading space; "" for no hint). ``hint`` may
+    list shorter hints after the full one, separated by "|" ("Set name or code|Set or code|Set"):
+    static/topbar.js shows the longest that fits the box at its size, so a hint is never cut at
+    large text on a phone (confirmation P-5, P-19)."""
+    if not hint:
+        return ""
+    full, *shorter = hint.split("|")
+    return f" placeholder='{esc(full)}'" + (f" data-ph='{esc('|'.join(shorter))}'" if shorter else "")
+
+
+def breakable(text: str) -> str:
+    """``text`` escaped, with a break opportunity after each "_", "@", "." and "/" inside it (a
+    variable's name, an e-mail address, a file's path): where it does not fit its line it breaks
+    there, never mid-word (confirmation P-14: "MTG_BACKUP_C/OPY_DIR", "alice@example.tes/t")."""
+    out = esc(text)
+    for mark in ("_", "@", ".", "/"):
+        out = out.replace(mark, mark + "<wbr>")
+    # a mark that ends the text, or one before a space, needs no break after it; .brk (theme)
+    # breaks inside a piece only when the piece alone is wider than the line
+    return "<span class='brk'>" + out.replace("<wbr> ", " ").removesuffix("<wbr>") + "</span>"
+
+
+def all_shown(n: int, one: str, many: str = "") -> str:
+    """The line under a list loaded whole: "All 12 entries shown.", and "1 entry shown." for one
+    (never "All 1", confirmation P-6). ``many`` defaults to ``one`` with an "s"; with no ``one``,
+    "All 12 shown." and "1 shown."."""
+    if not one:
+        return "1 shown." if n == 1 else f"All {n:,} shown."
+    if n == 1:
+        return f"1 {one} shown."
+    return f"All {n:,} {many or one + 's'} shown."
+
+
 def load_more(
-    href: str, *, text: str = "Load more", shown: int | None = None, total: int | None = None, done: str = ""
+    href: str,
+    *,
+    text: str = "Load more",
+    shown: int | None = None,
+    total: int | None = None,
+    done: str = "",
+    into: str = "",
 ) -> str:
     """ "Load more" under a list that grows in place (the standard's Load more button; the owner: a button,
     never endless scrolling). ``href`` is the next page's address (the link works without scripts;
     a page's script may fetch it and append the rows). ``shown`` of ``total`` gives the line under
     it ("25 of 112"); ``done`` is the line shown instead when there is no more ("That is every
-    card.")."""
+    card."). ``into``: the selector of the table whose rows the next page adds to, for the shared
+    static/loadmore.js (a page with its own script leaves it out). The script comes with every
+    button: it keeps the pages added on the history entry and says when one could not be read
+    (MtgLoadMore), for the page's own script too."""
     if done:
         return f"<div class='loadmore'><p class='muted'>{esc(done)}</p></div>"
     line = ""
     if shown is not None and total is not None:
         line = f"<p class='muted'>{shown:,} of {total:,}</p>"
+    target = f" data-into='{esc(into)}'" if into else ""
+    script = "<script src='/static/loadmore.js' defer></script>"
     return (
-        f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' data-load-more>"
-        f"{esc(text)}</a>{line}</div>"
+        f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' "
+        f"data-load-more{target}>{esc(text)}</a>{line}</div>{script}"
     )
 
 
-def selection_bar(count_text: str, actions: Sequence[str], *, label: str, hidden: bool = False) -> str:
+def selection_bar(
+    count_text: str,
+    actions: Sequence[str],
+    *,
+    label: str,
+    hidden: bool = False,
+    cancel_cls: str = "",
+    more: Sequence[str] = (),
+    end: Sequence[str] = (),
+) -> str:
     """The sticky action bar while a list has a selection: the count ("2 checked on 1 deck"), then
-    the actions (plain, then the red-outline one, then the one orange main button)."""
+    the actions (plain, then the red-outline one, then the one orange main button).
+
+    The slim form (final audit F01: one row on a phone): ``cancel_cls`` draws a × Cancel button
+    with that class at the left, ``more`` (menu items, see ``menu_opener``) goes into a ⋯ menu
+    after the actions, and ``end`` follows the menu (the one red action)."""
     h = " hidden" if hidden else ""
-    return (
-        f"<div class='ui-bar' role='group' aria-label='{esc(label)}'{h}>"
-        f"<span class='count' aria-live='polite'>{esc(count_text)}</span>{''.join(actions)}</div>"
+    slim = " slim" if (cancel_cls or more or end) else ""
+    count = esc(count_text)
+    if slim and count_text.endswith(" selected"):
+        # "12 selected": the word folds away on a narrow bar (the scripts update .n)
+        count = f"<span class='n'>{esc(count_text[:-9])}</span> <span class='lbl'>selected</span>"
+    cancel = (
+        f"<button type='button' class='btn icon-only bar-x {esc(cancel_cls)}' aria-label='Cancel' "
+        f"title='Cancel'>{icon('x')}</button>"
+        if cancel_cls
+        else ""
     )
+    menu = (
+        "<details class='dd bar-more'><summary class='btn icon-only' aria-label='More actions' "
+        f"title='More actions' aria-haspopup='menu'>{icon('more')}</summary>"
+        f"<div class='menu'>{''.join(more)}</div></details>"
+        if more
+        else ""
+    )
+    return (
+        f"<div class='ui-bar{slim}' role='group' aria-label='{esc(label)}'{h}>{cancel}"
+        f"<span class='count' aria-live='polite'>{count}</span>{''.join(actions)}{menu}"
+        f"{''.join(end)}</div>"
+    )
+
+
+def menu_opener(text: str, href: str, box_id: str, *, icon_name: str = "") -> str:
+    """A menu item (for a ``details.dd`` menu) that opens the box ``box_id``, as ``box_opener``: a
+    real link to ``href`` without scripts."""
+    ic = f"{icon(icon_name)} " if icon_name else ""
+    return f"<a href='{esc(href)}' {box_open_attr(box_id)}>{ic}{esc(text)}</a>"
 
 
 def side_panel(
@@ -607,7 +873,7 @@ def side_panel(
     × and the back link both go to ``close_href`` (the list); put the result in ``split``."""
     return (
         f"<aside class='ui-drawer' aria-label='{esc(label)}'>"
-        f"<p class='page-only'><a href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
+        f"<p class='page-only'><a class='ui-cap' href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
         f"<div class='dh'><h2>{heading_html}</h2><a class='close btn panel-only' href='{esc(close_href)}'"
         f" aria-label='Close' title='Close'>{icon('x')}</a></div>{body_html}</aside>"
     )

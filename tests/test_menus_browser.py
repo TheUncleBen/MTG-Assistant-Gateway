@@ -28,6 +28,7 @@ from .test_editor_browser import _link
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import expect, quiet
 
 pytest.importorskip("playwright")
 
@@ -36,7 +37,7 @@ OWN = [
     "Open in a new tab",
     "Edit deck",
     "Goldfish",
-    "Run full test",
+    "Run test",
     "Clone",
     "Rename…",
     "Move to folder…",
@@ -53,7 +54,7 @@ OTHERS = [
     "Open in a new tab",
     "Clone into my decks",
     "Goldfish",
-    "Run full test",
+    "Run test",
     "Export…",
     "Compare with…",
     "Bookmark",
@@ -171,7 +172,7 @@ def test_a_deck_tile_menu_opens_four_ways_and_lists_the_owners_actions(tmp_path:
             _menu(page)
             assert _items(page) == OWN
             page.mouse.click(5, 5)
-            page.wait_for_timeout(100)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
             assert page.locator(".ctxmenu").count() == 0
             # the ⋮, a real button outside the tile's link
             kebab = tile.locator("button.kebab")
@@ -253,7 +254,7 @@ def test_a_hold_on_a_deck_tile_opens_its_menu_and_leaves_nothing_stuck(tmp_path:
             x, y = box["x"] + 30, box["y"] + box["height"] / 2
             cdp = page.context.new_cdp_session(page)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-            page.wait_for_timeout(500)
+            _menu(page)  # the hold opened the menu
             refused = tile.locator("a").evaluate(
                 """(a) => {
                     const dt = new DataTransfer();
@@ -279,13 +280,12 @@ def test_a_hold_on_a_deck_tile_opens_its_menu_and_leaves_nothing_stuck(tmp_path:
             assert page.url.endswith("/decks?folder=503&view=list")
             # Back closes the sheet and stays on the page
             page.go_back()
-            page.wait_for_timeout(300)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
+            quiet(page)
             assert page.locator(".ctxmenu").count() == 0 and "/decks" in page.url
             assert "/decks/42" not in page.url
             # a tap on the tile still opens the deck (nothing swallowed or faded)
-            page.wait_for_timeout(500)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-            page.wait_for_timeout(80)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
             page.wait_for_url(re.compile(r"/decks/42$"), timeout=5000)
             assert errors == [], errors
@@ -328,7 +328,6 @@ def test_a_tap_on_the_menu_right_after_a_hold_acts(tmp_path: Path) -> None:
             ix, iy = ib["x"] + ib["width"] / 2, ib["y"] + ib["height"] / 2
             # a real tap on an item while the lift's tap would still be swallowed
             cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": ix, "y": iy}]})
-            page.wait_for_timeout(40)
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
             page.locator(".ctxmenu[role=menu]").wait_for(state="detached", timeout=2000)
             assert errors == [], errors
@@ -372,8 +371,11 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             _pick(page, "Move to folder…")
             box = _box(page)
             assert box.locator("h2").inner_text() == "Move “Renamed deck”"
+            # the tree fills in once /decks/api/folders answers: wait for it (all_inner_texts
+            # doesn't), not a fixed moment
+            box.locator(".tree label", has_text="Precons").wait_for(timeout=5000)
             labels = [t.strip() for t in box.locator(".tree label").all_inner_texts()]
-            assert labels == ["Top level (no folder)", "Archive", "Commander", "Brews", "Precons"]
+            assert labels == ["No folder", "Archive", "Commander", "Brews", "Precons"]
             assert box.locator(".tree input:checked").evaluate("i => i.value") == "503"
             box.locator(".tree label", has_text="Archive").click()
             with page.expect_navigation(wait_until="networkidle"):
@@ -390,7 +392,7 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             assert box.locator("h2").inner_text() == "Export “Renamed deck”"
             tabs = [t.strip() for t in box.locator("[role=tab]").all_inner_texts()]
             # (the sample deck has no sideboard or maybeboard, so that tab is left out)
-            assert tabs == ["Archidekt import text", "Plain decklist", "Files"]
+            assert tabs == ["Archidekt text", "Plain list", "Files"]
             assert "Sol Ring" in box.locator("textarea").input_value()
             box.locator("[role=tab]", has_text="Files").click()
             assert box.locator(".files a[download]").count() == 7
@@ -462,8 +464,11 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
             box = _box(page)
             box.locator("input#mb-fname").wait_for(timeout=3000)
             assert box.locator("h2").inner_text() == "New folder"
+            box.locator("select#mb-finside option", has_text="Precons").wait_for(
+                state="attached", timeout=5000
+            )
             inside = [t.strip() for t in box.locator("select#mb-finside option").all_inner_texts()]
-            assert inside == ["Top level (no folder)", "Archive", "Commander", "Brews", "Precons"]
+            assert inside == ["No folder", "Archive", "Commander", "Brews", "Precons"]
             box.locator("input#mb-fname").fill("Cube")
             box.locator("button", has_text="Next").click()
             page.locator(".mtgbox h2", has_text="Create this folder?").wait_for(timeout=3000)
@@ -507,8 +512,9 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
             box = _box(page)
             box.locator(".tree").wait_for(timeout=3000)
             assert box.locator("h2").inner_text() == "Move the folder “Commander”"
+            box.locator(".tree label", has_text="Old lists").wait_for(timeout=5000)
             labels = [t.strip() for t in box.locator(".tree label").all_inner_texts()]
-            assert labels == ["Top level (no folder)", "Cube", "Old lists"]
+            assert labels == ["No folder", "Cube", "Old lists"]
             assert box.locator(".body .muted").inner_text() == (
                 "Everything inside moves with it. A folder can't go inside itself, so it and its own "
                 "folders are not listed."
@@ -545,13 +551,13 @@ def test_the_delete_folder_box_counts_asks_for_the_name_and_shows_the_progress(t
             body = box.locator(".body").inner_text()
             assert "This deletes, on Archidekt:" in body
             assert (
-                "3 decks: each gets a snapshot under History first, and a private copy in your backup "
-                "folder when backups are on" in body
+                "3 decks: each gets a snapshot under History first (no copy on Archidekt, and a snapshot "
+                "can't be restored onto a deleted deck)" in body
             )
             assert "1 card package: no snapshot or copy, it is lost" in body
             assert "2 folders inside it, and the folder itself" in body
             assert (
-                "The gateway makes the snapshots and copies first and stops if any of them fails. Then "
+                "The gateway makes the snapshots first and stops if any of them fails. Then "
                 "Archidekt deletes everything in one step, which can't be undone." in body
             )
             assert box.locator("label[for=mb-typed]").inner_text() == "Type the folder's name to confirm"
@@ -592,13 +598,18 @@ def test_a_folder_holding_the_backup_folder_is_refused_in_the_box(tmp_path: Path
             page.locator("li.folder[data-folder-id='504'] button.kebab").click()
             _pick(page, "Delete folder…")
             box = _box(page)
-            page.locator(".mtgbox h2", has_text="can't be deleted here").wait_for(timeout=3000)
-            assert box.locator("h2").inner_text() == "“Archive” can't be deleted here"
+            page.locator(".mtgbox h2", has_text="can't be deleted yet").wait_for(timeout=3000)
+            assert box.locator("h2").inner_text() == "“Archive” can't be deleted yet"
             assert box.locator(".body").inner_text().strip()
-            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == ["OK"]
-            box.locator(".acts button").click()
+            # 0.7.46: the box offers to move the backup folder out of the way (or Cancel)
+            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == [
+                "Cancel",
+                "Move the backup folder to your top level",
+            ]
+            box.locator(".acts button", has_text="Cancel").click()
             _gone(page)
             assert ark.folder_deletes == []
+            assert next(f for f in ark.folders["alice"] if f["id"] == 505)["parent"] == 504
             assert errors == [], errors
             browser.close()
     finally:
@@ -691,31 +702,49 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             # Proposals: a waiting change may be applied from its row
             page.goto(f"{server.base}/proposals", wait_until="networkidle")
             row = page.locator(".pr-table .tr", has_text="Arcane Signet").first
-            assert row.locator("button.kebab.inline").count() == 1 and row.locator("a button").count() == 0
-            row.locator("button.kebab").click()
+            # the row's ⋮ is the page's own (a link without scripts), beside Review, never inline
+            assert row.locator("a.kebab").count() == 1 and row.locator("a button").count() == 0
+            assert row.locator(".kebab.inline").count() == 0
+            row.locator("a.kebab").click()
             _menu(page)
             assert _items(page) == ["Review", "Apply", "Reject", "Open the deck"]
             assert page.locator(".ctxmenu a[href='/decks/42']").count() == 1
             page.keyboard.press("Escape")
-            # History: Details, Restore (review first), Open report, Open the deck
+            # History: Details, Restore (review first), Open report, Open the deck, Delete…
             page.goto(f"{server.base}/history", wait_until="networkidle")
             rows = page.locator(".hy-table .tr:not(.th):not(.daygroup):not(.group)")
             found: set[str] = set()
-            for i in range(min(rows.count(), 12)):
+            # History is the decks' timeline (0.7.46): changes, snapshots and tests interleave, so
+            # every row is opened, not the first few
+            for i in range(rows.count()):
                 rows.nth(i).locator(".title").click(button="right")
                 _menu(page)
                 found.update(_items(page))
                 page.keyboard.press("Escape")
             assert {"Details", "Open the deck"} <= found, found
-            assert "Restore (review first)" in found, found
-            assert found <= {"Details", "Restore (review first)", "Open report", "Open the deck"}, found
+            assert "Restore (review first)" in found and "Delete…" in found, found
+            assert "Open report" in found, found
+            assert "Test this version" in found, found  # a snapshot's, from its row too (0.7.46)
+            # a change's review page and the change a snapshot was taken before: from the ⋮,
+            # not capsules in the line (L9)
+            assert {"Open the review page", "The change it was taken before"} <= found, found
+            assert found <= {
+                "Details",
+                "Open the review page",
+                "The change it was taken before",
+                "Restore (review first)",
+                "Test this version",
+                "Open report",
+                "Open the deck",
+                "Delete…",
+            }, found
             # Reports
             page.goto(f"{server.base}/reports", wait_until="networkidle")
             row = page.locator(".rp-t .tr", has_text="Sample Commander Deck").first
-            assert row.locator("a button").count() == 0
-            row.locator("button.kebab.inline").click()
+            assert row.locator("a button").count() == 0 and row.locator(".kebab.inline").count() == 0
+            row.locator("a.kebab").click()
             _menu(page)
-            assert _items(page) == ["Open", "Play more games", "Copy as Markdown", "Open the deck"]
+            assert _items(page) == ["Open", "Play more games", "Copy as Markdown", "Open the deck", "Delete…"]
             assert page.locator(".ctxmenu a[href='/history/reports/rep_menu#forge-more']").count() == 1
             page.keyboard.press("Escape")
             # the Watchlist: a card row and a deck row
@@ -725,16 +754,19 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             assert _items(page) == [
                 "Open card",
                 "Add to deck…",
-                "Add to collection",
+                "Add to binder",
+                "Pin card",  # 0.7.46: pins it on Archidekt (Binder › Lists › Pinned cards)
+                "Details",  # mockup screen 8: the row's details, its list, and the red Stop watching
                 "Price alert…",
+                "Move to list…",
                 "Copy name",
                 "Open on Scryfall",
-                "Remove",
+                "Stop watching",
             ]
             page.keyboard.press("Escape")
             page.locator("#wr-d42 .act button.kebab").click()
             _menu(page)
-            assert _items(page) == ["Open", "Price alert…", "Remove"]
+            assert _items(page) == ["Open", "Price alert…", "Stop watching"]
             _pick(page, "Price alert…")
             assert page.locator("#wx-d42").is_visible()  # a deck row has no alert fields: its details open
             # a card row's Price alert… is a box (M16) with the row's three fields, posting as the row's form
@@ -746,7 +778,7 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             assert box.locator("h2").inner_text().startswith("Price alert: ")
             assert box.locator("input[name=alert_pct]").count() == 1
             assert box.locator("form input[name=action][value=alerts]").count() == 1
-            assert box.locator(".acts button", has_text="Save alert").is_visible()
+            assert box.locator(".acts button", has_text="Save price alert").is_visible()
             page.keyboard.press("Escape")
             assert errors == [], errors
             browser.close()
@@ -771,23 +803,27 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             tile.locator("button.kebab").click()
             _menu(page)
             items = _items(page)
-            assert items[:3] == ["Open card", "Add to deck…", "Add to collection"]
+            assert items[:3] == ["Open card", "Add to deck…", "Add to binder"]
             assert "Copy name" in items and items[-1] == "Open on Scryfall"
-            _pick(page, "Add to collection")
-            page.locator(".toast.cards-toast", has_text="added to your collection").wait_for(timeout=5000)
-            # the Collection: the quantity row, Details…, Remove from collection
+            _pick(page, "Add to binder")
+            # the gateway's own words say which entry the copy went to (0.7.46 merge rule)
+            page.locator(
+                ".toast.cards-toast",
+                has_text=re.compile(r"Added (“.+” as a new entry|1 copy to the “.+” entry)"),
+            ).wait_for(timeout=5000)
+            # the Collection: the quantity row, Details…, Remove from binder
             page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
             row = page.locator("ul.colllist li.row[data-id]").first
             row.locator(".name").click(button="right")
             menu = _menu(page)
             items = _items(page)
             assert items[:2] == ["Open card", "Add to deck…"]
-            assert "Details…" in items and items[-1] == "Remove from collection"
-            assert "Add to collection" not in items
+            assert "Details…" in items and items[-1] == "Remove from binder"
+            assert "Add to binder" not in items
             assert menu.locator(".mqty .lbl").inner_text() == "Quantity"
             n = int(menu.locator(".mqty .n").inner_text())
             menu.locator(".mqty button.step", has_text="+").click()
-            page.wait_for_timeout(800)
+            expect(menu.locator(".mqty .n")).to_have_text(str(n + 1))  # the count follows the step
             assert page.locator(".ctxmenu").count() == 1  # the menu stays for more steps
             assert int(menu.locator(".mqty .n").inner_text()) == n + 1
             _pick(page, "Details…")
@@ -799,7 +835,7 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             row.locator(".kebab").click()
             assert page.locator(".ctxmenu").count() == 1
             page.keyboard.press("Escape")
-            page.wait_for_timeout(100)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
             assert page.locator(".ctxmenu").count() == 0
             # the editor's rows
             page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
@@ -807,8 +843,8 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             erow.locator(".name").click(button="right")
             _menu(page)
             items = _items(page)
-            assert items[:3] == ["Open card", "Add to collection", "Watch this card"]
-            assert "Change printing…" in items and "Remove from deck" in items
+            assert items[:3] == ["Open card", "Add to binder", "Watch this card"]
+            assert "Printings…" in items and "Remove from deck" in items
             assert "Copy name" in items and items[-1] == "Open on Scryfall"
             assert errors == [], errors
             browser.close()

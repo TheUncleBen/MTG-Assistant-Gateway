@@ -110,21 +110,21 @@ async def test_default_is_manual_and_the_account_page_sets_the_mode(stack: Stack
 
     b = Browser(h)
     await b.login()
-    page = (await b.http.get("/account/details")).text
+    page = (await b.http.get("/account/assistants/default")).text
     assert "Approval mode" in page and page.count("name='mode'") == 3 and "value='manual' checked" in page
     assert "tricked by text it reads" in page  # the cost of the auto modes, said plainly
     await b.aclose()
 
-    assert await _set_mode(h, "auto") == "/account/details?ok=mode_auto"
+    assert await _set_mode(h, "auto") == "/account/assistants/default?ok=mode_auto"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
     assert h.db.get_user("user-1")["approval_mode"] == "auto"
     events = [a for a in h.db.audit_for_user("user-1", 50) if a["event"] == "approval_mode_set"]
     assert events and events[0]["detail"] == {"from": "manual", "to": "auto", "by": "user"}
 
-    assert await _set_mode(h, "bogus") == "/account/details?err=mode_invalid"
-    assert await _set_mode(h, "") == "/account/details?err=mode_invalid"
+    assert await _set_mode(h, "bogus") == "/account/assistants/default?err=mode_invalid"
+    assert await _set_mode(h, "") == "/account/assistants/default?err=mode_invalid"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
-    assert await _set_mode(h, "manual") == "/account/details?ok=mode_manual"
+    assert await _set_mode(h, "manual") == "/account/assistants/default?ok=mode_manual"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "manual"
 
 
@@ -137,7 +137,7 @@ async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -
     await linked_user(stack)
     b = Browser(h)
     await b.login()
-    page = (await b.http.get("/account/details")).text
+    page = (await b.http.get("/account/assistants/default")).text
     await b.aclose()
     card = page[page.index("<div class='card' id='mode'>") :]
     card = card[: card.index("</form></div>")]
@@ -217,9 +217,9 @@ async def test_a_cap_changed_on_the_settings_page_applies_at_once(stack: Stack) 
     h = stack.h
     await linked_user(stack)
     h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
-    assert await _set_mode(h, "auto") == "/account/details?err=mode_invalid"
+    assert await _set_mode(h, "auto") == "/account/assistants/default?err=mode_invalid"
     assert h.db.get_user("user-1")["approval_mode"] is None
-    assert await _set_mode(h, "semi") == "/account/details?ok=mode_semi"
+    assert await _set_mode(h, "semi") == "/account/assistants/default?ok=mode_semi"
 
 
 async def test_a_lowered_cap_and_row_limit_apply_at_once_to_a_member_who_chose_more(stack: Stack) -> None:
@@ -228,7 +228,7 @@ async def test_a_lowered_cap_and_row_limit_apply_at_once_to_a_member_who_chose_m
     lowered row limit makes a 3-row edit high risk at once."""
     h = stack.h
     token = await linked_user(stack)
-    assert await _set_mode(h, "auto") == "/account/details?ok=mode_auto"
+    assert await _set_mode(h, "auto") == "/account/assistants/default?ok=mode_auto"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
     h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
     assert h.db.get_user("user-1")["approval_mode"] == "auto"  # the stored choice is kept
@@ -246,14 +246,14 @@ async def test_the_cap_limits_what_members_may_choose(capped: Stack) -> None:
     h = capped.h
     token = await linked_user(capped)
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "semi"
-    assert await _set_mode(h, "auto") == "/account/details?err=mode_invalid"
+    assert await _set_mode(h, "auto") == "/account/assistants/default?err=mode_invalid"
     assert h.db.get_user("user-1")["approval_mode"] is None
     b = Browser(h)
     await b.login()
-    page = (await b.http.get("/account/details")).text
+    page = (await b.http.get("/account/assistants/default")).text
     assert "value='auto' disabled" in page and "not allowed on this gateway" in page
     await b.aclose()
-    assert await _set_mode(h, "manual") == "/account/details?ok=mode_manual"
+    assert await _set_mode(h, "manual") == "/account/assistants/default?ok=mode_manual"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "manual"
 
 
@@ -267,7 +267,7 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
     p = structured(low)
     assert p["approval_mode"] == "semi" and p["risk"] == "low" and p["assistant_may_apply"] is True
     assert "call apply_proposal now" in p["next_step"]
-    assert APPROVAL_META_KEY not in (low.get("_meta") or {})  # nothing for a person to press
+    assert low["_meta"][APPROVAL_META_KEY]  # the card offers Apply now too, should the assistant not (0.7.46)
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     sent = len(ark.patches)
     assert a["ok"] and a["state"] == "applied" and a["snapshot_id"] and sent >= 1
@@ -279,8 +279,10 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
     assert p["risk"] == "high" and "6 rows" in p["risk_reason"] and p["assistant_may_apply"] is False
     assert "high risk" in p["next_step"] and "Do not call apply_proposal" in p["next_step"]
     code = high["_meta"][APPROVAL_META_KEY]  # the card gets its buttons
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    own = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    out = structured(own)
     assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == "high"
+    assert "_meta" not in own or APPROVAL_META_KEY not in own["_meta"]  # the refusal draws no card (0.7.46)
     assert "semi-automatic" in out["message"] and len(ark.patches) == sent
     refused = [x for x in h.db.audit_for_user("user-1", 50) if x["event"] == "apply_needs_user"]
     assert refused and refused[0]["detail"]["mode"] == "semi" and refused[0]["detail"]["risk"] == "high"
@@ -323,15 +325,18 @@ async def test_every_proposal_kind_has_a_tier(stack: Stack, tool: str, args: dic
 
 
 async def test_semi_mode_note_says_what_it_applies(stack: Stack) -> None:
-    """account_status's note matches the tiers: clones and small deck or collection edits apply
-    without the member's press in semi mode (a clone is low risk by design); a new deck from a list
-    waits."""
+    """The mode's note matches the tiers: clones and small deck or collection edits apply without
+    the member's press in semi mode (a clone is low risk by design); a new deck from a list waits.
+    Since 0.7.46 (A7) account_status gives the assistant the short note and the account page the
+    full one."""
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "semi")
-    note = structured(await call(h, token, "account_status"))["approval_mode_note"]
+    short = structured(await call(h, token, "account_status"))["approval_mode_note"]
+    assert "at most 5 card rows" in short and "a private copy of a deck" in short, short
+    note = modes.mode_help("semi")
     assert "at most 5 card rows" in note and f"{modes.MAX_COPIES_PER_ROW} copies each" in note
-    assert "a private copy of a deck (a clone" in note and "collection" in note
+    assert "a private copy of a deck (a clone" in note and "binder" in note
     assert "A new deck built from a list" in note and "New decks" not in note
     assert "{rows}" not in modes.mode_help("semi", max_rows=3) and "at most 3" in modes.mode_help(
         "semi", max_rows=3
@@ -365,7 +370,7 @@ async def test_auto_mode_applies_everything_with_a_snapshot(stack: Stack) -> Non
     r = structured(await _adds(h, token, 1))
     assert r["assistant_may_apply"] is True
     r = structured(await call(h, token, "reject_proposal", {"proposal_id": r["proposal_id"]}))
-    assert r["state"] == "rejected" and r["assistant_may_apply"] is False and r["risk"] == "low"
+    assert r["state"] == "rejected" and r["assistant_may_apply"] is False
     snaps = structured(await call(h, token, "list_snapshots"))["snapshots"]
     assert [s["snapshot_id"] for s in snaps] == [a["snapshot_id"]]
     # The REST API applies under the same mode (same service path).
@@ -436,7 +441,7 @@ async def test_one_members_mode_never_applies_to_another(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     alice = await linked_user(stack, ALICE, "alice", "pw-alice")
     amy = await linked_user(stack, AMY, "amy", "pw-amy")
-    assert await _set_mode(h, "auto", user=ALICE) == "/account/details?ok=mode_auto"
+    assert await _set_mode(h, "auto", user=ALICE) == "/account/assistants/default?ok=mode_auto"
     assert h.db.get_user("user-1")["approval_mode"] == "auto"
     assert h.db.get_user("user-2")["approval_mode"] is None
 
@@ -469,7 +474,7 @@ async def test_one_members_mode_never_applies_to_another(stack: Stack) -> None:
     )
 
     # Amy choosing semi changes Amy only.
-    assert await _set_mode(h, "semi", user=AMY) == "/account/details?ok=mode_semi"
+    assert await _set_mode(h, "semi", user=AMY) == "/account/assistants/default?ok=mode_semi"
     assert h.db.get_user("user-1")["approval_mode"] == "auto"
     assert h.db.get_user("user-2")["approval_mode"] == "semi"
     assert structured(await call(h, amy, "account_status"))["approval_mode"] == "semi"
@@ -517,7 +522,7 @@ def test_the_low_risk_wording_is_the_list_risk_of_checks() -> None:
         assert modes.risk_of("edit", rows)[0] == "low", kind
         assert modes.risk_of("collection", rows)[0] == "low", kind
     for text in (modes.low_risk_text(), modes.mode_help("semi")):
-        assert "color tag" in text and "custom mana value" in text and "collection" in text
+        assert "color tag" in text and "custom mana value" in text and "binder" in text
 
 
 def test_the_account_actions_wording_names_every_account_action() -> None:
@@ -537,11 +542,13 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         "collaborator_add": "collaborator changes",
         "collaborator_remove": "collaborator changes",
         "delete_deck": "deleting a deck",
+        "clear_collection": "clearing your binder",
         "deck_help": "deck help requests",
         "report": "reports to Archidekt's moderators",
         "profile": "profile and email settings",
         "contest_enter": "contest entries",
         "contest_withdraw": "contest entries",
+        "purge_removed": "removing a removed card's row for good",
     }
     assert set(words) == set(LABELS)
     for action, word in words.items():
@@ -549,6 +556,8 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         assert modes.risk_of("action", [{"action": action}])[0] in modes.MEMBER_ONLY
     for mode in modes.MODES:
         assert "Archidekt account" in modes.mode_help(mode) and "deleting a deck" in modes.mode_help(mode)
+    for mode in ("semi", "auto"):
+        assert "clearing your binder" in modes.mode_help(mode) + modes.MEMBER_ONLY_TEXT
 
 
 async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> None:
@@ -559,7 +568,7 @@ async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> N
     b = Browser(h)
     try:
         await b.login()
-        page = _flat((await b.http.get("/account/details")).text)
+        page = _flat((await b.http.get("/account/assistants/default")).text)
     finally:
         await b.aclose()
     guide = _flat(guide_body(site="Gateway", writes_enabled=True, has_collection=True, max_rows=3))
@@ -611,9 +620,10 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
     from mtg_gateway.pages import OK_MESSAGES
 
     assert OK_MESSAGES["mode_semi"] == (
-        "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
+        "Saved as your default: an assistant that follows it applies low-risk changes without asking "
+        "(a small deck or binder edit, "
         "or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
-        "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot "
+        "a snapshot you can restore from History; a binder change keeps none. Restoring a snapshot "
         "does not put back a deck's folder, tags, cover or custom cards."
     )
     # and Full auto's names taking custom cards out among what still waits (confirmation C-2)

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from collections import Counter, OrderedDict
@@ -44,7 +45,9 @@ from mcp_types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from . import refusals
 from .approve import CARD_IMAGE_HOSTS
+from .busy import outage
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -66,7 +69,7 @@ WAITING_CARD_URI = URI_BASE + "waiting-card"  # show_waiting_changes (0.7.29)
 CARD_META_KEY = "mtg/card"  # tool-result _meta key a card reads its link or data from
 LINK_TTL = 600  # seconds a signed link stays valid
 LINK_PATH = "/cards/data/"
-SCRYFALL_API = "https://api.scryfall.com"  # the deck card (older chats) reads rules text from Scryfall
+SCRYFALL_API = "https://api.scryfall.com"  # the printings and deck cards read rules text from Scryfall
 STATIC = Path(__file__).parent / "static" / "cards"
 LINK_KINDS = ("printings",)
 
@@ -84,9 +87,55 @@ def card_html(name: str, public_url: str = "") -> str:
     so the tool result itself carries nothing extra for it."""
     html = (STATIC / f"{name}.html").read_text(encoding="utf-8")
     bridge = (STATIC / "_bridge.js").read_text(encoding="utf-8")
-    base = (STATIC / "_base.css").read_text(encoding="utf-8")
+    base = used_rules((STATIC / "_base.css").read_text(encoding="utf-8"), html + bridge)
     gateway = json.dumps(public_url.rstrip("/")).replace("<", "\\u003c")
-    return html.replace("/*@BASE@*/", base).replace("/*@BRIDGE@*/", bridge).replace('"@GATEWAY@"', gateway)
+    html = html.replace("/*@BASE@*/", base).replace("/*@BRIDGE@*/", bridge).replace('"@GATEWAY@"', gateway)
+    return shipped(html)
+
+
+_CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_CSS_NAME = re.compile(r"[.#]([A-Za-z][\w-]*)")
+
+
+def used_rules(css: str, page: str) -> str:
+    """The shared base styles less the rules for classes and ids this card never names (another
+    card's tiles, chips or curve): a chat loads the whole card for every one it draws. A rule is
+    kept when any selector in it names only words found in the card (its markup, its script's
+    strings, or the bridge), and every @-rule (media queries, the dark theme) is kept whole."""
+    out: list[str] = []
+    i, n = 0, len(css)
+    while i < n:
+        start = css.find("{", i)
+        if start < 0:
+            out.append(css[i:])
+            break
+        depth, end = 0, start
+        while end < n:
+            depth += {"{": 1, "}": -1}.get(css[end], 0)
+            if depth == 0:
+                break
+            end += 1
+        head = _CSS_COMMENT.sub("", css[i:start]).strip()
+        groups = [_CSS_NAME.findall(g) for g in head.split(",")]
+        if head.startswith("@") or any(all(name in page for name in g) for g in groups):
+            out.append(css[i : end + 1])
+        i = end + 1
+    return "".join(out)
+
+
+# a /* ... */ comment that fills its lines (no "*/" before its own end, so it never runs on
+# into the code after a shorter comment)
+_COMMENT_LINES = re.compile(r"^[ \t]*/\*(?:(?!\*/).)*\*/[ \t]*\n", re.MULTILINE | re.DOTALL)
+
+
+def shipped(html: str) -> str:
+    """A card as sent to the chat (a chat loads the whole document for every card it draws): the
+    source's comments that fill their own lines, its indentation and its blank lines left out,
+    about a fifth of its size. Only whole lines go, so no code, style, markup or string changes;
+    the cards hold no string or element whose text runs over a line break."""
+    html = _COMMENT_LINES.sub("", html)
+    kept = (line.strip() for line in html.split("\n"))
+    return "\n".join(line for line in kept if line and not line.startswith("//")) + "\n"
 
 
 def _add_card(
@@ -133,7 +182,7 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         name="printings-card",
         title="Printings of a card",
         description="Every printing of one card with its picture; tap one to pick it.",
-        csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS), connect_domains=[gateway]),
+        csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS), connect_domains=[gateway, SCRYFALL_API]),
         prefers_border=True,
     )
     _add_card(
@@ -163,7 +212,7 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         name="waiting-card",
         title="Waiting changes",
         description=(
-            "The changes waiting for the user's approval, each with Approve and Reject, and Apply all."
+            "The changes waiting for the user's approval, each with Apply and Reject, and Apply all."
         ),
         csp=ResourceCsp(),
         prefers_border=True,
@@ -347,7 +396,7 @@ def with_card(data: dict[str, Any], card: dict[str, Any] | None) -> CallToolResu
     and whose ``_meta`` carries what the card needs, out of the model's context."""
     meta = {CARD_META_KEY: card} if card else None
     return CallToolResult(
-        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str, indent=2).decode())],
+        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str).decode())],
         structured_content=data,
         _meta=meta,
     )
@@ -357,8 +406,8 @@ def with_card(data: dict[str, Any], card: dict[str, Any] | None) -> CallToolResu
 FIXED_MESSAGES = {
     "not_found": "The card behind this link no longer exists.",
     "invalid": "The card behind this link no longer exists.",
-    "not_linked": "No Archidekt account is linked; link one under Account details on the gateway.",
-    "rate_limited": "Scryfall asked the gateway to wait. Ask your assistant for the printings again.",
+    "not_linked": refusals.not_linked(),
+    "rate_limited": f"{outage('slow_down', 'Scryfall')} Ask your assistant for the printings again.",
     "unavailable": "The data behind this link could not be loaded right now.",
 }
 
@@ -419,6 +468,8 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
             kind = str(exc.kind)
             return fail(kind, FIXED_MESSAGES.get(kind, FIXED_MESSAGES["unavailable"]), _status(kind))
         data = {"oracle_id": link["ref"], **out}
+        if out.get("from_local_copy"):  # the local copy, while Scryfall can't answer: never kept
+            return JSONResponse({"ok": True, **data}, headers={**headers, "Cache-Control": "no-store"})
         links.remember(token, data)
         return JSONResponse({"ok": True, **data}, headers=headers)
 

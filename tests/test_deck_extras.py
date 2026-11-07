@@ -205,7 +205,7 @@ async def test_a_package_is_added_through_the_review_page_and_listed_for_the_box
         assert "More rows than your low-risk limit also wait for your press." in page
         assert "Add a package" in page and "data-open" in page and "Review the cards" in page
         empty = await _post(b, "/decks/42/package", package="")
-        assert empty.status_code == 400 and "paste a package link or id" in empty.text
+        assert empty.status_code == 400 and "paste a package link or ID" in empty.text
         r = await _post(b, "/decks/42/package", package=pkg_id, categories="default", skip_existing="1")
         pid = _pid(r)
         assert "Arcane Signet" not in {c["card"]["oracleCard"]["name"] for c in ark.decks[42]["cards"]}
@@ -327,6 +327,8 @@ async def test_lock_saves_the_cards_template_categories_as_its_defaults(stack: S
 
 async def test_a_contest_entry_and_its_withdrawal_go_through_the_review_page(stack: Stack) -> None:
     ark = stack.ark
+    _contest_ready(ark)
+    ark.account.entries.clear()
     b, _token = await _member(stack)
     try:
         page = (await b.http.get("/decks/42/contest")).text
@@ -392,10 +394,10 @@ async def test_a_template_is_added_to_a_deck_from_my_lists(stack: Stack) -> None
             "/lists/templates",
             data={"csrf": csrf, "action": "add_to_deck", "was_name": "Draw", "deck": "42"},
         )
-        pid = _pid(r)
-        assert not [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
-        done = await _browser_apply(stack.h, pid)
-        assert done["state"] == "applied", done
+        # the member's own press adds it at once (as Deck settings › Add template), back on the
+        # list with a notice and Undo; a Premier or Not in deck template opens its review first
+        assert r.status_code == 303, r.text
+        assert r.headers["location"].startswith("/lists/templates?ok=template_added&n=Draw&p="), r.headers
         assert [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
         again = await b.http.post(
             "/lists/templates",
@@ -510,7 +512,7 @@ async def test_packages_json_rows_carry_budget_and_formats_for_the_tiles(stack: 
 
 
 async def test_my_decks_and_packages_is_a_switch_that_the_address_keeps(stack: Stack) -> None:
-    """The Decks page's switch (the owner, 2026-10-25): My Decks lists decks only, Packages packages
+    """The Decks page's switch (Sam, 2026-10-25): My Decks lists decks only, Packages packages
     only; the choice rides in the address and the list's form, and keeps the open folder."""
     b, _token = await _member(stack)
     try:

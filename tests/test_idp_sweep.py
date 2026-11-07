@@ -430,7 +430,7 @@ async def test_every_successful_round_logs_one_line_and_the_status_follows_it(
     assert second["state"] == "ok" and second["removed"] == 0
     assert failed["state"] == "failed" and failed["at"]
     assert failed["error"] == (
-        f"group {USERS!r} found 0 times (is the name right, and may the token view that group?)"
+        f"Group “{USERS}” found 0 times (is the name right, and may the token view that group?)"
     )
     assert TOKEN not in json.dumps(statuses) and TOKEN not in caplog.text
 
@@ -458,7 +458,7 @@ def test_status_when_off_gives_the_reason() -> None:
 
 # Every reason a round deletes nothing has its own next step for the admin overview.
 NEXT_STEP_CASES = {
-    "Authentik could not be reached (ConnectError)": "can reach Authentik at the issuer's address",
+    "Authentik couldn't be reached (ConnectError)": "can reach Authentik at the issuer's address",
     "Authentik answered HTTP 403": "Make a new token and Docker secret",
     "Authentik answered HTTP 401": "Make a new token and Docker secret",
     "Authentik answered HTTP 502": "It tries again by itself",

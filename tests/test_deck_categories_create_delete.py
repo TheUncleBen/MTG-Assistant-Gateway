@@ -82,7 +82,7 @@ async def test_a_new_category_reads_as_one_line_and_sends_nothing(stack: Stack) 
         SUB, "42", [{"action": "create", "category": "Removal", "not_in_price": True}]
     )
     assert p["diff"] == "New category “Removal”: Not in price on. " + OPEN_TABS_NOTE
-    assert p["diff"] == category_line(p["rows"][0])
+    assert p["diff"] == category_line(p["rows"][0]) + " " + OPEN_TABS_NOTE  # said once, at the end
     assert stack.ark.category_creates == [] and stack.ark.category_deletes == []
 
 
@@ -384,6 +384,27 @@ async def test_restore_deletes_a_category_added_since_once_it_is_empty(stack: St
     assert "Removal" not in _cats(ark)
 
 
+async def test_restore_makes_a_deleted_maybeboard_record_again(stack: Stack) -> None:
+    """Review F17: Delete unused removed the empty Maybeboard (Not in deck and Not in price on, as
+    Archidekt's default board reads); a restore of a snapshot that held its record left it out, as
+    the default board without a record reads the same. The record is made again, with its switches."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    for row in ark.decks[42]["cards"]:
+        if row["categories"] == ["Maybeboard"]:
+            row["categories"] = ["Ramp"]  # an empty Maybeboard (its record id comes with the first read)
+    p = await svc.propose_categories(SUB, "42", [{"action": "delete", "category": "Maybeboard"}])
+    done = await svc.apply(SUB, p["proposal_id"], via="browser")
+    assert done["state"] == "applied" and "Maybeboard" not in _cats(ark)
+    r = await svc.propose_restore(SUB, done["result"]["snapshot_id"])
+    assert "Category “Maybeboard” is kept on the deck again, as it was in the snapshot." in r["diff"], r
+    back = await svc.apply(SUB, r["proposal_id"], via="browser")
+    assert back["state"] == "applied" and back["result"]["verified"] is True, back
+    made = _cats(ark)["Maybeboard"]
+    assert isinstance(made["id"], int)
+    assert made["includedInDeck"] is False and made["includedInPrice"] is False
+
+
 # -- the assistant's path: the same tool creates and deletes ----------------------------------------
 async def test_the_assistant_creates_deletes_and_deletes_unused_with_the_same_tool(stack: Stack) -> None:
     from .test_approval_modes import _set_mode
@@ -415,6 +436,11 @@ async def test_the_assistant_creates_deletes_and_deletes_unused_with_the_same_to
     p = structured(await call(h, token, "propose_deck_categories", {"deck_id": "42", "delete_unused": True}))
     assert p["ok"] and p["assistant_may_apply"] is False, p
     assert "Delete category “Spare”" in p["diff"] and "Delete category “Maybeboard”" in p["diff"]
+    # the default board is named in a warning (assistant tool review, 2026-10-28)
+    assert p["warnings"] == [
+        "“Maybeboard” is Archidekt's default board, deleted here because it is empty. Tell the user, "
+        "or leave it out by naming the categories to delete instead."
+    ], p
     # a delete of a category with cards and nowhere to move them is refused, in the backend's words
     p = structured(
         await call(
@@ -546,3 +572,68 @@ async def test_a_new_category_from_a_template_takes_its_switches(stack: Stack) -
         out = structured(await call(stack.h, token, "propose_deck_categories", propose(bad)))
         assert out["ok"] is False and says in out["message"], out
     assert stack.ark.category_creates == []
+
+
+async def test_deleting_a_board_out_of_the_deck_says_its_cards_join_the_deck(stack: Stack) -> None:
+    """Confirmation pass, N1: the delete line said a Maybeboard's cards "stay in the deck with no
+    category" when they were never in the deck; they join it. The same for a move into a category
+    that counts, and a move to another board keeps the neutral words."""
+    from mtg_gateway.decks import category_line
+
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    ark.add_side_row(42, "Sol Ring")
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Maybeboard", "no_category": True}]
+    )
+    assert p["diff"].startswith("Delete category “Maybeboard”: its 1 card joins the deck with no category.")
+    assert p["rows"][0]["joins_deck"] is True and p["rows"][0]["counts"] is True
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Maybeboard", "move_cards_to": "Ramp"}]
+    )
+    assert p["diff"].startswith(
+        "Delete category “Maybeboard”: its 1 card moves to “Ramp” first and joins the deck."
+    )
+    ark.decks[42]["categories"].append({"name": "Sideboard", "isPremier": False, "includedInDeck": False})
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Maybeboard", "move_cards_to": "Sideboard"}]
+    )
+    assert p["diff"].startswith("Delete category “Maybeboard”: its 1 card moves to “Sideboard” first.")
+    assert "joins_deck" not in p["rows"][0]
+    # a plain category's cards were in the deck: the words are as before
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Ramp", "no_category": True}]
+    )
+    assert p["diff"].startswith("Delete category “Ramp”: its 2 cards stay in the deck with no category.")
+    row = {"name": "M", "delete": True, "cards": 2, "no_category": True, "joins_deck": True}
+    assert category_line(row) == "Delete category “M”: its 2 cards join the deck with no category."
+    assert category_line({"name": "M", "delete": True, "cards": 2, "move_to": "X", "joins_deck": True}) == (
+        "Delete category “M”: its 2 cards move to “X” first and join the deck."
+    )
+
+
+async def test_delete_with_no_category_clears_the_cards_then_deletes(stack: Stack) -> None:
+    """The deck page's "No category" choice (review 2, M6): the cards stay in the deck with no
+    category (each row written with its other categories, if any) and only then is the empty
+    category deleted, as Archidekt allows; the line says so."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    for row in ark.decks[42]["cards"]:
+        if row["card"]["oracleCard"]["name"] == "Cultivate":
+            row["categories"] = ["Ramp", "Lands"]
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Ramp", "no_category": True}]
+    )
+    assert p["diff"].startswith("Delete category “Ramp”: its 2 cards stay in the deck with no category")
+    out = await svc.apply(SUB, p["proposal_id"], via="browser")
+    assert out["state"] == "applied" and out["result"]["verified"] is True, out
+    assert "Ramp" not in _cats(ark) and _filed(ark, "Ramp") == []
+    rows = {r["card"]["oracleCard"]["name"]: r.get("categories") or [] for r in ark.decks[42]["cards"]}
+    assert rows["Cultivate"] == ["Lands"] and rows["Coiling Oracle"] == []
+    assert len(ark.patches) == 2 and len(ark.category_deletes) == 1 and ark.category_deletes_with_cards == []
+    with pytest.raises(DeckError, match="no_category and move_cards_to together"):
+        await svc.propose_categories(
+            SUB,
+            "42",
+            [{"action": "delete", "category": "Maybeboard", "no_category": True, "move_cards_to": "Lands"}],
+        )

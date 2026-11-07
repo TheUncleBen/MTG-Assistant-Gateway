@@ -16,6 +16,7 @@ import pytest
 from .test_editor_browser import _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -248,7 +249,7 @@ def test_editor_save_bar_never_covers_the_top_bar(server: Server, width: int, sc
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
         page.evaluate("() => window.scrollTo(0, 1200)")
-        page.wait_for_timeout(150)
+        redrawn(page)
         got = page.evaluate(
             "() => { const top = document.querySelector('.topbar').getBoundingClientRect();"
             " const bar = document.querySelector('.editbar').getBoundingClientRect();"

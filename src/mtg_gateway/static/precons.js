@@ -67,8 +67,11 @@
         main.removeAttribute("aria-busy");
         if (!d || !d.ok) return;
         replace(d);
+        if (window.MtgLoadMore) window.MtgLoadMore.reset();  // a new list: no Load more pages yet
         var url = "/precons" + (p.toString() ? "?" + p.toString() : "");
-        if (window.history && history.replaceState) history.replaceState(null, "", url);
+        // through the panel (static/searchpanel.js address): the entry keeps its state (audit N1)
+        var P = window.MtgSearchPanel;
+        if (P && P.address) P.address(url); else if (window.history && history.replaceState) history.replaceState(history.state, "", url);
       })
       .catch(function (e) {
         if (!e || e.name !== "AbortError") main.removeAttribute("aria-busy");
@@ -112,12 +115,17 @@
         }
         if (more) wrap.parentNode.replaceChild(more, wrap); else wrap.remove();
         fit();
+        if (window.MtgLoadMore) window.MtgLoadMore.loaded();
       })
-      .catch(function () {
+      .catch(function (err) {
         a.removeAttribute("aria-busy");
-        var p = $("p", wrap);
-        if (!p) { p = document.createElement("p"); p.className = "muted"; wrap.appendChild(p); }
-        p.textContent = "The next sets could not be loaded. Try again.";
+        // the one wording every Load more uses (static/loadmore.js), as a toast
+        if (window.MtgLoadMore) window.MtgLoadMore.failed(err instanceof TypeError && window.MtgFetch ? window.MtgFetch.noConnectionError("nothing more could be loaded") : null);
+        else {
+          var p = $("p", wrap);
+          if (!p) { p = document.createElement("p"); p.className = "muted"; wrap.appendChild(p); }
+          p.textContent = "No connection; nothing more could be loaded. Try again.";
+        }
       });
   });
 })();

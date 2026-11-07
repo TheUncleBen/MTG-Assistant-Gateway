@@ -11,10 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 from . import cardquery as cq
+from . import prefs, ui
 from . import searchpanel as sp
 from .deckpage import mana_html
+from .theme import UNPRICED_HTML, icon
 from .theme import esc as _esc
-from .theme import icon
 
 VIEWS = ("grid", "list")
 
@@ -54,7 +55,7 @@ CARDS_CSS = """
 .spanel .fmtrow .add-row{flex:none;margin:0;display:inline-flex;align-items:center;gap:.3rem;
   height:var(--ctl)}
 .spanel .fmtrow .row2{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto}
-.spanel .fgrid > .cs-pick{--gw:220px}
+.spanel .fgrid > .cs-pick{--gw:15.714em}
 .spanel .fgrid > .fg.mv{--gw:12em}
 /* pickers: chosen values as chips (with IS / NOT where Scryfall has it) above a search box */
 .cs .cs-pick{position:relative;min-width:0}
@@ -68,7 +69,7 @@ CARDS_CSS = """
   font-size:.78rem;
   font-weight:700;letter-spacing:.02em}
 .cs .chips li.not .pol{background:var(--red-tint);color:var(--red-text);border-color:var(--red-text)}
-.cs .chips .nm{padding:0 .3rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cs .chips .nm{padding:0 .3rem;white-space:normal;overflow-wrap:break-word;min-width:0}
 .cs .chips .x{margin:0;width:1.75rem;min-height:1.75rem;height:1.75rem;padding:0;border-radius:50%;
   display:inline-flex;align-items:center;justify-content:center;border:0;background:none;color:var(--text)}
 .cs .chips .x:hover,.cs .chips .x:focus-visible{background:var(--surface-3)}
@@ -85,6 +86,8 @@ CARDS_CSS = """
 .cs .opts li[aria-selected=true],.cs .opts li.opt:hover{background:var(--surface-2)}
 .cs .opts li.none{cursor:default;color:var(--text-muted)}
 .cs .checks{display:flex;flex-wrap:wrap;gap:.5rem 1.25rem}
+/* each tick a 44 px row of its own words (a finger's target, P-11) */
+.cs .checks label{display:inline-flex;align-items:center;gap:.4rem;min-height:44px;margin:0;font-weight:400}
 /* More filters: opened from the results bar (its own summary shows without scripts and on phones) */
 details.cs-more{margin:0;border-top:1px solid var(--border-soft);padding-top:.25rem}
 details.cs-more > .cs-grid{margin:.5rem 0 0}
@@ -101,7 +104,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cs-more-wrap .muted{font-size:.9rem}
 .cs-more-wrap button{margin:0;min-width:12rem}
 /* the tile grid: as many tiles of the chosen size as fit (M 168 px at least; S and L in the theme) */
-.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,168px),1fr));gap:1rem .9rem;
+.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,12rem),1fr));gap:1rem .9rem;
   list-style:none;margin:0 0 1rem;padding:0}
 .cardgrid .cc{display:flex;flex-direction:column;gap:.5rem;min-width:0}
 .cardgrid .pic,.cardlist .pic{all:unset;display:block;cursor:pointer;position:relative;aspect-ratio:5/7;
@@ -110,8 +113,10 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cardgrid .pic:focus-visible,.cardlist .pic:focus-visible,.cardlist .nmb:focus-visible{outline:3px solid
   var(--orange);outline-offset:2px}
 .cardgrid .pic img,.cardlist .pic img{width:100%;height:100%;display:block;object-fit:cover}
+/* the page's text colour: the stand-in for a picture that failed (theme.CSS .img-fallback) sits on
+   a gradient whose surface-3 end gave the muted colour 3.6:1, and this rule outweighs that one */
 .cardgrid .pic .ph,.cardlist .pic .ph{position:absolute;inset:0;display:flex;align-items:center;
-  justify-content:center;padding:.5rem;text-align:center;font-weight:700;color:var(--text-muted);
+  justify-content:center;padding:.5rem;text-align:center;font-weight:700;color:var(--text);
   overflow-wrap:anywhere;font-size:.85rem}
 .cardgrid .meta{display:flex;flex-direction:column;gap:.15rem;min-width:0}
 /* the name and its ⋮ share the first row, the mana cost the second (a row every tile keeps, so
@@ -134,8 +139,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cardgrid .add,.cardlist .add{margin:0;min-width:0}
 /* every card of a row is as tall as the tallest, its Add to deck on the row's bottom edge */
 .cardgrid .add{width:100%;margin-top:auto}
-.cardgrid .add > span,.cardlist .add > span{min-width:0;overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap}
+.cardgrid .add > span,.cardlist .add > span{min-width:0}
 /* the list view: one row a card, columns that fold under the name on narrow screens */
 .cardlist{list-style:none;margin:0 0 1rem;padding:0;border:1px solid var(--border);
   border-radius:var(--radius);
@@ -169,8 +173,21 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 /* phones: the stat rows keep three boxes a row; the Games toggles form a grid */
 @media (max-width:599.98px){
   .cs .row3{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,5rem) auto}
-  .cs .toggles{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.6rem,1fr))}
+  .cs .toggles{display:grid;grid-template-columns:repeat(auto-fill,minmax(8em,1fr))}
 }
+/* rows too narrow for their controls side by side (a phone, or large text): the first control
+   with Remove, the others under it, each as wide as the row (the comparison "less than or equal
+   to" and the format names need the room) */
+.cs .rows{container-type:inline-size}
+@container (max-width:30em){
+  .cs .rows .row3{grid-template-columns:minmax(0,1fr) auto}
+  .cs .rows .row3 > .rm{grid-column:2;grid-row:1}
+  .cs .rows .row3 > select + select{grid-column:1 / -1}
+  .cs .rows .row3 > input{grid-column:1;max-width:10em} }
+@container (max-width:26em){
+  .cs .rows .row2{grid-template-columns:minmax(0,1fr) auto}
+  .cs .rows .row2 > .rm{grid-column:2;grid-row:1}
+  .cs .rows .row2 > select + select{grid-column:1 / -1} }
 /* Add to deck: a small dialog over the page (a bottom sheet on phones), themed like the card viewer */
 .addsheet{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
   background:var(--scrim-strong,rgba(0,0,0,.72));padding:1rem}
@@ -182,11 +199,15 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .addsheet .head{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;min-width:0}
 .addsheet h3{margin:0;font-size:1.25rem;line-height:1.25;overflow-wrap:anywhere;min-width:0;display:flex;
   flex-wrap:wrap;align-items:center;gap:.4rem .5rem}
-.addsheet .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
-  line-height:1;font-weight:400;border-radius:50%}
+.addsheet .close{flex:none;margin:0;width:max(2.4rem,44px);min-height:44px;height:max(2.4rem,44px);
+  font-size:1.5rem;line-height:1.25;font-weight:400;border-radius:50%}
+.addsheet .close .x{line-height:1.25}
 .addsheet .field{margin:0}
 .addsheet .field > label{margin:0}
 .addsheet .two{display:grid;grid-template-columns:6rem minmax(0,1fr);gap:.9rem}
+/* a box too narrow for the count beside the category (a phone at 200% text): one under the other */
+.addsheet .box{container-type:inline-size}
+@container (max-width:20em){ .addsheet .two{grid-template-columns:1fr} }
 .addsheet .msg{margin:0;font-size:.93rem;color:var(--text-muted);min-height:1.2em}
 .addsheet .msg.err{color:var(--red-text);font-weight:700}
 .addsheet .note{margin:0;font-size:.9rem;color:var(--text-muted)}
@@ -198,7 +219,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     padding-bottom:calc(1.25rem + env(safe-area-inset-bottom))}
   .addsheet .acts button{flex:1 1 auto} }
-/* Watch on each result: a pill on the picture's top right corner, a check and "Watching"
+/* Watch on each result: a pill on the picture's top right corner, a check and "On your watchlist"
    when the card is watched; icon only at card size S and in the list view; 44 px on touch */
 .cs-hint{margin:0 0 .9rem}
 .picwrap{position:relative;display:block}
@@ -211,8 +232,19 @@ html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32
 .cardlist .wbtn{position:static;width:var(--ctl);height:var(--ctl);min-height:var(--ctl);
   border-radius:var(--radius);box-shadow:none}
 .cardlist .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
-@media (pointer:coarse){html[data-card-size=s] .cardgrid .wbtn{width:44px}}
+html[data-card-size=s] .cardgrid .wbtn{width:44px}
 @media (max-width:899.98px){.cardlist .acts{grid-area:add}}
+/* two cards a row on a narrow phone at S and M (one at L), as the Binder's grid: at M a 168 px
+   tile fit once across a 375 px phone, each taller than the screen (0.7.46 full review, D, F9).
+   The Watch pill is icon only on those narrow tiles, as at S (its words stay for a screen reader) */
+@media (max-width:420px){
+  html:not([data-card-size=l]) .cardgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  /* a page too narrow for two cards with their words (200% text): one a row */
+  @container (max-width:20em){ html:not([data-card-size=l]) .cardgrid{grid-template-columns:1fr} }
+  html:not([data-card-size=l]) .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
+    overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  html:not([data-card-size=l]) .cardgrid .wbtn{padding:0;justify-content:center;width:32px}}
+@media (max-width:420px){html:not([data-card-size=l]) .cardgrid .wbtn{width:44px}}
 /* the card menu on results: theme.CARD_MENU_CSS (static/cardmenu.js) */
 .cardgrid .pic img{-webkit-touch-callout:none}
 """
@@ -262,7 +294,7 @@ def _picker(
         f"<div class='field cs-pick' data-picker='{key}' data-source='{source}'"
         f"{' data-signed' if signed else ''}><label class='lbl' for='p-{key}'>{_esc(label)}</label>"
         f"<ul class='chips' aria-label='{_esc(label)} chosen'>{chips}</ul>"
-        f"<input id='p-{key}' type='text' name='{key}' autocomplete='off' placeholder='{_esc(placeholder)}' "
+        f"<input id='p-{key}' type='text' name='{key}' autocomplete='off'{ui.hint_attrs(placeholder)} "
         f"role='combobox' aria-expanded='false' aria-autocomplete='list' aria-controls='o-{key}'>"
         f"<ul class='opts' id='o-{key}' role='listbox' hidden></ul>{hint_html}</div>"
     )
@@ -274,7 +306,7 @@ def _text_field(key: str, label: str, value: str, *, placeholder: str = "", hint
     return (
         f"<div class='field'><label for='f-{key}'>{_esc(label)}</label>"
         f"<input id='f-{key}' type='text' name='{key}' value='{_esc(value)}' maxlength='{cq.MAX_TEXT}' "
-        f"placeholder='{_esc(placeholder)}' autocomplete='off'{described}>{hint_html}</div>"
+        f"{ui.hint_attrs(placeholder)} autocomplete='off'{described}>{hint_html}</div>"
     )
 
 
@@ -329,10 +361,19 @@ def _rows(kind: str, label: str, rows_html: list[str], add_label: str, *, group:
     )
 
 
-def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
+# Mockup screen 5 (owner 11-01): on a Fold and on desktop the filter groups wait behind the
+# Filters button phones have, in place, their last state kept on the account (prefs.CARDS_FILTERS).
+# False shows them open at those widths, as before.
+FOLD_FILTERS_WIDE = True
+
+
+def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: bool = True) -> str:
     """The search form, from the shared panel (searchpanel.py): the name row, the main filter
     groups, "More filters" with the rest of Scryfall's fields, and the results bar at the foot.
-    Phones open the filters as a sheet. ``total``: the count the bar shows (None: no search yet)."""
+    Phones open the filters as a sheet; a Fold or desktop folds them in place behind the same
+    button (FOLD_FILTERS_WIDE), ``folded`` saying how they start (the account's last state).
+    ``total``: the count the bar shows (None: no search yet)."""
+    fold: bool | None = (not folded) if FOLD_FILTERS_WIDE else None
     games = "".join(_toggle("g", g, label, g in f.games) for g, label in cq.GAMES)
     stat_rows = [_stat_row(*row) for row in f.stats] or [_stat_row("pow", "ge", "")]
     price_rows = [_price_row(*row) for row in f.prices] or [_price_row("usd", "le", "")]
@@ -353,7 +394,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
                 f.types,
                 source="types",
                 signed=True,
-                placeholder="Creature, Goblin, Equipment…",
+                placeholder="Creature, Goblin, Equipment…|Goblin, Equipment…|Goblin…",
             ),
             sp.group(
                 "Mana value",
@@ -377,7 +418,14 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
             sp.pick_group(
                 label="Rarity", name="r", options=cq.RARITIES, chosen=f.rarity, none_text="Any rarity"
             ),
-            _picker("s", "Set", f.sets, source="sets", signed=False, placeholder="Set name or code"),
+            _picker(
+                "s",
+                "Set",
+                f.sets,
+                source="sets",
+                signed=False,
+                placeholder="Set name or code|Set or code|Set",
+            ),
         ]
     )
     more = (
@@ -386,7 +434,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
         + "><summary class='fold-btn'>More filters</summary><div class='cs-grid'>"
         "<h3 class='sub'>Card text</h3>"
         + _text_field(
-            "o", "Rules text", f.oracle, placeholder="draw a card", hint="Use ~ for the card's own name."
+            "o", "Rules text", f.oracle, placeholder="destroy target", hint="Use ~ for the card's own name."
         )
         + _text_field(
             "m", "Mana cost", f.mana, placeholder="{2}{G}{G}", hint="Symbols like {W}, {2} or {R/G}."
@@ -411,7 +459,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
             f.criteria,
             source="criteria",
             signed=True,
-            placeholder="Foil, Full Art, Reprint…",
+            placeholder="Foil, Full Art, Reprint…|Foil, Reprint…|Foil…",
         )
         + "<fieldset><legend>Matching</legend><div class='checks'>"
         f"<label><input type='checkbox' name='tany' value='1'{' checked' if f.types_any else ''}> "
@@ -431,7 +479,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
             "x",
             "Scryfall syntax",
             f.syntax,
-            placeholder="o:draw t:creature",
+            placeholder="o:draw t:creature|o:draw",
             hint="Added to everything picked above.",
         )
         + "</div></details>"
@@ -440,19 +488,22 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
         main + more,
         show_html="<button type='button' class='btn-primary sp-show'>Show cards</button>",
         clear_html="<button type='button' class='sp-clear'>Clear filters</button>",
+        folded=folded if FOLD_FILTERS_WIDE else None,
+        pref=prefs.CARDS_FILTERS if FOLD_FILTERS_WIDE else "",
     )
     return (
-        f"<form id='cs-form' class='cs' method='get' action='/cards' role='search' data-view='{_esc(view)}' "
-        "data-count-own>"
+        "<form id='cs-form' class='cs' method='get' action='/cards' role='search' autocomplete='off' "
+        f"data-view='{_esc(view)}' data-count-own>"
         + sp.name_row(
-            label="Card name",
+            label="Name",
             name="q",
             value=f.name,
-            placeholder="Any part of a card name",
+            placeholder="Name",
             input_id="c-q",
             search_label="Search cards",
             cross_html=sp.cross_link("Search decks instead", "/search", "decks"),
             attrs=f" maxlength='{cq.MAX_TEXT}'",
+            fold=fold,
         )
         + sheet
         + results_bar_html(f, view=view, total=total)
@@ -566,20 +617,28 @@ HINT_HTML = (
     "<p class='ui-hint cs-hint' id='cs-hint'>Watch a card with its <b>Watch</b> button, or right-click it "
     "(press and hold on a phone) for more.</p>"
 )
+# the same hint in the Android app: a phone's words only (audit D15)
+HINT_APP_HTML = (
+    "<p class='ui-hint cs-hint' id='cs-hint'>Watch a card with its <b>Watch</b> button, or press and hold "
+    "it for more.</p>"
+)
 
 
 def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: bool = False) -> str:
-    """The Watch button on a result: "Watch", or a check and "Watching" when the member
+    """The Watch button on a result: "Watch", or a check and "On your watchlist" when the member
     already watches the card. A printing search watches the shown printing."""
     name = str(card.get("name") or "")
     pin = ""
+    on = _norm(name) in watched
     if printing and card.get("set") and card.get("collector_number"):
         pin = f" data-set-code='{_esc(card['set'])}' data-number='{_esc(card['collector_number'])}'"
-    if _norm(name) in watched:
+        # a printing's own button: that printing watched, not another one of the card
+        on = _print_key(card["set"], card["collector_number"]) in watched
+    if on:
         return (
             f"<button type='button' class='wbtn on' data-watch='{_esc(name)}'{pin} aria-pressed='true' "
             f"aria-label='{_esc(name)} is on your watchlist' title='On your watchlist'>"
-            f"{icon('check')}<span>Watching</span></button>"
+            f"{icon('check')}<span>On your watchlist</span></button>"
         )
     return (
         f"<button type='button' class='wbtn' data-watch='{_esc(name)}'{pin} aria-pressed='false' "
@@ -592,9 +651,28 @@ def _norm(name: str) -> str:
     return " ".join(name.lower().split())
 
 
+_PRINT = "#print "  # a watched printing's key in watched_names (no card name starts with "#")
+
+
+def _print_key(set_code: object, number: object) -> str:
+    return f"{_PRINT}{str(set_code).lower()} {str(number).lower()}"
+
+
 def watched_names(rows: list[dict[str, Any]]) -> frozenset[str]:
-    """The names a member watches (any printing), as the Watch buttons compare them."""
-    return frozenset(_norm(str(r.get("name") or "")) for r in rows)
+    """The names a member watches (any printing), as the Watch buttons compare them, and each
+    watched printing's key (a printing search's buttons)."""
+    out = {_norm(str(r.get("name") or "")) for r in rows}
+    out |= {
+        _print_key(r["set_code"], r["collector_number"])
+        for r in rows
+        if r.get("set_code") and r.get("collector_number")
+    }
+    return frozenset(out)
+
+
+def watched_name_list(watched: frozenset[str]) -> list[str]:
+    """The names alone, sorted (the deck editor's list)."""
+    return sorted(n for n in watched if not n.startswith(_PRINT))
 
 
 def card_tile_html(
@@ -667,7 +745,7 @@ def card_row_html(
         f"<span class='ty'>{_esc(card.get('type_line') or '')}{(' · ' + _esc(stats)) if stats else ''}</span>"
         f"<span class='set num' title='{_esc(card.get('set_name') or '')}'>{_esc(where)}</span>"
         f"<span class='rar'>{_esc(rarity)}</span>"
-        f"<span class='price num'>{_esc(price) if price else '<span class=muted>–</span>'}</span>"
+        f"<span class='price num'>{_esc(price) if price else UNPRICED_HTML}</span>"
         "</span>"
         + (
             ""

@@ -24,7 +24,7 @@ pytest.importorskip("playwright")
 SHOTS = os.environ.get("MTG_SETTINGS_SHOTS")
 TEXT = (
     ".set-group h2, .set-group summary, .set-label, .set-help, .set-src, .set-err, .range, .unit, "
-    ".set-seg label, .set-choices label, .set-confirm, .set-nav a, .set-save button, .reset, .notice, "
+    ".set-sw, .set-choices label, .set-confirm, .set-nav a, .set-save button, .reset, .notice, "
     ".notice li, .set-badge, .set-confirm .lead, .set-confirm .tick, code"
 )
 
@@ -32,7 +32,7 @@ TEXT = (
 TAPS = """
 () => [...document.querySelectorAll(
     '.set-group:not(#g-scan) input[type=number], .set-group:not(#g-scan) .msel-btn,'
-    + ' .set-seg label, .set-choices label, .set-save button, .set-nav a, .reset')]
+    + ' .set-sw, .set-choices label, .set-save button, .set-nav a, .reset')]
   .filter(e => e.getBoundingClientRect().width)
   .filter(e => e.getBoundingClientRect().height < 38.5)
   .map(e => (e.id || e.textContent.trim()).slice(0, 30) + ' ' + Math.round(e.getBoundingClientRect().height))
@@ -120,9 +120,10 @@ def test_the_settings_page_reads_and_works_everywhere(server: Server, width: int
         _shot(page, f"settings-saved-{width}-{theme}.png", page.locator("main"))
 
         # the On/Off switch works from the keyboard
-        page.focus("#s-row-update_check input[value=on]")
-        page.keyboard.press("ArrowRight")
-        assert page.is_checked("#s-row-update_check input[value=off]")
+        assert page.is_checked("#f-update_check")
+        page.focus("#f-update_check")
+        page.keyboard.press("Space")
+        assert not page.is_checked("#f-update_check")
 
         # the scan thresholds open, and fit
         page.locator("#g-scan summary").click()
@@ -246,11 +247,13 @@ LOCKED_ROWS = """
   return keys.map(key => {
     const row = document.getElementById('s-row-' + key);
     const ctls = [...row.querySelectorAll('input, select, button')];
-    const shown = ctls.filter(c => c.type !== 'radio' || c.checked)
-      .map(c => c.type === 'radio' ? c.value : (c.classList.contains('msel-btn') ? c.innerText : c.value))
+    // an On/Off switch shows on or off (its hidden "off" is what an unticked one sends)
+    const shown = ctls.filter(c => c.type !== 'hidden' && (c.type !== 'radio' || c.checked))
+      .map(c => c.type === 'checkbox' ? (c.checked ? 'on' : 'off') :
+        c.type === 'radio' ? c.value : (c.classList.contains('msel-btn') ? c.innerText : c.value))
       .filter(v => v);
     const faces = [...row.querySelectorAll(
-      'input:not([type=radio]), .msel-btn, .set-seg label, .set-choices label')]
+      'input:not([type=radio]):not([type=checkbox]), .msel-btn, .set-sw, .set-choices label')]
       .filter(e => e.getBoundingClientRect().width);
     return {
       key,
@@ -356,18 +359,18 @@ MIDWORD_BREAKS = """
 })
 """
 
-# A locked On/Off row: each label's words, the chosen one, and the radios' own look (they stay
-# invisible over their label: no grey dashed face).
+# A locked On/Off row: its switch's words (its state), whether it is on, and the box's own look (it
+# stays invisible inside its switch: no grey dashed face).
 LOCKED_CHOICES = """
 (keys) => keys.map(key => {
   const row = document.getElementById('s-row-' + key);
-  const labels = [...row.querySelectorAll('.set-seg label, .set-choices label')];
+  const labels = [...row.querySelectorAll('.set-sw, .set-choices label')];
   return {
     key,
     words: labels.map(l => l.innerText.trim()),
     chosen: labels.filter(l => l.querySelector('input').checked).map(l => l.innerText.trim()),
-    segInputs: [...row.querySelectorAll('.set-seg input')].map(i => getComputedStyle(i).opacity),
-    dashedRadios: [...row.querySelectorAll('input[type=radio]')]
+    segInputs: [...row.querySelectorAll('.set-sw input')].map(i => getComputedStyle(i).opacity),
+    dashedRadios: [...row.querySelectorAll('input[type=radio], input[type=checkbox]')]
       .filter(i => getComputedStyle(i).borderTopStyle === 'dashed').length,
   };
 })
@@ -387,7 +390,7 @@ LOCKED_CHOICES = """
 def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
     locked_server: Server, width: int, theme: str, zoom: str
 ) -> None:
-    """A locked On/Off row shows "On"/"Off", not the radios on top of them, with no dashed ring; and
+    """A locked On/Off row says its state ("Off") beside its greyed switch, with no dashed box; and
     at 200% text the variable name breaks only after an underscore."""
     from playwright.sync_api import sync_playwright
 
@@ -400,7 +403,7 @@ def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         assert page.evaluate(MIDWORD_BREAKS) == []
         (backups,) = page.evaluate(LOCKED_CHOICES, ["archidekt_backups"])
-        assert backups["words"] == ["On", "Off"] and backups["chosen"] == ["Off"], backups
+        assert backups["words"] == ["Off"] and backups["chosen"] == [], backups
         assert backups["segInputs"] and set(backups["segInputs"]) == {"0"}, backups
         assert backups["dashedRadios"] == 0
         assert page.evaluate(MEASURE) == []
@@ -439,13 +442,13 @@ def test_a_confirmation_tick_shows_only_after_lowering_or_turning_off(
             "lowering this."
         ]
         assert hint.inner_text() == "1 change not saved yet"
-        page.locator("#s-row-archidekt_backups .set-seg label", has_text="Off").click()
+        page.locator("#s-row-archidekt_backups .set-sw").click()  # off
         assert len(page.evaluate(CONFIRMS)) == 2 and hint.inner_text() == "2 changes not saved yet"
         assert "You turned this off." in page.evaluate(CONFIRMS)[0]
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
         _shot(page, f"settings-confirm-{width}-{theme}.png", page.locator("#g-backups"))
-        page.locator("#s-row-archidekt_backups .set-seg label", has_text="On").click()
+        page.locator("#s-row-archidekt_backups .set-sw").click()  # on again
         page.fill("#f-archidekt_backup_copies", "20")
         assert page.evaluate(CONFIRMS) == [] and hint.inner_text() == "1 change not saved yet"
         # lowered and saved without the tick: refused, the box still there with its sentence

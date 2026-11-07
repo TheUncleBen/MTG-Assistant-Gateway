@@ -71,7 +71,8 @@ async def test_group_removal_in_authentik_cuts_off_the_member(env: Env, http: ht
     removed = ak.post(f"/core/groups/{group['pk']}/remove_user/", json={"pk": user["pk"]})
     assert removed.status_code in (200, 204), removed.text
     try:
-        time.sleep(CHECK_TTL + 1)  # past the gateway's short membership cache
+        # fixed wait: past the gateway's membership cache (CHECK_TTL), a timer of the code under test
+        time.sleep(CHECK_TTL + 1)
         assert mcp_tools_list(http, tokens["access_token"]).status_code == 401
         r = exchange(http, client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
         assert r.status_code == 400 and r.json()["error"] == "invalid_grant", r.text

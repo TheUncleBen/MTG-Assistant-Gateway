@@ -275,6 +275,7 @@ def test_tag_box_suggests_archidekts_tags(server: Server, width: int, scheme: st
         # one letter asks nothing; two do
         box.click()
         box.press_sequentially("b", delay=40)
+        # fixed wait: a negative check : one letter asks nothing within 400 ms
         page.wait_for_timeout(400)
         assert asked == [] and not listbox.is_visible()
         box.press_sequentially("u", delay=40)
@@ -317,6 +318,7 @@ def test_tag_box_stays_a_plain_box_when_the_lookup_fails(server: Server) -> None
         box = page.locator("#tagname")
         box.click()
         box.press_sequentially("budget", delay=40)
+        # fixed wait: a negative check: a refused read opens no list within 600 ms
         page.wait_for_timeout(600)
         assert not page.locator("#tagname-list").is_visible()
         with page.expect_navigation():

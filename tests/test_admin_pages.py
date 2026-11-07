@@ -88,8 +88,8 @@ async def test_the_overview_is_six_widgets_then_system_updates_and_activity_by_d
         assert text.index("<h1>Admin: overview</h1>") < text.index(
             "Members, the last 30 days and the system."
         )
-        assert text.index("the system.") < text.index("<nav class='adm-nav'")
-        assert text.index("<nav class='adm-nav'") < text.index("<section class='ui-widgets'")
+        assert text.index("the system.") < text.index("<nav class='hubseg adm-nav'")
+        assert text.index("<nav class='hubseg adm-nav'") < text.index("<section class='ui-widgets'")
         assert _widgets(text) == [
             "Members",
             "Proposals, 30 days",
@@ -99,10 +99,16 @@ async def test_the_overview_is_six_widgets_then_system_updates_and_activity_by_d
             "Updates",
         ]
         assert "<span class='big'>4<small>signed in</small></span>" in text
-        assert "1 disabled · 1 linked to Archidekt" in text
+        # one span a fact (ui.facts, re-check S5), the dot drawn by the style; it was one text line
+        facts = "<span class='tx ui-dots balanced'><span>1 disabled</span><span>1 linked to Archidekt</span>"
+        assert facts in text
         assert "<span class='big'>86</span>" in text  # 84 + 2 tool calls
         assert "<span class='big'>3</span><span class='det'>3 today</span>" in text  # the errors
         assert "<div class='wdg alert'>" in text  # errors in the alert tone
+        # no Mystic Forge, Forge or clean-up here: the System widget says what runs, in words,
+        # not "0 services set up" (re-audit D31)
+        assert "<span class='big'>Gateway only</span>" in text and "services set up" not in text
+        assert "Mystic Forge, Forge and member clean-up are not set up" in text
         assert "class='spark' role='img' aria-label='Tool calls per day, oldest first:" in text
         assert "<section class='ui-card' id='system'" in text and "<details id='how-to-update'>" in text
         assert text.index("id='system'") < text.index("id='how-to-update'")
@@ -131,7 +137,7 @@ async def test_users_list_reads_in_words_with_widgets_chips_and_filters(gw: Harn
             "Active in 7 days",
             "Disabled",
             "Linked to Archidekt",
-            "Connected apps",
+            "Assistants",  # independent review 2, L2: the name it has everywhere else
         ]
         assert "<span class='big'>4<small>signed in</small></span>" in text
         assert "<div class='wdg alert'>" in text  # one account is disabled
@@ -160,9 +166,51 @@ async def test_users_list_reads_in_words_with_widgets_chips_and_filters(gw: Harn
         found = await _get(b, "/admin/users?q=bob")
         assert found.count("class='tr mem") == 1 and ">bob<" in found
         nobody = await _get(b, "/admin/users?q=zzz")
-        assert "Nobody matches these filters. <a href='/admin/users'>Show everyone</a>" in nobody
+        everyone = "<a class='ui-cap' href='/admin/users'>Show everyone</a>"
+        assert f"Nobody matches these filters. {everyone}" in nobody
     finally:
         await b.aclose()
+
+
+async def test_a_members_panel_says_why_an_app_has_no_logo(gw: Harness) -> None:
+    """T-201: the admin's panel names where each connected app sends members back (hosts only), so
+    an app that shows the neutral icon instead of its logo can be told apart from one that does."""
+    gw.db.save_client(
+        "gpt-app",
+        {
+            "client_name": "ChatGPT",
+            "redirect_uris": [
+                "https://chatgpt.com/connector_platform_oauth_redirect",
+                "https://elsewhere.example/cb?x=secret",
+            ],
+        },
+    )
+    gw.db.save_token(
+        "tok-gpt",
+        kind="access",
+        client_id="gpt-app",
+        sub="user-2",
+        scopes=["mcp"],
+        resource=None,
+        family="fg",
+        expires_at=NOW + 3600,
+    )
+    b = await admin_browser(gw)
+    try:
+        panel = (await _get(b, "/admin/users?open=user-2")).split("<aside class='ui-drawer'", 1)[1]
+        assert (
+            "No logo: it sends members back to chatgpt.com and elsewhere.example, not only to one "
+            "company’s addresses." in panel
+        )
+        assert "No logo: its registration names no address to send members back to." in panel  # claude-app
+        assert "secret" not in panel and "connector_platform" not in panel
+    finally:
+        await b.aclose()
+    gw.db.save_client("gpt-app", {"client_name": "ChatGPT", "redirect_uris": ["https://chatgpt.com/cb"]})
+    assert ui.client_brand_note("gpt-app") == "OpenAI’s logo: it sends members back only to chatgpt.com."
+    assert ui.client_brand_note("https://claude.ai/oauth/x") == "Claude’s logo: its address is on claude.ai."
+    assert ui.client_brand_note("https://e.example/m.json") == "No logo: its address is on e.example."
+    assert ui.client_brand_note("unknown-app") == "No logo: no registration is kept for it."
 
 
 async def test_a_members_panel_holds_the_ids_the_actions_and_the_two_boxes(gw: Harness) -> None:
@@ -170,7 +218,7 @@ async def test_a_members_panel_holds_the_ids_the_actions_and_the_two_boxes(gw: H
     try:
         text = await _get(b, "/admin/users?open=user-2")
         panel = text.split("<aside class='ui-drawer' aria-label='bob'>", 1)[1]
-        assert "<a href='/admin/users'>← All members</a>" in panel
+        assert "<a class='ui-cap' href='/admin/users'>← All members</a>" in panel
         assert "<code>user-2</code>" in panel and "<code>claude-app</code>" in panel
         assert "<span class='nm'>Claude</span>" in panel and "bob_brews" in panel
         assert "class='btn btn-outline-danger' href='/admin/users?open=user-2&box=disable'" in panel
@@ -262,7 +310,8 @@ async def test_metrics_read_in_words_with_the_raw_name_only_in_a_rows_details(gw
         opened = await _get(b, "/admin/metrics?open=tool%3Asearch_decks")
         assert "<div class='more-body' id='m-0-more'>" in opened and "aria-expanded='true'" in opened
         none = await _get(b, "/admin/metrics?q=zzz")
-        assert "Nothing counted matches these filters. <a href='/admin/metrics'>Show everything</a>" in none
+        everything = "<a class='ui-cap' href='/admin/metrics'>Show everything</a>"
+        assert f"Nothing counted matches these filters. {everything}" in none
     finally:
         await b.aclose()
 
@@ -293,7 +342,7 @@ async def test_card_models_search_member_filter_and_widgets(gw: Harness) -> None
         assert _widgets(text) == ["Models kept", "Members with models", "Changed in 7 days"]
         assert "<span class='big'>2</span>" in text or "<span class='big'>2<small>" in text
         assert "<span class='big'>2<small>of 4</small></span>" in text
-        assert "<input type='search' name='q'" in text and "placeholder='Search card name'" in text
+        assert "<input type='search' name='q'" in text and "placeholder='Name'" in text
         opts = text.split("<select name='member'", 1)[1].split("</select>", 1)[0]
         assert "<option value='' selected>Every member</option>" in opts
         assert ">bob</option>" in opts and ">a member with no name</option>" in opts
@@ -310,7 +359,7 @@ async def test_card_models_search_member_filter_and_widgets(gw: Harness) -> None
         assert bob.count("class='tr model'") == 1 and ">Opt<" in bob
         assert "<option value='user-2' selected>bob</option>" in bob
         none = await _get(b, "/admin/models?q=zzz")
-        assert "No card models match. <a href='/admin/models'>Show all</a>" in none
+        assert "No card models match. <a class='ui-cap' href='/admin/models'>Show all</a>" in none
         # a model that is gone can't be removed twice: the page says so instead of a box
         r = await b.http.get("/admin/models?remove=nope&by=user-9", headers=NAVIGATE)
         assert r.status_code == 200 and "id='remove'" not in r.text
@@ -327,7 +376,7 @@ async def test_settings_opens_with_the_heading_purpose_and_tab_bar_in_the_wide_c
         text = await _get(b, "/admin/settings")
         h1 = text.index("<h1>Admin: settings</h1>")
         purpose = text.index("Settings for the whole gateway. A setting your stack sets is shown greyed out")
-        nav = text.index("<nav class='adm-nav'")
+        nav = text.index("<nav class='hubseg adm-nav'")
         groups = text.index("<nav class='ui-chips set-nav'")
         assert h1 < purpose < nav < groups
         assert "<main class='wrap ui-wide'" in text
@@ -374,11 +423,12 @@ async def test_admin_activity_has_the_page_head_first_and_a_menu_on_every_row(gw
         "tool_call", sub="user-2", client_id="claude-app", detail={"tool": "search_decks", "ok": True}
     )
     gw.db.audit("approval_refused", sub="user-2", client_id="claude-app", detail={"proposal_id": "p1"})
+    gw.db.audit("client_registered", client_id="dcr-4f9a", detail={"redirect_hosts": []})  # no member
     b = await admin_browser(gw)
     try:
         text = await _get(b, "/admin/activity")
-        assert text.index("<h1>Admin: activity</h1>") < text.index("<nav class='adm-nav'")
-        assert text.index("<nav class='adm-nav'") < text.index("<section class='ui-widgets'")
+        assert text.index("<h1>Admin: activity</h1>") < text.index("<nav class='hubseg adm-nav'")
+        assert text.index("<nav class='hubseg adm-nav'") < text.index("<section class='ui-widgets'")
         assert "<div class='wdg wide-sm'>" in text  # Last 14 days spans the phone row
         assert "<script src='/static/admin.js?v=" in text
         rows = text.split("act-table'", 1)[1]
@@ -396,6 +446,49 @@ async def test_admin_activity_has_the_page_head_first_and_a_menu_on_every_row(gw
         summaries = "".join(r.split("<div class='more-body'", 1)[0] for r in rows.split("<div class='tr ev"))
         assert "search_decks" not in summaries and "Search public decks" in summaries  # the tool in words
         assert "search_decks" in rows  # its raw name only in the row's details
+    finally:
+        await b.aclose()
+
+
+async def test_admin_activity_names_members_in_plain_text_and_rows_in_words(gw: Harness) -> None:
+    """Review F5 and F11: the member column is the name in plain text (no bare blue link; the row's
+    menu and details keep "Show bob only"), an app's registration says where it signs in, and the
+    one-time "stored sign-ins tied to their owners" upgrade entry stays out of the list unless
+    asked for by name."""
+    gw.db.audit(
+        "tool_call", sub="user-2", client_id="claude-app", detail={"tool": "search_decks", "ok": True}
+    )
+    gw.db.audit(
+        "client_registered",
+        client_id="dcr-4f9a",
+        detail={"client_name": "ChatGPT", "redirect_uri_count": 1, "redirect_hosts": ["chatgpt.com"]},
+    )
+    gw.db.audit("archidekt_sessions_sealed", detail={"resealed": 0})
+    b = await admin_browser(gw)
+    try:
+        text = await _get(b, "/admin/activity")
+        rows = text.split("act-table'", 1)[1]
+        assert "<span class='c-who'>bob</span>" in rows
+        assert not re.search(r"<span class='c-who'><a ", rows)
+        assert "Show bob only</a>" in rows  # the filter stays, as a button in the row's details
+        reg = rows.split("An app registered", 1)[1].split("<div class='more-body'", 1)[0]
+        assert "Signs you back in at chatgpt.com" in reg and "No detail" not in reg
+        assert "Stored Archidekt sign-ins" not in rows and "resealed" not in rows
+        one = await _get(b, "/admin/activity?event=archidekt_sessions_sealed")
+        assert "Stored Archidekt sign-ins tied to their owners" in one.split("act-table'", 1)[1]
+    finally:
+        await b.aclose()
+
+
+async def test_the_overview_names_approval_modes_as_members_see_them(gw: Harness) -> None:
+    """Review F11: the overview names the approval modes as the Account and Settings pages do,
+    with no setting word in brackets, and points at the clean-up steps by their name."""
+    b = await admin_browser(gw)
+    try:
+        text = await _get(b, "/admin")
+        assert "Ask me every time" in text
+        for word in ("(manual)", "(semi)", "(auto)", "section 12"):
+            assert word not in text, word
     finally:
         await b.aclose()
 

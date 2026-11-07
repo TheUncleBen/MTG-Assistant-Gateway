@@ -16,8 +16,7 @@ from .decks import DeckError
 
 LIST_FIELD = Field(
     description=(
-        "Which list: templates (category templates), default_categories (each card's preset "
-        "categories), color_tags, pins (pinned cards) or custom_cards."
+        "templates, default_categories, color_tags, pins, custom_cards or collection_tags (binder tags)."
     )
 )
 
@@ -32,12 +31,11 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
         name="get_my_lists",
         title="Read one of my Archidekt lists",
         description=(
-            "Read one of the user's account-wide Archidekt lists as it is now: their category "
-            "templates (name and the three switches: in deck, in price, Premier), their default "
-            "categories (the categories a card goes into when added to a deck, 100 cards a page; the "
-            "first is the main one), their color tags (name and hex color), their pinned cards "
-            "(printing, copies, finish and note; Archidekt keeps at most 150) or their custom cards "
-            "(search by name, a page at a time). Changes nothing."
+            "Read one of the user's account-wide Archidekt lists: category templates (name; in deck, "
+            "in price and Premier switches), default categories (a card's categories when added to a "
+            "deck, main first; 100 cards a page), color tags (name, hex color), pinned cards "
+            "(printing, copies, finish, note) or custom cards (search by name, a page at a time). "
+            "Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -58,29 +56,23 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
         name="propose_list_change",
         title="Propose a change to one of my Archidekt lists (write, two-step)",
         description=(
-            "Step 1 of changing one of the user's account-wide Archidekt lists. changes is a list of "
-            "changes to that one list, each an object with op and its fields:\n"
-            "- templates: create {name, in_deck, in_price, premier} (in deck and price default on, "
-            "Premier off); edit {name, new_name?, in_deck?, in_price?, premier?}; delete {name}.\n"
-            "- default_categories: set {card, categories: [template names, the main one first]}; "
-            "clear {card}. Only the user's template names can be default categories.\n"
-            "- color_tags: create {name (32 characters at most), color (hex, default #fa890d)}; edit "
-            "{name, new_name?, color?}; delete {name}. Cards already tagged keep their old name and "
-            "color.\n"
-            "- pins: pin {card, set_code?, collector_number?, finish? (Normal, Foil or Etched), "
-            "quantity?, notes?}; edit {card or pin_id, quantity?, notes?, finish?, set_code? and "
-            "collector_number? for another printing}; unpin {card or pin_id}; remove_all {}.\n"
-            "- custom_cards: create {fields}; edit {name, fields}; delete {name}. fields uses "
-            "Archidekt's own names (frontName, frontManaCost, frontTypes, frontSubTypes, "
-            "frontSuperTypes, frontText, frontPower, frontToughness, frontLoyalty, frontArtistName, "
-            "cmc, hasBack and the back* fields, setCode, collectorNumber); a name and at least one "
-            "type are required. A picture is never set from here: the user uploads it on the My "
-            "lists page.\n"
-            "Each change is checked against the list as it is now. Returns the proposal (kind "
-            "'lists') and its review URL; it is applied with apply_proposal like any other. A small "
-            "change is low risk (assistant_may_apply says when you may apply it yourself); a delete "
-            "(a template, a color tag, a custom card, or all pins) always waits for the user's own "
-            "press. Changes nothing on Archidekt by itself."
+            "Step 1 of changing one of the user's account-wide Archidekt lists. changes: to that one "
+            "list, each {op, ...} (or action):\n"
+            "- templates: create {name, in_deck, in_price, premier} (in_deck, in_price default on); "
+            "edit {name, new_name?, in_deck?, in_price?, premier?}; delete {name}.\n"
+            "- default_categories: set {card, categories: [template names, main first]}; clear "
+            "{card}.\n"
+            "- color_tags, collection_tags (binder tags): create {name (at most 32 characters), color "
+            "(hex, default #fa890d)}; edit {name, new_name?, color?}; delete {name}.\n"
+            "- pins: pin {card, set_code?, collector_number?, finish? (Normal, Foil, Etched), "
+            "quantity?, notes?}; edit {card or pin_id, and those fields}; unpin {card or pin_id}; "
+            "remove_all {}.\n"
+            "- custom_cards: create {fields}; edit {name, fields}; delete {name}. fields: Archidekt's "
+            "names, as get_my_lists shows them (frontName, frontManaCost, frontTypes, frontText, cmc, "
+            "hasBack, back*, ...); a name and a type are required. Pictures: the user uploads them on "
+            "Binder › Lists.\n"
+            "Returns the proposal (kind 'lists') for apply_proposal; a delete or remove_all waits for "
+            "the user's press. Changes nothing on Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,
@@ -92,8 +84,15 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
             Field(description="The changes to that list, each with op (see the description)."),
         ],
     ) -> CallToolResult:
+        # every other propose tool names a change's kind "action": taken here for "op" too
+        changes = [
+            {"op": c["action"], **{k: v for k, v in c.items() if k != "action"}}
+            if isinstance(c, dict) and "op" not in c and "action" in c
+            else c
+            for c in changes
+        ]
         try:
             out = await state.decks.propose_lists(_sub(), which_list, changes)
-            return _proposal({"ok": True, **out})
+            return h._proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

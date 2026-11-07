@@ -19,8 +19,8 @@
    add box, the top bar's "Search cards and decks" suggestions (static/suggest.js) and the other
    pages' card rows (static/menus.js): Open card, Add to deck…, Add to collection, Watch this
    card (or "On your watchlist", which opens it) and Art variants… (the shared printing picker,
-   static/printpick.js, in its browse mode) with watchlists on, Copy name, Open on Scryfall, and a
-   page's own items. Watch goes through /watchlist/api/watch; the toast's Undo stops that one
+   static/printpick.js, in its browse mode) with watchlists on, Pin card (Lists, Pinned on
+   Archidekt), Copy name, Open on Scryfall, and a page's own items. Watch goes through /watchlist/api/watch; the toast's Undo stops that one
    watch again through /watchlist/api/unwatch, by its id. Nothing of the watch shows with
    watchlists off (the page's body has no data-watchlist then).
 
@@ -49,6 +49,8 @@
     bookmark: "<path d='M6 3h12v18l-6-4-6 4z'/>",
     check: "<path d='M5 12l4 4L19 6'/>",
     eye: "<path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z'/><circle cx='12' cy='12' r='3'/>",
+    "eye-off": "<path d='M3 3l18 18'/><path d='M10.6 6.2A10 10 0 0 1 12 6c6.5 0 10 6 10 6a16 16 0 0 1-3.1 3.7"
+      + "M6.6 6.6A16 16 0 0 0 2 12s3.5 6 10 6a9.7 9.7 0 0 0 4-.8'/>",  // Stop watching (theme.py's eye-off)
     image: "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
     "vote-up": "<path d='M6 15l6-6 6 6'/>",
     "image-off": "<path d='M4 5h16v14H4z'/><path d='M4 17l5-5 4 4 3-3 4 4'/><path d='M3 3l18 18'/>",
@@ -80,7 +82,8 @@
     trophy: "<path d='M7 4h10v5a5 5 0 0 1-10 0z'/><path d='M7 6H4a3 3 0 0 0 3 3M17 6h3a3 3 0 0 1-3 3M12 14v4M8 21h8'/>",
     pdf: "<path d='M6 3h8l4 4v14H6z'/><path d='M14 3v4h4'/><path d='M9 13h6M9 17h6'/>",
     comment: "<path d='M4 5h16v11H9l-5 4z'/>",
-    tag: "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>"
+    tag: "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>",
+    pin: "<path d='M9 3h6l-1 6 4 4H6l4-4z'/><path d='M12 13v8'/>"
   };
   function icon(name) {
     var span = el("span");
@@ -91,20 +94,22 @@
     var i = document.querySelector("input[name=csrf]");
     return i ? i.value : "";
   }
-  var ODD = "The gateway sent an answer this page could not read. Reload the page to see whether the change was made.";
+  // through the shared MtgFetch (static/fetchjson.js): neither ever rejects; a session that
+  // ended or a lost connection comes back as {ok: false} with the site's one wording and
+  // d.signedOut / d.noConnection, so every page shows the same words (and Sign in: fail below)
   function post(path, body) {
-    return fetch(path, {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-      body: JSON.stringify(body)
-    }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: ODD }; });
-    });
+    return window.MtgFetch.answer(path, { method: "POST", body: JSON.stringify(body), csrf: csrf() });
   }
   function getJSON(path) {
-    return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: ODD }; });
-    });
+    return window.MtgFetch.answer(path);
+  }
+  /* a change that did not go through, as a red toast: the gateway's own reason, or ``fallback``;
+     signed out and no connection get their one wording, and signed out a Sign in button that
+     comes back to this page (Try again cannot help then). ``extra``: more actions. */
+  function fail(d, fallback, extra) {
+    var pr = window.MtgFetch.problem(d, null);
+    var text = d && (d.signedOut || d.noConnection) ? pr.text : ((d && d.message) || fallback);
+    toast(text, { error: true, actions: pr.actions.concat(extra || []) });
   }
   // A proposal the deck page owes a reject (static/deck.js: a question left open when the page
   // was left). The reject goes out as the page leaves, but a request that outlives its page is
@@ -165,14 +170,6 @@
   var norm = function (n) { return String(n || "").toLowerCase().replace(/\s+/g, " ").trim(); };
   function enabled() { return document.body.hasAttribute("data-watchlist"); }
   function phone() { return window.matchMedia && window.matchMedia("(max-width: 599.98px)").matches; }
-  // Where the phone's Back should close a menu instead of leaving the page: a phone, a touch
-  // screen in the rail range (600 to 1279.98 px, as theme.py draws the rail) and the Android
-  // app at any width (static/deck.js and static/feedback.js ask the same)
-  function backCloses() {
-    return phone() ||
-      (window.matchMedia && window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches) ||
-      document.body.classList.contains("app");
-  }
 
   // -- toast: what was done, with its links; errors stay until dismissed -------------------------
   var toastEl = null, toastTimer = null;
@@ -182,8 +179,12 @@
     dismissToast();
     toastEl = el("div", "toast cards-toast" + (opts.error ? " error" : ""));
     toastEl.setAttribute("role", opts.error ? "alert" : "status");
-    if (opts.ok) { var ok = icon("check"); ok.setAttribute("class", "i ok"); toastEl.appendChild(ok); }
-    toastEl.appendChild(el("span", "msg", text));
+    // the check mark is the message's first thing, in its line: at 200% text the message no
+    // longer fits beside an icon of its own and started under it (final polish AA2)
+    var msg = el("span", "msg");
+    if (opts.ok) { var ok = icon("check"); ok.setAttribute("class", "i ok"); msg.appendChild(ok); }
+    msg.appendChild(document.createTextNode(text));
+    toastEl.appendChild(msg);
     (opts.actions || []).forEach(function (a) { toastEl.appendChild(a); });
     var x = el("button", "close icon-only", "×");
     x.type = "button";
@@ -191,7 +192,24 @@
     x.addEventListener("click", dismissToast);
     toastEl.appendChild(x);
     document.body.appendChild(toastEl);
+    placeToast(toastEl);
     if (!opts.error) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
+  }
+  // Two notes never cover each other: the deck page's own (static/deck.js) and this one each
+  // keep one at a time, so a new one that would sit on the other's is lifted above it.
+  function placeToast(t) {
+    var others = Array.prototype.filter.call(document.querySelectorAll(".toast"), function (o) {
+      return o !== t && o.getClientRects().length > 0;
+    });
+    if (!others.length) return;
+    var top = Math.min.apply(null, others.map(function (o) { return o.getBoundingClientRect().top; }));
+    var r = t.getBoundingClientRect();
+    var clear = others.every(function (o) {
+      var b = o.getBoundingClientRect();
+      return r.right <= b.left || b.right <= r.left || r.bottom <= b.top || b.bottom <= r.top;
+    });
+    if (clear) return;
+    t.style.bottom = Math.max(0, window.innerHeight - top + 8) + "px";
   }
   // Copies text: execCommand first, inside the press (the app's WebView may refuse the async
   // clipboard), then the async API. Resolves true when it was copied.
@@ -210,6 +228,11 @@
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
     return Promise.resolve(false);
   }
+  // any button with data-copy-text copies that text and says so (data-copy-said)
+  document.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest ? e.target.closest("button[data-copy-text]") : null;
+    if (b) copyAndSay(b.getAttribute("data-copy-text"), b.getAttribute("data-copy-said") || "Copied.");
+  });
   function copyAndSay(text, said) {
     return copyText(text).then(function (ok) {
       if (ok) toast(said, { ok: true, ms: 4000 });
@@ -220,18 +243,41 @@
   function collect(name) {
     return post("/collection/api/add", { items: [{ name: name, quantity: 1 }], source: "manual" }).then(function (d) {
       if (d.ok && d.added && d.added.length) {
-        var a = el("a", null, "Open the collection");
+        var a = el("a", "btn", "Open the binder");
         a.href = "/collection?q=" + enc(name);
-        toast(name + " added to your collection.", { ok: true, actions: [a] });
+        // the gateway says which entry the copy went to (one already there, or a new one)
+        toast(d.message || name + " added to your binder.", { ok: true, actions: [a] });
         return true;
       }
-      toast(d.message || "The card could not be added to your collection.", { error: true });
+      fail(d, "The card could not be added to your binder.");
       return false;
     }, function () { toast("No connection; the card was not added.", { error: true }); return false; });
   }
 
+  // "Pin card": pins it on Archidekt (the Pinned tab of Lists), one copy, the printing Archidekt
+  // gives the name
+  function pin(name) {
+    var body = "csrf=" + enc(csrf()) + "&action=pin&card=" + enc(name);
+    return fetch("/lists/pins", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: body
+    }).then(function (r) {
+      return r.json().catch(function () { return { ok: false, message: window.MtgFetch.UNREADABLE }; });
+    }).then(function (d) {
+      if (d.ok) {
+        var a = el("a", "btn", "Open Wants");
+        a.href = "/collection/wants";
+        toast(d.notice || "Pinned on Archidekt.", { ok: true, actions: [a] });
+        return true;
+      }
+      fail(d, "The card could not be pinned.");
+      return false;
+    }, function () { toast("No connection; the card was not pinned.", { error: true }); return false; });
+  }
+
   // -- Watch -------------------------------------------------------------------------------------
-  // The Watch button's look for a card: "Watch", or a check and "Watching" when it is watched.
+  // The Watch button's look for a card: "Watch", or a check and "On your watchlist" when it is watched.
   function drawButton(b, name, on) {
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
@@ -239,10 +285,51 @@
     b.title = on ? "On your watchlist" : "Watch " + name;
     b.textContent = "";
     b.appendChild(icon(on ? "check" : "bookmark"));
-    b.appendChild(el("span", null, on ? "Watching" : "Watch"));
+    b.appendChild(el("span", null, on ? "On your watchlist" : "Watch"));
+  }
+  /* The names the member watches (any printing), read once a page from /watchlist/api/names:
+     every page's card menu then says "On your watchlist" for them instead of offering the watch
+     again. A watch or an Undo here keeps the list right. */
+  var watchedNames = null, watchedAsked = false;
+  // kept in this tab for a minute (sessionStorage), so moving between pages does not ask again
+  // (0.7.46 audit SH-23); sign-out clears it with the site's storage
+  var WATCHED_KEY = "mtg-watched", KEEP_MS = 60000;
+  function keptWatched() {
+    try {
+      var kept = JSON.parse(sessionStorage.getItem(WATCHED_KEY) || "null");
+      return kept && Date.now() - kept.at < KEEP_MS && kept.names ? kept.names : null;
+    } catch (e) { return null; }
+  }
+  function keepWatched() {
+    try { sessionStorage.setItem(WATCHED_KEY, JSON.stringify({ at: Date.now(), names: Object.keys(watchedNames || {}) })); } catch (e) { /* storage off */ }
+  }
+  function loadWatched() {
+    if (watchedAsked || !enabled() || !window.fetch) return;
+    watchedAsked = true;
+    var kept = keptWatched();
+    if (kept) {
+      watchedNames = watchedNames || Object.create(null);
+      kept.forEach(function (n) { watchedNames[n] = true; });
+      return;
+    }
+    fetch("/watchlist/api/names", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok || !d.names) return;
+        watchedNames = watchedNames || Object.create(null);
+        d.names.forEach(function (n) { watchedNames[norm(n)] = true; });
+        keepWatched();
+      })
+      .catch(function () { /* the menus offer Watch; the server keeps one watch a card */ });
+  }
+  function isWatched(name) { return !!(watchedNames && watchedNames[norm(name)]); }
+  function markWatched(name, on) {
+    watchedNames = watchedNames || Object.create(null);
+    if (on) watchedNames[norm(name)] = true; else delete watchedNames[norm(name)];
+    if (keptWatched()) keepWatched();
   }
   function listLink(name) {
-    var a = el("a", null, "Open the watchlist");
+    var a = el("a", "btn", "Open the watchlist");
     a.href = "/watchlist?q=" + enc(name);
     return a;
   }
@@ -260,11 +347,12 @@
     return post("/watchlist/api/watch", body).then(function (d) {
       done();
       if (!d.ok) {
-        toast(d.message || "The card could not be watched.", { error: true });
+        fail(d, "The card could not be watched.");
         throw new Error("refused");
       }
       var w = d.watch || {};
       var name = w.name || what.name;
+      markWatched(name, true);
       state(true);
       if (!w.created) { toast(name + " is on your watchlist.", { ok: true, actions: [listLink(name)] }); return w; }
       var undo = el("button", "btn-plain", "Undo");
@@ -273,11 +361,12 @@
         undo.disabled = true;
         post("/watchlist/api/unwatch", { watch_id: w.watch_id }).then(function (u) {
           if (!u.ok && u.status !== 404) { toast(u.message || "The watch could not be undone.", { error: true }); return; }
-          if (!o.was) state(false);
+          if (!o.was) { state(false); markWatched(name, false); }
           toast(name + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
-      toast(name + " added to your watchlist.", { ok: true, actions: [listLink(name), undo] });
+      // the server's words say the price alert the new watch came with (the member's defaults)
+      toast(d.message || name + " added to your watchlist.", { ok: true, actions: [listLink(name), undo] });
       return w;
     }, function (err) {
       done();
@@ -294,7 +383,7 @@
     o = o || {};
     var opts = {
       name: name,
-      current: null,
+      current: o.current || null,  // the printing on show, marked in the list (the viewer's Printing row)
       finish: "nonfoil",
       returnFocus: o.returnFocus || null,
       onWatch: function (p, finish) {
@@ -307,23 +396,22 @@
   }
 
   // -- the menu ----------------------------------------------------------------------------------
-  var menu = null, menuBack = null, scrim = null, menuPushed = false, ignorePop = false, menuScroll = [0, 0];
+  var menu = null, menuBack = null, scrim = null, menuScroll = [0, 0];
+  // the open menu is a layer (static/layers.js): the phone's Back closes it, and its one history
+  // entry (where the browser needs one) is shared with the boxes and the other menus
+  var Layers = window.MtgLayers, menuLayer = null;
   // until when the scrim ignores a click: the lift of the finger whose hold opened the sheet lands
   // as a click wherever the finger was, and under a phone's bottom sheet that is the scrim, which
   // would close the menu the moment it opened (bind sets it on the lift)
   var scrimGuardUntil = 0;
-  function close(focusBack, fromHistory) {
+  function close(focusBack, fromBack) {
     if (!menu) return;
     menu.remove();
     if (scrim) scrim.remove();
     menu = null; scrim = null;
-    if (menuPushed && !fromHistory) {
-      // going back over the menu's entry fires popstate later; that one is ours, not a Back press
-      menuPushed = false;
-      ignorePop = true;
-      try { history.back(); } catch (e) { ignorePop = false; }
-    }
-    menuPushed = false;
+    var layer = menuLayer;
+    menuLayer = null;
+    if (layer && !fromBack && Layers) Layers.release(layer);
     if (focusBack && menuBack && menuBack.isConnected) menuBack.focus();
     menuBack = null;
   }
@@ -357,7 +445,7 @@
     a.appendChild(document.createTextNode(text));
     a.addEventListener("click", function (e) {
       close(false);
-      if (!ignorePop || o.ext || a.hasAttribute("download") || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      if (!backPending() || o.ext || a.hasAttribute("download") || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
       // the menu's own Back is on its way: the link goes once it has landed (whenClosed)
       e.preventDefault();
       // the progress bar, as for any link to another gateway page (static/feedback.js)
@@ -412,7 +500,8 @@
     menuScroll = [window.scrollX, window.scrollY];
     var first = m.querySelector("[role=menuitem]:not([disabled])");
     if (first) first.focus({ preventScroll: true });
-    if (backCloses()) { try { history.pushState({ mtgmenu: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; } }
+    // the phone's Back closes the menu (static/layers.js)
+    if (Layers) menuLayer = Layers.open({ name: "menu", close: function () { if (menu === m) close(true, true); } });
     return m;
   }
   document.addEventListener("pointerdown", function (e) { if (menu && !menu.contains(e.target) && e.target !== scrim) close(false); }, true);
@@ -423,28 +512,14 @@
     if (!menu || (e.target instanceof Element && menu.contains(e.target))) return;
     if (Math.abs(window.scrollX - menuScroll[0]) > 4 || Math.abs(window.scrollY - menuScroll[1]) > 4) close(false);
   }, { capture: true, passive: true });
-  // Runs go (a change of page) once the menu's own Back has landed. A page change started while
-  // that history.back() is still on its way races it, and the Back can win: a tap on Remove… left
-  // the member on the same page, or took them back to it after the box had opened.
-  var afterPop = [];
-  function flushAfterPop() {
-    var list = afterPop;
-    afterPop = [];
-    list.forEach(function (go) { go(); });
-  }
+  // Runs go (a change of page) once the layers' own Back has landed (static/layers.js). A page
+  // change started while that history.back() is still on its way races it, and the Back can win:
+  // a tap on Remove… left the member on the same page, or took them back to it after the box had
+  // opened.
+  function backPending() { return !!(Layers && Layers.backPending()); }
   function whenClosed(go) {
-    if (!ignorePop) { go(); return; }
-    afterPop.push(go);
-    // a Back that never reports: go anyway (this one only, so an older call's wait never hurries it)
-    setTimeout(function () {
-      var at = afterPop.indexOf(go);
-      if (at >= 0) { afterPop.splice(at, 1); go(); }
-    }, 1500);
+    if (Layers) Layers.settled(go); else go();
   }
-  window.addEventListener("popstate", function () {
-    if (ignorePop) { ignorePop = false; flushAfterPop(); return; }
-    if (menu && menuPushed) { menuPushed = false; close(true, true); }
-  });
 
   // A ⋮ button for a tile or row; label: "Menu for NAME"
   function kebab(label) {
@@ -488,6 +563,18 @@
       e.preventDefault();
       e.stopPropagation();
     }, true);
+    // The menu sits on the body, so a root that is only part of the page (the deck page's stacks)
+    // never sees a press or a tap inside it: the lift of the finger that held must still be
+    // swallowed there, and a new press inside the menu is still a real tap.
+    if (root !== document && root !== document.body) {
+      document.addEventListener("pointerdown", function (e) { if (menu && menu.contains(e.target)) lift = false; }, true);
+      document.addEventListener("click", function (e) {
+        if (!swallow || !lift || !menu || !menu.contains(e.target) || root.contains(e.target)) return;
+        lift = false;
+        e.preventDefault();
+        e.stopPropagation();
+      }, true);
+    }
     root.addEventListener("pointerdown", function (e) {
       opened = false;
       // a new press is a real tap: the lift of the hold is over even when no click followed it
@@ -547,10 +634,12 @@
   window.MtgMenu = {
     open: openMenu, close: close, isOpen: function () { return !!menu; }, bind: bind,
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
-    toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
-    copyText: copyText, copyAndSay: copyAndSay, collect: collect, enabled: enabled, phone: phone, norm: norm,
-    // true while the menu's own history.back() has not landed yet (static/box.js asks)
-    backPending: function () { return ignorePop; },
+    toast: toast, dismissToast: dismissToast, placeToast: placeToast, post: post, getJSON: getJSON, fail: fail, csrf: csrf, oweReject: oweReject,
+    copyText: copyText, copyAndSay: copyAndSay, collect: collect, pin: pin, enabled: enabled, phone: phone, norm: norm,
+    // true while the layers' own history.back() has not landed yet, and through the task in
+    // which it lands (static/layers.js)
+    backPending: function () { return !!(Layers && Layers.inFlight()); },
+    backLanding: function () { return !!(Layers && Layers.landing()); },
     // a page change a menu item starts (a form sent, an address opened) goes through this
     whenClosed: whenClosed
   };
@@ -577,12 +666,13 @@
     } else if (s.addHref) {
       items.push(link("Add to deck…", "plus", s.addHref));
     }
-    if (s.collect) items.push(item("Add to collection", "collection", function () { collect(name); }));
+    if (s.collect) items.push(item("Add to binder", "collection", function () { collect(name); }));
     if (s.watch) {
-      if (s.watch.watched) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
+      if (s.watch.watched || isWatched(name)) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
       else items.push(item("Watch this card", "bookmark", s.watch.onWatch, { focusBack: true }));
-      if (s.watch.onArt && window.MtgPrintPick) items.push(item("Art variants…", "image", s.watch.onArt));
+      if (s.watch.onArt && window.MtgPrintPick) items.push(item("Printings…", "image", s.watch.onArt));
     }
+    if (s.collect) items.push(item("Pin card", "pin", function () { pin(name); }));
     (s.before || []).forEach(function (n) { items.push(n); });
     if (s.copyName !== false) items.push(item("Copy name", "copy", function () { copyAndSay(name, "Name copied."); }));
     items.push(sep());
@@ -713,9 +803,13 @@
     });
   });
 
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", loadWatched);
+  else loadWatched();
+
   window.MtgCardMenu = {
     enabled: enabled, icon: icon, toast: toast, dismissToast: dismissToast, norm: norm,
     drawButton: drawButton, listLink: listLink, watch: watch, artVariants: artVariants, collect: collect,
+    isWatched: isWatched, markWatched: markWatched,
     open: open, close: close, isOpen: function () { return !!menu; }, bind: bind
   };
 })();

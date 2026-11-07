@@ -30,10 +30,13 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
-from .timing import add_time, archidekt_time
+from . import dbwait
+from .busy import outage
+from .timing import add_time, archidekt_failures, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
 # The page data archidekt.com's own pages carry (Next.js), and the most of a page the gateway reads
@@ -91,7 +94,7 @@ def _condition_id(value: Any) -> int | None:
     if code == "D":
         code = "DMG"
     if code not in CONDITION_IDS:
-        raise ArchidektError("invalid", f"Archidekt has no card condition {code!r}")
+        raise ArchidektError("invalid", f"Archidekt has no card condition “{code}”.")
     return CONDITION_IDS[code]
 
 
@@ -100,7 +103,7 @@ def _language_id(value: Any) -> int | None:
         return value
     code = str(value).strip().upper()
     if code not in LANGUAGE_IDS:
-        raise ArchidektError("invalid", f"Archidekt has no card language {code!r}")
+        raise ArchidektError("invalid", f"Archidekt has no card language “{code}”.")
     return LANGUAGE_IDS[code]
 
 
@@ -311,7 +314,7 @@ def art_url(scryfall_uid: str, image_hash: str = "") -> str:
     (its image URL helper, bundle read 2026-10-14), so the same is sent here."""
     uid = str(scryfall_uid or "").lower()
     if not re.fullmatch(r"[0-9a-f-]{36}", uid):
-        raise ArchidektError("invalid", "not a Scryfall card id")
+        raise ArchidektError("invalid", "Not a Scryfall card ID.")
     version = str(image_hash or "")
     if not re.fullmatch(r"[0-9A-Za-z]{1,32}", version):
         version = "11"
@@ -380,9 +383,14 @@ class ArchidektError(Exception):
         retryable: bool = False,
         sent: bool = True,
         retry_after: float | None = None,
+        status: int | None = None,
     ):
         super().__init__(message)
         self.kind = kind
+        # the HTTP status of the answer a contract error is about (None: no answer, or not one
+        # whose status says anything): a 400 refused the request, a 2xx whose body could not be
+        # read was taken by Archidekt all the same
+        self.status = status
         # a GET that failed this way (timeout, network error, 5xx) may be retried after a backoff
         self.retryable = retryable
         # False when the request never left the gateway (the pacer refused it): nothing can have
@@ -395,6 +403,17 @@ class ArchidektError(Exception):
 
 BACKUP_FOLDER_NAME = "MTG Gateway Backups"
 DECK_ID_RE = re.compile(r"[0-9]{1,12}")
+_DIGITS_RE = re.compile(r"(\d+)")
+
+
+def category_sort_key(name: str) -> tuple[Any, ...]:
+    """How archidekt.com's deck page orders category names: a numeric-aware, case-insensitive
+    comparison (its ``Intl.Collator`` with ``numeric`` and ``sensitivity: "base"``, read from its
+    bundle on 2026-11-01), so "Ramp 2" comes before "Ramp 10" and "draw" sorts with "Draw". The
+    deck answer itself lists categories by record, which the site never shows; it keeps no order
+    of its own (no field, no route), so this rule is the one order there is."""
+    parts = _DIGITS_RE.split(name.casefold())
+    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in parts if p), name
 
 
 def backup_name(deck_name: str, when: float) -> str:
@@ -752,7 +771,7 @@ _SET_CODE_RE = re.compile(r"[A-Za-z0-9]{2,6}")
 def _printing(card: dict[str, Any], *, exact: bool) -> dict[str, Any]:
     cid = card.get("id")
     if isinstance(cid, bool) or not isinstance(cid, int):
-        raise ArchidektError("contract", "card search result has no integer id")
+        raise ArchidektError("contract", "Card search result has no integer ID.")
     edition = card.get("edition") if isinstance(card.get("edition"), dict) else {}
     oracle = card.get("oracleCard") if isinstance(card.get("oracleCard"), dict) else {}
     options = card.get("options")
@@ -892,6 +911,13 @@ def retry_after_seconds(value: str | None, *, now: float | None = None) -> float
 # assistant's queue. Only the order changes; every request still keeps the gap and the
 # per-minute cap.
 page_turn: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_page_turn", default=False)
+# Set around a member's own one-click save on their page (the deck page's quick edits, a Deck
+# settings category save), with page_turn: its reads and its write start from the page burst
+# (PAGE_BURST) and may use the share of the per-minute cap kept for pages, as a page's reads do,
+# instead of waiting the full gap before each. A save is three calls (read, write, read back), so
+# the bucket that refills one start per gap still holds the rate over time, and the per-minute
+# cap and the member's own budget still count every call.
+hand_save: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_hand_save", default=False)
 
 
 class TurnLock:
@@ -934,66 +960,187 @@ class TurnLock:
         self._held = False
 
 
+# At most this many calls are out at Archidekt at once, and background work (the deck sync,
+# assistants, applies) has at most MAX_IN_FLIGHT - 1 of them, so a member's page always has a slot
+# and never waits behind a slow background answer.
+MAX_IN_FLIGHT = 2
+# A member's page reads may start up to this many at once instead of one per ``min_interval``
+# (owner decision, 0.7.46): the starts are drawn from a bucket of PAGE_BURST that refills one per
+# ``min_interval``, so over time the rate is the same, and the per-minute cap still counts every
+# call. Up to PAGE_BURST page reads may be out at once; background work keeps the gap and its slot.
+PAGE_BURST = 5
+# A sixth of the per-minute cap is kept for the reads of a member's own pages: background work may
+# use the rest, so a long apply or sync never leaves a page waiting for the next minute.
+PAGE_SHARE = 6
+
+
 class Pacer:
-    """Global request pacing shared by every user: one call at a time, a minimum
-    gap between calls, at most ``max_per_minute`` calls in any 60 seconds (0: no
-    such cap), Retry-After respected, and a breaker that opens for a minute after
-    five consecutive failures. A call past the per-minute cap waits for a slot
-    rather than failing, so a long apply slows down instead of stopping halfway.
-    A call made for a member's page (``page_turn``) goes before the waiting calls that are not."""
+    """Global request pacing shared by every user: the starts of calls at least ``min_interval``
+    apart, at most MAX_IN_FLIGHT calls out at once (background work one fewer), at most
+    ``max_per_minute`` calls started in any 60 seconds (0: no such cap) with a share of them kept
+    for pages, Retry-After respected, and a breaker that opens for a minute after five consecutive
+    failures. A call past the per-minute cap waits for a slot rather than failing, so a long apply
+    slows down instead of stopping halfway. A call made for a member's page (``page_turn``) goes
+    before the waiting calls that are not. A page's reads may start in a burst (see PAGE_BURST):
+    every start, a page's or not, takes one from a bucket of ``burst`` that refills one per
+    ``min_interval``; a page read waits only for the bucket, other calls for the gap as well.
+
+    The pacer's turn is held only while a call waits for its start, never while Archidekt answers:
+    a slow answer to one call does not hold up the start of the next."""
 
     MAX_RETRY_AFTER = 120.0  # a larger (or garbled) Retry-After must not stall every user for longer
     WINDOW = 60.0
 
-    def __init__(self, min_interval: float, max_per_minute: int = 0):
+    def __init__(
+        self,
+        min_interval: float,
+        max_per_minute: int = 0,
+        max_in_flight: int = MAX_IN_FLIGHT,
+        burst: int = PAGE_BURST,
+    ):
         self.min_interval = min_interval
         self.max_per_minute = max(0, int(max_per_minute))
+        self.max_in_flight = max(1, int(max_in_flight))
+        self.burst = max(1, int(burst))
+        self._tokens = float(self.burst)  # starts left in the bucket
+        self._filled_at = time.monotonic()
+        # the calls of the per-minute cap only a page's read may use
+        self.page_reserve = self.max_per_minute // PAGE_SHARE
         self._sent: deque[float] = deque()  # start times of the calls in the last WINDOW seconds
         self._lock = TurnLock()
         self._next_allowed = 0.0
         self._failures = 0
         self._open_until = 0.0
         self._retry_until = 0.0  # set by a 429's Retry-After: calls are refused until then
+        self._in_flight = 0
+        self._background_in_flight = 0
+        self._waiting = 0  # background calls waiting outside the turn for a slot or the cap
+        self._freed: asyncio.Future[None] | None = None  # resolved when a call ends
+
+    def turn(self, *, first: bool, page: bool) -> _PacerTurn:
+        """One call's turn: ``first`` puts it in the pages' line, ``page`` lets it use the slot and
+        the share of the per-minute cap kept for a member's page reads."""
+        return _PacerTurn(self, first=first, page=page)
 
     async def __aenter__(self) -> None:
-        await self._lock.acquire(first=page_turn.get())
-        try:
-            now = time.monotonic()
-            if now < self._open_until:
-                raise ArchidektError(
-                    "unavailable",
-                    "Archidekt requests are paused after repeated failures; try later",
-                    sent=False,
-                )
-            if now < self._retry_until:
-                wait = int(self._retry_until - now) + 1
-                raise ArchidektError(
-                    "rate_limited",
-                    f"Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for "
-                    f"{wait} second{'' if wait == 1 else 's'}. Try again after that.",
-                    sent=False,
-                    retry_after=self._retry_until - now,
-                )
-            if now < self._next_allowed:
-                await asyncio.sleep(self._next_allowed - now)
-            if self.max_per_minute:
-                now = time.monotonic()
-                while self._sent and now - self._sent[0] >= self.WINDOW:
-                    self._sent.popleft()
-                if len(self._sent) >= self.max_per_minute:
-                    await asyncio.sleep(self._sent[0] + self.WINDOW - now)
-                    self._sent.popleft()
-                self._sent.append(time.monotonic())
-        except BaseException:
-            # a cancelled or failed wait must never leave the shared lock held
-            self._lock.release()
-            raise
+        on_page = page_turn.get()
+        await self.enter(first=on_page, page=on_page)
 
     async def __aexit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: Any
     ) -> None:
-        self._next_allowed = time.monotonic() + self.min_interval
-        self._lock.release()
+        self.leave(page=page_turn.get())
+
+    def _refusal(self, now: float) -> ArchidektError | None:
+        if now < self._open_until:
+            return ArchidektError(
+                "unavailable",
+                outage("paused", again=True),
+                sent=False,
+            )
+        if now < self._retry_until:
+            # no number of seconds in the words (no time promises); the wait is in retry_after
+            return ArchidektError(
+                "rate_limited",
+                outage("slow_down", again=True),
+                sent=False,
+                retry_after=self._retry_until - now,
+            )
+        return None
+
+    def _cap_wait(self, now: float, page: bool) -> float:
+        """Seconds until the per-minute cap lets this call start (0: now)."""
+        if not self.max_per_minute:
+            return 0.0
+        while self._sent and now - self._sent[0] >= self.WINDOW:
+            self._sent.popleft()
+        limit = self.max_per_minute - (0 if page else self.page_reserve)
+        if len(self._sent) < limit:
+            return 0.0
+        return max(0.001, self._sent[len(self._sent) - limit] + self.WINDOW - now)
+
+    def _slot_free(self, page: bool) -> bool:
+        if page:
+            return self._in_flight < max(self.max_in_flight, self.burst)
+        if self._in_flight >= self.max_in_flight:
+            return False
+        return self.max_in_flight == 1 or self._background_in_flight < self.max_in_flight - 1
+
+    def _bucket_wait(self, now: float) -> float:
+        """Seconds until the bucket holds a start (0: now), after refilling it up to ``now``."""
+        if self.min_interval <= 0:
+            return 0.0
+        self._tokens = min(float(self.burst), self._tokens + (now - self._filled_at) / self.min_interval)
+        self._filled_at = now
+        return 0.0 if self._tokens >= 1.0 else (1.0 - self._tokens) * self.min_interval
+
+    async def _until_freed(self, timeout: float | None) -> None:
+        if self._freed is None or self._freed.done():
+            self._freed = asyncio.get_running_loop().create_future()
+        await asyncio.wait({self._freed}, timeout=timeout)
+
+    async def enter(self, *, first: bool, page: bool) -> None:
+        started = time.perf_counter()
+        try:
+            await self._enter(first=first, page=page)
+        finally:
+            add_time(pacer_time, time.perf_counter() - started)  # for Admin's Speed card
+
+    async def _enter(self, *, first: bool, page: bool) -> None:
+        while True:
+            await self._lock.acquire(first=first)
+            held = True  # whether this call holds the turn, so it is released once at most
+            try:
+                refused = self._refusal(time.monotonic())
+                if refused is not None:
+                    raise refused
+                wait = self._cap_wait(time.monotonic(), page)
+                if page:
+                    # a page waits in its turn: nothing but other pages goes before it meanwhile
+                    while not self._slot_free(page):
+                        await self._until_freed(None)
+                    if wait:
+                        await asyncio.sleep(wait)
+                elif wait or not self._slot_free(page):
+                    # background work waits outside the turn, so a page arriving meanwhile starts
+                    self._lock.release()
+                    held = False
+                    self._waiting += 1
+                    try:
+                        await self._until_freed(wait or None)
+                    finally:
+                        self._waiting -= 1
+                    continue
+                now = time.monotonic()
+                # a page waits for the bucket only; anything else for the gap after the last start too
+                gap = 0.0 if page else self._next_allowed - now
+                wait = max(gap, self._bucket_wait(now))
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                now = time.monotonic()
+                self._bucket_wait(now)
+                self._tokens = max(0.0, self._tokens - 1.0)
+                if self.max_per_minute:
+                    self._sent.append(now)
+                self._next_allowed = now + self.min_interval
+                self._in_flight += 1
+                if not page:
+                    self._background_in_flight += 1
+            except BaseException:
+                # a cancelled or failed wait must never leave the shared turn held, nor release
+                # it out from under another call once it has let it go
+                if held:
+                    self._lock.release()
+                raise
+            self._lock.release()
+            return
+
+    def leave(self, *, page: bool) -> None:
+        self._in_flight = max(0, self._in_flight - 1)
+        if not page:
+            self._background_in_flight = max(0, self._background_in_flight - 1)
+        if self._freed is not None and not self._freed.done():
+            self._freed.set_result(None)
 
     def retry_wait(self) -> float:
         """Seconds left of the pause a 429's Retry-After set (0 when none is running)."""
@@ -1002,7 +1149,7 @@ class Pacer:
     def busy(self) -> bool:
         """Whether a call is being sent or waiting its turn right now (the deck sync, sync.py,
         steps aside while one is)."""
-        return self._lock.locked()
+        return self._lock.locked() or self._in_flight > 0 or self._waiting > 0
 
     def paused(self) -> bool:
         """Whether calls are being refused right now (the breaker is open or a Retry-After is
@@ -1032,6 +1179,19 @@ class Pacer:
             self._failures = 0
 
 
+class _PacerTurn:
+    """``async with pacer.turn(...)``: one call's start and end in the shared Pacer."""
+
+    def __init__(self, pacer: Pacer, *, first: bool, page: bool):
+        self.pacer, self.first, self.page = pacer, first, page
+
+    async def __aenter__(self) -> None:
+        await self.pacer.enter(first=self.first, page=self.page)
+
+    async def __aexit__(self, *exc: Any) -> None:
+        self.pacer.leave(page=self.page)
+
+
 # Read caching. Anonymous reads of public decks and deck searches are cached for everyone.
 # Card-catalogue reads (``/cards/v2/``) are sent with the member's session, so each one is cached
 # for that member only: an answer fetched with one member's token is never served to another.
@@ -1047,7 +1207,7 @@ RATE_LIMIT_WAITS = 6
 RATE_LIMIT_WAIT_TOTAL = 300.0
 # What an apply that stopped this way says (the apply adds whether anything had changed).
 PATIENCE_SPENT = (
-    "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply stopped."
+    "Archidekt asked the gateway to slow down for longer than an apply may wait, so the apply stopped."
 )
 
 
@@ -1086,6 +1246,12 @@ apply_writes: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Contex
     "archidekt_apply_writes", default=None
 )
 _backup_write: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_backup_write", default=False)
+# Set around a member's apply (decks.py) with ``apply_writes``: called just before each of the
+# apply's writes is sent (not the backup copy's), so the database notes that its writes have begun
+# before Archidekt can have any of them. When the note can't be made, the write is not sent.
+before_apply_write: contextvars.ContextVar[Callable[[], None] | None] = contextvars.ContextVar(
+    "archidekt_before_apply_write", default=None
+)
 # Answers after which Archidekt did not act on a write: a 429, a 403, a 404, a 401.
 NOT_ACTED_ON = frozenset({"rate_limited", "forbidden", "not_found", "auth"})
 
@@ -1102,15 +1268,35 @@ def backup_writes() -> Iterator[None]:
         _backup_write.reset(token)
 
 
+def answer_lost(exc: Any) -> bool:
+    """Whether a failed write (an ArchidektError, or a DeckError made from one) may have been taken
+    by Archidekt although the gateway never heard so: it went out and got no answer (a timeout or
+    a network error), a 5xx, or a 2xx whose body could not be read. A request that never left, and
+    an answer that refused it (a 4xx, a 429), changed nothing. ``verify_mismatch`` is the gateway's
+    own read after a write, not the write's answer."""
+    if not getattr(exc, "sent", True) or exc.kind in NOT_ACTED_ON:
+        return False
+    if exc.kind == "contract":
+        status = getattr(exc, "status", None)
+        if status is None:
+            status = getattr(exc, "http_status", None)
+        return status is None or not 400 <= int(status) < 500
+    return exc.kind in ("unavailable", "unreachable", "temporarily_unavailable", "upstream")
+
+
 def _note_write(exc: ArchidektError | None) -> None:
     """A write inside an apply succeeded (``exc`` None) or failed with ``exc``: mark the apply's
-    progress as written unless the request never left the gateway or Archidekt did not act on it."""
+    progress as written unless the request never left the gateway or Archidekt did not act on it.
+    A failed write Archidekt may have taken unanswered is also marked ``answer_lost``: the apply
+    then never says nothing was changed (0.7.46 audit PA-3)."""
     progress = apply_writes.get()
     if progress is None or _backup_write.get():
         return
     if exc is not None and (not exc.sent or exc.kind in NOT_ACTED_ON):
         return
     progress["deck_written"] = True
+    if exc is not None and answer_lost(exc):
+        progress["answer_lost"] = True
 
 
 NO_SIGN_IN_TEXT = "Archidekt asked for a sign-in, and this request was made without one"
@@ -1136,6 +1322,10 @@ def _refusal_detail(resp: httpx.Response) -> str:
 # The account-wide requests (parity release 2) live in their own module; it reads the names above
 # from this partly loaded one, so it is imported here, never before this module.
 from .archidekt_account import AccountRequests  # noqa: E402
+
+
+class _ReaderGone(Exception):
+    """The first reader of a shared read was cancelled: a waiter sends the read itself."""
 
 
 class ArchidektClient(AccountRequests):
@@ -1166,6 +1356,12 @@ class ArchidektClient(AccountRequests):
         self.cache_seconds = max(0.0, float(cache_seconds))
         self.card_cache_seconds = max(0.0, float(card_cache_seconds))
         self._cache: dict[str, tuple[float, Any]] = {}
+        # Cacheable reads under way (single-flight): cache key -> (``_writes_begun`` when it was
+        # sent, its answer). The same read asked for meanwhile waits for that answer instead of
+        # being sent again, unless a write began after it was sent.
+        self._flights: dict[str, tuple[int, asyncio.Future[Any]]] = {}
+        self._writes_begun = 0  # counts every write's start and end
+        self._writes_out = 0
         self.stats = {
             "requests": 0,
             "cache_hits": 0,
@@ -1173,6 +1369,7 @@ class ArchidektClient(AccountRequests):
             "rate_limited": 0,
             "rate_limit_waits": 0,
             "failures": 0,
+            "shared": 0,  # reads answered by an identical read already under way
         }
         # Called with the path of every write about to be sent (decks.py drops the member caches
         # that write makes stale: the deck list, the collection's first page).
@@ -1264,12 +1461,114 @@ class ArchidektClient(AccountRequests):
                 self.stats["cache_hits"] += 1
                 logger.debug("archidekt cache hit %s", path)
                 return copy.deepcopy(value)
+        if key is not None and not fresh:
+            flight = self._flights.get(key)
+            if flight is not None and flight[0] == self._writes_begun and not self._writes_out:
+                started = time.perf_counter()
+                try:
+                    value = await asyncio.shield(flight[1])
+                except _ReaderGone:
+                    pass  # the first reader was cancelled: send it ourselves
+                else:
+                    self.stats["shared"] += 1
+                    return copy.deepcopy(value)
+                finally:
+                    add_time(archidekt_time, time.perf_counter() - started)
+        if method != "GET":
+            # changes something on Archidekt (or signs in there): a request let through while the
+            # database is locked waits for it first, so what comes back is kept (dbwait.py)
+            await dbwait.before_side_effect()
         is_write = method != "GET" and not path.startswith("/rest-auth/")
+        # Two calls may be out at once: a read answered before a write landed but finished after it
+        # (or made while one is out) is not kept, or the cache would serve the deck as it was.
+        writes_seen = self._writes_begun
+        if key is not None and key not in self._flights:
+            return await self._first_reader(method, path, key, writes_seen, token, scheme, params)
+        if is_write and apply_writes.get() is not None and not _backup_write.get():
+            note = before_apply_write.get()
+            if note is not None:
+                note()
         if is_write:
+            self._writes_begun += 1
+            self._writes_out += 1
             # cleared before the write is sent: a write that fails halfway may still have landed
             self.forget_deck_reads()
             for listener in self.write_listeners:
                 listener(path)
+        try:
+            return await self._attempts(
+                method,
+                path,
+                key,
+                is_write,
+                writes_seen,
+                token=token,
+                scheme=scheme,
+                json_body=json_body,
+                params=params,
+                upload=upload,
+            )
+        finally:
+            if is_write:
+                self._writes_out -= 1
+                self._writes_begun += 1
+
+    async def _first_reader(
+        self,
+        method: str,
+        path: str,
+        key: str,
+        writes_seen: int,
+        token: str | None,
+        scheme: str,
+        params: dict[str, Any] | None,
+    ) -> Any:
+        """Send a cacheable read that others asking for it meanwhile wait for (``_flights``)."""
+        answer: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self._flights[key] = (writes_seen, answer)
+        try:
+            value = await self._attempts(
+                method,
+                path,
+                key,
+                False,
+                writes_seen,
+                token=token,
+                scheme=scheme,
+                json_body=None,
+                params=params,
+                upload=None,
+            )
+        except asyncio.CancelledError:
+            answer.set_exception(_ReaderGone())
+            raise
+        except BaseException as exc:
+            answer.set_exception(exc)
+            raise
+        else:
+            answer.set_result(copy.deepcopy(value))
+            return value
+        finally:
+            if answer.done():
+                answer.exception()  # retrieved: no "never retrieved" warning when nobody waited
+            if self._flights.get(key, (0, None))[1] is answer:
+                del self._flights[key]
+
+    async def _attempts(
+        self,
+        method: str,
+        path: str,
+        key: str | None,
+        is_write: bool,
+        writes_seen: int,
+        *,
+        token: str | None,
+        scheme: str,
+        json_body: Any | None,
+        params: dict[str, Any] | None,
+        upload: tuple[bytes, str] | None,
+    ) -> Any:
+        """The sends of one request, with its retries and rate-limit waits (see ``_request``)."""
         attempts = 1 + (self.retries if method == "GET" and not no_retry.get() else 0)
         attempt = 0
         while True:
@@ -1322,7 +1621,8 @@ class ArchidektClient(AccountRequests):
             if is_write:
                 _note_write(None)
             if key is not None:
-                self._cache_put(key, copy.deepcopy(value))
+                if writes_seen == self._writes_begun and not self._writes_out:
+                    self._cache_put(key, copy.deepcopy(value))
             elif is_write:
                 # and again once the write has landed: a list fetched while it was under way could
                 # otherwise be kept as fresh with the old rows
@@ -1361,8 +1661,13 @@ class ArchidektClient(AccountRequests):
         started = time.perf_counter()
         try:
             return await self._paced_send(method, path, headers, json_body, params, upload)
+        except ArchidektError as exc:
+            if exc.kind in ("unavailable", "rate_limited"):  # not a refusal of this one request
+                add_time(archidekt_failures, 1)
+            raise
         finally:
             add_time(archidekt_time, time.perf_counter() - started)  # pacer wait and transfer alike
+            await dbwait.settle()  # a background job's database work waits off the loop
 
     async def _paced_send(
         self,
@@ -1373,7 +1678,12 @@ class ArchidektClient(AccountRequests):
         params: dict[str, Any] | None,
         upload: tuple[bytes, str] | None = None,
     ) -> Any:
-        async with self.pacer:
+        # A member's page reading is the one kind of call the pacer keeps a slot and a share of the
+        # per-minute cap for, and the calls of the member's own one-click save (hand_save); any
+        # other write, or anything an apply sends, is background work.
+        on_page = page_turn.get()
+        reading = on_page and ((method == "GET" and patient.get() is None) or hand_save.get())
+        async with self.pacer.turn(first=on_page, page=reading):
             self.stats["requests"] += 1
             try:
                 if upload is not None:
@@ -1386,16 +1696,16 @@ class ArchidektClient(AccountRequests):
                     )
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
-                raise ArchidektError(
-                    "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
-                ) from exc
+                # plain words for a member's page or card: never an exception's class name
+                words = outage("timeout" if isinstance(exc, httpx.TimeoutException) else "unreachable")
+                raise ArchidektError("unavailable", words, retryable=True) from exc
             if resp.status_code == 429:
                 asked = retry_after_seconds(resp.headers.get("Retry-After"))
                 # During a member's apply a 429 is waited out, not counted towards the breaker
                 self.pacer.record(False, asked, breaker=patient.get() is None)
                 raise ArchidektError(
                     "rate_limited",
-                    "Archidekt asked the gateway to slow down; try again later",
+                    outage("slow_down", again=True),
                     # what Archidekt asked for, or longer when this 429 opened the breaker
                     retry_after=max(asked, self.pacer.pause_left()),
                 )
@@ -1403,33 +1713,35 @@ class ArchidektClient(AccountRequests):
                 self.pacer.record(True)
                 if "Authorization" not in headers:  # a read made without a sign-in: no session to blame
                     raise ArchidektError("auth", NO_SIGN_IN_TEXT)
-                raise ArchidektError("auth", "Archidekt rejected the stored session; relink your account")
+                raise ArchidektError("auth", "Archidekt rejected the stored session; relink your account.")
             if resp.status_code == 403:
                 # A 403 is Archidekt refusing this one request; the session itself still works
                 # (that is a 401), so it is never reported as a link to redo.
                 self.pacer.record(True)
                 why = _refusal_detail(resp)
                 raise ArchidektError(
-                    "forbidden", "Archidekt refused this request" + (f": {why}" if why else " (HTTP 403)")
+                    "forbidden", "Archidekt refused this request" + (f": {why}" if why else ".")
                 )
             if resp.status_code == 404:
                 self.pacer.record(True)
                 raise ArchidektError("not_found", "Archidekt could not find that deck.")
             if resp.status_code >= 500:
                 self.pacer.record(False)
-                raise ArchidektError(
-                    "unavailable", f"Archidekt returned HTTP {resp.status_code}", retryable=True
-                )
+                raise ArchidektError("unavailable", outage("failing"), retryable=True)
             if resp.status_code >= 400:
                 self.pacer.record(True)
-                raise ArchidektError("contract", f"Archidekt rejected the request (HTTP {resp.status_code})")
+                raise ArchidektError(
+                    "contract", "Archidekt did not accept this request.", status=resp.status_code
+                )
             self.pacer.record(True)
             if resp.status_code == 204 or not resp.content:
                 return None
             try:
                 return resp.json()
             except ValueError as exc:
-                raise ArchidektError("contract", "Archidekt returned a non-JSON body") from exc
+                raise ArchidektError(
+                    "contract", "Archidekt returned a non-JSON body.", status=resp.status_code
+                ) from exc
 
     # -- auth ---------------------------------------------------------------
     async def login(self, username_or_email: str, password: str) -> dict[str, Any]:
@@ -1440,10 +1752,10 @@ class ArchidektClient(AccountRequests):
             "POST", "/rest-auth/login/", json_body={key: username_or_email, "password": password}
         )
         if not isinstance(body, dict):
-            raise ArchidektError("contract", "unexpected login response shape")
+            raise ArchidektError("contract", "Unexpected login response shape.")
         access = next((body[k] for k in TOKEN_FIELDS if isinstance(body.get(k), str) and body[k]), None)
         if access is None:
-            raise ArchidektError("contract", "Archidekt login did not return a recognized token field")
+            raise ArchidektError("contract", "Archidekt login did not return a recognized token field.")
         refresh = next((body[k] for k in REFRESH_FIELDS if isinstance(body.get(k), str)), None)
         user = body.get("user") if isinstance(body.get("user"), dict) else {}
         return {
@@ -1464,13 +1776,13 @@ class ArchidektClient(AccountRequests):
             )
         except ArchidektError as exc:
             if exc.kind in ("auth", "forbidden", "contract"):
-                raise ArchidektError("auth", "Archidekt rejected the stored refresh token; relink") from exc
+                raise ArchidektError("auth", "Archidekt rejected the stored refresh token; relink.") from exc
             raise
         if not isinstance(body, dict):
-            raise ArchidektError("contract", "unexpected token refresh response shape")
+            raise ArchidektError("contract", "Unexpected token refresh response shape.")
         access = next((body[k] for k in TOKEN_FIELDS if isinstance(body.get(k), str) and body[k]), None)
         if access is None:
-            raise ArchidektError("contract", "Archidekt token refresh did not return an access token")
+            raise ArchidektError("contract", "Archidekt token refresh did not return an access token.")
         return access
 
     # -- reads --------------------------------------------------------------
@@ -1508,13 +1820,13 @@ class ArchidektClient(AccountRequests):
             body = await self._request("GET", "/decks/v3/", token=token, params=params)
             results = body.get("results") if isinstance(body, dict) else None
             if not isinstance(results, list):
-                raise ArchidektError("contract", "unexpected deck list shape")
+                raise ArchidektError("contract", "Unexpected deck list shape.")
             count = body.get("count")
             if isinstance(count, int) and not isinstance(count, bool):
                 counts.add(count)
             for d in results:
                 if not isinstance(d, dict) or "id" not in d:
-                    raise ArchidektError("contract", "unexpected deck entry shape")
+                    raise ArchidektError("contract", "Unexpected deck entry shape.")
                 if not _owned_by(d.get("owner"), username, user_id):
                     dropped += 1
                     unreadable += not _owner_readable(d.get("owner"))
@@ -1589,11 +1901,11 @@ class ArchidektClient(AccountRequests):
         body = await self._request("GET", "/decks/v3/", params=params)
         results = body.get("results") if isinstance(body, dict) else None
         if not isinstance(results, list):
-            raise ArchidektError("contract", "unexpected deck search shape")
+            raise ArchidektError("contract", "Unexpected deck search shape.")
         rows = []
         for d in results:
             if not isinstance(d, dict) or "id" not in d:
-                raise ArchidektError("contract", "unexpected deck entry shape")
+                raise ArchidektError("contract", "Unexpected deck entry shape.")
             if d.get("private"):
                 continue  # never list a private deck, whatever the listing says
             row = list_row(d)
@@ -1608,13 +1920,21 @@ class ArchidektClient(AccountRequests):
 
     async def user_profile(self, username: str) -> dict[str, Any] | None:
         """A public profile by username, through the deck listing (``/api/users/{id}/`` needs the
-        numeric id, which the listing's owner block carries). None when the user has no public
-        decks or does not exist."""
+        numeric id, which the listing's owner block carries); for someone with no public decks,
+        through their profile page on archidekt.com (user_by_page). None when there is no such
+        user."""
         found = await self.search_decks(owner=username, order_by="-updatedAt")
-        if not found["decks"]:
+        first = found["decks"][0] if found["decks"] else None
+        if first is not None and str(first.get("owner") or "").casefold() == username.casefold():
+            return {"username": first["owner"], "id": first.get("owner_id"), "decks": found}
+        user = await self.user_by_page(username)
+        if user is None:
             return None
-        first = found["decks"][0]
-        return {"username": first["owner"], "id": first.get("owner_id"), "decks": found}
+        return {
+            **user,
+            "id": str(user["id"]),
+            "decks": {"decks": [], "count": 0, "has_more": False, "page": 1},
+        }
 
     async def get_deck(self, token: str | None, deck_id: str, *, fresh: bool = False) -> Deck:
         """Fetch a deck. With ``token=None`` this is an anonymous read of a public deck, served
@@ -1673,7 +1993,7 @@ class ArchidektClient(AccountRequests):
             or not DECK_ID_RE.fullmatch(str(new_id))
         ):
             keys = sorted(body)[:20] if isinstance(body, dict) else type(body).__name__
-            raise ArchidektError("contract", f"deck create response has no deck id (fields: {keys})")
+            raise ArchidektError("contract", f"Deck create response has no deck ID (fields: {keys}).")
         return Deck(id=str(new_id), name=name, owner="", updated_at="", cards=[], categories=[], raw=body)
 
     # -- backups ------------------------------------------------------------
@@ -1685,7 +2005,7 @@ class ArchidektClient(AccountRequests):
     async def _find_folder(self, token: str, name: str) -> tuple[dict[str, Any], dict[str, str] | None]:
         tree = await self._request("GET", "/decks/folderTree/", token=token)
         if not isinstance(tree, dict) or not isinstance(tree.get("id"), int):
-            raise ArchidektError("contract", "unexpected folder tree shape")
+            raise ArchidektError("contract", "Unexpected folder tree shape.")
         # A folder whose name differs only in capitals (one made by hand, or under an earlier
         # folder setting) is reused rather than a second one made beside it; an exact match first.
         found = [
@@ -1716,7 +2036,7 @@ class ArchidektClient(AccountRequests):
             json_body={"name": name, "private": True, "parentFolder": tree["id"]},
         )
         if not isinstance(made, dict) or not isinstance(made.get("id"), int):
-            raise ArchidektError("contract", "unexpected folder create response")
+            raise ArchidektError("contract", "Unexpected folder create response.")
         return {"id": str(made["id"]), "name": name}
 
     async def backup_deck(
@@ -1730,7 +2050,7 @@ class ArchidektClient(AccountRequests):
         so it is set afterwards with PATCH /decks/{id}/update/; a failure there leaves a valid,
         named backup and is not raised."""
         if not DECK_ID_RE.fullmatch(str(folder_id)):
-            raise ArchidektError("contract", "backup folder id is not a number")
+            raise ArchidektError("contract", "Backup folder ID is not a number.")
         body = await self._request(
             "POST",
             "/decks/copy/",
@@ -1754,7 +2074,7 @@ class ArchidektClient(AccountRequests):
         )
         new_id = body.get("id") if isinstance(body, dict) else None
         if isinstance(new_id, bool) or not isinstance(new_id, int):
-            raise ArchidektError("contract", "deck copy response has no deck id")
+            raise ArchidektError("contract", "Deck copy response has no deck ID.")
         if description:
             try:
                 await self._request(
@@ -1776,10 +2096,10 @@ class ArchidektClient(AccountRequests):
         if folder_id is None:
             tree = await self._request("GET", "/decks/folderTree/", token=token)
             if not isinstance(tree, dict) or not isinstance(tree.get("id"), int):
-                raise ArchidektError("contract", "unexpected folder tree shape")
+                raise ArchidektError("contract", "Unexpected folder tree shape.")
             folder_id = str(tree["id"])
         if not DECK_ID_RE.fullmatch(str(folder_id)):
-            raise ArchidektError("contract", "folder id is not a number")
+            raise ArchidektError("contract", "Folder ID is not a number.")
         body = await self._request(
             "POST",
             "/decks/copy/",
@@ -1803,7 +2123,7 @@ class ArchidektClient(AccountRequests):
         )
         new_id = body.get("id") if isinstance(body, dict) else None
         if isinstance(new_id, bool) or not isinstance(new_id, int):
-            raise ArchidektError("contract", "deck copy response has no deck id")
+            raise ArchidektError("contract", "Deck copy response has no deck ID.")
         return {"id": str(new_id), "url": f"https://archidekt.com/decks/{new_id}", "name": name}
 
     # -- writes -------------------------------------------------------------
@@ -1865,7 +2185,7 @@ class ArchidektClient(AccountRequests):
             loose = await self._card_search(token, name, exact=False, page_size=50)
             hits = [c for c in loose if _card_matches(c, name)]
         if not hits:
-            raise ArchidektError("not_found", f"no Archidekt printing found for '{name}'")
+            raise ArchidektError("not_found", f"Archidekt doesn't have “{name}”.")
         return _printing(_prefer_printing(hits, set_code, collector_number), exact=False)
 
     async def _require_printing(
@@ -1875,7 +2195,7 @@ class ArchidektClient(AccountRequests):
         label = f"{code.upper()} #{number}"
         if not _SET_CODE_RE.fullmatch(code) or not number or len(number) > 10:
             raise ArchidektError(
-                "not_found", f"'{name}': a set code and collector number are needed, got {label!r}"
+                "not_found", f"“{name}”: a set code and collector number are needed, got “{label}”."
             )
         params = {"edition": code.lower(), "collectorNumber": number, "pageSize": 10}
         found = await self._cards(token, params)
@@ -1885,15 +2205,17 @@ class ArchidektClient(AccountRequests):
         others = sorted({_printing(c, exact=True)["name"] for c in found if isinstance(c.get("id"), int)})
         if others:
             raise ArchidektError(
-                "not_found", f"{label} is {', '.join(others)}, not '{name}'; nothing was added"
+                "not_found", f"{label} is {', '.join(others)}, not “{name}”; nothing was added."
             )
-        raise ArchidektError("not_found", f"Archidekt has no printing {label} of '{name}'; nothing was added")
+        raise ArchidektError(
+            "not_found", f"Archidekt doesn't have “{name}” in that printing ({label}), so nothing was added."
+        )
 
     async def _cards(self, token: str, params: dict[str, Any]) -> list[dict]:
         body = await self._request("GET", "/cards/v2/", token=token, params=params)
         results = body.get("results") if isinstance(body, dict) else None
         if not isinstance(results, list):
-            raise ArchidektError("contract", "unexpected card search shape")
+            raise ArchidektError("contract", "Unexpected card search shape.")
         return [c for c in results if isinstance(c, dict)]
 
     async def _card_search(self, token: str, name: str, *, exact: bool, page_size: int) -> list[dict]:
@@ -1903,8 +2225,16 @@ class ArchidektClient(AccountRequests):
         body = await self._request("GET", "/cards/v2/", token=token, params=params)
         results = body.get("results") if isinstance(body, dict) else None
         if not isinstance(results, list):
-            raise ArchidektError("contract", "unexpected card search shape")
+            raise ArchidektError("contract", "Unexpected card search shape.")
         return [c for c in results if isinstance(c, dict)]
+
+    async def modify_cards(self, token: str, deck_id: str, entries: list[dict[str, Any]]) -> Any:
+        """PATCH /decks/{id}/modifyCards/v2/ with several entries in one ``{"cards": [...]}``, as
+        archidekt.com's own editor sends a pasted list (not tried live: the apply's read-back
+        checks every card, and a list Archidekt refuses goes one card at a time)."""
+        return await self._request(
+            "PATCH", f"/decks/{deck_id}/modifyCards/v2/", token=token, json_body={"cards": list(entries)}
+        )
 
     async def modify_card(self, token: str, deck_id: str, entry: dict[str, Any]) -> Any:
         """PATCH /decks/{id}/modifyCards/v2/ with {"cards": [entry]}, one card per call, as the
@@ -1937,7 +2267,7 @@ class ArchidektClient(AccountRequests):
         """One page of the member's own collection: {"results": [...], "count", "page",
         "totalPages", "next", "previous", "tags", "isPublic", "owner"}."""
         if not str(user_id).isdigit():
-            raise ArchidektError("contract", "the linked account has no Archidekt user id; relink")
+            raise ArchidektError("contract", "The linked account has no Archidekt user ID; relink.")
         params: dict[str, Any] = {"page": max(1, int(page)), "pageSize": max(1, min(int(page_size), 500))}
         if card_name:
             params["cardName"] = card_name
@@ -1946,7 +2276,7 @@ class ArchidektClient(AccountRequests):
             params["orderDirection"] = "descending" if descending else "ascending"
         body = await self._request("GET", f"/collection/{user_id}/v2/", token=token, params=params)
         if not isinstance(body, dict) or not isinstance(body.get("results"), list):
-            raise ArchidektError("contract", "unexpected collection listing shape")
+            raise ArchidektError("contract", "Unexpected collection listing shape.")
         return body
 
     async def collection_add(
@@ -1958,10 +2288,14 @@ class ArchidektClient(AccountRequests):
         modifier: str = "Normal",
         condition: str | None = None,
         language: str | None = None,
+        tags: list[int] | None = None,
+        purchase_price: float | None = None,
     ) -> dict[str, Any]:
         """POST /collection/v2/: one new record for ``card_id`` (an Archidekt printing id).
         ``condition`` and ``language`` are the gateway's codes (NM, EN, ...), sent as Archidekt's
-        numbers (CONDITION_IDS, LANGUAGE_IDS)."""
+        numbers (CONDITION_IDS, LANGUAGE_IDS). ``tags`` (collection tag ids) and
+        ``purchase_price`` are record fields the site's own create sends too (REQUESTS.md §14;
+        how it writes a tag inside ``tags`` was not recorded: ids, as collection_tags sends)."""
         body: dict[str, Any] = {
             "game": 1,
             "quantity": int(quantity),
@@ -1972,21 +2306,26 @@ class ArchidektClient(AccountRequests):
             body["condition"] = _condition_id(condition)
         if language:
             body["language"] = _language_id(language)
+        if tags:
+            body["tags"] = [int(t) for t in tags]
+        if purchase_price is not None:
+            body["purchasePrice"] = purchase_price
         resp = await self._request("POST", "/collection/v2/", token=token, json_body=body)
         if not isinstance(resp, dict):
-            raise ArchidektError("contract", "unexpected collection create response shape")
+            raise ArchidektError("contract", "Unexpected collection create response shape.")
         return resp
 
     async def collection_set(self, token: str, record: dict[str, Any], **changes: Any) -> dict[str, Any]:
         """PATCH /collection/v2/{id}/ with the record's full body (the site sends every field on an
-        edit) and ``changes`` applied: quantity, modifier, condition, language, purchasePrice."""
+        edit) and ``changes`` applied: quantity, modifier, condition, language, purchasePrice, tags
+        (tag ids)."""
         rid = record.get("id")
         if isinstance(rid, bool) or not isinstance(rid, int):
-            raise ArchidektError("contract", "collection record has no integer id")
+            raise ArchidektError("contract", "Collection record has no integer ID.")
         card = record.get("card") if isinstance(record.get("card"), dict) else {}
         card_id = card.get("id", record.get("card"))
         if isinstance(card_id, bool) or not isinstance(card_id, int):
-            raise ArchidektError("contract", "collection record has no card id")
+            raise ArchidektError("contract", "Collection record has no card ID.")
         body: dict[str, Any] = {
             "game": record.get("game") or 1,
             "id": rid,
@@ -1994,9 +2333,15 @@ class ArchidektClient(AccountRequests):
             "card": card_id,
             "modifier": record.get("modifier") or "Normal",
         }
-        for key in ("tags", "purchasePrice"):
-            if record.get(key) is not None:
-                body[key] = record[key]
+        if record.get("purchasePrice") is not None:
+            body["purchasePrice"] = record["purchasePrice"]
+        if isinstance(record.get("tags"), list):
+            # tags go back as ids, whether the listing sent ids or tag objects (collection_tags)
+            body["tags"] = [
+                t.get("id") if isinstance(t, dict) else t
+                for t in record["tags"]
+                if isinstance(t.get("id") if isinstance(t, dict) else t, int)
+            ]
         # Archidekt keeps condition and language as numbers (see CONDITION_IDS). A value copied
         # from the record goes back as it came when it is a number, as its number when it is a
         # known code, and is left out when it is neither (an edit never fails on a stored value
@@ -2019,7 +2364,7 @@ class ArchidektClient(AccountRequests):
         body.update(changed)
         resp = await self._request("PATCH", f"/collection/v2/{rid}/", token=token, json_body=body)
         if not isinstance(resp, dict):
-            raise ArchidektError("contract", "unexpected collection update response shape")
+            raise ArchidektError("contract", "Unexpected collection update response shape.")
         return resp
 
     async def collection_delete(self, token: str, ids: list[int]) -> None:
@@ -2043,7 +2388,7 @@ class ArchidektClient(AccountRequests):
         """PUT /decks/{id}/vote/ {up, remove}: the deck page's like button. Taking a vote back
         sends ``remove`` with ``up`` naming the vote taken back, as the site does."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         return await self._request(
             "PUT", f"/decks/{deck_id}/vote/", token=token, json_body={"up": up, "remove": remove}
         )
@@ -2056,7 +2401,7 @@ class ArchidektClient(AccountRequests):
 
     async def bookmark_deck(self, token: str, deck_id: str, *, on: bool) -> Any:
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         if on:
             return await self._request("POST", f"/decks/{deck_id}/bookmarks/", token=token, json_body={})
         return await self._request("DELETE", f"/decks/{deck_id}/bookmarks/", token=token)
@@ -2066,6 +2411,50 @@ class ArchidektClient(AccountRequests):
             "POST", "/users/follow/", token=token, json_body={"followId": int(user_id), "unfollow": not on}
         )
 
+    async def user_by_page(self, username: str) -> dict[str, Any] | None:
+        """``{username, id}`` of a user read from archidekt.com's own profile page
+        (``/u/{username}``, which the site draws on its server, for someone with no public decks
+        too), or None when the site has no such user. The page's data is not an API and its
+        layout is not recorded: the user is the object in it carrying exactly this username with
+        a numeric ``id``, wherever it sits (find_user). A page without its data raises
+        ``changed``. Not exercised live by the gateway yet: the owner's live check."""
+        try:
+            props = await self.site_page_data(f"/u/{quote(username, safe='')}")
+        except ArchidektError as exc:
+            if exc.kind == "not_found":
+                return None
+            raise
+        return find_user(props, username)
+
+    # Archidekt's own change log of a deck (the parity report's ``GET /api/decks/{id}/logs/``,
+    # seen in the site's scripts). Its answer's layout is NOT recorded anywhere: the reading below
+    # takes a list, or a page {"results": [...], "next", "count"}, and from each entry the fields
+    # it can recognise (log_entry). Not exercised live by the gateway yet: the owner's live check.
+    async def deck_logs(self, token: str, deck_id: str, page: int = 1) -> dict[str, Any]:
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "Deck ID is not a number.")
+        body = await self._request(
+            "GET", f"/decks/{deck_id}/logs/", token=token, params={"page": max(1, int(page))}, fresh=True
+        )
+        rows = body.get("results") if isinstance(body, dict) else body
+        if not isinstance(rows, list):
+            raise ArchidektError(
+                "changed", "Archidekt's change log came back in a layout the gateway can't read."
+            )
+        count = body.get("count") if isinstance(body, dict) else None
+        return {
+            "entries": [log_entry(r) for r in rows if isinstance(r, dict)],
+            "has_more": bool(body.get("next")) if isinstance(body, dict) else False,
+            "count": count if isinstance(count, int) and not isinstance(count, bool) else None,
+        }
+
+    async def delete_deck_relation(self, token: str, relation_id: int) -> Any:
+        """``DELETE /decks/relations/{id}/``: removes one card row of a deck for good (the parity
+        report's evidence: the site's _app script). The gateway sends it only for a row the deck
+        lists as removed (``deletedAt`` set, removed_rows), checked just before. Not exercised
+        live by the gateway yet: the owner's live check."""
+        return await self._request("DELETE", f"/decks/relations/{int(relation_id)}/", token=token)
+
     # Deck collaborators ("editors"), from archidekt.com's deck settings bundle (2026-10-10):
     # GET /decks/{id}/editors/ answers {"results": [{id, user {id, username, avatar}, createdBy,
     # createdAt}]}; POST /decks/{id}/editors/ {"user": user id} adds one and answers that row;
@@ -2074,16 +2463,16 @@ class ArchidektClient(AccountRequests):
 
     async def deck_editors(self, token: str, deck_id: str) -> list[dict[str, Any]]:
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         body = await self._request("GET", f"/decks/{deck_id}/editors/", token=token)
         rows = body.get("results") if isinstance(body, dict) else body
         if not isinstance(rows, list):
-            raise ArchidektError("contract", "unexpected collaborator list shape")
+            raise ArchidektError("contract", "Unexpected collaborator list shape.")
         return [r for r in rows if isinstance(r, dict)]
 
     async def add_deck_editor(self, token: str, deck_id: str, user_id: int) -> Any:
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         return await self._request(
             "POST", f"/decks/{deck_id}/editors/", token=token, json_body={"user": int(user_id)}
         )
@@ -2095,12 +2484,12 @@ class ArchidektClient(AccountRequests):
         """GET /users/{id}/following/: {"count", "next", "previous", "results": [{id, username,
         avatar, following}]} (checked live 2026-10-07)."""
         if not str(user_id).isdigit():
-            raise ArchidektError("contract", "user id is not a number")
+            raise ArchidektError("contract", "User ID is not a number.")
         body = await self._request(
             "GET", f"/users/{user_id}/following/", token=token, params={"page": max(1, int(page))}
         )
         if not isinstance(body, dict) or not isinstance(body.get("results"), list):
-            raise ArchidektError("contract", "unexpected following list shape")
+            raise ArchidektError("contract", "Unexpected following list shape.")
         return body
 
     async def comment_thread(
@@ -2116,7 +2505,7 @@ class ArchidektClient(AccountRequests):
             params={"page": max(1, int(page)), "orderBy": order_by},
         )
         if not isinstance(body, dict):
-            raise ArchidektError("contract", "unexpected comment thread shape")
+            raise ArchidektError("contract", "Unexpected comment thread shape.")
         return body
 
     async def site_page_data(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2129,7 +2518,8 @@ class ArchidektClient(AccountRequests):
         headers = {"Accept": "text/html", "User-Agent": self.user_agent}
         body = bytearray()
         too_big = False
-        async with self.pacer:
+        on_page = page_turn.get()
+        async with self.pacer.turn(first=on_page, page=on_page):
             self.stats["requests"] += 1
             try:
                 # read as it comes, so the size limit also bounds memory (security review F-04)
@@ -2144,30 +2534,31 @@ class ArchidektClient(AccountRequests):
                                 break
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
-                raise ArchidektError(
-                    "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
-                ) from exc
+                # plain words for a member's page or card: never an exception's class name
+                words = outage("timeout" if isinstance(exc, httpx.TimeoutException) else "unreachable")
+                raise ArchidektError("unavailable", words, retryable=True) from exc
             self.pacer.record(resp.status_code < 500 and resp.status_code != 429)
         if resp.status_code == 404:
             raise ArchidektError("not_found", "Archidekt has no such forum page.")
         if resp.status_code == 429:
             raise ArchidektError(
                 "rate_limited",
-                "Archidekt asked the gateway to slow down; try again later",
+                outage("slow_down", again=True),
                 retry_after=retry_after_seconds(resp.headers.get("Retry-After")),
             )
         if resp.status_code >= 400:
             status = resp.status_code
-            raise ArchidektError("unavailable", f"Archidekt returned HTTP {status}", retryable=status >= 500)
+            words = outage("failing") if status >= 500 else "Archidekt did not show that page."
+            raise ArchidektError("unavailable", words, retryable=status >= 500)
         if too_big:
-            raise ArchidektError("changed", "the forum page is larger than the gateway reads")
+            raise ArchidektError("changed", "The forum page is larger than the gateway reads.")
         m = NEXT_DATA_RE.search(body.decode(resp.encoding or "utf-8", errors="replace"))
         try:
             props = json.loads(html_lib.unescape(m.group(1)) if m else "")["props"]["pageProps"]
         except (ValueError, KeyError, TypeError) as exc:
-            raise ArchidektError("changed", "the forum page has no page data the gateway knows") from exc
+            raise ArchidektError("changed", "The forum page has no page data the gateway knows.") from exc
         if not isinstance(props, dict):
-            raise ArchidektError("changed", "the forum page has no page data the gateway knows")
+            raise ArchidektError("changed", "The forum page has no page data the gateway knows.")
         return props
 
     async def comment_create(self, token: str, parent: int, text: str) -> dict[str, Any]:
@@ -2178,7 +2569,7 @@ class ArchidektClient(AccountRequests):
             json_body={"parent": int(parent), "text": rich_doc(text)},
         )
         if not isinstance(resp, dict):
-            raise ArchidektError("contract", "unexpected comment create response shape")
+            raise ArchidektError("contract", "Unexpected comment create response shape.")
         return resp
 
     async def update_deck(self, token: str, deck_id: str, fields: dict[str, Any]) -> dict[str, Any]:
@@ -2196,7 +2587,7 @@ class ArchidektClient(AccountRequests):
         the deck afterwards and compare every field rather than trusting the response, which only
         has to be a JSON object."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         allowed = (
             "name",
             "description",
@@ -2210,12 +2601,12 @@ class ArchidektClient(AccountRequests):
         )
         body = {k: fields[k] for k in allowed if k in fields}
         if not body:
-            raise ArchidektError("contract", "no deck details to update")
+            raise ArchidektError("contract", "No deck details to update.")
         if isinstance(body.get("description"), str):
             body["description"] = rich_doc(body["description"])
         resp = await self._request("PATCH", f"/decks/{deck_id}/update/", token=token, json_body=body)
         if not isinstance(resp, dict):
-            raise ArchidektError("contract", "unexpected deck update response shape")
+            raise ArchidektError("contract", "Unexpected deck update response shape.")
         return resp
 
     async def update_category(self, token: str, deck_id: str, category: dict[str, Any]) -> Any:
@@ -2236,16 +2627,16 @@ class ArchidektClient(AccountRequests):
         Account category templates (``/users/category/``) are a different route, used only by
         account_lists.py."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         cid = category.get("id")
         if isinstance(cid, bool) or not isinstance(cid, int) or cid <= 0:
-            raise ArchidektError("contract", "category id is not a number")
+            raise ArchidektError("contract", "Category ID is not a number.")
         name = category.get("name")
         if not isinstance(name, str) or not name.strip():
-            raise ArchidektError("contract", "category name is empty")
+            raise ArchidektError("contract", "Category name is empty.")
         flags = ("includedInDeck", "includedInPrice", "isPremier")
         if any(not isinstance(category.get(k), bool) for k in flags):
-            raise ArchidektError("contract", "category flags must be true or false")
+            raise ArchidektError("contract", "Category flags must be true or false.")
         body = {
             "name": name,
             "includedInDeck": category["includedInDeck"],
@@ -2264,13 +2655,13 @@ class ArchidektClient(AccountRequests):
         by name. The caller refuses a name the deck already has before anything is sent, as the
         site's own form does ("Deck already has category named ...")."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         name = category.get("name")
         if not isinstance(name, str) or not name.strip():
-            raise ArchidektError("contract", "category name is empty")
+            raise ArchidektError("contract", "Category name is empty.")
         flags = ("includedInDeck", "includedInPrice", "isPremier")
         if any(not isinstance(category.get(k), bool) for k in flags):
-            raise ArchidektError("contract", "category flags must be true or false")
+            raise ArchidektError("contract", "Category flags must be true or false.")
         body = {
             "name": name,
             "includedInDeck": category["includedInDeck"],
@@ -2290,9 +2681,9 @@ class ArchidektClient(AccountRequests):
         only for a category with no card filed under it. ``deck_id`` is not part of the route; it
         is checked so a call always names its deck."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         if isinstance(category_id, bool) or not isinstance(category_id, int) or category_id <= 0:
-            raise ArchidektError("contract", "category id is not a number")
+            raise ArchidektError("contract", "Category ID is not a number.")
         await self._request("DELETE", f"/decks/category/{category_id}/", token=token)
 
     # -- a member's own hand actions on their decks: delete, folders, tags, comments ---------------
@@ -2304,7 +2695,7 @@ class ArchidektClient(AccountRequests):
     async def delete_deck(self, token: str, deck_id: str) -> None:
         """DELETE /decks/{id}/ (the site's "Delete deck", reported)."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "Deck ID is not a number.")
         await self._request("DELETE", f"/decks/{deck_id}/", token=token)
 
     async def folder_tree(self, token: str) -> dict[str, Any]:
@@ -2312,7 +2703,7 @@ class ArchidektClient(AccountRequests):
         2026-10-05 by ensure_folder)."""
         tree = await self._request("GET", "/decks/folderTree/", token=token)
         if not isinstance(tree, dict) or not isinstance(tree.get("id"), int):
-            raise ArchidektError("contract", "unexpected folder tree shape")
+            raise ArchidektError("contract", "Unexpected folder tree shape.")
         return tree
 
     async def create_folder(
@@ -2326,7 +2717,7 @@ class ArchidektClient(AccountRequests):
             json_body={"name": name, "private": private, "parentFolder": int(parent_id)},
         )
         if not isinstance(made, dict) or not isinstance(made.get("id"), int):
-            raise ArchidektError("contract", "unexpected folder create response")
+            raise ArchidektError("contract", "Unexpected folder create response.")
         return made
 
     async def mass_update(self, token: str, items: list[dict[str, Any]]) -> Any:
@@ -2345,7 +2736,7 @@ class ArchidektClient(AccountRequests):
             or not isinstance(body.get("decks"), list)
             or not all(isinstance(d, dict) and "id" in d for d in body["decks"])
         ):
-            raise ArchidektError("contract", "unexpected folder shape")
+            raise ArchidektError("contract", "Unexpected folder shape.")
         return body
 
     async def delete_folders(self, token: str, folder_ids: list[int]) -> Any:
@@ -2353,7 +2744,7 @@ class ArchidektClient(AccountRequests):
         delete, which deletes each folder with every deck, card package and folder inside it (its
         bundle, read 2026-10-20; reported)."""
         if not folder_ids:
-            raise ArchidektError("contract", "no folder to delete")
+            raise ArchidektError("contract", "No folder to delete.")
         items = [{"id": int(f), "type": "folder"} for f in folder_ids]
         return await self._request(
             "POST", "/decks/folders/deleteItems/", token=token, json_body={"items": items}
@@ -2366,7 +2757,7 @@ class ArchidektClient(AccountRequests):
         body = await self._request("GET", "/decks/tags/v2/", token=token, params={"q": query[:60]})
         results = body.get("results") if isinstance(body, dict) else body
         if not isinstance(results, list):
-            raise ArchidektError("contract", "unexpected tag search shape")
+            raise ArchidektError("contract", "Unexpected tag search shape.")
         return [r for r in results if isinstance(r, dict)]
 
     async def add_deck_tag(self, token: str, deck_id: str, tag_id: int, position: str) -> dict[str, Any]:
@@ -2378,7 +2769,7 @@ class ArchidektClient(AccountRequests):
             json_body={"deck": int(deck_id), "tag": int(tag_id), "position": position},
         )
         if not isinstance(made, dict):
-            raise ArchidektError("contract", "unexpected tag relation response")
+            raise ArchidektError("contract", "Unexpected tag relation response.")
         return made
 
     async def remove_deck_tag(self, token: str, relation_id: int) -> None:
@@ -2393,7 +2784,7 @@ class ArchidektClient(AccountRequests):
             "PATCH", f"/comments/{int(comment_id)}/", token=token, json_body={"text": rich_doc(text)}
         )
         if not isinstance(resp, dict):
-            raise ArchidektError("contract", "unexpected comment update response shape")
+            raise ArchidektError("contract", "Unexpected comment update response shape.")
         return resp
 
     async def comment_delete(self, token: str, comment_id: int) -> None:
@@ -2406,7 +2797,7 @@ class ArchidektClient(AccountRequests):
         listing shape plus ``tags`` and the owner Archidekt_Precons."""
         body = await self._request("GET", "/decks/precons/", token=None)
         if not isinstance(body, dict) or not all(isinstance(v, list) for v in body.values()):
-            raise ArchidektError("contract", "unexpected precon listing shape")
+            raise ArchidektError("contract", "Unexpected precon listing shape.")
         return {str(k): [d for d in v if isinstance(d, dict) and "id" in d] for k, v in body.items()}
 
 
@@ -2495,11 +2886,11 @@ def _oracle_text(oracle: dict[str, Any]) -> str:
 
 def parse_deck(body: Any) -> Deck:
     if not isinstance(body, dict) or "id" not in body or not isinstance(body.get("cards"), list):
-        raise ArchidektError("contract", "unexpected deck shape")
+        raise ArchidektError("contract", "Unexpected deck shape.")
     cards: list[DeckCard] = []
     for entry in body["cards"]:
         if not isinstance(entry, dict):
-            raise ArchidektError("contract", "unexpected card entry shape")
+            raise ArchidektError("contract", "Unexpected card entry shape.")
         if entry.get("deletedAt"):
             continue  # soft-deleted relation still present in the payload
         card = entry.get("card") if isinstance(entry.get("card"), dict) else {}
@@ -2507,7 +2898,7 @@ def parse_deck(body: Any) -> Deck:
         edition = card.get("edition") if isinstance(card.get("edition"), dict) else {}
         qty = entry.get("quantity", 1)
         if not isinstance(qty, int):
-            raise ArchidektError("contract", "card quantity is not an integer")
+            raise ArchidektError("contract", "Card quantity is not an integer.")
         legalities = oracle.get("legalities") if isinstance(oracle.get("legalities"), dict) else {}
         rank = oracle.get("edhrecRank")
         combos = oracle.get("twoCardComboIds") if isinstance(oracle.get("twoCardComboIds"), list) else []
@@ -2614,3 +3005,112 @@ def parse_deck(body: Any) -> Deck:
         comment_root=_int(body.get("commentRoot")) or None,
         custom_cards=parse_custom_rows(body.get("customCards")),
     )
+
+
+# -- Archidekt's own records of a deck: its change log and its removed card rows ------------------
+LOG_TIME_KEYS = ("createdAt", "created_at", "created", "date", "timestamp", "time", "updatedAt")
+LOG_WHO_KEYS = ("user", "owner", "editor", "author", "createdBy")
+LOG_WHAT_KEYS = ("description", "message", "text", "summary", "change", "changes", "action", "type", "event")
+LOG_TEXT_MAX = 500
+
+
+def _log_words(value: Any) -> str:
+    """A log field as plain words: a string, a number, or a short list of them."""
+    if isinstance(value, bool) or value is None:
+        return ""
+    if isinstance(value, (str, int, float)):
+        return " ".join(str(value).split())
+    if isinstance(value, list):
+        parts = [_log_words(v) for v in value[:20]]
+        return "; ".join(p for p in parts if p)
+    if isinstance(value, dict):
+        name = value.get("name") or value.get("username")
+        return _log_words(name) if isinstance(name, str) else ""
+    return ""
+
+
+def log_entry(raw: dict[str, Any]) -> dict[str, Any]:
+    """One entry of a deck's change log as the gateway shows it: ``when`` (Archidekt's time
+    text), ``who`` (a username) and ``what`` (words). The layout of Archidekt's entries is not
+    recorded (ArchidektClient.deck_logs), so each is the first field it recognises; an entry with
+    none of them shows its other plain fields as "name: value"."""
+    when = next((str(raw[k]) for k in LOG_TIME_KEYS if isinstance(raw.get(k), str) and raw[k]), "")
+    who = ""
+    for k in LOG_WHO_KEYS:
+        v = raw.get(k)
+        if isinstance(v, dict) and isinstance(v.get("username"), str):
+            who = v["username"]
+            break
+        if isinstance(v, str) and v:
+            who = v
+            break
+    if not who and isinstance(raw.get("username"), str):
+        who = raw["username"]
+    what = next((w for k in LOG_WHAT_KEYS if (w := _log_words(raw.get(k)))), "")
+    if not what:
+        skip = {"id", "deck", *LOG_TIME_KEYS, *LOG_WHO_KEYS, "username"}
+        what = "; ".join(f"{k}: {w}" for k, v in raw.items() if k not in skip and (w := _log_words(v)))
+    return {
+        "when": when[:40],
+        "who": " ".join(who.split())[:60],
+        "what": what[:LOG_TEXT_MAX],
+    }
+
+
+def removed_rows(deck: Deck) -> list[dict[str, Any]]:
+    """The card rows Archidekt still keeps for cards taken out of the deck: in the deck JSON with
+    ``deletedAt`` set (parse_deck leaves them out of ``cards``). Each ``{relation_id, name,
+    quantity, categories, removed_at}``; a row without a numeric id can't be removed for good and
+    is left out. Newest removal first."""
+    out: list[dict[str, Any]] = []
+    raw_cards = deck.raw.get("cards") if isinstance(deck.raw, dict) else None
+    for entry in raw_cards if isinstance(raw_cards, list) else []:
+        if not isinstance(entry, dict) or not entry.get("deletedAt"):
+            continue
+        rid = entry.get("id")
+        if not isinstance(rid, int) or isinstance(rid, bool):
+            continue
+        card = entry.get("card") if isinstance(entry.get("card"), dict) else {}
+        oracle = card.get("oracleCard") if isinstance(card.get("oracleCard"), dict) else {}
+        custom = entry.get("customCard") if isinstance(entry.get("customCard"), dict) else {}
+        name = str(oracle.get("name") or custom.get("name") or "").strip() or "A card"
+        qty = entry.get("quantity")
+        out.append(
+            {
+                "relation_id": rid,
+                "name": name,
+                "quantity": qty if isinstance(qty, int) and not isinstance(qty, bool) else None,
+                "categories": [str(c) for c in (entry.get("categories") or []) if isinstance(c, str)],
+                "removed_at": str(entry.get("deletedAt")),
+            }
+        )
+    out.sort(key=lambda r: r["removed_at"], reverse=True)
+    return out
+
+
+def find_user(data: Any, username: str) -> dict[str, Any] | None:
+    """The object in a site page's data that is the user called ``username`` (any capitals) with a
+    numeric ``id``: ``{username, id}`` as Archidekt spells the name. Searched breadth-first a few
+    levels deep, so the page's own user comes before one named in a list further down."""
+    want = username.casefold()
+    level = [data]
+    for _ in range(6):
+        nxt: list[Any] = []
+        for node in level:
+            if isinstance(node, dict):
+                name, uid = node.get("username"), node.get("id")
+                if (
+                    isinstance(name, str)
+                    and name.casefold() == want
+                    and isinstance(uid, int)
+                    and not isinstance(uid, bool)
+                    and uid > 0
+                ):
+                    return {"username": name, "id": uid}
+                nxt.extend(v for v in node.values() if isinstance(v, (dict, list)))
+            elif isinstance(node, list):
+                nxt.extend(v for v in node[:200] if isinstance(v, (dict, list)))
+        level = nxt
+        if not level:
+            break
+    return None

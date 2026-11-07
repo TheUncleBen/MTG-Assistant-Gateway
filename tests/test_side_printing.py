@@ -42,7 +42,7 @@ def test_one_pinned_printing_per_card_in_each_zone() -> None:
 
     pin = {"action": "add", "card_name": "Sol Ring", "set_code": "sld", "collector_number": "1074"}
     assert len(parse_changes([pin, {**pin, "zone": "side"}])) == 2
-    with pytest.raises(DeckError, match="one pinned printing"):
+    with pytest.raises(DeckError, match="One pinned printing"):
         parse_changes([{**pin, "zone": "side"}, {**pin, "zone": "side", "collector_number": "1075"}])
     with pytest.raises(DeckError, match="also removed or set"):
         parse_changes(

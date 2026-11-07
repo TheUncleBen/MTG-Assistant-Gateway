@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from . import board, ui
+from .clickguard import GUARD_SCRIPT
 
 LIST_SCRIPT = "/static/proposals.js"
 
@@ -161,9 +162,11 @@ def deck_box_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str
             f"<input type='hidden' name='back' value='/decks/{did}'>"
             "<div class='ylist'>"
             f"<label class='pick all'><input type='checkbox' class='all' data-all='{did}'>"
-            f"<span>All {len(lines)} waiting</span></label>"
+            # one change is "The 1 waiting", never "All 1" (confirmation P-6)
+            f"<span>{'The 1' if len(lines) == 1 else f'All {len(lines)}'} waiting</span></label>"
             f"<ul class='wlist'>{rows}</ul></div>" + action_bar(inline=True) + every + "</form>"
-            f"<script src='{LIST_SCRIPT}' defer></script>"
+            # the click guard first: the bar's Apply box carries it (static/proposals.js)
+            f"<script src='{GUARD_SCRIPT}' defer></script><script src='{LIST_SCRIPT}' defer></script>"
         )
     return ui.box("proposals", "Proposals for this deck", body, close_href=f"/decks/{did}", cls="propbox")
 
@@ -177,6 +180,10 @@ form.guarded button[data-guard][aria-disabled=true]{opacity:1;background:transpa
   border:1px dashed currentColor;cursor:default}
 form.guarded button.primary[aria-disabled=true]{color:var(--orange-text)}
 form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
+/* the same for the Apply box's button, which sits in the box's action row (form='apply-f') */
+.ui-box button[data-guard][aria-disabled=true]{opacity:1;background:transparent;
+  border:1px dashed currentColor;cursor:default}
+.ui-box button.primary[data-guard][aria-disabled=true]{color:var(--orange-text)}
 /* Reject's short confirm in the bar; focus moves to its Reject by script */
 .wbar .rejectask{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;flex:1 1 100%}
 .wbar .rejectask span{flex:1 1 10rem;font-weight:700}
@@ -225,7 +232,9 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .ybox .ylist .pick.all{display:flex}
 /* the box is narrow everywhere: the count on its own row, Apply and Reject side by side under it */
 .ybox .wbar .wtop{flex-basis:100%}
-.ybox .wbar button[name=action]{flex:1 1 0;min-width:0}
+/* each button at least its own word wide: a row each when both can't share one (final polish P-6:
+   "Appl/y" at 320 px and 200% text) */
+.ybox .wbar button[name=action]{flex:1 1 7em;min-width:min-content}
 .propbox .yall{display:flex;align-items:center;justify-content:space-between;min-height:44px;margin:.5rem 0 0;
   padding:0 .75rem;border-radius:14px;border:1px solid var(--border-soft);background:var(--surface);
   color:var(--text);text-decoration:none;font-weight:700}
@@ -240,7 +249,7 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
   /* the count and Clear on one row, Apply and Reject side by side on the next: two rows at
      200% text too */
   .wbar:not(.inline) .wtop{flex-basis:100%}
-  .wbar button[name=action]{flex:1 1 0;min-width:0}
+  .wbar button[name=action]{flex:1 1 7em;min-width:min-content}
   .pick .by{flex-basis:100%;padding-left:1.85rem}
   .wrow .review{padding:0 .4rem}
 }

@@ -106,7 +106,7 @@ async def test_resolve_requires_input_and_handles_scryfall_outage(stack: Stack) 
     assert out == {
         "ok": False,
         "error": "invalid",
-        "message": "give `cards` or `text` with at least one card",
+        "message": "Give `cards` or `text` with at least one card.",
         "error_code": "INVALID_ARGUMENT",
         "retryable": False,
     }
@@ -450,7 +450,7 @@ async def test_resolve_caps_names_per_call(stack: Stack) -> None:
     assert out == {
         "ok": False,
         "error": "invalid",
-        "message": f"at most {MAX_RESOLVE_CARDS} cards per call",
+        "message": f"At most {MAX_RESOLVE_CARDS} cards per call.",
         "error_code": "INVALID_ARGUMENT",
         "retryable": False,
     }
@@ -458,7 +458,10 @@ async def test_resolve_caps_names_per_call(stack: Stack) -> None:
 
 
 async def test_one_resolve_in_flight_per_user(stack: Stack) -> None:
-    """A second concurrent call from the same account is rejected, not queued; other users are unaffected."""
+    """One resolve call per account runs at a time; other users are unaffected. A second one from
+    the same account waits its turn for a short, bounded time (AT-38: assistants send calls in
+    parallel), says it waited, and is refused busy only past that wait, with a suggested wait (no
+    end time is known for the call that holds the place)."""
     from mtg_gateway.scan.service import CardInput, ScanError
 
     sf = stack.sf
@@ -476,16 +479,64 @@ async def test_one_resolve_in_flight_per_user(stack: Stack) -> None:
     )
     first = asyncio.create_task(service.resolve([CardInput("Sol Ring")], owner="alice"))
     await asyncio.sleep(0.05)
+    service.queue_wait = 0.2
     with pytest.raises(ScanError) as exc:
         await service.resolve([CardInput("Sol Ring")], owner="alice")
-    assert exc.value.kind == "busy"
+    assert exc.value.kind == "busy" and "after a short wait" in str(exc.value)
+    assert exc.value.extra == {"suggested_wait": scan_service.SUGGESTED_WAIT_SECONDS}
+    service.queue_wait = 10.0
+    waited: list[float] = []
+    queued = asyncio.create_task(service.resolve([CardInput("Sol Ring")], owner="alice", waited=waited))
     other = asyncio.create_task(service.resolve([CardInput("Sol Ring")], owner="bob"))
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(1.1)
+    assert not queued.done()  # still waiting its turn
     gate.set()
     assert (await first)[0].status == "exact"
     assert (await other)[0].status == "exact"
-    # Once the first call finishes, the account may resolve again.
-    assert (await service.resolve([CardInput("Sol Ring")], owner="alice"))[0].status == "exact"
+    assert (await queued)[0].status == "exact" and len(waited) == 1 and waited[0] >= 1.0
+    # Once the calls finish, the account may resolve again, at once.
+    again: list[float] = []
+    assert (await service.resolve([CardInput("Sol Ring")], owner="alice", waited=again))[0].status == "exact"
+    assert again == [] or again[0] < 0.1
+    # Security review 2, R2-06: with MAX_RESOLVE_WAITERS_PER_USER of the account's calls already
+    # waiting, one more is busy at once instead of joining them.
+    service._in_flight.add("alice")
+    service._resolve_waiting["alice"] = scan_service.MAX_RESOLVE_WAITERS_PER_USER
+    try:
+        start = time.monotonic()
+        with pytest.raises(ScanError) as exc:
+            await service.resolve([CardInput("Sol Ring")], owner="alice")
+        assert exc.value.kind == "busy" and time.monotonic() - start < 1.0
+        assert service._resolve_waiting["alice"] == scan_service.MAX_RESOLVE_WAITERS_PER_USER
+    finally:
+        service._in_flight.discard("alice")
+        service._resolve_waiting.pop("alice", None)
+
+
+async def test_resolve_cards_says_when_it_waited_its_turn(stack: Stack, monkeypatch) -> None:
+    """The tool's answer says it waited (waited_seconds), and a busy refusal carries suggested_wait."""
+    from mtg_gateway.scan.service import ScanError
+
+    token = await mcp_token(stack.h)
+    service = stack.h.app.state.gateway.scan
+    real = service.resolve
+
+    async def queued(inputs, *, owner=None, waited=None):
+        if waited is not None:
+            waited.append(2.4)
+        return await real(inputs, owner=owner)
+
+    monkeypatch.setattr(service, "resolve", queued)
+    out = (await call(stack.h, token, "resolve_cards", {"text": "1 Sol Ring"}))["structuredContent"]
+    assert out["ok"] is True and out["waited_seconds"] == 2, out
+
+    async def busy(inputs, *, owner=None, waited=None):
+        raise ScanError("busy", "x", extra={"suggested_wait": 10})
+
+    monkeypatch.setattr(service, "resolve", busy)
+    refused = (await call(stack.h, token, "resolve_cards", {"text": "1 Sol Ring"}))["structuredContent"]
+    assert refused["error"] == "busy" and refused["suggested_wait"] == 10 and refused["retryable"], refused
+    assert "retry_after" not in refused
 
 
 async def test_browser_resolve_reports_busy_as_429(stack: Stack) -> None:
@@ -516,6 +567,54 @@ def test_ocr_variants_are_bounded_and_plausible() -> None:
     assert ocr_variants("Rarnpant Growth", 4) == ["Rampant Growth"]
     assert ocr_variants("Sol Ring", 4) == ["Soi Ring", "Sol Rlng"]
     assert len(ocr_variants("llllllllll", 4)) == 4
+
+
+def test_trimmed_starts_drop_only_what_the_title_bar_edge_adds() -> None:
+    """The title bar's left edge reads as a stray letter in front of the name ("fSolRing",
+    "l Sol Ring"). Only a lone first letter, a lower-case first letter, or an I, l or 1 glued to a
+    capital is taken off; a name that starts like a real one is left alone."""
+    from mtg_gateway.scan.service import trimmed_starts
+
+    assert trimmed_starts("fSolRing") == ["SolRing"]
+    assert trimmed_starts("fsolRing ti") == ["solRing ti"]
+    assert trimmed_starts("l Sol Ring") == ["Sol Ring"]
+    assert trimmed_starts("l Sol 1 Ring") == ["Sol 1 Ring"]
+    assert trimmed_starts("ISolRing") == ["SolRing"]
+    kept = ("Sol Ring", "Island", "Invoke the Firemind", "A Little Chat", "I Know All, I See All", "lol", "f")
+    for name in (*kept, "Xqzv Plorth"):
+        assert trimmed_starts(name) == [], name
+
+
+async def test_a_stray_letter_before_the_title_still_finds_the_card(stack: Stack) -> None:
+    """F3: reads with the title bar's edge in front ("fSolRing", "l Sol Ring") resolve to the card
+    they name, with the collector line still deciding the printing. The trimmed name passes the
+    same similarity guard, so it never lands on a longer or a different card."""
+    token = await mcp_token(stack.h)
+    out = (
+        await call(
+            stack.h,
+            token,
+            "resolve_cards",
+            {
+                "cards": [
+                    {"name": "fSolRing"},
+                    {"name": "l Sol Ring"},
+                    {"name": "fsolRing ti"},
+                    {"name": "fSolRing", "set": "frc", "collector_number": "21"},
+                    {"name": "l Mountain"},  # Mountain, never Mountain Goat
+                    {"name": "l Sol Talisman"},  # Sol Talisman, never Sol Ring
+                    {"name": "fXqzv Plorth"},  # garbage stays unresolved
+                ]
+            },
+        )
+    )["structuredContent"]
+    cards = out["cards"]
+    names = [c["card"]["name"] if c["card"] else None for c in cards]
+    assert names == ["Sol Ring", "Sol Ring", "Sol Ring", "Sol Ring", "Mountain", "Sol Talisman", None], cards
+    assert [c["status"] for c in cards[:3]] == ["fuzzy", "fuzzy", "fuzzy"]
+    assert cards[3]["status"] == "printing" and cards[3]["card"]["set"] == "frc", cards[3]
+    assert cards[3]["card"]["collector_number"] == "21"
+    assert cards[6]["status"] == "not_found"
 
 
 @pytest.mark.skipif(not os.environ.get("SCAN_LIVE"), reason="set SCAN_LIVE=1 to query api.scryfall.com")
@@ -571,10 +670,9 @@ async def test_rate_limit_midway_keeps_resolved_cards_and_defers_the_rest(stack:
     assert out["cards"][0]["card"]["name"] == "Sol Ring" and out["card_count"] == 3
     assert out["deferred"] == 2 and 1 <= out["retry_in"] <= 30
     assert (
-        "not looked up yet" in out["cards"][2]["note"]
-        and "Scryfall asked the gateway to slow down and its lookups are paused for 30 seconds; "
-        "try again after that"
-        in out["cards"][2]["note"]
+        out["cards"][2]["note"]
+        == "Not looked up yet. Scryfall asked the gateway to slow down, so its requests are paused for "
+        "now. Its lookups wait 30 seconds; try again after that."
     )
     assert out["needs_review"] == [2, 3] and "2 of 4 names were not looked up" in out["message"]
     assert seen["n"] == 3  # nothing else was attempted after the 429
@@ -715,7 +813,7 @@ async def test_info_line_resolves_the_printing_and_distrusts_a_conflicting_read(
     assert cards[0]["foil"] is True and cards[0]["input"]["collector_number"] == "365"
     # A printing that is another card is a conflict: kept for review, never ready to use.
     assert cards[1]["status"] == "conflict" and cards[1]["card"]["name"] == "Sol Ring"
-    assert "does not match 'Sol Ring'; matched by name instead" in cards[1]["note"]
+    assert "does not match “Sol Ring”; matched by name instead" in cards[1]["note"]
     assert cards[1]["input"]["lang"] == "en"
     # The single finish wins over the pasted marker, and the note says so.
     assert cards[2]["status"] == "printing" and cards[2]["card"]["set"] == "frc" and cards[2]["foil"] is False
@@ -754,21 +852,21 @@ async def test_printing_needs_the_title_to_agree(stack: Stack) -> None:
     cards = out["cards"]
     assert cards[0]["status"] == "conflict" and cards[0]["card"]["name"] == "Sol Ring"
     assert (
-        "MH2 236 is Sol Talisman, which does not match 'Sol Ring'; matched by name instead"
+        "MH2 236 is Sol Talisman, which does not match “Sol Ring”; matched by name instead"
         in (cards[0]["note"])
     )
     assert cards[0]["input"] == {"name": "Sol Ring", "set": "mh2", "collector_number": "236", "quantity": 1}
     assert cards[1]["status"] == "conflict" and cards[1]["card"]["name"] == "Command Tower"
     assert "TDC 352 is Command Beacon" in cards[1]["note"]
     assert cards[2]["status"] == "printing" and cards[2]["card"]["collector_number"] == "365"
-    assert cards[2]["note"] == "title read as 'Aesi, Tyrant'"
+    assert cards[2]["note"] == "title read as “Aesi, Tyrant”"
     assert cards[3]["status"] == "printing" and cards[3]["card"]["set"] == "dsc"
-    assert cards[3]["note"] == "title read as 'Aesi Tyrant of Gyre Stralt'"
+    assert cards[3]["note"] == "title read as “Aesi Tyrant of Gyre Stralt”"
     assert cards[4]["status"] == "ambiguous" and cards[4]["card"] is None
     assert cards[4]["suggestions"][0] == "Aesi, Tyrant of Gyre Strait"
-    assert "CMR 365 is Aesi, Tyrant of Gyre Strait but the title read 'Xq Zzyx'" in cards[4]["note"]
+    assert "CMR 365 is Aesi, Tyrant of Gyre Strait but the title read “Xq Zzyx”" in cards[4]["note"]
     assert cards[5]["status"] == "conflict" and cards[5]["card"]["name"] == "Mountain"
-    assert "6ED 195 is Mountain Goat, which does not match 'Mountain'" in cards[5]["note"]
+    assert "6ED 195 is Mountain Goat, which does not match “Mountain”" in cards[5]["note"]
     assert cards[6]["status"] == "conflict" and cards[6]["card"]["name"] == "Apocalypse"
     assert "BBD 217 is Apocalypse Hydra" in cards[6]["note"]
 
@@ -912,6 +1010,46 @@ async def test_truncated_title_check_sees_all_completions(stack: Stack) -> None:
 
 
 # -- printings -------------------------------------------------------------------
+async def test_printings_by_name_while_scryfall_says_wait_is_try_again_not_no_card(stack: Stack) -> None:
+    """A Scryfall 429 left the name unread, so card_printings must not answer "no card found"
+    (whole-application audit, row 4): it says to try again, with retry_in in seconds. And when
+    Scryfall is down, the words are plain: no exception name, no HTTP code."""
+
+    def limited(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "12"}, json={"object": "error"})
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route", request=request)
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"object": "error"})
+
+    service = stack.h.app.state.gateway.scan
+    token = await mcp_token(stack.h)
+    for handler in (limited, down, failing):
+        service.scryfall = ScryfallClient(
+            "https://scryfall.test",
+            min_interval=0.0,
+            http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://scryfall.test"),
+        )
+        result = await call(stack.h, token, "card_printings", {"name": "Sol Ring"})
+        out = result["structuredContent"]
+        assert out["ok"] is False and out["error"] != "not_found", out
+        assert "no card found" not in out["message"], out
+        assert result["isError"] is True and out["retryable"] is True, out
+        for raw in ("ConnectError", "503", "429", "unreachable:"):
+            assert raw not in out["message"], out
+        if handler is limited:
+            assert out["error"] == "rate_limited" and out["retry_in"] == 12, out
+            assert "retry_in" in out["message"] and out.get("retry_in") == 12, out
+        else:
+            assert out["error"] == "unavailable" and "Try again later" in out["message"], out
+        # resolve_cards says the same plain words when Scryfall is down
+        if handler is down:
+            resolved = await call(stack.h, token, "resolve_cards", {"cards": [{"name": "Sol Ring"}]})
+            assert "ConnectError" not in json.dumps(resolved), resolved
+
+
 async def test_printings_by_oracle_id_and_by_name(stack: Stack) -> None:
     """The assistant's copy of a card's printings: the sets and the newest printings, newest first,
     with finishes but no pictures (those are the printings card's, through its signed link)."""
@@ -1186,7 +1324,9 @@ async def test_card_printings_lists_released_paper_first_and_clear_counts(stack:
         ("mdd", True, False),
     ]
     assert out["matching_total"] == 3 and "matching" not in out and out["returned_count"] == 2
-    assert out["truncated"] is True and out["has_more"] is False and out["total_cards"] == 3
+    assert out["truncated"] is True and out["total_cards"] == 3
+    # more printings than the rows returned: has_more says so whatever cut them (the limit here)
+    assert out["has_more"] is True and out["scryfall_more_pages"] is False
     # the limit caps the set list too; the count says how many there are
     assert len(out["sets"]) == 2 and out["sets_total"] == 3 and out["sets_truncated"] is True
     assert "not narrowed" in out["sets_scope"]

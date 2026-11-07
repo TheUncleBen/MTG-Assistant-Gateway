@@ -8,6 +8,7 @@ it where ownership matters.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import hashlib
 import json
@@ -144,6 +145,30 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 
 UNUSED_CLIENT_TTL = 7 * 86400
+# By default, a browser or Android app sign-in ends this long after it was made, however much it is
+# used (renew_browser_session); the Settings page's "Longest website sign-in" changes it
+# (Database.session_max_age), and "Website sign-in when unused" is how long it lasts unused.
+BROWSER_SESSION_MAX_AGE = 30 * 86400
+# Why a browser session ended, as the page its browser sees next says (pages.py, /signed-out):
+# it went unused too long, it reached the longest sign-in time, the identity provider no longer
+# honours its sign-in, the member is no longer in the group, they signed out on all devices from
+# another one, an admin signed them out, or an admin turned their account off.
+SESSION_END_REASONS = ("unused", "longest", "idp", "removed", "elsewhere", "admin", "disabled")
+# How long that is remembered, and how long a session cookie outlives its session so the browser
+# still brings it back to be told (the cookie is worth nothing once its session has ended).
+SESSION_END_NOTICE = 30 * 86400
+# The provider grant of a browser session is held by "s:" and the session's id hash (membership.py).
+SESSION_HOLDER = "s:"
+# A sign-in's grant waits under "login:" until its session is made; one never handed over goes then.
+LOGIN_GRANT_TTL = 86400
+
+
+def _expiry_reason(created: int, expires: int, longest: int) -> str:
+    """Why a session whose end time has passed ended: it ran into the longest sign-in time (its end
+    was capped there, give or take a minute), or else it went unused."""
+    return "longest" if expires >= created + longest - 60 else "unused"
+
+
 # Retention and size caps applied by purge_expired. Registration and /authorize are open to
 # anyone, so rows nobody has signed in for are capped as well as aged out.
 AUDIT_RETENTION_SECONDS = 365 * 86400
@@ -177,6 +202,29 @@ APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
 # Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
 # member's deck are always kept (and any a pending restore still needs); older ones are deleted.
 SNAPSHOTS_KEEP_PER_DECK = 25
+# A run of the member's own edits on the deck page (and its settings and categories) shares one
+# snapshot, the one taken before its first edit, while each edit follows the last within this
+# many seconds and nothing else changed the deck between them: one restore point and one History
+# entry per sitting, not one per tap. Ten minutes covers a sitting of taps seconds apart, with a
+# pause to look a card up; Undo steps back through the edits in between. Those snapshots are
+# also counted apart from all others, so taps never push an assistant's change out of the newest.
+PAGE_SESSION_SECONDS = 600
+PAGE_SESSION_KINDS = ("edit", "details", "categories")
+# whether a snapshot was taken for one of those edits (SQL, on a row of snapshots named s)
+_PAGE_SNAPSHOT_SQL = (
+    "EXISTS (SELECT 1 FROM proposals p WHERE p.id = s.proposal_id AND p.owner_sub = s.owner_sub "
+    "AND p.created_by_client = '__browser__' AND p.kind IN ('edit', 'details', 'categories'))"
+)
+# an applied page edit that shares its snapshot with a newer applied page edit: shown in
+# History as part of that newer one (SQL, on a row of proposals named q)
+_FOLDED_SQL = (
+    "(q.created_by_client = '__browser__' AND q.kind IN ('edit', 'details', 'categories') "
+    "AND q.snapshot_id IS NOT NULL AND EXISTS ("
+    "SELECT 1 FROM proposals q2 WHERE q2.owner_sub = q.owner_sub AND q2.snapshot_id = q.snapshot_id "
+    "AND q2.state = 'applied' AND q2.created_by_client = '__browser__' "
+    "AND q2.kind IN ('edit', 'details', 'categories') "
+    "AND (q2.created_at > q.created_at OR (q2.created_at = q.created_at AND q2.rowid > q.rowid))))"
+)
 # Rows deleted per transaction by the purge's plain deletes, so the lock is
 # released between batches.
 PURGE_BATCH = 500
@@ -188,6 +236,97 @@ DECK_COVER_RETENTION_SECONDS = 180 * 86400
 PRICE_RETENTION_DAYS = 365
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
+# Set around a tool call (dbwait.tool_busy_middleware) to a dict that a write which found the
+# database locked past BUSY_TIMEOUT_MS marks ("locked"), so the call is answered "busy" instead
+# of a raw error.
+lock_failures: ContextVar[dict[str, bool] | None] = ContextVar("db_lock_failures", default=None)
+
+
+class DatabaseBusy(sqlite3.OperationalError):
+    """A write found the write lock held by another connection while its request was let through
+    without waiting for it (``ReadThrough``): raised at once instead of waiting on the event loop.
+    The request is then run again once the lock is free (dbwait.DatabaseWaitMiddleware)."""
+
+    def __init__(self) -> None:
+        super().__init__("database is locked (the request went ahead without waiting)")
+
+
+def _worker_thread() -> bool:
+    """Whether this thread is a worker (a job run with asyncio.to_thread): no event loop runs in
+    it, and it is not the main thread (a command run without a loop). A thread that runs an event
+    loop takes the loop's path in Database.tx() whichever thread it is (uvicorn's loop runs in a
+    thread of its own in the browser tests), so it never waits for the lock with the loop held."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return threading.current_thread() is not threading.main_thread()
+    return False
+
+
+class ReadThrough:
+    """One request let through while another connection holds the write lock because it should
+    only read (dbwait.DatabaseWaitMiddleware). Its writes don't wait: one that finds the lock held
+    raises DatabaseBusy and marks ``busy`` (unless it is an optional one, ``optional_writes``);
+    ``committed`` notes a write that landed (the lock was free for it). ``active`` is False once
+    the request ends or turns to waiting (dbwait.before_side_effect). ``deadline``: when its
+    wait for the lock, should it need one, runs out (time.monotonic)."""
+
+    def __init__(self, db: Database, deadline: float) -> None:
+        self.db = db
+        self.deadline = deadline
+        self.active = True
+        self.busy = False
+        self.committed = False
+        # a handled DatabaseBusy of this request was logged (decks.say_busy): one line per lock event
+        self.said_busy = False
+
+
+read_through: ContextVar[ReadThrough | None] = ContextVar("db_read_through", default=None)
+_optional: ContextVar[bool] = ContextVar("db_optional_write", default=False)
+
+
+@contextmanager
+def optional_writes() -> Iterator[None]:
+    """Writes nothing depends on (the usage counters): in a request let through while the lock
+    is held, one that finds it held is skipped by its caller without making the request wait."""
+    token = _optional.set(True)
+    try:
+        yield
+    finally:
+        _optional.reset(token)
+
+
+def _note_locked(exc: BaseException) -> None:
+    if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc) and not _optional.get():
+        seen = lock_failures.get()
+        if seen is not None:
+            seen["locked"] = True
+
+
+# The result of an apply cut off before it finished (a restart, a crash, the six-hour backstop),
+# for an UPDATE of proposals with :why: what the apply noted before its Archidekt writes
+# (apply_progress, note_apply_progress) and whether any write had begun (``writes_started``; an
+# apply cut off before its first write changed nothing), the snapshot taken before it and, for
+# a new deck, the deck made. The deck an edit was for is not a change, so it is not kept as
+# ``deck_id`` (which says a new deck was made). Every apply notes that no write has begun when it
+# starts (claim_proposal), so a row with no note at all was left by a version that kept none
+# (0.7.45): whether a write had begun is not known, so it counts as begun ("may", and the deck is
+# read back), never as "nothing was changed".
+_STARTED_SQL = (
+    "CASE WHEN json_type(result_json, '$.apply_progress') IS NULL THEN 1 "
+    "ELSE COALESCE(json_extract(result_json, '$.apply_progress.writes_started'), 0) END"
+)
+INTERRUPTED_SQL = (
+    "json_patch(COALESCE(json_extract(result_json, '$.apply_progress'), '{}'), json_object("
+    "'error', 'interrupted', "
+    f"'writes_started', json(CASE WHEN {_STARTED_SQL} THEN 'true' ELSE 'false' END), "
+    f"'detail', :why || CASE WHEN {_STARTED_SQL} "
+    "THEN ', while the change was being sent to Archidekt, so part or all of it may be there. Read "
+    "the deck before doing anything else with it' "
+    "ELSE ', before anything was sent to Archidekt, so nothing was changed there' END, "
+    "'snapshot_id', snapshot_id, "
+    "'deck_id', CASE WHEN kind = 'create_deck' THEN deck_id END))"
+)
 # Remembered choices that follow the account: how many one account may keep and how large
 # one may be, so a page script cannot grow the database without bound.
 MAX_PREFS_PER_ACCOUNT = 300
@@ -753,6 +892,179 @@ def _step_15(conn: sqlite3.Connection) -> None:
     _add_column(conn, "proposals", "risk", "TEXT")
 
 
+def _step_16(conn: sqlite3.Connection) -> None:
+    """0.7.46, one live card per proposal: ``card_seqs`` counts, per app (client id), the cards
+    drawn in that app's chat for a proposal, as a JSON object ``{client: n}``. Each card knows
+    its own number, and a card that reads a higher one for its app shows a short line instead of
+    its buttons ("Replaced by a newer version below"), so only the newest card asks for a press.
+    Proposals made before have none: their cards keep working as before."""
+    _add_column(conn, "proposals", "card_seqs", "TEXT")
+
+
+def _step_17(conn: sqlite3.Connection) -> None:
+    """0.7.46, sign-outs: the identity provider's tokens are kept per sign-in, not one set per
+    member. ``holder`` names whose they are: ``s:`` and a browser session's id hash (a browser or
+    the Android app), ``ai:`` and the member (their latest AI-app sign-in), ``login:`` and a login
+    id's hash (a sign-in not yet handed to its session). A grant the provider stops honouring then
+    ends only the sign-in that holds it. ``checked_at`` is when the provider last let that holder
+    in, so the first page after a restart is not kept waiting either. The one grant per member kept
+    until now becomes their ``ai:`` grant, which their sessions from before this step use (they
+    have none of their own) until they end.
+
+    ``session_ends`` records why a browser session ended (``reason``), by its id hash only, so the
+    page a returning browser sees can say why it was signed out (pages.py, /signed-out)."""
+    if "holder" not in _columns(conn, "idp_grants"):
+        conn.execute("ALTER TABLE idp_grants RENAME TO idp_grants_old")
+        conn.execute(
+            """CREATE TABLE idp_grants (
+                holder TEXT PRIMARY KEY,
+                sub TEXT NOT NULL,
+                refresh_enc TEXT NOT NULL DEFAULT '',
+                access_enc TEXT NOT NULL DEFAULT '',
+                access_expires_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                checked_at INTEGER
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO idp_grants (holder, sub, refresh_enc, access_enc, access_expires_at, updated_at)
+               SELECT 'ai:' || sub, sub, refresh_enc, access_enc, access_expires_at, updated_at
+               FROM idp_grants_old"""
+        )
+        conn.execute("DROP TABLE idp_grants_old")
+    conn.execute("CREATE INDEX IF NOT EXISTS idp_grants_sub ON idp_grants(sub)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS session_ends (
+            id_hash TEXT PRIMARY KEY,
+            reason TEXT NOT NULL,
+            ended_at INTEGER NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS session_ends_at ON session_ends(ended_at)")
+
+
+def _step_18(conn: sqlite3.Connection) -> None:
+    """0.7.46, Binder prices (binder_prices.py, prices.py): what the daily price check prices for a
+    member beyond their watchlist, and the cheapest printing of a watch by name alone.
+
+    - ``binder_records``: the member's Binder as last read whole from Archidekt (once a day while
+      they use the Binder), one row per record: the printing, finish and copies the value and the
+      price sort need, and the row as the page draws it (``row_json``). The gateway's own Binder
+      changes keep it current between reads.
+    - ``binder_reads``: per member, when they last opened the Binder (``seen_at``: only the Binders
+      in use are read and priced), when it was last read whole and how many records that read held.
+    - ``owned_decks``: the printings in each of the member's own decks as last read (any deck
+      page view), so the card viewer has a price history for deck cards too.
+    - ``watch_cards``: the card's Scryfall oracle id, and for a watch by name alone the printing
+      that was cheapest at the last check (its points are kept under ``min:`` and the oracle id).
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS binder_records (
+            sub TEXT NOT NULL,
+            rid INTEGER NOT NULL,
+            scryfall_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT '',
+            finish TEXT NOT NULL DEFAULT 'nonfoil',
+            quantity INTEGER NOT NULL DEFAULT 0,
+            row_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (sub, rid)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS binder_reads (
+            sub TEXT PRIMARY KEY,
+            seen_at INTEGER,
+            read_at INTEGER,
+            records INTEGER NOT NULL DEFAULT 0,
+            complete INTEGER NOT NULL DEFAULT 0
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS owned_decks (
+            sub TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            deck_name TEXT NOT NULL DEFAULT '',
+            cards_json TEXT NOT NULL DEFAULT '[]',
+            read_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, deck_id)
+        )"""
+    )
+    for column in ("oracle_id", "cheapest_id", "cheapest_set", "cheapest_cn"):
+        _add_column(conn, "watch_cards", column, "TEXT")
+
+
+def _step_19(conn: sqlite3.Connection) -> None:
+    """0.7.46: a deck edit's ``deck_after`` (decks.deck_after_block: the deck's size, verdict and
+    price once applied), kept with the proposal so the review page can say the price change an
+    assistant is told. Set by a propose or an amend that works it out; another amend clears it."""
+    _add_column(conn, "proposals", "deck_after_json", "TEXT")
+
+
+def _step_20(conn: sqlite3.Connection) -> None:
+    """0.7.46: each connected assistant's own approval mode (assistants.py). One row per member and
+    assistant: Claude (claude.ai) and ChatGPT (chatgpt.com) are one assistant each however many
+    times they connect; any other app, and one on the member's own computer, is its own (``app:``
+    and its client id). ``mode`` NULL follows the member's default (``users.approval_mode``),
+    which is how every assistant starts, so the upgrade changes no one's mode. ``first_seen_at`` is
+    when it first signed in, ``opened_at`` when the member first saw it (its page, or it was
+    connected before this step): until then it shows New and the notice on Home."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS assistant_modes (
+            sub TEXT NOT NULL,
+            assistant TEXT NOT NULL,
+            mode TEXT,
+            set_at INTEGER,
+            first_seen_at INTEGER NOT NULL,
+            opened_at INTEGER,
+            PRIMARY KEY (sub, assistant)
+        )"""
+    )
+
+
+def _step_21(conn: sqlite3.Connection) -> None:
+    """0.7.46, the Watchlist as a want list (prices.py): the member's watchlist lists (groups of
+    watched cards, ``watch_lists``, a list can be empty), and on each watched card the list it is
+    in (``list_name``, '' for none), the price it had when it was added (``added_price`` in
+    ``added_currency``, the reference for the "drop below" and "rise above" alerts) and those two
+    alerts as percentages of it (``alert_drop_pct``, ``alert_rise_pct``)."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS watch_lists (
+            sub TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, name)
+        )"""
+    )
+    _add_column(conn, "watch_cards", "list_name", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "watch_cards", "added_price", "REAL")
+    _add_column(conn, "watch_cards", "added_currency", "TEXT")
+    _add_column(conn, "watch_cards", "alert_drop_pct", "REAL")
+    _add_column(conn, "watch_cards", "alert_rise_pct", "REAL")
+
+
+def _step_22(conn: sqlite3.Connection) -> None:
+    """0.7.46 audit (QG-16): the gateway's own alerts for the website's bell
+    (``gateway_alerts``: a price alert that fired, a report that finished, a summary, kept per
+    member whether or not push notifications are on; ``seen_at`` once the list was opened)."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS gateway_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sub TEXT NOT NULL,
+            event TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            path TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            seen_at INTEGER
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS gateway_alerts_sub ON gateway_alerts (sub, id)")
+
+
+# A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
+# result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
+RISK_REASON_KEY = "_risk_reason"
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -770,6 +1082,13 @@ MIGRATIONS = [
     _step_13,
     _step_14,
     _step_15,
+    _step_16,
+    _step_17,
+    _step_18,
+    _step_19,
+    _step_20,
+    _step_21,
+    _step_22,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -796,6 +1115,20 @@ def _like_prefix(prefix: str) -> str:
 
 # job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
 BACKUP_MADE_JOB = "backup_made:"
+# Why a snapshot can't be deleted now (Database.snapshot_held), in the member's words.
+# The proposals History lists as changes to a deck once applied (owner decision C7: History is the
+# deck's timeline); account-wide ones (lists, collection, Archidekt actions) are not a deck's.
+# the applied changes History lists; "lists" are the member's Archidekt lists (My lists), each
+# entry with the list as it was just before (review F7)
+DECK_CHANGE_KINDS = ("edit", "restore", "details", "categories", "create_deck", "lists")
+SNAPSHOT_HELD_RESTORE = (
+    "A restore that is waiting puts the deck back to this snapshot, so it can't be deleted. Reject "
+    "or apply that restore first."
+)
+SNAPSHOT_HELD_BACKUP = (
+    "The gateway still needs this snapshot to tidy up its backup copy on Archidekt, so it can't be "
+    "deleted yet."
+)
 # job_runs rows recording each Archidekt folder the gateway put a member's backup copies in
 # (record_backup_folder), by member and folder id: a renamed backup folder stays known as one
 BACKUP_FOLDER_JOB = "backup_folder:"
@@ -817,10 +1150,17 @@ MEMBER_TABLES = (
     ("idp_grants", "sub"),
     ("metrics", "sub"),
     ("watch_cards", "sub"),
+    ("watch_lists", "sub"),
     ("watch_decks", "sub"),
     ("deck_values", "sub"),
+    ("binder_records", "sub"),  # their Binder as last read, for its value
+    ("binder_reads", "sub"),
+    ("binder_jobs", "sub"),  # their binder import or restore job (collection_bulk)
+    ("owned_decks", "sub"),  # the printings of their decks, for the price history
     ("notify_prefs", "sub"),
     ("account_prefs", "sub"),
+    ("assistant_modes", "sub"),  # the approval mode they chose for each assistant
+    ("gateway_alerts", "sub"),  # the gateway's own alerts kept for their bell
     ("card_models", "added_by"),  # their simulator card models go too
     ("backup_deletes", "sub"),  # their queued backup deletes go with their snapshots
     ("users", "sub"),
@@ -892,15 +1232,24 @@ class Database:
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._atomic_thread: int | None = None  # the thread inside atomic(), if any
         self._anonymous_audit_inserts = 0
         self.price_days = PRICE_RETENTION_DAYS
         # Snapshots kept per deck; None means SNAPSHOTS_KEEP_PER_DECK (the app wires the live
         # setting in, snapshots_keep()).
         self.snapshots_per_deck: int | None = None
         self.snapshots_source: Callable[[], int] | None = None
+        # the longest a sign-in lasts, in seconds, from the Settings page (create_app); None: the default
+        self.session_max_age_source: Callable[[], int] | None = None
         # A closed proposal's risk tier from its stored row (get_proposal's shape), stored when it
         # closes (settle_risks); the app wires in DeckService.stored_risk. None stores nothing.
-        self.risk_source: Callable[[dict[str, Any]], str] | None = None
+        # It may answer (tier, reason): the reason is kept with the tier (RISK_REASON_KEY).
+        self.risk_source: Callable[[dict[str, Any]], str | tuple[str, str]] | None = None
+        # What the Watchlist's kept rows (PriceService.card_summaries) are worked out from, counted
+        # as it is written (_count_watchlist_writes): per member, writes to their watched cards and
+        # their Binder as last read; and, shared by everyone, writes to the price points.
+        self._watchlist_writes: dict[str, int] = {}
+        self._price_writes = 0
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -914,6 +1263,7 @@ class Database:
             try:
                 self._migrate()
                 upgrade_backup.went_forward(self._conn)
+                self._count_watchlist_writes()
             except Exception:
                 self._conn.close()
                 raise
@@ -1018,16 +1368,149 @@ class Database:
             self._conn.close()
 
     @contextmanager
-    def tx(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+    def atomic(self) -> Iterator[sqlite3.Connection]:
+        """One transaction around several of this class's writes (each tx() inside becomes a
+        savepoint of it): they all land or none does, and no other connection can take the write
+        lock between them. Nothing awaited inside: the connection is held throughout."""
+        with self.tx() as c:
+            outer = self._atomic_thread
+            self._atomic_thread = threading.get_ident()
             try:
-                yield self._conn
-            except Exception:
-                self._conn.execute("ROLLBACK")
+                yield c
+            finally:
+                self._atomic_thread = outer
+
+    @contextmanager
+    def tx(self) -> Iterator[sqlite3.Connection]:
+        if self._atomic_thread == threading.get_ident():
+            with self._lock:  # inside atomic(): a savepoint of its transaction
+                self._conn.execute("SAVEPOINT tx")
+                try:
+                    yield self._conn
+                except Exception:
+                    self._conn.execute("ROLLBACK TO tx")
+                    self._conn.execute("RELEASE tx")
+                    raise
+                else:
+                    self._conn.execute("RELEASE tx")
+            return
+        if _worker_thread():
+            self._begin_off_loop()  # holds self._lock on return, the transaction begun
+        else:
+            self._lock.acquire()
+            through = read_through.get()
+            try:
+                if through is not None and through.active:
+                    self._begin_without_waiting(through)
+                else:
+                    self._conn.execute("BEGIN IMMEDIATE")
+            except BaseException as exc:
+                self._lock.release()
+                _note_locked(exc)
                 raise
-            else:
-                self._conn.execute("COMMIT")
+        try:
+            yield self._conn
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+            through = read_through.get()
+            if through is not None and through.active:
+                through.committed = True
+        finally:
+            self._lock.release()
+
+    def _begin_without_waiting(self, through: ReadThrough) -> None:
+        """BEGIN IMMEDIATE for a request let through while the lock is held (ReadThrough): never
+        waits; DatabaseBusy when the lock is still held."""
+        if str(self.path) == ":memory:":
+            self._conn.execute("BEGIN IMMEDIATE")
+            return
+        self._conn.execute("PRAGMA busy_timeout=0")
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            if not _optional.get():
+                through.busy = True
+            raise DatabaseBusy() from exc
+        finally:
+            self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+
+    def _begin_off_loop(self) -> None:
+        """BEGIN IMMEDIATE for a worker thread (a job run with asyncio.to_thread), returning with
+        self._lock held. While another connection holds the write lock, the thread waits for it
+        on a connection of its own with self._lock released (wait_write_free), so the event loop's
+        reads and writes on the shared connection are never held up behind that wait. It waits
+        BUSY_TIMEOUT_MS in all, as a write on the loop does, then fails the same way."""
+        deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+        while True:
+            self._lock.acquire()
+            try:
+                if self._conn.in_transaction:  # nested: let SQLite refuse it as it always has
+                    self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute("PRAGMA busy_timeout=0")
+                try:
+                    self._conn.execute("BEGIN IMMEDIATE")
+                    return  # self._lock stays held for the transaction
+                except sqlite3.OperationalError as exc:
+                    left = deadline - time.monotonic()
+                    if "locked" not in str(exc) or left <= 0:
+                        raise
+                finally:
+                    self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            except BaseException:
+                self._lock.release()
+                raise
+            self._lock.release()
+            self.wait_write_free(left)
+
+    def write_free(self) -> bool:
+        """Whether a write could start now without waiting: nothing in this process is using the
+        connection and no other connection (``mtg-gateway backup``, an admin command run in the
+        container, a worker thread) holds the write lock. It never waits, so it is safe on the
+        event loop (dbwait.py asks it before each request)."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            if self._conn.in_transaction or str(self.path) == ":memory:":
+                return True
+            self._conn.execute("PRAGMA busy_timeout=0")
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError:
+                return False
+            finally:
+                self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            self._conn.execute("ROLLBACK")
+            return True
+        finally:
+            self._lock.release()
+
+    def wait_write_free(self, timeout: float) -> bool:
+        """Wait, at most ``timeout`` seconds, until a write could start; True once it could. For a
+        worker thread, never the event loop: it waits on its own connection, so the gateway's
+        connection stays free for the requests that don't wait."""
+        deadline = time.monotonic() + timeout
+        if not self._lock.acquire(timeout=max(timeout, 0.0)):
+            return False
+        self._lock.release()
+        if str(self.path) == ":memory:":
+            return True
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=left)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("ROLLBACK")
+            return True
+        except sqlite3.OperationalError:
+            return False
+        finally:
+            conn.close()
 
     def _one(self, sql: str, args: tuple[Any, ...] = ()) -> sqlite3.Row | None:
         with self._lock:
@@ -1092,6 +1575,51 @@ class Database:
                 "BEGIN SELECT mtg_proposal_changed(NEW.sub, NULL); END"
             )
 
+    def _count_watchlist_writes(self) -> None:
+        """Count every write to what a member's Watchlist rows are worked out from, as SQLite makes
+        it: ``watch_cards`` and ``binder_records`` per member (an insert, update or delete of a
+        row, by any statement, a member's data being deleted included) and
+        ``price_points`` for everyone (a price is not personal). Nothing else counts, so a Binder
+        visit or an assistant's tool call, which write elsewhere, leave the kept rows in place.
+        The triggers are TEMP: they live on this connection and nothing is written to the file. A
+        write rolled back still counts, which only works the rows out again."""
+
+        def member(sub: Any) -> None:
+            key = str(sub)
+            self._watchlist_writes[key] = self._watchlist_writes.get(key, 0) + 1
+
+        def shared() -> None:
+            self._price_writes += 1
+
+        self._conn.create_function("mtg_watchlist_write", 1, member)
+        self._conn.create_function("mtg_price_write", 0, shared)
+        # a database an older step list made (tests) may lack some; the steps run only at open
+        present = {r[0] for r in self._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        for table in ("watch_cards", "binder_records", "price_points"):
+            if table not in present:
+                continue
+            for event, body in (
+                ("INSERT", "SELECT mtg_watchlist_write(NEW.sub);"),
+                ("DELETE", "SELECT mtg_watchlist_write(OLD.sub);"),
+                (
+                    "UPDATE",
+                    "SELECT mtg_watchlist_write(OLD.sub); "
+                    "SELECT mtg_watchlist_write(NEW.sub) WHERE NEW.sub IS NOT OLD.sub;",
+                ),
+            ):
+                if table == "price_points":
+                    body = "SELECT mtg_price_write();"
+                self._conn.execute(
+                    f"CREATE TEMP TRIGGER IF NOT EXISTS mtg_{table}_{event.lower()} AFTER {event} ON {table} "
+                    f"BEGIN {body} END"
+                )
+
+    def watchlist_stamp(self, sub: str) -> tuple[int, int]:
+        """How many times what ``sub``'s Watchlist rows are worked out from has been written
+        (_count_watchlist_writes): their own rows, then the shared prices. Equal stamps, same
+        rows."""
+        return self._watchlist_writes.get(sub, 0), self._price_writes
+
     def pending_proposal_decks(self) -> list[tuple[str, str]]:
         """(owner_sub, deck_id) of every pending proposal not yet expired, one row per pair: the
         decks whose waiting count an approval setting can change."""
@@ -1110,6 +1638,83 @@ class Database:
         with self.tx() as c:
             cur = c.execute("UPDATE users SET approval_mode = ? WHERE sub = ?", (mode, sub))
             return cur.rowcount > 0
+
+    # Each connected assistant's own approval mode (assistants.py) ---------------------------------
+    def note_assistant(self, sub: str, assistant: str, client_id: str) -> bool:
+        """Remember that ``assistant`` signed in for ``sub`` (called before its new tokens are
+        saved). The first time it follows the member's default (no mode of its own), and counts as
+        new unless ``client_id`` already held a token for the member (connected before schema 20).
+        True when the row is new."""
+        now = int(time.time())
+        with self.tx() as c:
+            known = c.execute(
+                "SELECT 1 FROM tokens WHERE sub = ? AND client_id = ? LIMIT 1", (sub, client_id)
+            ).fetchone()
+            cur = c.execute(
+                "INSERT OR IGNORE INTO assistant_modes (sub, assistant, mode, set_at, first_seen_at, "
+                "opened_at) VALUES (?, ?, NULL, NULL, ?, ?)",
+                (sub, assistant, now, now if known else None),
+            )
+            return cur.rowcount > 0
+
+    def assistant_modes(self, sub: str) -> dict[str, dict[str, Any]]:
+        """The member's assistants by key: mode (None follows their default), set_at,
+        first_seen_at and opened_at."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT assistant, mode, set_at, first_seen_at, opened_at FROM assistant_modes WHERE sub = ?",
+                (sub,),
+            ).fetchall()
+        return {r["assistant"]: dict(r) for r in rows}
+
+    def assistant_mode(self, sub: str, assistant: str) -> str | None:
+        """The mode the member chose for one assistant, or None while it follows their default."""
+        row = self._one("SELECT mode FROM assistant_modes WHERE sub = ? AND assistant = ?", (sub, assistant))
+        return row["mode"] if row else None
+
+    def set_assistant_mode(self, sub: str, assistant: str, mode: str | None) -> None:
+        """The member's own choice for one assistant (None: back to their default). Only the member's
+        own browser calls this, never an assistant over MCP or the API (modes.py)."""
+        now = int(time.time())
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO assistant_modes (sub, assistant, mode, set_at, first_seen_at, opened_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (sub, assistant) DO UPDATE SET "
+                "mode = excluded.mode, set_at = excluded.set_at, "
+                "opened_at = COALESCE(assistant_modes.opened_at, excluded.opened_at)",
+                (sub, assistant, mode, now, now, now),
+            )
+
+    def mark_assistant_opened(self, sub: str, assistant: str) -> None:
+        """The member has seen this assistant (its page): no longer New, no notice on Home."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE assistant_modes SET opened_at = ? "
+                "WHERE sub = ? AND assistant = ? AND opened_at IS NULL",
+                (int(time.time()), sub, assistant),
+            )
+
+    def forget_assistant(self, sub: str, assistant: str | None = None) -> int:
+        """Forget one assistant (every one with None) when the member disconnects it: connected again, it
+        starts at the member's default."""
+        with self.tx() as c:
+            if assistant is None:
+                cur = c.execute("DELETE FROM assistant_modes WHERE sub = ?", (sub,))
+            else:
+                cur = c.execute(
+                    "DELETE FROM assistant_modes WHERE sub = ? AND assistant = ?", (sub, assistant)
+                )
+            return cur.rowcount
+
+    def client_redirects(self, client_id: str) -> list[str]:
+        """Where an app sends members back after sign-in: a registered app's redirect addresses, or
+        those of the client metadata document the gateway fetched. Empty when none is kept."""
+        info = self.get_client(client_id)
+        if info is None:
+            row = self._one("SELECT info_json FROM cimd_clients WHERE client_id = ?", (client_id,))
+            info = json.loads(row["info_json"]) if row else None
+        uris = info.get("redirect_uris") if isinstance(info, dict) else None
+        return [str(u) for u in uris] if isinstance(uris, list) else []
 
     def set_user_disabled(self, sub: str, disabled: bool) -> bool:
         """Mark a user disabled (refused at token load, refresh, sign-in and browser session) or
@@ -1214,11 +1819,12 @@ class Database:
                 )
             return cur.rowcount
 
-    def revoke_all_for_user(self, sub: str) -> dict[str, int]:
-        """Revoke every token of ``sub`` and delete their browser sessions and pending codes."""
+    def revoke_all_for_user(self, sub: str, reason: str = "admin") -> dict[str, int]:
+        """Revoke every token of ``sub`` and delete their browser sessions and pending codes.
+        ``reason`` is what a browser signed out this way is told (SESSION_END_REASONS)."""
         with self.tx() as c:
             tokens = c.execute("UPDATE tokens SET revoked = 1 WHERE sub = ? AND revoked = 0", (sub,)).rowcount
-            sessions = c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
+            sessions = self._end_sessions(c, "sub = ?", (sub,), reason)
             # The provider tokens go too: with no sessions left there is nothing to re-check, and a
             # fresh sign-in stores new ones.
             c.execute("DELETE FROM idp_grants WHERE sub = ?", (sub,))
@@ -1495,6 +2101,58 @@ class Database:
         d["scopes"] = json.loads(d.pop("scopes_json"))
         return d
 
+    def token_live(self, token_hash: str) -> bool:
+        """Whether the token with this hash exists, is not revoked and has not expired."""
+        return (
+            self._one(
+                "SELECT 1 FROM tokens WHERE token_hash = ? AND revoked = 0 AND expires_at >= ?",
+                (token_hash, int(time.time())),
+            )
+            is not None
+        )
+
+    def note_apply_progress(self, proposal_id: str, progress: dict[str, Any]) -> None:
+        """Keep, with a proposal being applied, what its apply has done so far (decks: just
+        before each Archidekt write), so an apply cut off by a crash, an out-of-memory kill or the
+        backstop still says that its writes had begun (INTERRUPTED_SQL)."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE proposals SET result_json = json_set(COALESCE(result_json, '{}'), "
+                "'$.apply_progress', json(?)) WHERE id = ? AND state = 'applying'",
+                (json.dumps(progress), proposal_id),
+            )
+
+    def applied_after_read_back(self, proposal_id: str, owner_sub: str, result: dict[str, Any]) -> bool:
+        """Mark a deck edit failed as interrupted applied (``result``), when the deck read back
+        afterwards has the whole change (decks.read_back_interrupted). Only while it is still that
+        failed, unread change. True when it was marked."""
+        with self.tx() as c:
+            done = c.execute(
+                "UPDATE proposals SET state = 'applied', applied_at = ?, result_json = ? "
+                "WHERE id = ? AND owner_sub = ? AND state = 'failed' "
+                "AND json_extract(result_json, '$.error') = 'interrupted' "
+                "AND json_extract(result_json, '$.read_back') IS NULL",
+                (int(time.time()), json.dumps(result), proposal_id, owner_sub),
+            ).rowcount
+        if done:
+            self.settle_risks([proposal_id])
+        return bool(done)
+
+    def interrupted_to_read_back(self, since: int, limit: int = 20) -> list[dict[str, Any]]:
+        """Deck edits failed as interrupted since ``since`` whose writes had begun (or may have:
+        recorded before that was noted) and whose deck has not been read back yet (decks
+        read_back_interrupted): id and owner."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, owner_sub FROM proposals WHERE state = 'failed' AND kind = 'edit' "
+                "AND snapshot_id IS NOT NULL AND COALESCE(applied_at, created_at) >= ? "
+                "AND json_extract(result_json, '$.error') = 'interrupted' "
+                "AND COALESCE(json_extract(result_json, '$.writes_started'), 1) != 0 "
+                "AND json_extract(result_json, '$.read_back') IS NULL ORDER BY applied_at LIMIT ?",
+                (since, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def revoke_family(self, family: str) -> None:
         with self.tx() as c:
             c.execute("UPDATE tokens SET revoked = 1 WHERE family = ?", (family,))
@@ -1509,16 +2167,15 @@ class Database:
     def fail_interrupted_applies(self) -> int:
         """At startup, mark every proposal still 'applying' as failed. There is one gateway process,
         so an apply left running by the previous one (a crash, a redeploy) can't still be going.
-        The result points at the snapshot taken before it and the deck, so the member can check."""
+        The result (INTERRUPTED_SQL) keeps what the apply noted before each Archidekt write
+        (note_apply_progress), so even after a hard crash it says whether any write had begun,
+        and points at the snapshot taken before it, so the member can check."""
         with self.tx() as c:
             ids = [r[0] for r in c.execute("SELECT id FROM proposals WHERE state = 'applying'")]
             n = c.execute(
-                """UPDATE proposals SET state = 'failed',
-                   result_json = COALESCE(result_json, json_object('error', 'interrupted',
-                       'detail', 'the gateway restarted before the apply finished; check the deck on '
-                                 || 'Archidekt and restore the snapshot if it is only partly changed',
-                       'snapshot_id', snapshot_id, 'deck_id', deck_id))
-                   WHERE state = 'applying'"""
+                f"UPDATE proposals SET state = 'failed', result_json = {INTERRUPTED_SQL} "
+                "WHERE state = 'applying'",
+                {"why": "the gateway restarted before the apply finished"},
             ).rowcount
         self.settle_risks(ids)  # only the ones failed just now
         return n
@@ -1535,7 +2192,29 @@ class Database:
         n += self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
         n += self._delete_batched("auth_codes", "expires_at < ?", (now,))
         n += self._delete_batched("login_sessions", "expires_at < ?", (now,))
+        with self.tx() as c:
+            # each expired session leaves a note of why it ended for its browser's next visit
+            longest = self.session_max_age()
+            for key, created, expires in c.execute(
+                "SELECT id_hash, created_at, expires_at FROM browser_sessions WHERE expires_at < ?", (now,)
+            ).fetchall():
+                c.execute(
+                    "INSERT OR IGNORE INTO session_ends (id_hash, reason, ended_at) VALUES (?, ?, ?)",
+                    (key, _expiry_reason(int(created), int(expires), longest), int(expires)),
+                )
         n += self._delete_batched("browser_sessions", "expires_at < ?", (now,))
+        n += self._delete_batched("session_ends", "ended_at < ?", (now - SESSION_END_NOTICE,))
+        with self.tx() as c:
+            # provider grants of sessions that ended (expired, or ended by a path that kept no
+            # grant in step), and sign-ins never handed to a session
+            n += c.execute(
+                """DELETE FROM idp_grants WHERE holder LIKE 's:%'
+                   AND substr(holder, 3) NOT IN (SELECT id_hash FROM browser_sessions)"""
+            ).rowcount
+            n += c.execute(
+                "DELETE FROM idp_grants WHERE holder LIKE 'login:%' AND updated_at < ?",
+                (now - LOGIN_GRANT_TTL,),
+            ).rowcount
         with self.tx() as c:
             n += self._purge_cimd_clients(c, now)
         # Registration is open, so every client that registered and never finished a login,
@@ -1594,12 +2273,9 @@ class Database:
             )
             closed += [r[0] for r in c.execute(stuck, (now - 6 * 3600,))]
             n += c.execute(
-                """UPDATE proposals SET state = 'failed',
-                   result_json = COALESCE(result_json, json_object('error', 'interrupted',
-                       'detail', 'the apply did not finish; check the snapshot and the deck on Archidekt',
-                       'snapshot_id', snapshot_id, 'deck_id', deck_id))
-                   WHERE state = 'applying' AND COALESCE(applied_at, created_at) < ?""",
-                (now - 6 * 3600,),
+                f"UPDATE proposals SET state = 'failed', result_json = {INTERRUPTED_SQL} "
+                "WHERE state = 'applying' AND COALESCE(applied_at, created_at) < :before",
+                {"why": "the apply did not finish", "before": now - 6 * 3600},
             ).rowcount
         # only the proposals that expired or failed just now: the full scan is the one-time
         # backfill at startup (DeckService wires it in), never a tick's work
@@ -1656,7 +2332,10 @@ class Database:
     @staticmethod
     def _prune_snapshots(c: sqlite3.Connection, keep: int = SNAPSHOTS_KEEP_PER_DECK) -> int:
         """Keep the newest ``keep`` snapshots of each member's deck, and any snapshot a pending or
-        running proposal (a restore) still points at; delete the rest. Also kept:
+        running proposal (a restore) still points at; delete the rest. The snapshots of the
+        member's own deck-page edits (PAGE_SESSION_KINDS) count apart: the newest ``keep`` of them
+        and the newest ``keep`` of all the others, so a busy deck page never pushes out the
+        snapshot from before an assistant's change. Also kept:
         the snapshot each recorded Archidekt backup copy was made with, and any snapshot with a
         queued backup delete, so the gateway never loses its record of a copy it may delete.
         Only a copy the gateway may still delete holds
@@ -1667,8 +2346,11 @@ class Database:
             """DELETE FROM snapshots WHERE id IN (
                    SELECT id FROM (
                        SELECT id, ROW_NUMBER() OVER (
-                           PARTITION BY owner_sub, deck_id ORDER BY taken_at DESC, rowid DESC) AS n
-                       FROM snapshots)
+                           PARTITION BY owner_sub, deck_id, page ORDER BY taken_at DESC, rowid DESC) AS n
+                       FROM (SELECT s.id, s.owner_sub, s.deck_id, s.taken_at, s.rowid,
+                                    """
+            + _PAGE_SNAPSHOT_SQL
+            + """ AS page FROM snapshots s))
                    WHERE n > ?)
                AND id NOT IN (SELECT json_extract(changes_json, '$.snapshot_id') FROM proposals
                               WHERE kind = 'restore' AND state IN ('pending', 'applying')
@@ -1812,7 +2494,8 @@ class Database:
 
     # metrics (per-day counters; see metrics.Metrics) ------------------------
     def metrics_increment(self, day: str, sub: str | None, kind: str, name: str, n: int = 1) -> None:
-        with self.tx() as c:
+        """A usage counter: an optional write (optional_writes), as nothing depends on it."""
+        with optional_writes(), self.tx() as c:
             c.execute(
                 """INSERT INTO metrics (day, sub, kind, name, n) VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(day, sub, kind, name) DO UPDATE SET n = n + excluded.n""",
@@ -1870,28 +2553,108 @@ class Database:
         }
 
     # browser sessions ------------------------------------------------------
+    def session_max_age(self) -> int:
+        """The longest a sign-in lasts after it was made, in seconds, as the Settings page has it."""
+        if self.session_max_age_source is not None:
+            try:
+                return int(self.session_max_age_source())
+            except Exception:
+                logger.exception("could not read the longest sign-in time; the default applies")
+        return BROWSER_SESSION_MAX_AGE
+
     def create_browser_session(self, session_id: str, sub: str, ttl: int) -> None:
         now = int(time.time())
         with self.tx() as c:
             c.execute(
                 "INSERT INTO browser_sessions (id_hash, sub, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                (hash_token(session_id), sub, now, now + ttl),
+                (hash_token(session_id), sub, now, now + min(ttl, self.session_max_age())),
             )
 
     def get_browser_session(self, session_id: str) -> str | None:
+        now = int(time.time())
         row = self._one(
-            "SELECT sub FROM browser_sessions WHERE id_hash = ? AND expires_at >= ?",
-            (hash_token(session_id), int(time.time())),
+            "SELECT sub FROM browser_sessions WHERE id_hash = ? AND expires_at >= ? AND created_at > ?",
+            (hash_token(session_id), now, now - self.session_max_age()),
         )
         return row["sub"] if row else None
 
-    def delete_browser_session(self, session_id: str) -> None:
+    def renew_browser_session(self, session_id: str, ttl: int) -> int | None:
+        """Sliding renewal: once more than half of ``ttl`` has passed since the session was made or
+        last renewed, its end moves to ``ttl`` from now, never past ``session_max_age`` after the
+        sign-in. The seconds the session now has left when it was renewed, else None (not due,
+        or no such live session). Reads only, unless a renewal is due."""
+        now = int(time.time())
+        key = hash_token(session_id)
+        longest = self.session_max_age()
+        row = self._one(
+            "SELECT created_at, expires_at FROM browser_sessions WHERE id_hash = ? AND expires_at >= ? "
+            "AND created_at > ?",
+            (key, now, now - longest),
+        )
+        if row is None or int(row["expires_at"]) - now >= ttl / 2:
+            return None
+        until = min(now + ttl, int(row["created_at"]) + longest)
+        if until <= int(row["expires_at"]):
+            return None  # already as long as it may last
         with self.tx() as c:
-            c.execute("DELETE FROM browser_sessions WHERE id_hash = ?", (hash_token(session_id),))
+            done = c.execute(
+                "UPDATE browser_sessions SET expires_at = ? WHERE id_hash = ? AND expires_at = ?",
+                (until, key, row["expires_at"]),
+            ).rowcount
+        return until - now if done else None
 
-    def delete_browser_sessions_for(self, sub: str) -> int:
+    def delete_browser_session(self, session_id: str) -> None:
+        """The member signed out on this device: the session and its provider grant go, with no
+        record of why (the browser's cookie goes in the same answer)."""
+        key = hash_token(session_id)
         with self.tx() as c:
-            return c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
+            c.execute("DELETE FROM browser_sessions WHERE id_hash = ?", (key,))
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (SESSION_HOLDER + key,))
+
+    def delete_browser_sessions_for(self, sub: str, reason: str = "elsewhere") -> int:
+        """End every browser session of ``sub``; each browser is told ``reason`` when it comes back."""
+        with self.tx() as c:
+            return self._end_sessions(c, "sub = ?", (sub,), reason)
+
+    def end_browser_session(self, id_hash: str, reason: str) -> bool:
+        """End one browser session by its id hash (the identity provider no longer honours its
+        sign-in); the browser is told ``reason`` when it comes back. False: it had ended already."""
+        with self.tx() as c:
+            return self._end_sessions(c, "id_hash = ?", (id_hash,), reason) > 0
+
+    @staticmethod
+    def _end_sessions(c: sqlite3.Connection, where: str, args: tuple[Any, ...], reason: str) -> int:
+        """Delete the browser sessions ``where`` matches, with their provider grants, and record
+        why they ended (session_ends) for the page their browser sees next."""
+        assert reason in SESSION_END_REASONS, reason
+        now = int(time.time())
+        rows = [r[0] for r in c.execute(f"SELECT id_hash FROM browser_sessions WHERE {where}", args)]
+        for key in rows:
+            c.execute(
+                "INSERT OR REPLACE INTO session_ends (id_hash, reason, ended_at) VALUES (?, ?, ?)",
+                (key, reason, now),
+            )
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (SESSION_HOLDER + key,))
+        c.execute(f"DELETE FROM browser_sessions WHERE {where}", args)
+        return len(rows)
+
+    def session_end_reason(self, session_id: str) -> str | None:
+        """Why the browser session ``session_id`` is no longer live (one of SESSION_END_REASONS),
+        or None when it is live or nothing is known of it. Only the browser holding the session's
+        cookie can ask, so the answer tells nobody else anything."""
+        now = int(time.time())
+        key = hash_token(session_id)
+        row = self._one("SELECT created_at, expires_at FROM browser_sessions WHERE id_hash = ?", (key,))
+        longest = self.session_max_age()
+        if row is not None:
+            created, expires = int(row["created_at"]), int(row["expires_at"])
+            if created <= now - longest:
+                return "longest"
+            if expires < now:
+                return _expiry_reason(created, expires, longest)
+            return None
+        row = self._one("SELECT reason FROM session_ends WHERE id_hash = ?", (key,))
+        return str(row["reason"]) if row is not None else None
 
     MEMBER_TABLES = MEMBER_TABLES
 
@@ -1918,7 +2681,7 @@ class Database:
             c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
         self.flush_wal()
         self.scrub_upgrade_copies(sub, "account")
-        return sum(self.revoke_all_for_user(sub).values())
+        return sum(self.revoke_all_for_user(sub, "removed").values())
 
     def set_user_issuer(self, sub: str, issuer: str) -> None:
         with self.tx() as c:
@@ -1930,33 +2693,80 @@ class Database:
             c.execute("UPDATE users SET groups_json = ? WHERE sub = ?", (json.dumps(groups), sub))
 
     # identity-provider grants ------------------------------------------------
-    def save_idp_grant(self, sub: str, *, refresh_enc: str, access_enc: str, access_expires_at: int) -> None:
+    # One per sign-in, named by its holder (membership.py): "s:" and a browser session's id hash,
+    # "ai:" and the member (their latest AI-app sign-in), "login:" and a login's id hash (a sign-in
+    # on its way to its session).
+    def save_idp_grant(
+        self,
+        holder: str,
+        sub: str,
+        *,
+        refresh_enc: str,
+        access_enc: str,
+        access_expires_at: int,
+        signed_in: bool = False,
+    ) -> None:
+        """Keep a grant. ``signed_in``: from a sign-in the provider just let through, so it counts
+        as the provider's last yes (checked_at); a renewal leaves that as it was."""
+        now = int(time.time())
         with self.tx() as c:
             c.execute(
-                """INSERT INTO idp_grants (sub, refresh_enc, access_enc, access_expires_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(sub) DO UPDATE SET refresh_enc=excluded.refresh_enc,
+                """INSERT INTO idp_grants
+                     (holder, sub, refresh_enc, access_enc, access_expires_at, updated_at, checked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(holder) DO UPDATE SET sub=excluded.sub, refresh_enc=excluded.refresh_enc,
                      access_enc=excluded.access_enc, access_expires_at=excluded.access_expires_at,
-                     updated_at=excluded.updated_at""",
-                (sub, refresh_enc, access_enc, access_expires_at, int(time.time())),
+                     updated_at=excluded.updated_at,
+                     checked_at=COALESCE(excluded.checked_at, idp_grants.checked_at)""",
+                (holder, sub, refresh_enc, access_enc, access_expires_at, now, now if signed_in else None),
             )
 
     def replace_idp_grant(
-        self, sub: str, *, old_refresh_enc: str, refresh_enc: str, access_enc: str, access_expires_at: int
+        self, holder: str, *, old_refresh_enc: str, refresh_enc: str, access_enc: str, access_expires_at: int
     ) -> bool:
-        """save_idp_grant for a renewal ahead of time (membership.py): only over the grant it
+        """save_idp_grant for a renewal in the background (membership.py): only over the grant it
         renewed, never bringing back one revoked or deleted meanwhile. False: nothing written."""
         with self.tx() as c:
             cur = c.execute(
                 """UPDATE idp_grants SET refresh_enc=?, access_enc=?, access_expires_at=?, updated_at=?
-                   WHERE sub = ? AND refresh_enc = ?""",
-                (refresh_enc, access_enc, access_expires_at, int(time.time()), sub, old_refresh_enc),
+                   WHERE holder = ? AND refresh_enc = ?""",
+                (refresh_enc, access_enc, access_expires_at, int(time.time()), holder, old_refresh_enc),
             )
             return cur.rowcount == 1
 
-    def get_idp_grant(self, sub: str) -> dict[str, Any] | None:
-        row = self._one("SELECT * FROM idp_grants WHERE sub = ?", (sub,))
+    def get_idp_grant(self, holder: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM idp_grants WHERE holder = ?", (holder,))
         return dict(row) if row else None
+
+    def idp_grants_for(self, sub: str) -> list[dict[str, Any]]:
+        """The member's grants that stand for a sign-in in use (their sessions' and their AI apps'),
+        the one the provider let in last first."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT * FROM idp_grants WHERE sub = ? AND (holder LIKE 's:%' OR holder LIKE 'ai:%')
+                   ORDER BY COALESCE(checked_at, 0) DESC, updated_at DESC""",
+                (sub,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def move_idp_grant(self, old: str, new: str) -> bool:
+        """Hand a sign-in's grant to the holder it was made for (its new session, the member's AI
+        apps), replacing what that holder had. False: there was no such grant (nothing moved)."""
+        with self.tx() as c:
+            if c.execute("SELECT 1 FROM idp_grants WHERE holder = ?", (old,)).fetchone() is None:
+                return False
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (new,))
+            c.execute("UPDATE idp_grants SET holder = ? WHERE holder = ?", (new, old))
+            return True
+
+    def delete_idp_grant(self, holder: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (holder,))
+
+    def mark_idp_grant_checked(self, holder: str) -> None:
+        """The provider let this holder in just now."""
+        with self.tx() as c:
+            c.execute("UPDATE idp_grants SET checked_at = ? WHERE holder = ?", (int(time.time()), holder))
 
     # archidekt links -------------------------------------------------------
     def save_link(
@@ -2110,8 +2920,8 @@ class Database:
             c.execute(
                 f"""INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
                    changes_json, diff_text, state, created_at, expires_at, created_by_client, rows_json,
-                   board_no, archidekt_user_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?,
+                   deck_after_json, board_no, archidekt_user_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?,
                      (SELECT COALESCE(MAX(board_no), 0) + 1 FROM proposals
                       WHERE owner_sub = ? AND deck_id = ?
                         AND (state = 'applying' OR (state = 'pending' AND expires_at >= ?))),
@@ -2129,6 +2939,7 @@ class Database:
                     row["expires_at"],
                     row.get("created_by_client"),
                     json.dumps(row["rows"]) if row.get("rows") is not None else None,
+                    json.dumps(row["deck_after"]) if row.get("deck_after") is not None else None,
                     row["owner_sub"],
                     row["deck_id"],
                     now,
@@ -2202,6 +3013,8 @@ class Database:
         d["result"] = json.loads(d["result_json"]) if d.get("result_json") else None
         rows_json = d.pop("rows_json", None)
         d["rows"] = json.loads(rows_json) if rows_json else None
+        after_json = d.pop("deck_after_json", None)
+        d["deck_after"] = json.loads(after_json) if after_json else None
         return d
 
     def list_proposals(
@@ -2217,8 +3030,11 @@ class Database:
         until: int | None = None,
         offset: int = 0,
         oldest_first: bool = False,
+        fold_sessions: bool = False,
     ) -> list[dict[str, Any]]:
-        """Newest first (``oldest_first``: oldest first, so paging runs from the oldest). ``deck_id``,
+        """Newest first (``oldest_first``: oldest first, so paging runs from the oldest). With
+        ``fold_sessions`` (History) a deck-page sitting is its newest edit alone (page_session
+        has the rest). ``deck_id``,
         ``kinds`` (edit, create_deck, restore), ``states`` (pending,
         applied, failed, rejected, expired: a pending proposal past its expiry counts as expired),
         ``search`` (a case-insensitive match on the deck name or the change summary) and a time
@@ -2227,9 +3043,12 @@ class Database:
         sql = (
             "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
             "created_by_client, diff_text, version, board_no, status, status_reason, status_at, "
-            "amended_by_client FROM proposals WHERE owner_sub = ?"
+            "amended_by_client" + (", snapshot_id" if fold_sessions else "") + " FROM proposals q "
+            "WHERE owner_sub = ?"
         )
         args: list[Any] = [owner_sub]
+        if fold_sessions:
+            sql += " AND NOT " + _FOLDED_SQL
         if deck_id:
             sql += " AND deck_id = ?"
             args.append(str(deck_id))
@@ -2299,7 +3118,8 @@ class Database:
         search: str | None = None,
         since: int | None = None,
     ) -> dict[str, int]:
-        """How many snapshots, applied restores and deck reports the History page holds under its
+        """How many snapshots, applied changes (``changes``, DECK_CHANGE_KINDS; ``restores`` the
+        restores among them) and tests (``tests``, also ``reports``) the History page holds under its
         filters (deck, a search, a start time): its chips and its pager. Each count narrows as the
         rows it counts do (list_snapshots, list_proposals, ReportService.list): the search matches
         a deck's name, and for a restore its change summary too."""
@@ -2335,6 +3155,17 @@ class Database:
                 else 0
             )
             w, a = narrow("created_at", diff=True)
+            kinds = ",".join("?" * len(DECK_CHANGE_KINDS))
+            out["changes"] = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM proposals q"
+                    + w
+                    + f" AND kind IN ({kinds}) AND state = 'applied' AND NOT "
+                    + _FOLDED_SQL,
+                    [*a, *DECK_CHANGE_KINDS],
+                ).fetchone()[0]
+            )
+            out["tests"] = out["reports"]
             out["restores"] = int(
                 self._conn.execute(
                     "SELECT COUNT(*) FROM proposals" + w + " AND kind = 'restore' AND state = 'applied'", a
@@ -2343,15 +3174,26 @@ class Database:
         return out
 
     def snapshot_stats(self, owner_sub: str, deck_id: str | None = None) -> dict[str, int]:
-        """The History page's "Snapshots kept" widget: how many, on how many decks, the newest."""
-        sql = "SELECT COUNT(*), COUNT(DISTINCT deck_id), MAX(taken_at) FROM snapshots WHERE owner_sub = ?"
-        args: list[Any] = [owner_sub]
+        """The History page's "Snapshots kept" widget: how many, on how many decks (the copies of
+        the Binder kept before a clear counted apart, as ``binder``), the newest."""
+        from .collection_bulk import TARGET as binder
+
+        sql = (
+            "SELECT COUNT(*), COUNT(DISTINCT CASE WHEN deck_id = ? THEN NULL ELSE deck_id END), "
+            "SUM(deck_id = ?), MAX(taken_at) FROM snapshots WHERE owner_sub = ?"
+        )
+        args: list[Any] = [binder, binder, owner_sub]
         if deck_id:
             sql += " AND deck_id = ?"
             args.append(str(deck_id))
         with self._lock:
-            n, decks, newest = self._conn.execute(sql, args).fetchone()
-        return {"count": int(n or 0), "decks": int(decks or 0), "newest": int(newest or 0)}
+            n, decks, copies, newest = self._conn.execute(sql, args).fetchone()
+        return {
+            "count": int(n or 0),
+            "decks": int(decks or 0),
+            "binder": int(copies or 0),
+            "newest": int(newest or 0),
+        }
 
     def applied_via(self, owner_sub: str, proposal_id: str) -> str | None:
         """Where a proposal's apply was called from (``via`` of its ``proposal_applied`` audit row),
@@ -2365,15 +3207,26 @@ class Database:
         return str(row[0]) if row and row[0] is not None else None
 
     def history_decks(self, owner_sub: str) -> dict[str, str]:
-        """The decks that appear in the member's proposals and snapshots: id -> last known name,
-        for a history filter."""
+        """The decks that appear in the member's proposals, snapshots and reports of their own decks:
+        id -> the newest name any of them recorded, for a history filter and Activity."""
         with self._lock:
-            rows = self._conn.execute(
+            # the reports table belongs to reports.ReportService, which may not have made it yet
+            reports = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reports'"
+            ).fetchone()
+            sql = (
                 "SELECT deck_id, deck_name, created_at AS at FROM proposals WHERE owner_sub = ? "
-                "UNION ALL SELECT deck_id, deck_name, taken_at FROM snapshots "
-                "WHERE owner_sub = ? ORDER BY at",
-                (owner_sub, owner_sub),
-            ).fetchall()
+                "UNION ALL SELECT deck_id, deck_name, taken_at FROM snapshots WHERE owner_sub = ? "
+            )
+            args: tuple[Any, ...] = (owner_sub, owner_sub)
+            if reports:
+                # a pasted list's, a proposal's or a comparison's report names something else
+                sql += (
+                    "UNION ALL SELECT deck_id, deck_name, taken_at FROM reports WHERE owner_sub = ? "
+                    "AND deck_id != '' AND json_extract(stats_json, '$._run.source') IS NULL "
+                )
+                args += (owner_sub,)
+            rows = self._conn.execute(sql + "ORDER BY at", args).fetchall()
         out: dict[str, str] = {}
         for r in rows:
             out[str(r["deck_id"])] = str(r["deck_name"] or out.get(str(r["deck_id"])) or "")
@@ -2461,19 +3314,31 @@ class Database:
             row = self.get_proposal(pid, owner)
             if row is None:
                 continue
+            reason = ""
             try:
                 risk = self.risk_source(row)
+                if isinstance(risk, tuple):  # (tier, the reason it was judged by)
+                    risk, reason = risk
             except Exception:  # never let one odd row stop a close or the backfill
                 logger.exception("risk of proposal %s could not be worked out", pid)
                 risk = UNJUDGED
             if risk not in ("low", "high", "consent", "destructive"):
-                risk = UNJUDGED
+                risk, reason = UNJUDGED, ""
             with self.tx() as c:
                 stored = c.execute(
                     "UPDATE proposals SET risk = ? WHERE id = ? AND risk IS NULL "
                     "AND state NOT IN ('pending', 'applying')",
                     (risk, pid),
                 ).rowcount
+                if stored and reason:
+                    # the reason beside the tier, kept with it in the stored result (RISK_REASON_KEY)
+                    got = c.execute("SELECT result_json FROM proposals WHERE id = ?", (pid,)).fetchone()
+                    result = json.loads(got["result_json"]) if got and got["result_json"] else None
+                    result = result if isinstance(result, dict) else {}
+                    c.execute(
+                        "UPDATE proposals SET result_json = ? WHERE id = ?",
+                        (json.dumps({**result, RISK_REASON_KEY: str(reason)}), pid),
+                    )
             if risk != UNJUDGED:
                 n += stored
         return n
@@ -2563,6 +3428,8 @@ class Database:
         by_client: str | None,
         what_changed: str | None = None,
         baseline_fingerprint: str | None = None,
+        deck_name: str | None = None,
+        deck_after: dict[str, Any] | None = None,
     ) -> int | None:
         """Replace a waiting proposal's content with a new version, keeping its id, date and board
         number. The version being replaced is kept in ``proposal_versions`` with
@@ -2571,7 +3438,9 @@ class Database:
         status is cleared, except a hold that a rejected note it depends on put there: that
         stays until the link is gone, so the new version can't apply by itself. Returns the new
         version, or None when it isn't waiting, has expired or is at another version. Raises
-        ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions."""
+        ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions. ``deck_name``:
+        a new deck's new name (a waiting new deck may be renamed). ``deck_after``: the new version's
+        deck once applied, when the amend worked it out (cleared otherwise, never left stale)."""
         now = int(time.time())
         with self.tx() as c:
             row = c.execute(
@@ -2609,7 +3478,8 @@ class Database:
                 "UPDATE proposals SET changes_json = ?, rows_json = ?, diff_text = ?, version = ?, "
                 "amended_at = ?, amended_by_client = ?, version_note = ?, status = ?, "
                 "status_reason = ?, status_at = ?, "
-                "baseline_fingerprint = COALESCE(?, baseline_fingerprint) WHERE id = ?",
+                "baseline_fingerprint = COALESCE(?, baseline_fingerprint), "
+                "deck_name = COALESCE(?, deck_name), deck_after_json = ? WHERE id = ?",
                 (
                     json.dumps(changes),
                     json.dumps(rows) if rows is not None else None,
@@ -2622,10 +3492,34 @@ class Database:
                     row["status_reason"] if held else None,
                     now,
                     baseline_fingerprint,
+                    deck_name,
+                    json.dumps(deck_after) if deck_after is not None else None,
                     proposal_id,
                 ),
             )
             return old + 1
+
+    def next_card_seq(self, proposal_id: str, owner_sub: str, client: str | None) -> int:
+        """Count one more card drawn for this proposal in ``client``'s chat and return its number
+        (1 for the first). Each app counts its own cards: a card drawn in another app's chat never
+        makes this app's newest card look old."""
+        key = str(client or "")
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT card_seqs FROM proposals WHERE id = ? AND owner_sub = ?", (proposal_id, owner_sub)
+            ).fetchone()
+            if row is None:
+                return 0
+            try:
+                seqs = json.loads(row[0]) if row[0] else {}
+            except ValueError:
+                seqs = {}
+            if not isinstance(seqs, dict):
+                seqs = {}
+            n = int(seqs.get(key) or 0) + 1
+            seqs[key] = n
+            c.execute("UPDATE proposals SET card_seqs = ? WHERE id = ?", (json.dumps(seqs), proposal_id))
+            return n
 
     def proposal_versions(self, proposal_id: str, owner_sub: str) -> list[dict[str, Any]]:
         """The earlier versions of one of the owner's proposals, oldest first (the current one is
@@ -2817,9 +3711,12 @@ class Database:
         with self.tx() as c:
             now = int(time.time())
             # applied_at marks when the apply started; finish_proposal overwrites it when it ends.
+            # The apply's note starts as "no write begun" (INTERRUPTED_SQL tells it from a row an
+            # older version left, which has none); the apply notes each write (note_apply_progress).
             sql = (
-                "UPDATE proposals SET state = 'applying', applied_at = ? WHERE id = ? AND owner_sub = ? "
-                "AND state = 'pending' AND expires_at >= ?"
+                "UPDATE proposals SET state = 'applying', applied_at = ?, result_json = json_set("
+                "COALESCE(result_json, '{}'), '$.apply_progress', json('{\"writes_started\": false}')) "
+                "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND expires_at >= ?"
             )
             args: tuple[Any, ...] = (now, proposal_id, owner_sub, now)
             if expect_version is not None:
@@ -3092,6 +3989,42 @@ class Database:
             values += (owner_sub, proposal_id, owner_sub)
         with self.tx() as c:
             return c.execute(sql, values).rowcount == 1
+
+    def page_session_snapshot(
+        self, owner_sub: str, deck_id: str, *, now: int | None = None
+    ) -> dict[str, Any] | None:
+        """The snapshot a deck-page edit of ``deck_id`` shares (PAGE_SESSION_SECONDS): the deck's
+        newest snapshot, when the member's own page edits took it and the latest of them was
+        applied in the last PAGE_SESSION_SECONDS. ``snapshot_id`` and that edit's
+        ``after_fingerprint`` (how the deck stood after it), or None: then a new snapshot."""
+        since = int(time.time() if now is None else now) - PAGE_SESSION_SECONDS
+        kinds = ",".join("?" * len(PAGE_SESSION_KINDS))
+        row = self._one(
+            "SELECT s.id, json_extract(p.result_json, '$.after_fingerprint') FROM snapshots s "
+            "JOIN proposals p ON p.owner_sub = s.owner_sub AND p.snapshot_id = s.id "
+            "WHERE s.owner_sub = ? AND s.deck_id = ? AND p.state = 'applied' "
+            f"AND p.created_by_client = '__browser__' AND p.kind IN ({kinds}) AND p.applied_at >= ? "
+            "AND s.id = (SELECT id FROM snapshots WHERE owner_sub = ? AND deck_id = ? "
+            "ORDER BY taken_at DESC, rowid DESC LIMIT 1) "
+            "ORDER BY p.applied_at DESC, p.rowid DESC LIMIT 1",
+            (owner_sub, str(deck_id), *PAGE_SESSION_KINDS, since, owner_sub, str(deck_id)),
+        )
+        if not row or not row[1]:
+            return None
+        return {"snapshot_id": str(row[0]), "after_fingerprint": str(row[1])}
+
+    def page_session(self, owner_sub: str, snapshot_id: str) -> list[dict[str, Any]]:
+        """The member's applied deck-page edits that share ``snapshot_id``, oldest first: one
+        sitting on the deck page, shown in History as one entry."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, kind, diff_text, applied_at, created_at FROM proposals "
+                "WHERE owner_sub = ? AND snapshot_id = ? AND state = 'applied' "
+                "AND created_by_client = '__browser__' AND kind IN ('edit', 'details', 'categories') "
+                "ORDER BY created_at, rowid",
+                (owner_sub, snapshot_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def list_snapshots(
         self,
@@ -3420,6 +4353,50 @@ class Database:
             c.execute("UPDATE proposals SET result_json = ? WHERE id = ?", (json.dumps(new), proposal_id))
             return True
 
+    def snapshot_held(self, snapshot_id: str, owner_sub: str) -> str | None:
+        """Why the member's snapshot can't be deleted now, or None when it can: a waiting (or
+        running) restore puts the deck back to it, or it holds the gateway's record of a backup
+        copy on Archidekt the gateway may still delete (``_prune_snapshots`` keeps both too)."""
+        with self._lock:
+            return self._snapshot_held(self._conn, snapshot_id, owner_sub)
+
+    @staticmethod
+    def _snapshot_held(c: sqlite3.Connection, snapshot_id: str, owner_sub: str) -> str | None:
+        if c.execute(
+            "SELECT 1 FROM proposals WHERE owner_sub = ? AND kind = 'restore' AND state IN ('pending', "
+            "'applying') AND json_extract(changes_json, '$.snapshot_id') = ? LIMIT 1",
+            (owner_sub, snapshot_id),
+        ).fetchone():
+            return SNAPSHOT_HELD_RESTORE
+        if (
+            c.execute("SELECT 1 FROM backup_deletes WHERE snapshot_id = ? LIMIT 1", (snapshot_id,)).fetchone()
+            or c.execute(
+                "SELECT 1 FROM snapshots s WHERE s.id = ? AND s.owner_sub = ? AND "
+                "s.backup_deck_id IS NOT NULL AND s.id = (SELECT s2.id FROM snapshots s2 WHERE "
+                "s2.owner_sub = s.owner_sub AND s2.deck_id = s.deck_id AND "
+                "s2.backup_deck_id = s.backup_deck_id ORDER BY s2.taken_at, s2.rowid LIMIT 1) AND "
+                "EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id AND "
+                "coalesce(json_extract(j.detail_json, '$.kept'), 0) != 1)",
+                (snapshot_id, owner_sub, BACKUP_MADE_JOB),
+            ).fetchone()
+        ):
+            return SNAPSHOT_HELD_BACKUP
+        return None
+
+    def delete_snapshot(self, snapshot_id: str, owner_sub: str) -> bool:
+        """Delete one of the member's snapshots (the caller checked ``snapshot_held`` first; both
+        holds are checked again in the same step). False when there is no such snapshot of theirs,
+        or it is held."""
+        with self.tx() as c:
+            if self._snapshot_held(c, snapshot_id, owner_sub):
+                return False
+            return (
+                c.execute(
+                    "DELETE FROM snapshots WHERE id = ? AND owner_sub = ?", (snapshot_id, owner_sub)
+                ).rowcount
+                > 0
+            )
+
     def get_snapshot(self, snapshot_id: str, owner_sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM snapshots WHERE id = ? AND owner_sub = ?", (snapshot_id, owner_sub))
         if row is None:
@@ -3571,6 +4548,48 @@ class Database:
             return json.loads(row["value_json"])
         except ValueError:
             return default
+
+    # the gateway's own alerts for the bell (notify.py records them) ---------------------------
+    def add_gateway_alert(
+        self, sub: str, event: str, title: str, message: str, path: str, *, keep: int = 50
+    ) -> None:
+        """Keep one alert for the member's bell; only the newest ``keep`` stay."""
+        with self.tx() as c:
+            if c.execute("SELECT 1 FROM users WHERE sub = ?", (sub,)).fetchone() is None:
+                return
+            c.execute(
+                "INSERT INTO gateway_alerts (sub, event, title, message, path, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (sub, event[:32], title[:120], message[:1000], path[:500], int(time.time())),
+            )
+            c.execute(
+                "DELETE FROM gateway_alerts WHERE sub = ? AND id NOT IN (SELECT id FROM gateway_alerts "
+                "WHERE sub = ? ORDER BY id DESC LIMIT ?)",
+                (sub, sub, max(1, keep)),
+            )
+
+    def gateway_alerts(self, sub: str, *, events: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+        """The member's kept alerts, newest first (``events``: only those kinds)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, event, title, message, path, created_at, seen_at FROM gateway_alerts "
+                "WHERE sub = ? ORDER BY id DESC",
+                (sub,),
+            ).fetchall()
+        out = [dict(r) for r in rows]
+        if events is not None:
+            out = [r for r in out if r["event"] in events]
+        return out
+
+    def unseen_gateway_alerts(self, sub: str, *, events: tuple[str, ...] | None = None) -> int:
+        return sum(1 for r in self.gateway_alerts(sub, events=events) if r["seen_at"] is None)
+
+    def mark_gateway_alerts_seen(self, sub: str) -> None:
+        with self.tx() as c:
+            c.execute(
+                "UPDATE gateway_alerts SET seen_at = ? WHERE sub = ? AND seen_at IS NULL",
+                (int(time.time()), sub),
+            )
 
     def set_pref(
         self, sub: str, name: str, value: Any, *, keep_newest: tuple[str, int] | None = None
