@@ -1,7 +1,8 @@
 """Waits on what a browser test needs, in place of fixed sleeps (tests/test_no_fixed_waits.py).
 
 ``settled(page)``: no finite CSS transition or animation is running (a box's or a sheet's open
-or close, a fold, a fade), so what a test measures (sizes, positions, colours) is the end state.
+or close, a fold, a fade), and no box's opening is still to start, so what a test measures (sizes,
+positions, colours) is the end state.
 Infinite animations (a spinner, a skeleton) never end and do not count. ``getAnimations()``
 flushes pending style first, so a transition a click just started is already seen.
 
@@ -11,8 +12,12 @@ way, and no box (static/box.js) is still closing.
 
 from __future__ import annotations
 
+# (a box's scrim with neither "in" nor "out" is one whose opening has not started yet: static/box.js
+# adds "in" in the next frame, so a look before that frame saw no transition and went on to measure
+# the box at its starting scale, .98: 43.1 px for a 44 px button on CI)
 SETTLED_JS = (
-    "() => document.getAnimations().every(a => a.playState !== 'running'"
+    "() => !document.querySelector('.mtgbox-scrim:not(.in):not(.out)')"
+    " && document.getAnimations().every(a => a.playState !== 'running'"
     " || !a.effect || a.effect.getComputedTiming().iterations === Infinity)"
 )
 

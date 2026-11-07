@@ -20,7 +20,7 @@ from .test_cardsearch_browser import SIZES, _chromium, _page
 from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
-from .waits import expect, frame
+from .waits import expect, frame, poll
 
 pytest.importorskip("playwright")
 
@@ -252,8 +252,9 @@ def test_load_more_reads_to_the_end_and_the_list_view_and_sort_stay_in_the_searc
         before = len(server.sf.searches)
         page.locator("#f-order").select_option("cmc")
         page.wait_for_function("() => location.search.includes('order=cmc')", timeout=5000)
-        page.wait_for_load_state("networkidle")
-        assert any(s.get("order") == "cmc" for s in server.sf.searches[before:]), server.sf.searches[before:]
+        # the search itself, as the fake Scryfall saw it (a wait for the network to go quiet
+        # returned at once on CI: the page had gone quiet already, before the new search began)
+        poll(page, lambda: any(s.get("order") == "cmc" for s in server.sf.searches[before:]))
         assert errors == [], errors
         browser.close()
 
