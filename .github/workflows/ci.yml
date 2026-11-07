@@ -223,6 +223,17 @@ jobs:
           android/scripts/build.sh release --throwaway
           python3 -c 'import json,re,sys; d=json.load(open(sys.argv[1])); assert re.fullmatch(r"[0-9a-f]{64}", d["cert_sha256"]) and d["package_name"] == open("android/app/application-id.txt").read().strip(), d' android/out/mtg-assistant-gateway.json
           rm -f android/out/throwaway.keystore android/out/throwaway.keystore.password
+      # When the Gradle daemon's JVM dies, its crash log (hs_err_pid*.log, written in android/) and the
+      # daemon log are the only record of why; keep them for a week. This job holds no secrets.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: android-check-jvm-logs
+          path: |
+            android/hs_err_pid*.log
+            ~/.gradle/daemon/*/daemon-*.out.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   android:
     # The Android app (android/), built with Gradle and the runner's Android SDK by android/scripts/build.sh

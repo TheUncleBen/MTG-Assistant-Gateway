@@ -143,8 +143,9 @@ label.ck{display:flex;align-items:center;justify-content:center;width:44px;heigh
   font-size:.8125rem;font-weight:600;color:var(--text);border:4px solid transparent;border-radius:22px;
   background:var(--bg2) padding-box;background:color-mix(in srgb,var(--text) 10%,var(--bg)) padding-box}
 a.cap{display:inline-flex;margin:0;text-decoration:none;cursor:pointer;box-sizing:border-box}
-.more::after{content:"";width:6px;height:6px;border:solid currentColor;border-width:0 2px 2px 0;
-  transform:translateY(-2px) rotate(45deg)}
+/* the chevron grows with the words (polish AH2), 6 px with a 2 px line up to about 100% text */
+.more::after{content:"";flex:none;width:max(6px, .36em);height:max(6px, .36em);border:solid currentColor;
+  border-width:0 max(2px, .12em) max(2px, .12em) 0;transform:translateY(min(-2px, -.15em)) rotate(45deg)}
 .detail{position:fixed;inset:0;background:var(--bg);padding:12px;overflow:auto;z-index:5;display:flex;flex-direction:column;gap:10px}
 .detail .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .detail .top button{flex:none;white-space:nowrap}

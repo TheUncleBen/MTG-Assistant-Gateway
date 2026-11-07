@@ -980,11 +980,13 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
    Comments link matches its Like and Bookmark buttons. */
 .choice button,.choice .btn{min-height:48px}
 .banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
-/* A control that carries text a member typed (a username in Follow, a deck's category in the
-   editor's chips, a folder's name) shrinks and ellipsises inside its row, with the whole text
-   in its title, instead of widening the page (a 40-character username, for one). */
+/* A control that carries text a member typed (a username in Follow, a folder's name) shrinks and
+   ellipsises inside its row, with the whole text in its title, instead of widening the page (a
+   40-character username, for one). A chip (a deck's category in the editor's chips) shows its
+   whole name on more lines instead (polish, check on c246456a). */
 .soc,.btn.soc,.addbox button.tchip,.chips button{max-width:100%;min-width:0}
-.soc > span,.addbox button.tchip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.soc > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.addbox button.tchip{min-width:0;white-space:normal;overflow-wrap:break-word}
 .social .confirm{max-width:100%;flex-wrap:wrap;min-width:0}
 .social .confirm > span{min-width:0;overflow-wrap:anywhere}
 /* Touch screens: every control at least 44 px tall (the release's rule), including the small

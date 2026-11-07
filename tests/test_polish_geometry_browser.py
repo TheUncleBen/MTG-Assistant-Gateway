@@ -210,19 +210,21 @@ def test_binder_tags_tiles_and_clear_filters(server: Server, view: str) -> None:
         browser, page, errors = _open(p, exe, server, sid, 412)
         page.goto(f"{server.base}/collection?view={view}", wait_until="networkidle")
         assert page.evaluate(MEASURE) == []
-        # B6: a long tag is one line in its pill, with its full name as the hover text
+        # B6, then the no-cut-text rule (after c246456a): a long tag shows its whole name in its
+        # pill, on more lines where one has no room, and the pill stays inside its card
         pills = page.locator(".pill.tag")
         assert pills.count() >= 2
         long_one = [i for i in range(pills.count()) if len(pills.nth(i).inner_text()) > 30]
         assert long_one, [pills.nth(i).inner_text() for i in range(pills.count())]
         for i in long_one:
             pill = pills.nth(i)
-            rect = pill.evaluate(RECT)
-            assert rect[4] <= 26, rect
+            rect, card = pill.evaluate(RECT), pill.locator("xpath=ancestor::li[1]").evaluate(RECT)
+            assert rect[0] >= card[0] and rect[2] <= card[2], (rect, card)
             text = pill.locator(".t")
-            assert text.evaluate("e => getComputedStyle(e).textOverflow") == "ellipsis"
-            assert text.evaluate("e => e.scrollWidth > e.clientWidth")
-            assert pill.get_attribute("title") == text.evaluate("e => e.textContent")
+            assert text.evaluate(
+                "e => e.scrollWidth <= e.clientWidth && e.scrollHeight <= e.clientHeight + 1"
+            )
+            assert text.evaluate("e => getComputedStyle(e).textOverflow") != "ellipsis"
         # C4: Clear filters stays hidden while nothing is filtered
         for clear in page.locator(".sp-clear").all():
             assert clear.evaluate("e => e.hidden && !e.offsetParent")
@@ -317,9 +319,10 @@ def test_the_admin_overview_facts_line_at_desktop_width(server: Server) -> None:
         browser, page, errors = _open(p, exe, server, sid, 1280)
         page.goto(f"{server.base}/admin", wait_until="networkidle")
         _no_dangling_dot(page, ".wdg .det .ui-dots")
-        # N13: a long listing tag on the Decks list ends in an ellipsis inside its row. The seed's
-        # longest tag (56 characters) fits its box with a narrower font (CI's), so one far too long
-        # for it at any font is added: the test needs a tag that cannot fit.
+        # N13, then the no-cut-text rule (after c246456a): a long listing tag on the Decks list
+        # stays inside its row and shows its whole name on more lines. The seed's longest tag (56
+        # characters) fits its box with a narrower font (CI's), so one far too long for one line at
+        # any font is added: the test needs a tag that cannot fit.
         listing_row = server.ark._listing_row
 
         def row(d):
@@ -332,16 +335,14 @@ def test_the_admin_overview_facts_line_at_desktop_width(server: Server) -> None:
         page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
         pills = page.locator("ul.decklist .tags .pill")
         assert pills.count() >= 2
-        clipped = 0
+        wrapped = 0
         for pill in pills.all():
             rect, row = pill.evaluate(RECT), pill.locator("xpath=ancestor::li[1]").evaluate(RECT)
-            assert rect[0] >= row[0] and rect[2] <= row[2] and rect[4] <= 26, (rect, row)
-            assert pill.evaluate("e => getComputedStyle(e).whiteSpace") == "nowrap"
-            if pill.evaluate("e => e.scrollWidth > e.clientWidth"):
-                clipped += 1
-                assert pill.evaluate("e => getComputedStyle(e).textOverflow") == "ellipsis"
-                assert pill.get_attribute("title") == pill.evaluate("e => e.textContent")
-        assert clipped >= 1
+            assert rect[0] >= row[0] and rect[2] <= row[2], (rect, row)
+            assert pill.evaluate("e => e.scrollWidth <= e.clientWidth"), rect
+            if rect[4] > 26:
+                wrapped += 1
+        assert wrapped >= 1
         assert errors == []
         browser.close()
 

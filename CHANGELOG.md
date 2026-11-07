@@ -590,8 +590,10 @@ name per thing.
   side, it scrolls sideways as the deck's mana curve does.
 - A button's icon grows with its words at large text, such as the "+" of Create deck and the
   icons of Sign out and Import a list, and so do the icons of folds, of the Binder's entries
-  summary and of search boxes. The chevrons of folds and of Details grow too, and a search
-  box's button is as tall as its box.
+  summary and of search boxes. The chevrons of folds, of Details, of a card's Show all and of a
+  saved report grow too, and a search box's button is as tall as its box.
+- A tag chip shows its whole name at large text on a small phone: a long name wraps onto more
+  lines instead of ending in "…", in the Binder, the decks list, the card search and lists.
 - A switch whose parts fit on one row stays on one row on a small phone, such as the Binder's
   Cards, Lists and Watchlist and the Scan page's tabs.
 - The tab bar's count keeps a small gap under the bar's top edge and its capped size when the

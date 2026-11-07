@@ -49,12 +49,25 @@ def _ctx(
 
 
 # The Binder list's first rows: the row's width, the name's width and the row's height.
+# A tag chip shows its whole name on more lines where it has no room on one (polish, after
+# c246456a): the row's height leaves out what a chip's extra lines add, per line of chips.
 LIST_ROWS = """
-() => [...document.querySelectorAll('ul.colllist .tr.row')].slice(0, 4).map(li => {
-  const r = li.getBoundingClientRect(), n = li.querySelector('.name').getBoundingClientRect();
-  return {row: Math.round(r.width), name: Math.round(n.width), height: Math.round(r.height),
-          text: li.querySelector('.name').textContent.trim().slice(0, 24)};
-})
+() => {
+  const all = [...document.querySelectorAll('ul.colllist .tagrow .pill')]
+    .filter(e => e.getClientRects().length);
+  const one = all.length ? Math.min(...all.map(e => e.getBoundingClientRect().height)) : 0;
+  return [...document.querySelectorAll('ul.colllist .tr.row')].slice(0, 4).map(li => {
+    const r = li.getBoundingClientRect(), n = li.querySelector('.name').getBoundingClientRect();
+    const lines = {};
+    for (const c of li.querySelectorAll('.tagrow .pill')) {
+      const b = c.getBoundingClientRect(), top = Math.round(b.top);
+      lines[top] = Math.max(lines[top] || 0, b.height - one);
+    }
+    const extra = Object.values(lines).reduce((a, b) => a + b, 0);
+    return {row: Math.round(r.width), name: Math.round(n.width), height: Math.round(r.height - extra),
+            text: li.querySelector('.name').textContent.trim().slice(0, 24)};
+  });
+}
 """
 
 
@@ -63,7 +76,8 @@ def test_the_binder_list_gives_the_name_the_row_on_phones_and_folds(server: Serv
     """At every phone and Fold width the name column of the Binder's list view is at least two
     fifths of the row (it was 32 px at 360 px, one word every few letters) and no row is taller
     than 240 px (it was about 310 px), with the long tagged names of the sweep's data, among them
-    one unbroken 31-letter name that takes three lines whatever the layout."""
+    one unbroken 31-letter name that takes three lines whatever the layout. A tag chip's own extra
+    lines, which show its whole name, are left out of the row's height."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()

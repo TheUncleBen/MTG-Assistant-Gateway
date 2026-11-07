@@ -886,3 +886,47 @@ def test_text_boxes_hold_their_text_and_hints_at_every_size(server: Server, site
         ctx.close()
         browser.close()
     assert problems == [], "\n".join(problems)
+
+
+# -- chips show their whole name ------------------------------------------------------------------
+
+CHIP_CUT = """() => {
+  const out = [];
+  const sel = '.pill.tag > .t, .addbox button.tchip, ul.decklist .tags .pill, .cs .chips .nm, .lp-chip .nm';
+  for (const e of document.querySelectorAll(sel)) {
+    if (!e.getClientRects().length || !e.textContent.trim()) continue;
+    if (e.scrollWidth > e.clientWidth + 1)
+      out.push('"' + e.textContent.trim().slice(0, 40) + '" (' + e.tagName.toLowerCase() + '.' +
+        e.className + ') shows ' + e.clientWidth + ' of ' + e.scrollWidth + 'px');
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize(
+    "width,root,zoom,path",
+    [
+        (320, False, "text", "/collection"),
+        (320, True, None, "/collection"),
+        (717, True, None, "/decks?view=list"),
+        (320, False, "text", "/decks?view=list"),
+    ],
+)
+def test_a_chip_shows_its_whole_name(server: Server, site, width: int, root: bool, zoom, path: str) -> None:  # noqa: F811
+    """At 320 px with 200% text a long tag's chip in the Binder list ended in an ellipsis
+    ("landfall-and-ra…"). A chip's name wraps onto more lines instead, here and on the decks list,
+    the card search's and the lists' chips."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = _ctx(browser, server, sid, width, root=root)
+        page = ctx.new_page()
+        _goto(page, server, path, zoom)
+        found = page.evaluate(CHIP_CUT)
+        seen = page.evaluate("() => document.querySelectorAll('.pill.tag, ul.decklist .tags .pill').length")
+        ctx.close()
+        browser.close()
+    assert seen, f"{path}: no tag chips on the page"
+    assert found == [], "\n".join(found)

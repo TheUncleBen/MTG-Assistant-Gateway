@@ -1670,8 +1670,8 @@ CSS = """
   border:1px solid var(--control-border);
   border-radius:var(--radius);background:var(--surface);cursor:pointer}
 .lp-tagpv .hex{flex:0 0 8rem;width:8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.lp-tagpv .lp-chip{flex:0 1 auto;max-width:100%;overflow:hidden}
-.lp-tagpv .lp-chip .nm{overflow:hidden;text-overflow:ellipsis}
+.lp-tagpv .lp-chip{flex:0 1 auto;max-width:100%}
+.lp-tagpv .lp-chip .nm{white-space:normal;overflow-wrap:break-word;min-width:0}
 .lp-step{display:inline-flex;align-items:center;gap:4px;margin:0}
 .lp-step button{width:44px;min-width:44px;min-height:44px;padding:0;margin:0}
 .lp-step button svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}

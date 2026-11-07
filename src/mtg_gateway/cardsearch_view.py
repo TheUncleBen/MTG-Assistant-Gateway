@@ -69,7 +69,7 @@ CARDS_CSS = """
   font-size:.78rem;
   font-weight:700;letter-spacing:.02em}
 .cs .chips li.not .pol{background:var(--red-tint);color:var(--red-text);border-color:var(--red-text)}
-.cs .chips .nm{padding:0 .3rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cs .chips .nm{padding:0 .3rem;white-space:normal;overflow-wrap:break-word;min-width:0}
 .cs .chips .x{margin:0;width:1.75rem;min-height:1.75rem;height:1.75rem;padding:0;border-radius:50%;
   display:inline-flex;align-items:center;justify-content:center;border:0;background:none;color:var(--text)}
 .cs .chips .x:hover,.cs .chips .x:focus-visible{background:var(--surface-3)}

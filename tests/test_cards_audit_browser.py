@@ -604,3 +604,51 @@ def test_cards_fit_every_width_light_and_dark_on_both_hosts() -> None:
             assert not errors, errors
         finally:
             browser.close()
+
+
+# Each shown "Show all" / "Show more" capsule whose drawn chevron (its ::after) is under .3 of its
+# words' size: the site crawl's check (20), for the cards, which carry their own CSS
+CARD_CHEVRONS = """() => [...document.querySelectorAll('.more')]
+  .filter(m => m.getClientRects().length)
+  .map(m => [m.textContent.trim(), parseFloat(getComputedStyle(m, '::after').width),
+    parseFloat(getComputedStyle(m).fontSize)])
+  .filter(([, w, fs]) => !(w >= 0.3 * fs - 0.5))
+  .map(([t, w, fs]) => t + ': ' + w.toFixed(1) + 'px chevron beside ' + fs + 'px words')"""
+
+
+@pytest.mark.parametrize("name", ["printings-card", "deck-card"])
+def test_a_cards_show_all_chevron_grows_with_the_text(name: str) -> None:
+    """Polish AH2: the cards' Show all capsule drew a 6 px chevron with a 2 px line at every text
+    size, under a quarter of its words at 200% text. It grows with the words as the gateway's
+    folds do, and stays 6 px at 100%."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    deck = json.loads(json.dumps(DECK))
+    deck["categories"][1]["cards"] = [
+        dict(deck["categories"][1]["cards"][0], name=f"Card number {i}") for i in range(60)
+    ]
+    deck["categories"][1]["count"] = 60
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            if name == "printings-card":
+                _route(page, printings=_long_list(30))
+            else:
+                _route(page, deck=deck)
+            card = _open(page, name, RESULT if name == "printings-card" else DECK_RESULT, width=320)
+            card.locator("#more").wait_for()
+            frame = page.frames[1]
+            assert (
+                frame.evaluate(
+                    "() => parseFloat(getComputedStyle(document.querySelector('.more'), '::after').width)"
+                )
+                == 6
+            )
+            frame.evaluate(
+                "() => document.documentElement.style.setProperty('font-size', '200%', 'important')"
+            )
+            assert frame.evaluate(CARD_CHEVRONS) == []
+        finally:
+            browser.close()

@@ -4207,9 +4207,9 @@ ul.decklist{container-type:inline-size}
 ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;min-width:0;
   border-top:1px solid var(--border-soft);
   font-size:.86rem;color:var(--text-muted);min-height:2rem;align-items:center}
-/* a tag longer than the row ends in an ellipsis (its name is the hover text), never cut at the
-   row's edge (final audit N13) */
-ul.decklist .tags .pill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+/* a tag longer than the row goes on more lines, whole: never cut at the row's edge (final audit
+   N13) nor with an ellipsis (polish, check on c246456a) */
+ul.decklist .tags .pill{max-width:100%;white-space:normal;overflow-wrap:break-word;
   display:inline-block;vertical-align:middle}
 ul.decklist.list .deck a{flex-direction:row;align-items:center}
 ul.decklist.list .thumb{width:90px;height:60px;flex:none}
@@ -4219,6 +4219,13 @@ ul.decklist.list .thumb .ini{font-size:min(1.5rem,55cqb)} ul.decklist.list .thum
 ul.decklist.list .info{flex:1 1 12em;min-height:0}
 ul.decklist.list .tags{border-top:0;max-width:30%}
 @media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
+  ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
+  ul.decklist.list .tags:empty{display:none} }
+/* the same where the row is narrow for its text (a Fold or a computer at large text): the tags
+   under the name, the whole row wide, so the name and the tags' words keep their lines (polish,
+   check on c246456a: tags now show whole names on more lines) */
+ul.decklist.list .deck{container-type:inline-size}
+@container (max-width:40em){ ul.decklist.list .deck a{flex-wrap:wrap}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
   ul.decklist.list .tags:empty{display:none} }
 ul.decklist.list .deck{margin-bottom:.5rem}

@@ -2576,9 +2576,9 @@ COLLECTION_CSS = """
 .pill.tag{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .5rem;
   border-radius:999px;border-color:var(--border-soft);background:var(--surface-2);color:var(--text);
   font-weight:600;font-size:.8rem;line-height:1.5;max-width:100%;min-width:0}
-/* one line: a long name ends in an ellipsis (the whole name is the hover text and the Details
-   box's), never three lines inside a pill (polish B6) */
-.pill.tag > .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the whole name, on more lines where one has no room for it (a narrow phone at large text), never
+   cut with an ellipsis (polish, check on c246456a: "landfall-and-ra…" at 320 px and 200%) */
+.pill.tag > .t{min-width:0;white-space:normal;overflow-wrap:break-word}
 .pill.tag .sw,.tagck .sw{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;flex:none;
   background:var(--tagc,var(--text-muted));box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
 .pill.tag.more{padding:.1rem .5rem}

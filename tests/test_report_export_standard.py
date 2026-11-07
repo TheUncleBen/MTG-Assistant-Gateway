@@ -95,3 +95,45 @@ def test_the_html_files_links_take_the_text_colour() -> None:
                 ctx.close()
         finally:
             browser.close()
+
+
+# Each shown fold summary of the file whose drawn chevron (its ::after) is under .3 of its words'
+# size (the site's crawl check (20), for the saved file, which carries its own CSS)
+SMALL_CHEVRONS = """() => [...document.querySelectorAll('details > summary')]
+  .filter(s => s.getClientRects().length)
+  .map(s => [s.textContent.trim().slice(0, 30), parseFloat(getComputedStyle(s, '::after').width),
+    parseFloat(getComputedStyle(s).fontSize), getComputedStyle(s, '::after').borderRightStyle])
+  .filter(([, w, fs, line]) => line === 'solid' && w > 0 && w < 0.3 * fs - 0.5)
+  .map(([t, w, fs]) => t + ': ' + w.toFixed(1) + 'px chevron beside ' + fs + 'px words')"""
+
+
+def test_the_html_files_fold_chevrons_grow_with_the_text() -> None:
+    """Polish AG1/AH1: the saved file's folds drew a 6 px chevron with a 2 px line at every text
+    size, about a fifth of their words at 200% text. It grows with the words, as the site's do,
+    and stays 6 px at 100%."""
+    from .test_consent_browser import _chromium_or_skip, _launch
+
+    pytest.importorskip("playwright")
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    doc = _html(_report())
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            ctx = browser.new_context(viewport={"width": 320, "height": 800})
+            page = ctx.new_page()
+            page.set_content(doc)
+            assert page.locator("details > summary").count(), "the file has folds"
+            sizes = page.evaluate(
+                "() => [...document.querySelectorAll('details > summary')]"
+                ".map(s => parseFloat(getComputedStyle(s, '::after').width))"
+            )
+            assert sizes and all(abs(w - 6) < 0.6 for w in sizes), sizes
+            page.evaluate(
+                "() => document.documentElement.style.setProperty('font-size', '200%', 'important')"
+            )
+            assert page.evaluate(SMALL_CHEVRONS) == []
+            ctx.close()
+        finally:
+            browser.close()

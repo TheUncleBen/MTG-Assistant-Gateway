@@ -144,3 +144,18 @@ def test_the_back_key_asks_only_a_gateway_page_and_a_new_page_starts_with_no_lay
     finished = main.split("override fun onPageFinished")[1].split("override fun")[0]
     assert "layerOpen = false" in started
     assert "layerOpen = false" not in finished
+
+
+def test_android_check_keeps_the_jvm_crash_log_and_bounds_the_daemon() -> None:
+    """On c246456a the Gradle daemon's JVM crashed as lint started, after every unit test passed, and
+    its crash log stayed on the runner. The job keeps that log on a failure, and the daemon's heap
+    has room for lint with a metaspace ceiling."""
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    check = ci.split("\n  android-check:\n")[1].split("\n  android:\n")[0]
+    upload = check.split("actions/upload-artifact@")[1]
+    assert upload.split(" ")[0].isalnum() and len(upload.split(" ")[0]) == 40
+    assert "if: failure()" in upload
+    assert "android/hs_err_pid*.log" in upload and "~/.gradle/daemon/*/daemon-*.out.log" in upload
+    props = (ROOT / "android/gradle.properties").read_text(encoding="utf-8")
+    args = next(line for line in props.splitlines() if line.startswith("org.gradle.jvmargs="))
+    assert "-Xmx3g" in args and "-XX:MaxMetaspaceSize=1g" in args and "-Dfile.encoding=UTF-8" in args

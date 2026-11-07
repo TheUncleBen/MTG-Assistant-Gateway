@@ -90,16 +90,16 @@ HOSTILE = [LONGUSER, UNBROKEN, UNBROKEN_2, FOLDERS[1], LONG64, LONG_CATS[0]]
 # and the Brewer view's rules text (four lines), both whole in the card viewer. A cut-off anywhere
 # else is a defect
 ALLOW_CUT = ["ul.rows .ty", ".row.brew .tx"]
-# a one-line control showing a value a member typed (a drop-down's choice, a category chip, a
-# username): a long value (24 letters and more) ends in an ellipsis there, with the whole value in
-# the open list or on the page; a short one must show whole
-ALLOW_LONG = [".msel-txt", ".tchip", ".uname", ".soc > span", "ul.decklist .info .sub", ".pill.tag > .t"]
+# a one-line control showing a value a member typed (a drop-down's choice, a username; never a
+# chip, which shows its whole name on more lines): a long value (24 letters and more) ends in an
+# ellipsis there, with the whole value in the open list or on the page; a short one must show whole
+ALLOW_LONG = [".msel-txt", ".uname", ".soc > span", "ul.decklist .info .sub"]
 # whole or none: the brand's word moves out of sight whole where the bar has no room for it (the
 # mark alone is the link Home); a part of it, or an ellipsis, is a defect (AC6)
 ALLOW_HIDE = [".brand"]
 # a select button's chosen value may end in an ellipsis only where the button already spans its box
 # (a one-word value wider than a 320 px phone at 200% text): its list shows the whole value
-ALLOW_FULL = [".msel-txt", ".pill.tag > .t"]
+ALLOW_FULL = [".msel-txt"]
 # controls drawn over another on purpose: the watch button on a card's picture
 ALLOW_OVER = [".cardgrid .wbtn"]
 
@@ -700,7 +700,8 @@ CHECKS = r"""async ([o]) => {
           ' is cut (' + Math.round(need) + ' of ' + Math.round(avail) + 'px)');
     }
     timed('field', t0); t0 = performance.now();
-    // (11) a pill or label on two lines at 100% text (P-8: "In binder · you own 3" at 412 px)
+    // (11) a pill or label on two lines at 100% text (P-8: "In binder · you own 3" at 412 px),
+    // unless its words are longer than its whole line
     if (v.zoom === 'none') {
       for (const e of q(PILL, root)) {
         if (!shown(e) || e.closest(SKIP) || e.parentElement.closest(PILL)) continue;
@@ -712,7 +713,11 @@ CHECKS = r"""async ([o]) => {
           for (const r of rg.getClientRects()) if (r.width > 0 && !tops.some(t => Math.abs(t - r.top) < 4))
             tops.push(r.top);
         }
-        if (tops.length > 1)
+        // a name longer than the whole line it has (a long tag in a phone's tile) goes on more lines
+        // whole rather than end in an ellipsis: allowed where the pill spans its line already
+        const pe = e.parentElement, ps = cs(pe);
+        const line = pe.clientWidth - px(ps.paddingLeft) - px(ps.paddingRight);
+        if (tops.length > 1 && rect(e).width < line - 2)
           add('pill', nm(e) + '|' + txt(e), nm(e) + ' "' + txt(e) + '" takes ' + tops.length +
             ' lines at 100% text');
       }
