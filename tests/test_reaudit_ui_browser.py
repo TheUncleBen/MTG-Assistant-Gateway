@@ -367,3 +367,62 @@ def test_the_glance_tiles_fold_behind_one_line_on_phones(server: Server) -> None
         assert not page.locator("label.glance-lbl").first.is_visible()
         assert page.locator("section.ui-widgets").first.is_visible()
         browser.close()
+
+
+# a Binder list row's facts (set, finish, condition, language, price): one wrapping line, each
+# line starting at the name's left edge, and the price under them, never beside them
+FACTS_LINE = """
+() => {
+  const out = [];
+  const shown = e => e && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
+  for (const li of [...document.querySelectorAll('ul.colllist .tr.row')].slice(0, 4)) {
+    const tx = li.querySelector('.cardc > .tx'), left = tx.getBoundingClientRect().left;
+    const name = li.querySelector('.name').textContent.trim().slice(0, 20);
+    for (const f of li.querySelectorAll('.ui-dots.balanced')) {
+      if (!shown(f)) continue;
+      const d = getComputedStyle(f).display;
+      if (d !== 'block') out.push(name + ': facts laid out as ' + d);
+      const lines = {};
+      for (const c of f.children) {
+        if (!shown(c)) continue;
+        const r = c.getBoundingClientRect(), top = Math.round(r.top / 4);
+        lines[top] = Math.min(lines[top] ?? Infinity, r.left);
+      }
+      const starts = Object.values(lines);
+      for (const l of starts) if (Math.abs(l - left) > 2)
+        out.push(name + ': a facts line starts ' + Math.round(l - left) + 'px in from the name');
+      if (starts.length > 1 && starts.length >= f.children.length)
+        out.push(name + ': ' + starts.length + ' facts, one a line');
+      const pr = li.querySelector('.sub > .lgh');
+      const fb = f.getBoundingClientRect().bottom;
+      if (shown(pr) && f.closest('.sub') && pr.getBoundingClientRect().top < fb - 1)
+        out.push(name + ': the price sits beside the facts');
+    }
+  }
+  return out;
+}
+"""
+
+
+@pytest.mark.parametrize("width", [344, 412, 673, 717, 840])
+def test_the_binder_lists_facts_read_as_one_wrapping_line(server: Server, width: int) -> None:  # noqa: F811
+    """Polish AI1: on a phone and a Fold the Binder list's set, finish, condition, language and
+    price stood one a line, centred, each with a dot before it, and at 673 px the price sat beside
+    them: the name cell's flex-column rule (.cardc .tx) also caught the facts line, a .tx too."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, _ = _seed(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = _ctx(browser, server, sid, width, app=False)
+        page = ctx.new_page()
+        r = page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
+        assert r is not None and r.status == 200
+        assert page.locator("ul.colllist .ui-dots.balanced:visible").count()
+        found = page.evaluate(FACTS_LINE)
+        ctx.close()
+        browser.close()
+    assert found == [], "\n".join(found)

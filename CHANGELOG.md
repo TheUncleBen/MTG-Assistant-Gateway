@@ -593,7 +593,12 @@ name per thing.
   summary and of search boxes. The chevrons of folds, of Details, of a card's Show all and of a
   saved report grow too, and a search box's button is as tall as its box.
 - A tag chip shows its whole name at large text on a small phone: a long name wraps onto more
-  lines instead of ending in "…", in the Binder, the decks list, the card search and lists.
+  lines instead of ending in "…", in the Binder, the decks list, the card search and lists. On
+  the decks list the tags go under the deck's name on a Fold and in smaller windows.
+- The Binder list's set, finish, condition, language and price read as one line that wraps on a
+  phone and a Fold, instead of one per line, centred, each with a dot before it.
+- A saved report file keeps its words whole on a small phone at large text: its margins and list
+  indents are smaller there, and a card's name no longer squeezes beside its "drawn" share.
 - A switch whose parts fit on one row stays on one row on a small phone, such as the Binder's
   Cards, Lists and Watchlist and the Scan page's tabs.
 - The tab bar's count keeps a small gap under the bar's top edge and its capped size when the

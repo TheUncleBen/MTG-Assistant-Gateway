@@ -1609,7 +1609,7 @@ CSS = """
 .lp .title .s{display:block;font-weight:400;color:var(--text-muted);font-size:.86rem}
 .lp .flags{display:flex;flex-wrap:wrap;gap:.3rem}
 .lp .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
-.lp .cardc .tx{min-width:0;flex:1}
+.lp .cardc > .tx{min-width:0;flex:1}
 .lp-thumb{display:block;width:34px;height:47px;border-radius:3px;border:1px solid var(--border);flex:none;
   object-fit:cover;background:linear-gradient(160deg,var(--surface-3),var(--surface-2))}
 /* a custom card whose picture can't be shown (lists.js): a labelled tile with an image-off glyph */

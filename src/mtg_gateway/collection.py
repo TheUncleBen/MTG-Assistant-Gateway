@@ -2723,12 +2723,14 @@ ul.colllist{list-style:none;margin:0 0 1rem;padding:0;container-type:inline-size
 @container (max-width:64rem){
   ul.colllist .tr{grid-template-columns:var(--cols-md)}
   ul.colllist .md-hide{display:none}
-  ul.colllist .sub{display:flex}
+  ul.colllist .sub{display:block}
   ul.colllist .cardc .lg{display:none}
   ul.colllist .cardc .sub .lgh{display:block} }
 ul.colllist .tr{padding:.45rem .75rem}
 ul.colllist .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
-ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
+/* the name cell's own column (> .tx): the facts line inside it is a .tx too, and as a flex column it
+   stacked one fact a line, centred, each with its dot (polish AI1) */
+ul.colllist .cardc > .tx{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
 ul.colllist .cardc .name{font-weight:700;overflow-wrap:anywhere}
 ul.colllist .s{display:block;color:var(--text-muted);font-size:.84rem;overflow-wrap:anywhere}
 ul.colllist .smline{display:none}
@@ -2781,7 +2783,7 @@ ul.colllist .th .qc{justify-self:start}
 @container (max-width:22em){
   ul.colllist .tr.row{grid-template-columns:minmax(0,1fr) var(--ctl)}
   ul.colllist .cardc{flex-wrap:wrap;grid-column:1 / -1}
-  ul.colllist .cardc .tx{flex-basis:100%}
+  ul.colllist .cardc > .tx{flex-basis:100%}
   ul.colllist .act{grid-column:2;grid-row:2;align-self:center}
   ul.colllist .qc{grid-column:1;padding-left:0} }
 .loadmore{display:flex;flex-direction:column;align-items:center;gap:.4rem;margin:.5rem 0 1.25rem}

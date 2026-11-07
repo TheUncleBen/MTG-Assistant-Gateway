@@ -2458,7 +2458,7 @@ EXPORT_CSS = """
 *{box-sizing:border-box}
 html{font-size:14px;-webkit-text-size-adjust:100%;line-height:1.15;
   font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif}
-body{margin:0;padding:1rem;background:var(--bg);color:var(--text);font-size:1rem;line-height:1.35}
+body{margin:0;padding:min(1rem, 4vw);background:var(--bg);color:var(--text);font-size:1rem;line-height:1.35}
 .report{max-width:52rem;margin:0 auto;overflow-wrap:break-word}
 /* a link (the deck on Archidekt, the report on the gateway) is the text's own colour with a quiet
    underline, as the site's pages: never bare blue text */
@@ -2474,7 +2474,10 @@ h3 small,h4 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margi
 /* a price nobody knows: the site's muted word, normal weight, between the label and a value */
 .tile b .unpriced{font-weight:400;font-size:1rem}
 .card{background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-panel);
-  padding:1rem;margin:0 0 1rem;min-width:0}
+  padding:min(1rem, 4vw);margin:0 0 1rem;min-width:0}
+/* the page's, a card's and a list's indents are capped by the window's width, not the text's size:
+   at 320 px with 200% text they left a list's words about 150 px and broke "Commander" (polish AI2) */
+ul,ol{padding-left:min(1.25rem, 6vw)}
 .card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
 .meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem 1rem;margin:0 0 1rem;
   font-size:.93rem}
@@ -2575,9 +2578,11 @@ REPORT_CSS = """
   margin-left:.4rem}
 .report .honesty h4{margin:.75rem 0 .25rem}
 .report .names{list-style:none;margin:.25rem 0 0;padding:0;display:flex;flex-wrap:wrap;gap:.35rem}
-.report .names li{display:inline-flex;align-items:baseline;gap:.35rem;padding:.2rem .55rem;border-radius:3px;
-  background:var(--surface-2);border:1px solid var(--border-soft);font-size:.9rem;overflow-wrap:anywhere;
-  max-width:100%}
+/* a name keeps its words whole (break-word, not anywhere, which let the flex box squeeze a name beside
+   its nowrap share to one word a line, broken: polish AI2); the share goes under it where it has no room */
+.report .names li{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:0 .35rem;padding:.2rem .55rem;
+  border-radius:3px;background:var(--surface-2);border:1px solid var(--border-soft);font-size:.9rem;
+  overflow-wrap:break-word;max-width:100%;box-sizing:border-box}
 .report .names li i{font-style:normal;color:var(--text-muted);font-size:.8rem;white-space:nowrap}
 .report .approx{grid-template-columns:minmax(10rem,max-content) 1fr} .report .approx dd{font-size:.93rem}
 @media (max-width:480px){ .report .approx{grid-template-columns:1fr} }
@@ -2587,9 +2592,9 @@ REPORT_CSS = """
 .report .kept .names li i{white-space:normal}
 .report .kept .names form{margin:0}
 .report .kept .names button{min-height:44px}
-.report .vlines{margin:.25rem 0 0;padding-left:1.25rem}
+.report .vlines{margin:.25rem 0 0;padding-left:min(1.25rem, 6vw)}
 .report .vlines li{margin:.2rem 0;overflow-wrap:anywhere}
-.report .sumlines{margin:.5rem 0 0;padding-left:1.25rem}
+.report .sumlines{margin:.5rem 0 0;padding-left:min(1.25rem, 6vw)}
 .report .sumlines li{margin:.25rem 0;overflow-wrap:anywhere}
 .report details.raw{margin-top:1rem} .report details.raw > summary{margin:0}
 .report details.raw[open] > summary{margin-bottom:.5rem}

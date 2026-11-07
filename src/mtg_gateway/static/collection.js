@@ -263,7 +263,7 @@
     if (!row) {
       row = document.createElement("span");
       row.className = "tagrow";
-      var home = $(".meta", item) || $(".cardc .tx", item);
+      var home = $(".meta", item) || $(".cardc > .tx", item);
       if (!home) return;
       home.appendChild(row);
     }

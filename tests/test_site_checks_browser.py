@@ -714,10 +714,24 @@ CHECKS = r"""async ([o]) => {
             tops.push(r.top);
         }
         // a name longer than the whole line it has (a long tag in a phone's tile) goes on more lines
-        // whole rather than end in an ellipsis: allowed where the pill spans its line already
+        // whole rather than end in an ellipsis: allowed only where the pill spans its line, its words
+        // on one line are wider than that line, and the line is not squeezed (at least a third of
+        // its row or card, so a short pill in a narrow parent still fails: audit on 2995cc23)
         const pe = e.parentElement, ps = cs(pe);
         const line = pe.clientWidth - px(ps.paddingLeft) - px(ps.paddingRight);
-        if (tops.length > 1 && rect(e).width < line - 2)
+        const probe = e.cloneNode(true);
+        probe.style.cssText = 'position:absolute;visibility:hidden;left:0;top:0;white-space:nowrap;' +
+          'width:max-content;max-width:none;min-width:0';
+        for (const c of probe.querySelectorAll('*')) {
+          c.style.whiteSpace = 'nowrap'; c.style.maxWidth = 'none';
+        }
+        pe.appendChild(probe);
+        const oneLine = probe.getBoundingClientRect().width;
+        probe.remove();
+        const box = e.closest('li, [role=row], .tr, .card, article, .mtgbox, section') || document.body;
+        const whole = (tops.length < 2) || (rect(e).width >= line - 2 && oneLine > line - .5 &&
+          line >= rect(box).width / 3);
+        if (!whole)
           add('pill', nm(e) + '|' + txt(e), nm(e) + ' "' + txt(e) + '" takes ' + tops.length +
             ' lines at 100% text');
       }
@@ -911,6 +925,15 @@ CHECKS = r"""async ([o]) => {
       if (Math.abs(br.left - ir.right) > 1.5 || br.bottom < ir.top || br.top > ir.bottom) continue;
       if (Math.abs(ir.height - br.height) > 2) add('pair', nm(inp), 'the box ' + nm(inp) + ' is ' +
         Math.round(ir.height) + 'px tall beside its ' + Math.round(br.height) + 'px button');
+    }
+    // (22) a line of facts set apart by dots reads as one wrapping line: its own layout (block,
+    // its facts inline), never a column a fact a line with a dot before each (polish AI1: a
+    // name cell's flex-column rule for .tx caught the facts line, a .tx too)
+    for (const el of q('.ui-dots.balanced', root)) {
+      if (!shown(el)) continue;
+      if (cs(el).display !== 'block')
+        add('dots', nm(el) + '|' + txt(el), 'the facts line "' + txt(el) + '" is laid out as ' +
+          cs(el).display);
     }
     timed('chart', t0);
     return out;

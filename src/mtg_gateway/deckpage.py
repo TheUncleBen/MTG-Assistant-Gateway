@@ -4217,15 +4217,17 @@ ul.decklist.list .thumb .ini{font-size:min(1.5rem,55cqb)} ul.decklist.list .thum
 /* the words ask for 12 em of their own text: at 200% text on a phone they go under the picture
    and keep the row's width, so a deck's name wraps between words (re-audit, 320 px) */
 ul.decklist.list .info{flex:1 1 12em;min-height:0}
-ul.decklist.list .tags{border-top:0;max-width:30%}
+/* room for a long tag on one line beside a wide row (30% wrapped a 56-letter tag at 1280 px) */
+ul.decklist.list .tags{border-top:0;max-width:40%}
 @media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
   ul.decklist.list .tags:empty{display:none} }
-/* the same where the row is narrow for its text (a Fold or a computer at large text): the tags
-   under the name, the whole row wide, so the name and the tags' words keep their lines (polish,
-   check on c246456a: tags now show whole names on more lines) */
+/* the same where the row is narrow for its text (a Fold, a small computer window or large text):
+   the tags under the name, the whole row wide, so the name and the tags' words keep their lines
+   (polish, check on c246456a: tags show whole names on more lines; a 30% column left a tag a
+   quarter of a 609 px row, three lines for one name, on 2995cc23) */
 ul.decklist.list .deck{container-type:inline-size}
-@container (max-width:40em){ ul.decklist.list .deck a{flex-wrap:wrap}
+@container (max-width:64em){ ul.decklist.list .deck a{flex-wrap:wrap}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
   ul.decklist.list .tags:empty{display:none} }
 ul.decklist.list .deck{margin-bottom:.5rem}

@@ -1921,7 +1921,7 @@ REPORT_PAGE_CSS = (
   border-top:1px solid var(--border-soft)}
 .rv-page .rv-ended li:first-child{border-top:0}
 .rv-page .rv-ended b{font-variant-numeric:tabular-nums;white-space:nowrap}
-.rv-page .rv-notes{margin:.25rem 0 .5rem;padding-left:1.1rem}
+.rv-page .rv-notes{margin:.25rem 0 .5rem;padding-left:min(1.1rem, 6vw)}
 .rv-page .rv-notes li{margin:.2rem 0;overflow-wrap:anywhere}
 .rv-page .rv-det{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
 /* what the quick solo test leaves out: inset grouped lists, as on the account settings pages */

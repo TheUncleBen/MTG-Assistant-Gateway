@@ -137,3 +137,49 @@ def test_the_html_files_fold_chevrons_grow_with_the_text() -> None:
             ctx.close()
         finally:
             browser.close()
+
+
+# a word of letters (and an apostrophe) that the browser split across two lines
+BROKEN_WORDS = """() => {
+  const out = [];
+  const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+    const el = n.parentElement;
+    if (!el || !el.getClientRects().length || el.closest('pre, code')) continue;
+    for (const m of n.textContent.matchAll(/[A-Za-z\u00c0-\u024f']{2,}/g)) {
+      const r = document.createRange();
+      r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+      const tops = new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top)));
+      if (tops.size > 1) out.push('"' + m[0] + '" in ' + el.tagName.toLowerCase() + '.' + el.className);
+    }
+  }
+  return out;
+}"""
+
+
+def test_the_html_files_words_stay_whole_on_a_small_phone_at_large_text() -> None:
+    """Polish AI2: at 320 px with 200% text the page's, the card's and a list's indents left a
+    list's words about 150 px, and "Commander" broke inside the word ("Comman / der cast"). The
+    indents are capped by the window's width, so every word keeps its line."""
+    from .test_consent_browser import _chromium_or_skip, _launch
+
+    pytest.importorskip("playwright")
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    doc = _html(_report())
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            ctx = browser.new_context(viewport={"width": 320, "height": 800})
+            page = ctx.new_page()
+            page.set_content(doc)
+            page.evaluate(
+                "() => { document.documentElement.style.setProperty('font-size', '200%', 'important');"
+                " document.querySelectorAll('details').forEach(d => { d.open = true; }); }"
+            )
+            assert page.evaluate("() => /Commander cast/.test(document.body.textContent)")
+            assert page.evaluate(BROKEN_WORDS) == []
+            ctx.close()
+        finally:
+            browser.close()
