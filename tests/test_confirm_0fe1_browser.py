@@ -930,3 +930,29 @@ def test_a_chip_shows_its_whole_name(server: Server, site, width: int, root: boo
         browser.close()
     assert seen, f"{path}: no tag chips on the page"
     assert found == [], "\n".join(found)
+
+
+@pytest.mark.parametrize("width", [1280, 1600])
+def test_the_decks_list_tags_line_up_in_their_column(server: Server, site, width: int) -> None:  # noqa: F811
+    """Polish AJ1: beside a wide row the decks list's tags were as wide as their chips, so a row with
+    short tags started them further right than a row with long ones. They are a column of their own,
+    every row's first chip at its left edge."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = site
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = _ctx(browser, server, sid, width)
+        page = ctx.new_page()
+        _goto(page, server, "/decks?view=list")
+        lefts = page.evaluate(
+            "() => [...document.querySelectorAll('ul.decklist.list .deck .tags')]"
+            ".filter(t => t.querySelector('.pill')).map(t => {"
+            " const a = t.closest('a').getBoundingClientRect(), b = t.getBoundingClientRect();"
+            " return [Math.round(t.querySelector('.pill').getBoundingClientRect().left),"
+            " Math.round(b.top) < Math.round(a.top) + 4 + a.height / 2]; })"
+        )
+        ctx.close()
+        browser.close()
+    assert len(lefts) >= 2, lefts
+    assert len({x for x, _ in lefts}) == 1, lefts

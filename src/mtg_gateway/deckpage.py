@@ -4217,8 +4217,10 @@ ul.decklist.list .thumb .ini{font-size:min(1.5rem,55cqb)} ul.decklist.list .thum
 /* the words ask for 12 em of their own text: at 200% text on a phone they go under the picture
    and keep the row's width, so a deck's name wraps between words (re-audit, 320 px) */
 ul.decklist.list .info{flex:1 1 12em;min-height:0}
-/* room for a long tag on one line beside a wide row (30% wrapped a 56-letter tag at 1280 px) */
-ul.decklist.list .tags{border-top:0;max-width:40%}
+/* beside a wide row the tags are a column of their own, 40% wide (30% wrapped a 56-letter tag at
+   1280 px), its chips starting at the column's left edge on every row (polish AJ1: it was as wide
+   as its chips, so a row with short tags started them further right) */
+ul.decklist.list .tags{border-top:0;flex:0 0 40%;max-width:40%;justify-content:flex-start}
 @media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
   ul.decklist.list .tags:empty{display:none} }

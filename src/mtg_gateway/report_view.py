@@ -2460,6 +2460,10 @@ html{font-size:14px;-webkit-text-size-adjust:100%;line-height:1.15;
   font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif}
 body{margin:0;padding:min(1rem, 4vw);background:var(--bg);color:var(--text);font-size:1rem;line-height:1.35}
 .report{max-width:52rem;margin:0 auto;overflow-wrap:break-word}
+/* words for screen readers only (a table's caption, the copy box's label), as the site's: without
+   it the file showed the results table's caption as text, one word a line (polish AI3) */
+.sr-only{position:absolute;width:1px;height:1px;min-height:0;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0,0,0,0);white-space:nowrap;border:0}
 /* a link (the deck on Archidekt, the report on the gateway) is the text's own colour with a quiet
    underline, as the site's pages: never bare blue text */
 a{color:var(--text);text-decoration:underline;text-decoration-color:var(--text-muted);text-underline-offset:.18em}
@@ -2467,7 +2471,10 @@ a:hover{color:var(--orange-text);text-decoration-color:currentColor}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
-h1{font-size:2rem;margin:.25rem 0 .75rem;overflow-wrap:anywhere} h2{font-size:1.5rem;margin:0 0 .6rem}
+/* the big headings keep their size until the text is large for the window, then come down towards
+   the body's size, so a long word ("opponents") keeps its line at 320 px and 200% (polish AI2) */
+h1{font-size:min(2rem, max(1rem, 10vw));margin:.25rem 0 .75rem;overflow-wrap:anywhere}
+h2{font-size:min(1.5rem, max(1rem, 7.5vw));margin:0 0 .6rem}
 h3{font-size:1.1rem;margin:.75rem 0 .4rem} h4{font-size:1rem;margin:.6rem 0 .2rem} p{margin:.5rem 0}
 h3 small,h4 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margin-left:.4rem}
 .muted{color:var(--text-muted)} .small{font-size:.86rem} .b{font-weight:700}
@@ -2481,7 +2488,7 @@ ul,ol{padding-left:min(1.25rem, 6vw)}
 .card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
 .meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem 1rem;margin:0 0 1rem;
   font-size:.93rem}
-.meta dt{color:var(--text-muted);font-weight:700} .meta dd{margin:0;overflow-wrap:anywhere}
+.meta dt{color:var(--text-muted);font-weight:700} .meta dd{margin:0;overflow-wrap:break-word}
 h2 .ui-lbl{margin-left:.35rem}
 .notice{border:1px solid var(--card-border);border-left:4px solid var(--blue);background:var(--surface);
   border-radius:var(--radius-panel);padding:.7rem .9rem;margin:0 0 1rem;font-weight:700}
@@ -2593,14 +2600,14 @@ REPORT_CSS = """
 .report .kept .names form{margin:0}
 .report .kept .names button{min-height:44px}
 .report .vlines{margin:.25rem 0 0;padding-left:min(1.25rem, 6vw)}
-.report .vlines li{margin:.2rem 0;overflow-wrap:anywhere}
+.report .vlines li{margin:.2rem 0;overflow-wrap:break-word}
 .report .sumlines{margin:.5rem 0 0;padding-left:min(1.25rem, 6vw)}
-.report .sumlines li{margin:.25rem 0;overflow-wrap:anywhere}
+.report .sumlines li{margin:.25rem 0;overflow-wrap:break-word}
 .report details.raw{margin-top:1rem} .report details.raw > summary{margin:0}
 .report details.raw[open] > summary{margin-bottom:.5rem}
 .report table.trig{width:100%;border-collapse:collapse;font-size:.93rem;margin-top:.25rem}
 .report table.trig th{text-align:left;font-size:.86rem;color:var(--text-muted);padding:.2rem .25rem}
-.report table.trig td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:anywhere}
+.report table.trig td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:break-word}
 .report table.trig td:last-child,.report table.trig th:last-child{text-align:right;
   font-variant-numeric:tabular-nums}
 /* Forge's games (forge_results_html): a row per deck at the table, how the games ended, each game */
@@ -2632,13 +2639,15 @@ REPORT_CSS = """
     clip:rect(0 0 0 0);white-space:nowrap}
   .report .forge-results table.stack tr{display:block;padding:.45rem .5rem;
     border-top:1px solid var(--border-soft)}
-  .report .forge-results table.stack th,.report .forge-results table.stack td{display:flex;
-    justify-content:space-between;gap:.75rem;border:0;padding:.15rem 0;text-align:left;white-space:normal;
-    overflow-wrap:break-word}
+  /* a stacked cell: its label, then its value beside it or under it when there is no room, both
+     from the left as the site's cards are; it was a value pushed right that ran past the card at
+     320 px and 200% text ("life to commander damage" cut, polish AI4) */
+  .report .forge-results table.stack th,.report .forge-results table.stack td{display:flex;flex-wrap:wrap;
+    justify-content:flex-start;align-items:baseline;gap:0 .75rem;border:0;padding:.15rem 0;text-align:left;
+    white-space:normal;overflow-wrap:break-word}
   .report .forge-results table.stack tbody th{display:block;font-size:1rem}
   .report .forge-results table.stack td::before{content:attr(data-label);color:var(--text-muted);
     font-size:.86rem;font-weight:400;flex:none}
-  .report .forge-results table.stack td{text-align:right}
 }
 """
 

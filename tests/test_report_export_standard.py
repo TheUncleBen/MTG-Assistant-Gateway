@@ -150,7 +150,12 @@ BROKEN_WORDS = """() => {
       const r = document.createRange();
       r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
       const tops = new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top)));
-      if (tops.size > 1) out.push('"' + m[0] + '" in ' + el.tagName.toLowerCase() + '.' + el.className);
+      if (tops.size < 2) continue;
+      // name the cell's table and its label too (CI found "commander" in a td, nothing more)
+      const t = el.closest('table'), c = el.closest('td, th');
+      const lbl = c && c.dataset.label ? ' [' + c.dataset.label + ']' : '';
+      const where = t ? ' (table.' + t.className.replace(/ /g, '.') + lbl + ')' : '';
+      out.push('"' + m[0] + '" in ' + el.tagName.toLowerCase() + '.' + el.className + where);
     }
   }
   return out;
@@ -173,13 +178,100 @@ def test_the_html_files_words_stay_whole_on_a_small_phone_at_large_text() -> Non
         try:
             ctx = browser.new_context(viewport={"width": 320, "height": 800})
             page = ctx.new_page()
-            page.set_content(doc)
-            page.evaluate(
-                "() => { document.documentElement.style.setProperty('font-size', '200%', 'important');"
-                " document.querySelectorAll('details').forEach(d => { d.open = true; }); }"
-            )
-            assert page.evaluate("() => /Commander cast/.test(document.body.textContent)")
-            assert page.evaluate(BROKEN_WORDS) == []
+            # the page's own fonts, then two wider ones: CI's runner found a break ("commander" in a
+            # stacked table's cell) that this machine's narrower font did not
+            for font in ("", "DejaVu Sans", "Liberation Sans"):
+                page.set_content(doc)
+                if font:
+                    page.add_style_tag(content=f"html, body, body * {{font-family: '{font}' !important}}")
+                page.evaluate(
+                    "() => { document.documentElement.style.setProperty('font-size', '200%', 'important');"
+                    " document.querySelectorAll('details').forEach(d => { d.open = true; }); }"
+                )
+                assert page.evaluate("() => /Commander cast/.test(document.body.textContent)")
+                assert page.evaluate(BROKEN_WORDS) == [], font or "the page's fonts"
+            ctx.close()
+        finally:
+            browser.close()
+
+
+# the file's markup hooks that carry no style of their own, in the file or as a utility on the site:
+# section names (report-head, forge, forge-tiles, unmodeled, coverage), the results tables'
+# (qty, seats, rate; styled through .forge-results table), the chart's text parts (v, x, y) and the
+# folds' (disclosure; the file's details have their own capsule)
+HOOKS = {
+    "coverage",
+    "disclosure",
+    "forge",
+    "forge-tiles",
+    "qty",
+    "rate",
+    "report-head",
+    "seats",
+    "unmodeled",
+    "v",
+    "x",
+    "y",
+}
+
+
+def test_the_html_file_defines_every_class_it_uses() -> None:
+    """Polish AI3: the saved file used .sr-only for the results table's caption but had no rule for
+    it, so the caption showed as text, one word a line at 320 px. Every class the file uses is in
+    its own CSS, or is a hook that no global rule on the site styles either."""
+    doc = _html(_report())
+    css = "".join(re.findall(r"<style[^>]*>(.*?)</style>", doc, re.S))
+    body = re.sub(r"<style[^>]*>.*?</style>", "", doc, flags=re.S)
+    used: set[str] = set()
+    for value in re.findall(r"class=['\"]([^'\"]*)['\"]", body):
+        used |= set(value.split())
+    defined = set(re.findall(r"\.([A-Za-z_][\w-]*)", css))
+    assert used - defined - HOOKS == set()
+    for hook in HOOKS:
+        assert not re.search(rf"(?m)^\.{re.escape(hook)}\s*[{{,]", theme.CSS), hook
+
+
+STACK_SPILL = """() => {
+  const out = [];
+  for (const td of document.querySelectorAll('table.stack tbody td, table.stack tbody th')) {
+    if (td.getClientRects().length && td.scrollWidth > td.clientWidth + 1)
+      out.push((td.dataset.label || td.textContent.trim().slice(0, 20)) + ': ' + td.scrollWidth + ' of ' +
+        td.clientWidth + 'px in table.' + td.closest('table').className.replace(/ /g, '.'));
+  }
+  for (const s of document.querySelectorAll('.scroll'))
+    if (s.scrollWidth > s.clientWidth + 1)
+      out.push('a results table scrolls ' + (s.scrollWidth - s.clientWidth) + 'px');
+  return out;
+}"""
+
+
+def test_the_html_files_stacked_results_keep_their_values_in_the_card() -> None:
+    """Polish AI4: at 320 px with 200% text a stacked results card pushed its values right, past
+    its edge ("17% to 69%" lost "to", "life total 3, commander damage 2" was cut). A value goes under
+    its label when there is no room beside it, from the left, as the site's cards do."""
+    from .test_consent_browser import _chromium_or_skip, _launch
+
+    pytest.importorskip("playwright")
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    doc = _html(_report())
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            ctx = browser.new_context(viewport={"width": 320, "height": 800})
+            page = ctx.new_page()
+            for font in ("", "DejaVu Sans", "Liberation Sans"):
+                page.set_content(doc)
+                if font:
+                    page.add_style_tag(content=f"html, body, body * {{font-family: '{font}' !important}}")
+                page.evaluate(
+                    "() => document.documentElement.style.setProperty('font-size', '200%', 'important')"
+                )
+                assert page.locator("table.stack td").count()
+                assert page.evaluate(STACK_SPILL) == [], font or "the page's fonts"
+                caption = page.locator("table.seats caption")
+                assert caption.count() and caption.evaluate("e => e.getBoundingClientRect().height") <= 1
             ctx.close()
         finally:
             browser.close()

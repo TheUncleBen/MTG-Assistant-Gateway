@@ -598,7 +598,11 @@ name per thing.
 - The Binder list's set, finish, condition, language and price read as one line that wraps on a
   phone and a Fold, instead of one per line, centred, each with a dot before it.
 - A saved report file keeps its words whole on a small phone at large text: its margins and list
-  indents are smaller there, and a card's name no longer squeezes beside its "drawn" share.
+  indents are smaller there, its big headings come down towards the text's size, and a card's
+  name no longer squeezes beside its "drawn" share. On a phone each deck's results card shows its
+  values whole, under their labels where there is no room beside them, and the results table's
+  caption is for screen readers only, as on the site.
+- On the decks list beside a wide window the tags are a column of their own, lined up row to row.
 - A switch whose parts fit on one row stays on one row on a small phone, such as the Binder's
   Cards, Lists and Watchlist and the Scan page's tabs.
 - The tab bar's count keeps a small gap under the bar's top edge and its capped size when the
