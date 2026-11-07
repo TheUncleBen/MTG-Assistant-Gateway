@@ -48,6 +48,8 @@ ul.decklist .deck .chk{display:grid;place-items:center;width:44px;height:44px;cu
 ul.decklist .deck .chk input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
 ul.decklist .deck.sel a{outline:3px solid var(--orange-ctl);outline-offset:-3px}
 ul.decklist.grid .deck .chk ~ a .thumb{padding-left:0}
+/* the card count sits in the cover's top left, where the tick box goes: beside it while selecting */
+body.decks-selecting ul.decklist .deck .thumb .views{left:calc(44px + .4rem)}
 .decks-select[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text)}
 .decks-bulk-notice form.inline{display:inline-flex;margin:0 0 0 .5rem;vertical-align:middle}
 .mtgbox .body .radios{display:flex;flex-direction:column;gap:0}

@@ -167,6 +167,12 @@ def test_the_card_search_panel_fits_every_width_and_rarity_shows_its_picks(
         # the rarity drop-down: a checkbox list that names what is picked
         pick = page.locator(".pickm")
         assert page.locator(".pickm .v").inner_text() == "Any rarity"
+        # its arrow is drawn in the orange every drop-down's arrow has (static/chevron.svg; v39
+        # screenshots: it was the text's grey beside Format's orange)
+        assert (
+            page.evaluate("() => getComputedStyle(document.querySelector('.pickm-btn svg path')).stroke")
+            == "rgb(250, 137, 13)"
+        )
         page.locator(".pickm summary").click()
         page.locator(".pickm[open]").wait_for(timeout=3000)
         page.locator(".pickm input[value=r]").check()

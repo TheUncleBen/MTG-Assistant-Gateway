@@ -153,3 +153,43 @@ def test_the_bar_is_one_slim_row_on_a_phone(server: Server) -> None:  # noqa: F8
         assert bar.is_hidden()
         assert errors == [], errors
         browser.close()
+
+
+@pytest.mark.parametrize("width", [412, 1280])
+def test_the_tick_box_leaves_the_card_count_readable(server: Server, width: int) -> None:  # noqa: F811
+    """Checklist v39 screenshots: the card count moved to the cover's top left (6faae26a, clear
+    of a Home tile's ⋮), under the tick box Select puts in the same corner, so “34 cards” read
+    “_cards”. In select mode the count sits beside the box, whole and unoverlapped."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "light", exe)
+        page.goto(f"{server.base}/decks?q=a&view=grid", wait_until="networkidle")
+        page.wait_for_selector("section.fv-area", timeout=10_000)
+        page.locator(".decks-select").click()
+        tick = page.locator("#decks-list .deck .chk input[name=deck_id]").first
+        tick.wait_for(state="visible", timeout=3000)
+        pairs = page.evaluate(
+            """() => [...document.querySelectorAll('#decks-list .deck')].map(d => {
+                 const c = d.querySelector('.chk'), v = d.querySelector('.thumb .views');
+                 if (!c || !v) return null;
+                 const a = c.getBoundingClientRect(), b = v.getBoundingClientRect();
+                 return {text: v.textContent.trim(), w: b.width,
+                         overlap: a.left < b.right && b.left < a.right
+                                  && a.top < b.bottom && b.top < a.bottom,
+                         inside: b.left >= d.getBoundingClientRect().left - .5
+                                 && b.right <= d.getBoundingClientRect().right + .5};
+               }).filter(Boolean)"""
+        )
+        assert pairs, "no tile with a card count"
+        assert all(not q["overlap"] and q["inside"] and q["w"] > 0 for q in pairs), pairs
+        page.locator(".ui-bar[aria-label='Selected decks'] button.decks-clear").click()
+        back = page.evaluate(
+            "() => { const v = document.querySelector('#decks-list .deck .thumb .views');"
+            " return v.getBoundingClientRect().left - v.closest('.thumb').getBoundingClientRect().left }"
+        )
+        assert back < 12, back  # out of select mode the count goes back to its corner
+        assert errors == [], errors
+        browser.close()

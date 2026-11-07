@@ -35,7 +35,8 @@ and width class (final polish, B-13), and every check runs in one evaluation:
 - a switch on more rows than it needs: its parts fit one row at their own widths (NC1);
 - a chart's labels running into each other, cut at its edge, on its axis line or larger than the
   words around it (NC2);
-- a button with an icon whose label wraps, its content off its middle (P-13).
+- a button with an icon whose label wraps, its content off its middle (P-13);
+- a text cut to a number of lines showing the top of the next line under them (v39 screenshots).
 
 A name seeded without any break opportunity (forty letters and more) breaks anywhere by design
 and is not counted, nor is a word in a code box. A word wider than its box has nowhere else to
@@ -934,6 +935,19 @@ CHECKS = r"""async ([o]) => {
       if (cs(el).display !== 'block')
         add('dots', nm(el) + '|' + txt(el), 'the facts line "' + txt(el) + '" is laid out as ' +
           cs(el).display);
+    }
+    // (23) a text cut to a number of lines (line-clamp) shows no part of the line after them: the
+    // room it shows its text in is those lines' height (v39 screenshots: a Home tile's deck name
+    // cut at two lines showed the top of a third in its bottom padding)
+    for (const el of q('*', root)) {
+      const st = cs(el), n = parseInt(st.webkitLineClamp, 10);
+      if (!(n > 0) || !shown(el) || el.scrollHeight <= el.clientHeight + 1) continue;
+      const lh = parseFloat(st.lineHeight);
+      if (!(lh > 0)) continue;
+      const room = el.clientHeight - parseFloat(st.paddingTop);
+      if (room > n * lh + 1.5)
+        add('clamp', nm(el) + '|' + txt(el), nm(el) + ' "' + txt(el) + '" is cut at ' + n + ' lines in ' +
+          Math.round(room) + 'px: the next line shows below them');
     }
     timed('chart', t0);
     return out;

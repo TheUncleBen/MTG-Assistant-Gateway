@@ -1113,8 +1113,12 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   background:linear-gradient(135deg,#3a3a3a,#1f1f1f) center/cover no-repeat;color:#fff;text-decoration:none;
   font-weight:700}
 .home .recent a[style]{background-color:var(--surface-3)}
-.home .recent a span{position:absolute;left:0;right:0;bottom:0;padding:.4rem .5rem;
-  background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0));font-size:.9rem;line-height:1.25;
+/* the name's bottom room is a clear border, not padding: a name cut at two lines showed the top
+   of its third in the padding (overflow clips at the padding's edge, not the content's) */
+.home .recent a span{position:absolute;left:0;right:0;bottom:0;padding:.4rem .5rem 0;
+  border-bottom:.4rem solid transparent;
+  background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0)) border-box;
+  font-size:.9rem;line-height:1.25;
   overflow:hidden;overflow-wrap:break-word;display:-webkit-box;-webkit-box-orient:vertical;
   -webkit-line-clamp:2;line-clamp:2}
 .home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
@@ -2504,7 +2508,8 @@ SEARCH_PANEL_CSS = """
   cursor:pointer;list-style:none;font-weight:400;box-sizing:border-box}
 .spanel .pickm-btn::-webkit-details-marker{display:none}
 .spanel .pickm-btn .v{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.spanel .pickm-btn svg{transition:transform .15s}
+/* its arrow in the orange of every drop-down's arrow (chevron.svg) */
+.spanel .pickm-btn svg{transition:transform .15s;color:var(--orange)}
 .spanel .pickm[open] > .pickm-btn{border-color:var(--orange)}
 .spanel .pickm[open] > .pickm-btn svg{transform:rotate(180deg)}
 .spanel .pickm-btn:hover{background:var(--surface-2)}
