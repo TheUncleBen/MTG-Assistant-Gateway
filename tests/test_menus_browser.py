@@ -390,6 +390,9 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             box = _box(page)
             assert "wide" in (box.get_attribute("class") or "")
             assert box.locator("h2").inner_text() == "Export “Renamed deck”"
+            # the box opens with that title and fills in once /export answers: wait for the tabs
+            # (all_inner_texts doesn't; CI once read none), not a fixed moment
+            box.locator("[role=tab]", has_text="Files").wait_for(timeout=5000)
             tabs = [t.strip() for t in box.locator("[role=tab]").all_inner_texts()]
             # (the sample deck has no sideboard or maybeboard, so that tab is left out)
             assert tabs == ["Archidekt text", "Plain list", "Files"]

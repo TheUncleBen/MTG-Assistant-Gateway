@@ -126,7 +126,7 @@ def test_the_bell_says_signed_out_when_the_session_has_ended(chromium, server) -
         # signed out in another tab: the session is gone on the server
         server.db.delete_browser_session(sid)
         page.click(".topbar a.bell")
-        page.wait_for_selector(".mtgbox:visible .notice", timeout=10_000)
+        page.wait_for_selector(".mtgbox:visible .body .notice", timeout=10_000)
         text = page.inner_text(".mtgbox:visible")
         assert "You're signed out" in text and "No connection" not in text, text
         sign_in = page.locator(".mtgbox:visible a", has_text="Sign in")
@@ -136,12 +136,17 @@ def test_the_bell_says_signed_out_when_the_session_has_ended(chromium, server) -
 
 def test_the_bell_still_says_no_connection_when_the_gateway_cannot_be_reached(chromium, server) -> None:
     sid = server.sign_in()
-    with _page(chromium, server, sid, 1280) as page:
+    # the gateway's service worker sees every request of the page it controls, and Playwright's
+    # page.route doesn't promise to catch a request a service worker saw: blocked here, so the
+    # list request is the one this test fails (CI once timed out with the box still waiting)
+    with _page(chromium, server, sid, 1280, service_workers="block") as page:
+        # the list's address fails from the start (the count, /notifications/count, still answers)
+        page.route("**/notifications", lambda route: route.abort())
         page.goto(f"{server.base}/decks", wait_until="load")
         page.wait_for_function("() => !!window.MtgBell")
-        page.route("**/notifications", lambda route: route.abort())
         page.click(".topbar a.bell")
-        page.wait_for_selector(".mtgbox:visible .notice", timeout=10_000)
+        # the box's own note under the body is there from the start, hidden: wait for the body's
+        page.wait_for_selector(".mtgbox:visible .body .notice", timeout=10_000)
         text = page.inner_text(".mtgbox:visible")
         assert "No connection" in text and "signed out" not in text, text
 
