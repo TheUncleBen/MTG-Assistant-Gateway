@@ -12,9 +12,9 @@ from urllib.parse import quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import actions, deck_extras, deck_stats, prefs, ui
+from . import actions, deck_bulk, deck_extras, deck_stats, prefs, ui
 from .archidekt import format_label
-from .busy import busy_response
+from .busy import busy_plan, busy_response, outage, same_url
 from .companion import (
     DECK_CSP,
     DECK_ERR_MESSAGES,
@@ -26,33 +26,40 @@ from .companion import (
 )
 from .deckpage import (
     DECK_BOXES,
+    LIST_ORDERS,
     VIEWS,
+    compare_mine_html,
     covers_for,
     deck_boxes_html,
+    deck_check_html,
     deck_count_text,
+    deck_held_html,
     deck_list_controls_html,
     deck_list_held_html,
     deck_page_html,
+    deck_saving_html,
     deck_title,
     decks_unreadable_html,
     featured,
     folder_options_html,
     reread_href,
 )
-from .decks import MAX_PENDING_PROPOSALS, DeckError, current_client, owns_deck
+from .decks import MAX_PENDING_PROPOSALS, DeckError, current_client, is_pull, is_reload, owns_deck
 from .folderview import FOLDER_CSS, arrange, filter_params, level_html, read_filters, resolve_folder
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
-    login_redirect,
+    login_redirect_here,
+)
+from .running_view import deck_notice_html
+from .theme import (
+    SPINNER,
+    hub_switch,
+    icon,
 )
 from .theme import (
     esc as _esc,
-)
-from .theme import (
-    hub_switch,
-    icon,
 )
 from .waiting_strip import waiting_changes
 
@@ -81,7 +88,7 @@ def new_deck_error_html(exc: DeckError) -> str:
     if exc.kind == "not_linked":
         return (
             "<b>Link your Archidekt account first.</b> The deck is made in your Archidekt account. "
-            "<a href='/account/details#archidekt'>Link it under Account details</a>"
+            "<a href='/account/details/archidekt'>Link it under Account details</a>"
         )
     if exc.kind == "rate_limited" and "pending proposals" in str(exc):
         return (
@@ -148,7 +155,10 @@ def new_deck_box_html(
             if scan_name
             else ""
         )
-        + f"<form id='ndf' method='post' action='/decks/new' class='nd-form' data-src='{src}' novalidate>"
+        # what is typed is kept and put back (static/draft.js), unless a scan filled the form
+        + f"<form id='ndf' method='post' action='/decks/new' class='nd-form' data-src='{src}' novalidate"
+        + ("" if scan_name else " data-draft='newdeck'")
+        + ">"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         "<div class='nd-grid'><div class='nd-fields'>"
         "<div class='nd-top'><div class='field nd-name'><label for='name'>Deck name</label>"
@@ -176,7 +186,7 @@ def new_deck_box_html(
         )
         + "</select></span></div></div>"
         "<div class='nd-cards'><span class='lbl' id='nd-cards-l'>Cards</span>"
-        f"<div class='segc nd-tabs' role='tablist' aria-labelledby='nd-cards-l'>{tabs}</div>"
+        f"<div class='hubseg segc nd-tabs' role='tablist' aria-labelledby='nd-cards-l'>{tabs}</div>"
         "<div class='nd-src'>"
         "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
         "<input id='file' type='file' accept='.txt,.csv,.json,text/plain,text/csv,application/json' "
@@ -249,10 +259,11 @@ NEW_DECK_CSS = """
 .nd-form .switch{justify-self:start;margin:0}
 .nd-cards{display:grid;gap:.6rem} .nd-cards > .lbl{font-weight:700}
 /* three tabs on one row; at large text they wrap instead of widening the sheet */
-.mtgbox .body .nd-tabs{display:flex;flex-wrap:wrap;width:100%;margin:0}
+.mtgbox .body .nd-tabs{display:flex;width:100%;margin:0}
 .mtgbox .body .nd-tabs [role=tab]{flex:1 1 0;min-width:0;gap:.35rem;display:inline-flex;align-items:center;
   justify-content:center}
-.nd-tabs [role=tab] span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.nd-tabs [role=tab] span{white-space:normal;overflow-wrap:normal;overflow:hidden;text-overflow:ellipsis;
+  min-width:0}
 @media (max-width:759.98px){ .mtgbox .body .nd-tabs [role=tab]{flex:1 1 auto} }
 .nd-tabs [role=tab] svg.i{width:16px;height:16px;flex:none}
 .nd-src{display:grid;grid-template-columns:minmax(0,1fr);gap:.6rem}
@@ -278,7 +289,7 @@ NEW_DECK_CSS = """
   background:linear-gradient(135deg,#3a3a3a,#1f1f1f)}
 .ndtile .ini{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:3rem;
   font-weight:900;color:rgba(255,255,255,.25)}
-.ndtile .views{position:absolute;right:.5rem;top:.5rem;font-size:12px;color:#fff;background:rgba(0,0,0,.55);
+.ndtile .views{position:absolute;left:.5rem;top:.5rem;font-size:.857rem;color:#fff;background:rgba(0,0,0,.55);
   padding:.1rem .4rem;border-radius:3px}
 .ndtile .info{display:flex;flex-direction:column;gap:.1rem;padding:.5rem .75rem;min-width:0}
 .ndtile .name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -290,6 +301,17 @@ NEW_DECK_CSS = """
 @media (max-width:759.98px){ .nd-grid{grid-template-columns:minmax(0,1fr)} .nd-prev{display:none} }
 @media (max-width:599.98px){ .nd-top{grid-template-columns:minmax(0,1fr)}
   .nd-tabs [role=tab] svg.i{display:none} }
+/* The folds follow the text size too (final polish Z1): at 200% text on a 900-1024 px window
+   the tile's 13 rem and Format's 11 rem doubled and left Deck name about 70 px, one letter a
+   line, with "0/120" one character a line. The form and the fields column are containers
+   measured in their own em: below 40 em of form the tile preview goes, as below 760 px; below
+   26 em of fields column (Format's 11 rem, the gap and at least 14 em for the name) Deck name
+   stacks over Format and Folder over Game type, as below 600 px. At 100% the form has 47 em
+   and the fields 33 from 760 px up, so nothing moves there. */
+.nd-form{container:ndform/inline-size}
+.nd-fields{container:ndfields/inline-size}
+@container ndform (max-width:40em){ .nd-grid{grid-template-columns:minmax(0,1fr)} .nd-prev{display:none} }
+@container ndfields (max-width:26em){ .nd-top{grid-template-columns:minmax(0,1fr)} }
 """
 
 
@@ -333,9 +355,14 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         qp = request.query_params
         chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
+        order, _dir = prefs.sort_choice(
+            state.db, sub, request, "decks", sorts=LIST_ORDERS, default="updated", name="order"
+        )
         filters = read_filters(qp)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait, last_read_ok=True)
-        if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
+        if failure is not None and (
+            busy := busy_response(failure, request, page, sub=sub, sid=sid, title="My decks")
+        ):
             return busy
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
         unreadable = bool(getattr(rows, "unreadable", 0))  # entries Archidekt left unreadable
@@ -377,21 +404,24 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 ],
                 filters["show"],
             )
-            # New deck first, the one orange button, then New folder and New package (the owner,
-            # 2026-10-25: "New deck / New folder / New package")
+            # New deck first, then New folder and New package (the owner, 2026-10-25: "New deck / New
+            # folder / New package"); the one orange button is the page's own: New deck on My
+            # Decks, New package on Packages (0.7.46 audit D-25)
             + "<span class='acts'>"
-            f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
-            f"{icon('plus')} New deck</a>"
+            f"<a class='btn{'' if packages else ' btn-primary'}' href='/decks/new' "
+            f"{ui.box_open_attr('newdeck')}>{icon('plus')} New deck</a>"
             f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
-            f"<a class='btn' href='/decks/new-package' {ui.box_open_attr('newpkg')}>"
-            f"{icon('package')} New package</a>"
+            f"<a class='btn{' btn-primary' if packages else ''}' href='/decks/new-package' "
+            f"{ui.box_open_attr('newpkg')}>{icon('package')} New package</a>"
             "</span></div>"
         )
         notice = ""
         if qp.get("err") == "bad_ref":
-            notice = "<p class='notice error'>That is not an Archidekt deck link or id.</p>"
+            notice = "<p class='notice error'>That is not an Archidekt deck link or ID.</p>"
         if qp.get("ok") in LIST_OK_MESSAGES:
             notice = f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[qp['ok']])}</p>"
+        if "bulk" in (qp.get("ok"), qp.get("err")):  # Select's bar (deck_bulk.py)
+            notice += state.deck_bulk_notice(sub, qp.get("t"))
         nd = new_deck or {}
         # the boxes' Folder field: the member's tree as My decks has it (the top level alone while
         # it is still being read), starting on the open folder
@@ -439,7 +469,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
             listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + unread_html
             if not (unreadable and not total):  # nothing read: the notice instead of "No decks yet"
-                listing += level_html(level, covers=covers, q=q, view=view, order=order)
+                listing += level_html(level, covers=covers, q=q, view=view, order=order, tick=True)
             listing = f"<div id='decks-list'>{listing}</div>"
         body = (
             head
@@ -451,19 +481,23 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 view=view,
                 folder=folder,
                 total=None if unreadable and not total else total,
+                in_folders=0 if level.searching else sum(int(f.get("decks") or 0) for f in level.folders),
                 pending=pending,
                 direction=filters["direction"],
                 colors=filters["colors"],
                 colour_mode=filters["colour_mode"],
                 fmt=filters["fmt"],
                 show=filters["show"],
+                count_extra=deck_bulk.select_button_html(),
             )
             + listing
+            + deck_bulk.bulk_html(_csrf(s, sid) or "", tree, same_url(request))
             + (
                 f"<p class='muted small backups-note'>{hidden} backup "
                 f"{'copy' if hidden == 1 else 'copies'} made before changes "
                 "are kept out of this list (a deck named like a copy counts as one): "
-                "<a href='/history#backups'>see them under History</a>.</p>"
+                + ui.cap_link("See them under History", "/history#backups")
+                + "</p>"
                 if hidden
                 else ""
             )
@@ -484,8 +518,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             scripts=True,
             csp=DECK_CSP,  # the covers are Scryfall images
             deck_css=True,
-            extra_scripts=("searchpanel.js", "decks.js") + NEW_DECK_SCRIPTS,
-            extra_css=FOLDER_CSS + NEW_DECK_CSS + NEW_PACKAGE_CSS,
+            extra_scripts=("searchpanel.js", "decks.js", "deckselect.js") + NEW_DECK_SCRIPTS,
+            extra_css=FOLDER_CSS + NEW_DECK_CSS + NEW_PACKAGE_CSS + deck_bulk.BULK_CSS,
         )
         return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure) if remember else resp
 
@@ -493,7 +527,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def decks_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         qp = request.query_params
         # Try again on the notice that the deck list couldn't be read: read it again, then show it
         if qp.get("reread"):
@@ -507,8 +541,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def my_decks_json(request: Request) -> Response:
         """The signed-in member's deck list for the pages' placeholders (decks.js): the rows, plus
         the HTML the page itself would have rendered (``shape=list`` with the /decks controls'
-        q, order, view and folder; ``shape=recent`` for the home panel) so there is one renderer.
-        Browser session only; a GET that changes nothing needs no CSRF token."""
+        q, order, view and folder; ``shape=recent`` for the home panel; ``shape=pick`` the Compare
+        page's My decks chips for ``deck``, compare.js) so there is one renderer. Browser session
+        only; a GET that changes nothing needs no CSRF token."""
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse(
@@ -519,15 +554,19 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 {"ok": False, "error": "cross_site"}, 403, headers={"Cache-Control": "no-store"}
             )
         qp = request.query_params
-        shape = "recent" if qp.get("shape") == "recent" else "list"
+        shape = qp.get("shape") if qp.get("shape") in ("recent", "pick") else "list"
         q, order, view, folder = list_query(qp)
+        if shape == "list":  # the page's list opens sorted as it was left (the panel sends its pick)
+            order, _dir = prefs.sort_choice(
+                state.db, sub, request, "decks", sorts=LIST_ORDERS, default="updated", name="order"
+            )
         filters = read_filters(qp)
         try:
             rows = await asyncio.wait_for(decks.list_decks(sub), DECKS_JSON_TIMEOUT)
         except DeckError as exc:
             rows, problem = None, (exc.kind, str(exc))
         except TimeoutError:
-            rows, problem = None, ("unavailable", "Archidekt did not answer in time.")
+            rows, problem = None, ("unavailable", outage("timeout"))
         else:
             problem = None
         if problem is not None and problem[0] in ("rate_limited", "unavailable"):
@@ -548,7 +587,16 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         }
         if problem is not None:
             out["error"], out["message"] = problem
-        if shape == "recent":
+        if shape == "pick":
+            # the Compare page's other decks: no folder tree, so no second read
+            deck_id = re.sub(r"[^0-9]", "", qp.get("deck") or "")[:12]
+            out["html"] = (
+                compare_mine_html(deck_id, rows, other_ref=(qp.get("with") or "").strip()[:2000])
+                if rows is not None and deck_id
+                else ""
+            )
+            out["count"] = sum(1 for d in rows or [] if str(d.get("id")) != deck_id)
+        elif shape == "recent":
             from .home import recent_panel_inner
 
             recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
@@ -558,6 +606,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 covers,
                 unreadable=bool(getattr(rows, "unreadable", 0)),
                 last_read=last_read,
+                why=problem[1] if problem else None,
             )
             out["count"] = len(recent)
         else:
@@ -580,7 +629,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 + held_html
             )
             if not (unreadable and not total):
-                out["html"] += level_html(level, covers=covers, q=q, view=view, order=order)
+                out["html"] += level_html(level, covers=covers, q=q, view=view, order=order, tick=True)
             out["count"] = len(shown)
             out["total"] = None if unreadable and not total else total  # no count it doesn't know
             out["count_text"] = deck_count_text(out["total"])
@@ -598,11 +647,33 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure)
         return resp
 
+    @server.custom_route("/api/decks/names", methods=["GET"], include_in_schema=False)
+    async def my_deck_names(request: Request) -> Response:
+        """The member's own decks (id and name) for the site search's "Your decks" rows
+        (static/suggest.js; decision C8): the list as the cache holds it, never a wait for
+        Archidekt (a cold list is read in the background and answers on the next ask), and
+        nothing for a member without a link."""
+        sub, _sid = browser_session(state, request)
+        headers = {"Cache-Control": "no-store"}
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
+        rows: list[dict[str, Any]] | None = None
+        try:
+            if state.db.get_link(sub):
+                rows = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), 5.0)
+        except (DeckError, TimeoutError):
+            rows = None
+        names = [
+            {"id": str(d["id"]), "name": str(d.get("name") or "Unnamed deck")}
+            for d in sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
+        ]
+        return JSONResponse({"ok": True, "decks": names}, headers=headers)
+
     @server.custom_route("/decks/open", methods=["GET"], include_in_schema=False)
     async def open_deck(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         ref = (request.query_params.get("ref") or "").strip()
         try:
             from .decks import _clean_deck_id
@@ -617,7 +688,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_deck_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new")
+            return login_redirect_here(request, "/decks/new")
         values: dict[str, str] = {}
         scan_name = ""
         scan_ref = (request.query_params.get("scan_session") or "").strip()[:80]
@@ -638,7 +709,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_deck_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new")
+            # the sign-in ended while the form was filled in: after signing in the box opens
+            # again with what was typed (its draft, static/newdeck.js) (QG-04)
+            return login_redirect_here(request, "/decks/new?draft=1")
         data = await form(request, limit=4_200_000)  # a deck .json export can reach a few MB
         values = {
             k: v
@@ -688,7 +761,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_package_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new-package")
+            return login_redirect_here(request, "/decks/new-package")
         return await my_decks_response(request, sub, sid, new_package={"values": {}})
 
     @server.custom_route("/decks/new-package", methods=["POST"], include_in_schema=False)
@@ -697,7 +770,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         (decks.propose_new_deck with ``package``), applied at once as Create deck is."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new-package")
+            return login_redirect_here(request, "/decks/new-package")
         data = await deck_extras.read_form(request, lists=("format",))
         values = {
             "name": data.get("name", ""),
@@ -766,14 +839,29 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         addresses render the page this way, and a refused clone or delete comes back with
         ``box_error`` in its box. ``templates``: the member's template names, read for the Lock box
         drawn open from its address."""
-        # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again.
-        reload = re.search(r"max-age=0|no-cache", request.headers.get("cache-control", "")) is not None
+        # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again
+        # unless the copy on show is under PAGE_DECK_RELOAD old. The app's pull to refresh says so
+        # in its own header (decks.is_pull): read the deck now (PAGE_DECK_PULL_FLOOR aside).
+        reload = is_reload(request.headers)
         try:
-            deck = await decks.page_deck(sub, deck_id, fresh=reload)
+            deck, how = await decks.page_deck_view(sub, deck_id, fresh=reload, pull=is_pull(request.headers))
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         link = state.db.get_link(sub)
         own = bool(link) and owns_deck(deck, link) is True
+        held_at = how.get("held_at")
+        if held_at is not None:  # Archidekt can't be asked: the last read, read-only and dated
+            plan = busy_plan(how["refused"])
+            held = deck_held_html(
+                held_at, plan.title if plan else "Archidekt can't be asked", same_url(request)
+            )
+            own, box = False, ""
+        else:
+            held = (
+                deck_check_html(deck.id, how.get("read_at"), reload=bool(how.get("reload")))
+                if how.get("checking")
+                else ""
+            )
         if box == "delete" and not own:
             box, box_error = "", ""
         stats = deck_stats.compute(deck)
@@ -790,8 +878,25 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
+        notice = held + notice
+        # an apply still running on the deck (a slow save, this tab's or another's): the strip
+        # says so until it ends, then the page loads again (static/deck.js)
+        saving = decks.deck_saving(sub, deck.id) if own else 0
+        if saving:
+            notice = deck_saving_html(deck.id, saving) + notice
         if deck.link_notice:  # the member's link was dropped while reading this deck
             notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
+        being_made = decks.being_made(deck.id, sub)  # the member's new deck whose cards are still going in
+        if being_made:  # with the progress ring, until static/deck.js sees it done and reloads
+            notice = (
+                f"<p class='notice making' role='status' data-made-poll='/decks/{_esc(deck.id)}/made'>"
+                f"{SPINNER} {_esc(being_made)} Changes wait until it is done.</p>" + notice
+            )
+        # a test of this deck still going (the member pressed Run test, or an assistant ran one):
+        # the spinner and how far it is, with the way to its report, until every part is done
+        running = state.reports.running(sub, deck.id) if state.reports is not None else []
+        if running:  # running-live.js keeps it current (running_view)
+            notice = deck_notice_html(running, str(deck.id)) + notice
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
@@ -807,7 +912,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             stats,
             own=own,
             csrf=csrf,
-            writes_enabled=s.writes_enabled,
+            writes_enabled=s.writes_enabled and held_at is None,
             forge_on=bool(s.forge_url),
             owned=owned or None,
             view=view,
@@ -815,6 +920,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
+            making=bool(being_made),
             waiting=waiting_changes(
                 state.db, sub, deck.id, own=own, risk_of=decks.proposal_risk
             ),  # waiting_strip.py
@@ -871,7 +977,17 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             deck_css=True,
             # social.js: the banner's like, bookmark and follow and the comments; export.js: the
             # Export box's Copy buttons
-            extra_scripts=("social.js", "deckstats.js", "printpick.js", "export.js", "deckextras.js"),
+            # undo-box.js: a category delete's Undo in its toast (deck.js) asks in the shared box
+            extra_scripts=(
+                "social.js",
+                "deckstats.js",
+                "printpick.js",
+                "export.js",
+                "deckextras.js",
+                "undo-box.js",
+                # a test still going: its mark kept current (running_view)
+                *(("running-live.js",) if running else ()),
+            ),
             extra_css=deck_extras.CSS,
         )
         return prefs.remember_view(state.db, sub, resp, "deck", view, secure=secure) if remember else resp
@@ -887,8 +1003,41 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return RedirectResponse(f"/forum/thread/{thread_of(deck_id)}", status_code=303)
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         return await deck_page_response(request, sub, sid, deck_id)
+
+    @server.custom_route("/decks/{deck_id}/check", methods=["GET"], include_in_schema=False)
+    async def deck_check(request: Request) -> Response:
+        """What the read made behind a deck page shown as last read found (decks.page_check):
+        ``changed`` (load the page again to see it), ``failed`` (Archidekt could not be asked)."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"signed_in": False}, status_code=401, headers={"Cache-Control": "no-store"})
+        found = await decks.page_check(sub, request.path_params["deck_id"], wait=25.0)
+        return JSONResponse(
+            found or {"changed": False, "failed": False}, headers={"Cache-Control": "no-store"}
+        )
+
+    @server.custom_route("/decks/{deck_id}/busy", methods=["GET"], include_in_schema=False)
+    async def deck_busy(request: Request) -> Response:
+        """Whether an apply on the member's deck is still running, and how many changes it
+        carries (decks.deck_saving): the deck page's Saving strip asks now and then and loads the
+        page again once it ends."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"busy": False, "signed_in": False}, status_code=401)
+        changes = decks.deck_saving(sub, request.path_params["deck_id"])
+        return JSONResponse({"busy": changes > 0, "changes": changes}, headers={"Cache-Control": "no-store"})
+
+    @server.custom_route("/decks/{deck_id}/made", methods=["GET"], include_in_schema=False)
+    async def deck_made(request: Request) -> Response:
+        """Whether a new deck's cards are all in (decks.being_made): the deck page asks now and
+        then while its notice says it is still being made, and reloads once it is."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"made": False, "signed_in": False}, status_code=401)
+        made = decks.being_made(request.path_params["deck_id"], sub) is None
+        return JSONResponse({"made": made}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)
     async def clone_deck(request: Request) -> Response:
@@ -898,7 +1047,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Deck", EXPIRED, sub=sub, sid=sid, status=403)
@@ -912,7 +1061,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 sub, deck_id, data.get("name") or None, folder_id=int(fid) if fid else None
             )
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Clone"):
                 return busy
             # someone else's deck (or no link) goes back to its page with the message; a folder
             # that is not the member's ("not_found" with a folder picked) stays in the box

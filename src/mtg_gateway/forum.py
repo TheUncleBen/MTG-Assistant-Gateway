@@ -5,7 +5,7 @@ its server, and the gateway reads the same page data (``ArchidektClient.site_pag
 is not an API, so a site update can change it; when it does, the gateway says so in plain words
 (FORUM_CHANGED) and a thread still opens from its link or number. A thread itself is a comment
 tree, read through the comment API the deck comments use, and a reply is a comment
-(``propose_comment`` with ``thread_id``).
+(``propose_account_action`` comment_post with ``thread_id``).
 
 Shapes, from Archidekt's forum scripts (read 2026-10-22, not yet seen live):
 - /forum: ``forums.results`` = [{title (the group), children: [{title, description, posts}]}].
@@ -20,8 +20,10 @@ import math
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from . import refusals
+from .archidekt import ArchidektError
 from .decklist import clean_text
-from .decks import DeckError
+from .decks import DeckError, archidekt_wait
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -57,15 +59,49 @@ def _thread_id(value: Any) -> int:
     if "/forum/thread/" in raw:
         raw = raw.rsplit("/forum/thread/", 1)[1].split("?")[0].split("/")[0]
     if not raw.isdigit() or not 0 < int(raw) < 10**12:
-        raise DeckError("invalid", "thread_id must be a forum thread's number or its link")
+        raise DeckError("invalid", "thread_id must be a forum thread's number or its link.")
     return int(raw)
+
+
+def linked(decks: DeckService, sub: str) -> bool:
+    """Whether the member has an Archidekt account linked. The forum is public on Archidekt: its
+    pages and its threads' comments answer an anonymous reader, so a member without a link reads
+    it too (decision C8) and only replying needs the link."""
+    return decks.db.get_link(sub) is not None
+
+
+# A thread that Archidekt answers 404 for: its client's generic words are about a deck (QG-19)
+THREAD_NOT_FOUND = "That thread could not be found. It may have been deleted on Archidekt."
+
+
+def signed_in_only(public_url: str = "") -> str:
+    """A part of the forum Archidekt shows to signed-in readers only, read by a member with no
+    link: what to do and where, never Archidekt's raw "asked for a sign-in" sentence."""
+    return "Archidekt shows this part of the forum to signed-in readers only. " + refusals.not_linked(
+        public_url
+    )
+
+
+async def _anonymous(decks: DeckService, sub: str, fn: Any) -> Any:
+    """``fn()`` as an anonymous reader, inside the member's Archidekt slot (counted against their
+    budget like any other read). Archidekt wanting a signed-in reader is the member's missing
+    link (``not_linked``), said with where to link one."""
+    async with decks.archidekt_slot(sub):
+        try:
+            return await fn()
+        except ArchidektError as exc:
+            if exc.kind == "auth":
+                raise DeckError("not_linked", signed_in_only(decks.settings.public_url)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
 
 async def _page(
     decks: DeckService, sub: str, path: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     try:
-        return await decks._call(sub, lambda _token, *_: decks.client.site_page_data(path, params))
+        if linked(decks, sub):
+            return await decks._call(sub, lambda _token, *_: decks.client.site_page_data(path, params))
+        return await _anonymous(decks, sub, lambda: decks.client.site_page_data(path, params))
     except DeckError as exc:
         if exc.kind == "changed":
             raise DeckError("unavailable", FORUM_CHANGED) from exc
@@ -167,7 +203,7 @@ async def threads(
         # a name of dots would lead the page read out of /forum/ (security review F-03)
         raise DeckError("invalid", "Name the forum group and section (get_forum lists them).")
     if order not in ORDERS:
-        raise DeckError("invalid", f"order must be one of: {', '.join(ORDERS)}")
+        raise DeckError("invalid", f"order must be one of: {', '.join(ORDERS)}.")
     page = max(1, min(int(page or 1), MAX_PAGE))
     params: dict[str, Any] = {"page": page, "orderBy": ORDERS[order]}
     if search.strip():
@@ -218,7 +254,17 @@ async def thread(decks: DeckService, sub: str, thread_id: Any, *, page: int = 1)
 
     tid = _thread_id(thread_id)
     page = max(1, min(int(page or 1), MAX_PAGE))
-    body = await decks._call(sub, lambda token, *_: decks.client.comment_thread(token, tid, page=page))
+    try:
+        if linked(decks, sub):
+            body = await decks._call(
+                sub, lambda token, *_: decks.client.comment_thread(token, tid, page=page)
+            )
+        else:
+            body = await _anonymous(decks, sub, lambda: decks.client.comment_thread(None, tid, page=page))
+    except DeckError as exc:
+        if exc.kind == "not_found":
+            raise DeckError("not_found", THREAD_NOT_FOUND) from exc
+        raise
     kids = body.get("children")
     results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
     links = kids.get("links") if isinstance(kids, dict) else {}

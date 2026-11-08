@@ -70,7 +70,7 @@ async def test_a_slow_apply_answers_applying_with_progress_then_finishes(stack: 
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] and out["state"] == "applying", out
     assert out["progress"]["sent_entries"] == 1 and out["progress"]["of_entries"] == 3, out
-    assert "get_proposal" in out["next_step"] and "Do not apply it again" in out["next_step"]
+    assert "proposal_status" in out["next_step"] and "Do not apply it again" in out["next_step"]
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["state"] == "applying" and got["progress"]["sent_entries"] == 1, got
     # pressing apply again while it runs reports it and sends nothing more
@@ -125,7 +125,7 @@ async def test_the_review_page_shows_progress_and_refreshes_while_applying(stack
     r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applying"), r.headers
     page = await b.http.get(r.headers["location"])
-    assert "Applying. This is a large change" in page.text
+    assert "Applying. Archidekt is updated a step at a time" in page.text
     assert "sent 1 of 3 changes" in page.text
     # the refresh reloads the plain page, so the "Applying" notice does not outlive the apply
     assert f"content='5;url=/proposals/{p['proposal_id']}'" in page.text
@@ -427,7 +427,7 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
         f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The proposal is still pending, so "
         "you can apply it again later."
     ) in page
-    assert "paused after repeated failures" not in page and "new proposal" not in page
+    assert "failed several times in a row" not in page and "new proposal" not in page
 
 
 async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(
@@ -805,7 +805,7 @@ async def test_a_clone_whose_read_back_fails_says_the_copy_was_made(stack: Stack
     [made] = [d for d in set(ark.decks) - before if ark.decks[d]["name"] == "Down copy"]
     assert row["state"] == "failed" and row["result"]["deck_id"] == str(made), row["result"]
     assert row["result"]["detail"] == out["message"], row["result"]
-    assert out["message"].startswith("Archidekt returned HTTP 503"), out
+    assert out["message"].startswith("Archidekt had a problem answering."), out
     assert out["message"].endswith(f" {_copy_made(str(made))}"), out
     assert "no cards were added" not in out["message"]
 
@@ -837,8 +837,8 @@ async def test_a_partly_landed_failure_stores_the_message_its_caller_got(stack: 
     row = await _finished(h, p["proposal_id"])
     assert row["state"] == "failed" and row["result"]["sent_entries"] == 1, row["result"]
     assert "1 of 3 deck row changes had already been sent" in out["message"], out
-    # the reason ends its own sentence before the note ("... HTTP 503. 1 of 3 ...")
-    assert out["message"].startswith("Archidekt returned HTTP 503. 1 of 3 "), out["message"]
+    # the reason ends its own sentence before the note ("... answering. 1 of 3 ...")
+    assert out["message"].startswith("Archidekt had a problem answering. 1 of 3 "), out["message"]
     assert row["result"]["detail"] == out["message"], (row["result"], out)
 
 

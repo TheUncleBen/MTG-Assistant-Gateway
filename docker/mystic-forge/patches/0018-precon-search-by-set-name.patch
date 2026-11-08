@@ -1,0 +1,195 @@
+Subject: precon_search finds a precon by its set's name and names the set
+
+Found in the assistant tool review of the live gateway (2026-10-28): set
+names were not searchable ("Reality Fracture" found nothing while "FRC"
+worked) and the results did not say the set. precon_search now reads
+MTGJSON's SetList.json (the service DeckList.json comes from, no new host),
+kept a day, and matches the query against the deck's name, the set code and
+the set's name, as typed or word by word in any order ("warhammer 40000"
+finds the Warhammer 40,000 Commander decks). Each result names its set.
+When the set list can't be read, the search works as before on names and
+codes.
+
+tests/test_precon_search_set_names.py; tests/test_research_wording.py's
+precon test gets the set list from a fake too.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 has none of these. Needs
+patches 0001-0017 applied first.
+diff --git a/server.py b/server.py
+index e692600..0ab5175 100644
+--- a/server.py
++++ b/server.py
+@@ -3765,6 +3765,31 @@ async def _get_deck_list() -> list[dict]:
+     return _deck_list_cache["data"]
+ 
+ 
++_set_names_cache: dict[str, Any] = {"data": None, "expires_at": 0.0}
++
++
++async def _get_set_names() -> dict[str, str]:
++    """Set code -> set name, from MTGJSON's SetList (the service the deck list
++    comes from), kept a day. Empty when it can't be read: precon_search then
++    matches deck names and codes only, as before."""
++    if _set_names_cache["data"] is not None and time.time() < _set_names_cache["expires_at"]:
++        return _set_names_cache["data"]
++    try:
++        data = await _mtgjson_get("/SetList.json")
++    except Exception:
++        return {}
++    names = {str(s.get("code") or "").upper(): str(s.get("name") or "")
++             for s in data.get("data", []) if isinstance(s, dict) and s.get("code")}
++    _set_names_cache["data"] = names
++    _set_names_cache["expires_at"] = time.time() + 86400
++    return names
++
++
++def _search_words(text: str) -> list[str]:
++    """Lower-case words without punctuation: "Warhammer 40,000" -> warhammer, 40000."""
++    return re.findall(r"[a-z0-9]+", re.sub(r"(?<=\d)[,.](?=\d)", "", text.lower()))
++
++
+ BASIC_LANDS = {
+     "Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes",
+     "Snow-Covered Plains", "Snow-Covered Island", "Snow-Covered Swamp",
+@@ -3803,7 +3828,7 @@ async def _canonical_names(names: list[str]) -> Optional[tuple[dict[str, str], s
+ 
+ class PreconSearchInput(BaseModel):
+     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+-    query: str = Field(..., description="Search term for deck name or set code (e.g., 'Forces of the Imperium' or 'MKC').", min_length=1)
++    query: str = Field(..., description="Search term for the deck's name, its set's name or set code (e.g., 'Forces of the Imperium', 'Warhammer 40,000' or 'MKC').", min_length=1)
+     commander_only: bool = Field(default=True, description="If true, only show Commander precons.")
+     limit: int = Field(default=15, ge=1, le=50)
+ 
+@@ -3818,7 +3843,7 @@ class PreconDeckInput(BaseModel):
+ 
+ @mcp.tool(name="precon_search")
+ async def precon_search(params: PreconSearchInput) -> str:
+-    """Search for preconstructed decks by name or set code. Use this INSTEAD of
++    """Search for preconstructed decks by name, set name or set code. Use this INSTEAD of
+     web search when looking up precon decklists — it has the complete database.
+ 
+     Searches MTGJSON's database of 2700+ official precon decks. Returns deck names,
+@@ -3829,18 +3854,25 @@ async def precon_search(params: PreconSearchInput) -> str:
+     except Exception as e:
+         return _mtgjson_error(e)
+ 
++    set_names = await _get_set_names()
+     query_lower = params.query.lower()
++    wanted = _search_words(params.query)
+     matches: list[dict] = []
+ 
+     for deck in decks:
+         name = deck.get("name", "")
+         code = deck.get("code", "")
+         deck_type = deck.get("type", "")
++        set_name = set_names.get(str(code).upper(), "")
+ 
+         if params.commander_only and "Commander" not in deck_type:
+             continue
+ 
+-        if query_lower in name.lower() or query_lower in code.lower():
++        # the deck's name, its set code or its set's name, as typed or word by word
++        words = set(_search_words(f"{name} {code} {set_name}"))
++        if (query_lower in name.lower() or query_lower in code.lower()
++                or (set_name and query_lower in set_name.lower())
++                or (wanted and all(w in words for w in wanted))):
+             matches.append(deck)
+ 
+     if not matches:
+@@ -3858,7 +3890,9 @@ async def precon_search(params: PreconSearchInput) -> str:
+         file_name = deck.get("fileName", "?")
+         released = str(deck.get("releaseDate") or "")[:4]
+         when = f", {released}" if released.isdigit() else ""
+-        parts.append(f"- **{name}** ({code}{when}) — {deck_type}")
++        set_name = set_names.get(str(code).upper(), "")
++        in_set = f", set: {set_name}" if set_name else ""
++        parts.append(f"- **{name}** ({code}{when}) — {deck_type}{in_set}")
+         parts.append(f"  fileName: `{file_name}`")
+ 
+     return "\n".join(parts)
+diff --git a/tests/test_precon_search_set_names.py b/tests/test_precon_search_set_names.py
+new file mode 100644
+index 0000000..5513245
+--- /dev/null
++++ b/tests/test_precon_search_set_names.py
+@@ -0,0 +1,65 @@
++"""precon_search finds a precon by its set's name as well as by the deck's name
++and the set code, and says the set's name: "Reality Fracture" found nothing
++while "FRC" worked (assistant tool review, 2026-10-28). The set names come from
++MTGJSON's SetList, the same service the deck list comes from."""
++import pytest
++
++import server
++
++DECKS = [
++    {"name": "Multiverse Reforged", "code": "FRC", "type": "Commander Deck",
++     "fileName": "MultiverseReforged_FRC", "releaseDate": "2026-08-01"},
++    {"name": "Ancient Grudge", "code": "FRC", "type": "Commander Deck",
++     "fileName": "AncientGrudge_FRC", "releaseDate": "2026-08-01"},
++    {"name": "Forces of the Imperium", "code": "40K", "type": "Commander Deck",
++     "fileName": "ForcesOfTheImperium_40K", "releaseDate": "2022-10-07"},
++]
++
++
++@pytest.fixture
++def mtgjson(monkeypatch):
++    calls = []
++
++    async def get(path):
++        calls.append(path)
++        if path == "/DeckList.json":
++            return {"data": DECKS}
++        assert path == "/SetList.json"
++        return {"data": [{"code": "FRC", "name": "Reality Fracture Commander"},
++                         {"code": "40K", "name": "Warhammer 40,000 Commander"}]}
++
++    monkeypatch.setattr(server, "_mtgjson_get", get)
++    monkeypatch.setitem(server._deck_list_cache, "data", None)
++    monkeypatch.setitem(server._set_names_cache, "data", None)
++    return calls
++
++
++async def test_a_set_name_finds_its_precons_and_each_result_names_its_set(mtgjson):
++    out = await server.precon_search(server.PreconSearchInput(query="Reality Fracture"))
++    assert "(2 results)" in out
++    assert "**Multiverse Reforged** (FRC, 2026)" in out and "**Ancient Grudge** (FRC, 2026)" in out
++    assert "set: Reality Fracture Commander" in out
++    assert "Forces of the Imperium" not in out
++
++
++async def test_words_in_any_order_and_punctuation_still_match(mtgjson):
++    out = await server.precon_search(server.PreconSearchInput(query="warhammer 40000"))
++    assert "Forces of the Imperium" in out, out
++
++
++async def test_the_code_and_deck_name_still_match_and_set_names_are_read_once(mtgjson):
++    assert "Multiverse Reforged" in await server.precon_search(server.PreconSearchInput(query="frc"))
++    assert "Forces of the Imperium" in await server.precon_search(
++        server.PreconSearchInput(query="Forces of the"))
++    assert mtgjson.count("/SetList.json") == 1
++
++
++async def test_without_set_names_the_search_still_works(monkeypatch, mtgjson):
++    async def down(path):
++        if path == "/SetList.json":
++            raise RuntimeError("down")
++        return {"data": DECKS}
++
++    monkeypatch.setattr(server, "_mtgjson_get", down)
++    out = await server.precon_search(server.PreconSearchInput(query="FRC"))
++    assert "(2 results)" in out and "set:" not in out
+diff --git a/tests/test_research_wording.py b/tests/test_research_wording.py
+index 9173796..3bb0f8b 100644
+--- a/tests/test_research_wording.py
++++ b/tests/test_research_wording.py
+@@ -73,7 +73,10 @@ async def test_precon_search_one_result_and_year(monkeypatch):
+     async def fake_list():
+         return [{"name": "Multiverse Reforged", "code": "FRC", "type": "Commander Deck",
+                  "fileName": "MultiverseReforged_FRC", "releaseDate": "2026-08-01"}]
++    async def no_set_names():
++        return {}
+     monkeypatch.setattr(server, "_get_deck_list", fake_list)
++    monkeypatch.setattr(server, "_get_set_names", no_set_names)
+     out = await server.precon_search(server.PreconSearchInput(query="FRC"))
+     assert "(1 result)" in out
+     assert "(FRC, 2026)" in out

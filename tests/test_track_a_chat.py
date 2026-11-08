@@ -35,7 +35,9 @@ def _add(name: str) -> list[dict]:
 
 
 async def _propose(h, token: str, name: str) -> dict:
-    res = await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": _add(name)})
+    res = await call(
+        h, token, "propose_deck_changes", {"deck_id": "42", "changes": _add(name), "separate": True}
+    )
     assert structured(res)["ok"], structured(res)
     return res
 
@@ -202,7 +204,10 @@ def test_the_proposal_card_uses_the_shared_card_template() -> None:
     assert "/*@BASE@*/" not in html and "/*@BRIDGE@*/" not in html
     assert "var Bridge" in html or "Bridge =" in html
     assert "Use the review page in your browser." in html
-    assert html.index("button:disabled{opacity:.55") < html.index("border:1px dashed currentColor")
+    # the card's own rule for a locked button (full strength, a waiting cursor: audit D25) comes
+    # after the shared base's, and no dashed outline is left
+    assert html.index("button:disabled{opacity:.55") < html.index("button:disabled{opacity:1;cursor:wait}")
+    assert "border:1px dashed currentColor" not in html
 
 
 def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -> None:
@@ -299,3 +304,65 @@ def test_a_refusal_without_a_stored_reason_still_reads_as_a_sentence() -> None:
     msg = str(needs_look_error(None))
     assert msg.startswith("Not applied: The deck changed on Archidekt since this was made. Nothing")
     assert "  " not in msg
+
+
+# -- 0.7.46 full review F10: the words the waiting card and a card's Reject send -------------------
+
+
+async def test_the_waiting_changes_reach_the_assistant_as_text_without_app_ids(stack: Stack) -> None:
+    """show_waiting_changes' text was its structured content as JSON, with each app's client id
+    in "created_by" ("app: t (cda3fd9e-…)"), and the card drew "1 -> 2" where its rows draw
+    "1 → 2"."""
+    h = stack.h
+    token = await linked_user(stack)
+    other = await mcp_token(h)
+    mine = structured(await _propose(h, token, "Opt"))
+    amended = structured(
+        await call(
+            h,
+            token,
+            "amend_proposal",
+            {
+                "proposal_id": mine["proposal_id"],
+                "version": 1,
+                "changes": [*_add("Opt"), {"action": "set_quantity", "card_name": "Sol Ring", "quantity": 2}],
+            },
+        )
+    )
+    assert amended["ok"] and amended["version"] == 2, amended
+    theirs = structured(await _propose(h, other, "Swamp"))
+    res = await call(h, token, "show_waiting_changes", {"deck_id": "42"})
+    sc, text = structured(res), res["content"][0]["text"]
+    assert not text.lstrip().startswith("{"), text
+    ids = {x["created_by_client"] for x in sc["waiting"]}
+    assert len(ids) == 2 and not any(i in text for i in ids), text
+    assert text.startswith("2 changes wait for the user's approval on Sample Commander Deck (1 yours)"), text
+    for x, p in zip(sc["waiting"], (mine, theirs), strict=True):
+        assert f"#{x['board_no']}" in text and p["proposal_id"] in text and x["review_url"] in text
+    own = sc["waiting"][0]
+    assert own["what_changed"] == "now 1 → 2 Sol Ring", own
+    assert "1 → 2 Sol Ring" in own["summary"] and "->" not in own["summary"], own
+    assert "now 1 → 2 Sol Ring" in text and "->" not in text, text
+    assert "+1 Swamp" in text
+
+
+async def test_a_reject_pressed_on_the_card_answers_closed_at_not_applied_at(stack: Stack) -> None:
+    from mtg_gateway.approve import APPROVAL_META_KEY
+
+    h = stack.h
+    token = await linked_user(stack)
+    res = await _propose(h, token, "Opt")
+    out = structured(
+        await call(
+            h,
+            token,
+            "confirm_proposal",
+            {
+                "proposal_id": structured(res)["proposal_id"],
+                "approval": res["_meta"][APPROVAL_META_KEY],
+                "decision": "reject",
+            },
+        )
+    )
+    assert out["ok"] and out["state"] == "rejected", out
+    assert out["applied_at"] is None and out["closed_at"], out

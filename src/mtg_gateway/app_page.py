@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
-from .pages import _safe_next, browser_session
+from .pages import browser_session, login_redirect
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -144,15 +144,10 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
     def signed_in(request: Request) -> tuple[str | None, str | None]:
         return browser_session(state, request)
 
-    def to_login(next_path: str) -> Response:
-        return RedirectResponse(f"/login?next={_safe_next(next_path)}", status_code=302)
-
     @server.custom_route("/app", methods=["GET"], include_in_schema=False)
     async def app(request: Request) -> Response:
-        """The Android app's page is the setup hub's Android section (setup_hub.py)."""
-        sub, _sid = signed_in(request)
-        if not sub:
-            return to_login("/app")
+        """The Android app's page is the setup hub's Android section (setup_hub.py), which reads
+        signed out too; the download itself needs a sign-in."""
         return RedirectResponse("/install?for=android", status_code=302)
 
     @server.custom_route(LATEST_PATH, methods=["GET"], include_in_schema=False)
@@ -188,7 +183,7 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
     async def apk(request: Request) -> Response:
         sub, _sid = signed_in(request)
         if not sub:
-            return to_login("/app")
+            return login_redirect("/app")  # a download: the sign-in comes back to its page
         base = app_dir()
         if base is None:
             return Response("app not shipped on this gateway", status_code=404, media_type="text/plain")

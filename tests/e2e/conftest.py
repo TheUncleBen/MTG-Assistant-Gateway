@@ -186,6 +186,8 @@ async def authentik_sign_in(page: Page, username: str, password: str) -> None:
         field = page.locator(f"input[name={name}]")
         await field.wait_for(state="visible", timeout=60_000)
         await page.wait_for_load_state("networkidle")
+        # fixed wait: Authentik's flow web component can re-render once after load, with no event
+        # the page exposes; the fill loop below then checks the value stuck
         await page.wait_for_timeout(500)
         for _ in range(5):
             await field.fill(value)
@@ -193,7 +195,7 @@ async def authentik_sign_in(page: Page, username: str, password: str) -> None:
             # posts an empty field ("This field is required"). Only press once the value stuck.
             if await field.input_value() == value:
                 break
-            await page.wait_for_timeout(250)
+            await page.wait_for_timeout(250)  # fixed wait: poll interval of a loop with a deadline
         await field.press("Enter")
 
     async def password_outcome(answers_before: int) -> str:
@@ -217,7 +219,7 @@ async def authentik_sign_in(page: Page, username: str, password: str) -> None:
                     continue
                 if invalid == "true":
                     return "rejected"
-            await page.wait_for_timeout(250)
+            await page.wait_for_timeout(250)  # fixed wait: poll interval of a loop with a deadline
         return "timeout"
 
     await stage("uidField", username)

@@ -15,18 +15,23 @@ from __future__ import annotations
 import calendar
 import re
 import time
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
-from .decks import actor_label
+from .decks import actor_label, without_tabs_note
+from .reports_page import source_label_html
 from .theme import esc as _esc
 from .theme import icon, time_html
 
 PAGE = ui.PER_PAGE
 MAX_OFFSET = 2000
-# The chips. "changes" (a link from before proposals moved to Proposals) reads as Everything.
-TYPES = (("all", "Everything"), ("snapshots", "Snapshots"), ("restores", "Restores"), ("reports", "Reports"))
+# The chips (owner decision C7: History is the deck's timeline): the changes applied to a deck
+# (restores among them), its snapshots and its tests. A test's own home is its report page.
+TYPES = (("all", "Everything"), ("changes", "Changes"), ("snapshots", "Snapshots"), ("tests", "Tests"))
+# the chips' names before C7, still in old links
+OLD_TYPES = {"restores": "changes", "reports": "tests"}
 # The "When" presets: UTC calendar days (every time on the site is UTC), each a window that
 # starts at the beginning of a day and runs to now. The value is what the query string carries.
 WHENS = (
@@ -40,16 +45,34 @@ WHENS = (
 WHEN_DAYS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
 GROUPS = (("day", "Group by day"), ("deck", "Group by deck"))
 DEFAULTS = {"type": "all", "group": "day"}
-PAGE_SUB_TEXT = "Snapshots of your decks, restores and deck reports. Changes your assistants proposed are on"
+# plain words: the Proposals tab is in the switch right above (C-FINDINGS F13)
+PAGE_SUB_TEXT = (
+    "Your decks' timeline: the changes applied to them and to your Archidekt lists, their snapshots and "
+    "their tests. Changes still waiting for you are under Proposals."
+)
+# a snapshot's Details: one explanation, then its buttons in one row
+SNAPSHOT_WORDS = (
+    "Restore makes a proposal that puts the deck back to this snapshot; you review and confirm it "
+    "before anything changes on Archidekt. Test this version plays the deck as this snapshot recorded "
+    "it; the test is filed under the deck, and nothing changes on Archidekt."
+)
+GONE_DECK_WORDS = (
+    "This deck is no longer on your Archidekt account (deleted there?), so the snapshot cannot be "
+    "restored onto it. Make a new deck from this proposes a new deck with the snapshot's name, format, "
+    "cards and categories; you review and apply it before anything is made on Archidekt. Test this "
+    "version plays the deck as this snapshot recorded it; nothing changes on Archidekt."
+)
 NO_WHO = "Snapshots do not record who made them"
 NOTHING_YET = (
-    "Nothing yet. The snapshots taken before a change is applied, the restores and deck reports appear here."
+    "Nothing yet. The changes applied to your decks, the snapshots taken before them and your tests appear "
+    "here."
 )
 
 
 def read_query(params: Any) -> dict[str, Any]:
     """The page's filters from the query string, each limited to what the page offers."""
     kind = (params.get("type") or "all").strip().lower()
+    kind = OLD_TYPES.get(kind, kind)
     when = (params.get("when") or "").strip().lower()
     group = (params.get("group") or "day").strip().lower()
     opened = (params.get("open") or "").strip()
@@ -126,6 +149,116 @@ def _taken(text: str) -> int | None:
         return None
 
 
+CHANGE_WORDS = {
+    "create_deck": "Made the deck",
+    "details": "Changed the deck's details",
+    "categories": "Changed the deck's categories",
+    "lists": "Changed your Archidekt lists",
+}
+
+
+def _change_event(p: dict[str, Any]) -> dict[str, Any]:
+    """A change applied to a deck (not a restore): what it did, from its own summary. A sitting
+    on the deck page (``session``: its edits, oldest first, sharing one snapshot) is one entry
+    listing every edit."""
+    summary = without_tabs_note(str(p.get("summary") or "")).strip()
+    lead = CHANGE_WORDS.get(str(p.get("kind") or ""), "Applied a change")
+    session = p.get("session") or []
+    diff = without_tabs_note(str(p.get("diff_text") or ""))
+    if len(session) > 1:
+        lines = [
+            ln
+            for e in session
+            for ln in without_tabs_note(str(e.get("diff_text") or "")).splitlines()
+            if ln.strip()
+        ]
+        summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
+        lead = f"{len(session)} edits on the deck page"
+        diff = "\n".join(lines)
+    # the line is words only: the review page is in the ⋮ (``review``) and in the Details, never
+    # a capsule that wraps onto a line of its own on a phone (review 2, L9)
+    line = _esc(f"{lead}: {summary}" if summary else lead)
+    details = (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "") + str(
+        p.get("before_html") or ""
+    )  # a lists change: the list as it was (pages._lists_before)
+    return {
+        "key": f"p-{p['id']}",
+        "panel_actions": [ui.button_link("Open the review page", f"/proposals/{p['id']}")],
+        "ts": int(p.get("applied_at") or p.get("created_at") or 0),
+        "kind": "change",
+        "deck_id": p.get("deck_id"),
+        "deck_name": p.get("deck_name") or p.get("deck_id"),
+        "line": line,
+        "review": f"/proposals/{p['id']}",
+        "app": _app(p.get("created_by")),
+        "client": _client(p.get("created_by")),
+        "who": True,
+        "action": "",
+        "details": details,
+    }
+
+
+def result_words(r: dict[str, Any]) -> list[str]:
+    """A test's result in a few words for its History row (owner decision C7): when the commander
+    came down, the lethal turn, and Forge's win rate once there are enough games for it to mean
+    something. [] when the test has no result yet."""
+    h = r.get("headline") or {}
+    out = []
+    turn = h.get("commander_turn")
+    if isinstance(turn, (int, float)):
+        out.append(f"Commander turn {turn:g}")
+    kill = h.get("kill_median_turn")
+    if isinstance(kill, (int, float)):
+        out.append(f"{'lethal' if out else 'Lethal'} ({h.get('kill_damage') or 40} damage) by turn {kill:g}")
+    win = h.get("win") or {}
+    if win and win.get("enough", True) and isinstance(win.get("rate"), (int, float)):
+        out.append(f"Forge won {round(100 * float(win['rate']))}% of {int(win.get('games') or 0)} games")
+    elif win:
+        out.append(f"{int(win.get('games') or 0)} Forge games so far")
+    return out
+
+
+def _binder_copy_event(x: dict[str, Any], csrf_input: str) -> dict[str, Any]:
+    """The copy of the Binder kept before it was cleared (collection_bulk.clear): Restore to my
+    binder (a background job on the Binder page that adds every entry back) and its CSV. Not a
+    deck: no Test, no deck restore."""
+    sid = _esc(x["snapshot_id"])
+    count = x.get("card_count")
+    line = f"{count:,} cards" if isinstance(count, int) else "Your whole binder"
+    line += " as your binder stood just before it was cleared"
+    restore_form = (
+        "<form method='post' action='/collection/restore' class='hy-restore'>"
+        + csrf_input
+        + f"<input type='hidden' name='snapshot_id' value='{sid}'>"
+        + "<button type='submit' class='btn-plain' data-busy-label='Starting…'>Restore to my binder</button>"
+        "</form>"
+    )
+    csv_link = ui.button_link("Download CSV", f"/collection/snapshots/{sid}.csv", icon_name="download")
+    words = (
+        "<p>Restore to my binder adds every card in this copy back to your Archidekt binder, with its "
+        "finish, condition, language, tags and price paid. It runs on the Binder page, where you can "
+        "follow it. Cards already in your binder are added to, not replaced. The CSV is the same "
+        "list, ready for Archidekt’s own import.</p>"
+    )
+    review = f"/proposals/{x['proposal_id']}" if x.get("proposal_id") else None
+    link = "<p>" + ui.cap_link("The clear it was kept before", review) + "</p>" if review else ""
+    return {
+        "key": f"s-{x['snapshot_id']}",
+        "ts": int(x.get("taken_at") or 0),
+        "kind": "snapshot",
+        "deck_id": BINDER_ID,
+        "deck_name": x.get("deck_name") or "Your binder",
+        "line": _esc(line),
+        "review": review,
+        "backup": None,
+        "app": None,
+        "who": False,
+        "action": restore_form,
+        "details": link + words,
+        "panel_actions": [restore_form, csv_link],
+    }
+
+
 def build_events(
     restores: list[dict[str, Any]],
     snapshots: list[dict[str, Any]],
@@ -138,17 +271,14 @@ def build_events(
     under the deck's name (markup), who made it, the time, its quick action and its Details."""
     events: list[dict[str, Any]] = []
     for p in restores:
+        if p.get("kind") != "restore":
+            events.append(_change_event(p))
+            continue
         taken = _taken(p.get("taken") or "")
         when = f"Put back as it stood on {time_html(taken)}" if taken else "Put back as a snapshot had it"
-        line = f"{when} · <a href='/proposals/{_esc(p['id'])}'>proposal</a>"
+        line = when
         diff = str(p.get("diff_text") or "")
-        details = (
-            f"<p>{when}.</p>"
-            + (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
-            + "<div class='ui-actions'>"
-            + ui.button_link("Open the review page", f"/proposals/{p['id']}")
-            + "</div>"
-        )
+        details = f"<p>{when}.</p>" + (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
         events.append(
             {
                 "key": f"p-{p['id']}",
@@ -157,14 +287,19 @@ def build_events(
                 "deck_id": p.get("deck_id"),
                 "deck_name": p.get("deck_name") or p.get("deck_id"),
                 "line": line,
+                "review": f"/proposals/{p['id']}",
                 "app": _app(p.get("created_by")),
                 "client": _client(p.get("created_by")),
                 "who": True,
                 "action": "",
                 "details": details,
+                "panel_actions": [ui.button_link("Open the review page", f"/proposals/{p['id']}")],
             }
         )
     for x in snapshots:
+        if str(x.get("deck_id") or "") == BINDER_ID:
+            events.append(_binder_copy_event(x, csrf_input))
+            continue
         # deck_gone / backup_gone: what the member's Archidekt deck list says (decks.mark_gone)
         bits: list[str] = []
         count = x.get("card_count")
@@ -181,34 +316,36 @@ def build_events(
             elif x.get("proposal_id"):
                 summary += " just before a change was applied"
             bits.append(_esc(summary))
-        if x.get("proposal_id"):
-            bits.append(f"<a href='/proposals/{_esc(x['proposal_id'])}'>the change</a>")
+        # the change it was taken before and its backup copy are in the ⋮ (``review``,
+        # ``backup``) and in the Details, not capsules in the line (review 2, L9)
         if x.get("backup_gone"):
             bits.append("its backup copy is no longer on Archidekt")
-        elif x.get("backup_url"):
-            bits.append(
-                f"<a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
-                "backup copy on Archidekt</a>"
-            )
         restore_form = (
             "<form method='post' action='/history/restore' class='hy-restore'>"
             + csrf_input
             + f"<input type='hidden' name='snapshot_id' value='{_esc(x['snapshot_id'])}'>"
             + "<button type='submit' class='btn-plain'>Restore (review first)</button></form>"
         )
+        test_form = (
+            f"<form method='post' action='/history/snapshots/{_esc(x['snapshot_id'])}/test' class='hy-test'>"
+            + csrf_input
+            + "<button type='submit' class='btn-plain' data-busy-label='Testing…'>Test this version</button>"
+            "</form>"
+        )
         if x.get("deck_gone"):
             # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
-            restore = (
-                "<p class='muted'>This deck is no longer on your Archidekt account (deleted there?), so "
-                "the snapshot cannot be restored onto it. The snapshot stays here.</p>"
+            # The way back is a new deck made from the snapshot, reviewed like any new deck.
+            new_deck_form = (
+                f"<form method='post' action='/history/snapshots/{_esc(x['snapshot_id'])}/new-deck' "
+                "class='hy-new-deck'>"
+                + csrf_input
+                + "<button type='submit' class='btn-plain' data-busy-label='Proposing…'>"
+                "Make a new deck from this</button></form>"
             )
-            action = ""
+            restore = f"<p>{_esc(GONE_DECK_WORDS)}</p>"
+            action = new_deck_form
         else:
-            restore = (
-                "<p>Restoring makes a proposal that puts the deck back to this snapshot; you review and "
-                "confirm it before anything changes on Archidekt.</p>"
-                f"<div class='ui-actions'>{restore_form}</div>"
-            )
+            restore = f"<p>{_esc(SNAPSHOT_WORDS)}</p>"
             action = restore_form
         backup = ""
         if x.get("backup_gone"):
@@ -218,11 +355,16 @@ def build_events(
             )
         elif x.get("backup_url"):
             backup = (
-                f"<p><a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
-                "Archidekt backup copy</a></p>"
+                "<p>"
+                + ui.cap_link(
+                    "Backup copy on Archidekt",
+                    str(x["backup_url"]),
+                    attrs="target='_blank' rel='noopener noreferrer'",
+                )
+                + "</p>"
             )
         link = (
-            f"<p>See <a href='/proposals/{_esc(x['proposal_id'])}'>the change it was taken before</a>.</p>"
+            "<p>" + ui.cap_link("The change it was taken before", f"/proposals/{x['proposal_id']}") + "</p>"
             if x.get("proposal_id")
             else ""
         )
@@ -233,11 +375,14 @@ def build_events(
                 "kind": "snapshot",
                 "deck_id": x.get("deck_id"),
                 "deck_name": x.get("deck_name") or x.get("deck_id"),
-                "line": " · ".join(bits),
+                "line": ui.facts(bits, html=True),
+                "review": f"/proposals/{x['proposal_id']}" if x.get("proposal_id") else None,
+                "backup": str(x["backup_url"]) if x.get("backup_url") and not x.get("backup_gone") else None,
                 "app": None,
                 "who": False,
-                "action": action,
+                "action": action + test_form,  # out of sight in the row; the ⋮ sends them
                 "details": link + backup + restore,
+                "panel_actions": [action, test_form],
             }
         )
     for r in reports:
@@ -249,14 +394,25 @@ def build_events(
             bits.append(f"{m['land_count']} lands")
         if m.get("average_mana_value") is not None:
             bits.append(f"average mana value {float(m['average_mana_value']):.1f}")
-        if m.get("price_total") is not None:
+        if m.get("price_total"):  # 0: no card had a price, not a free deck
             bits.append(f"${float(m['price_total']):,.0f}")
         # the bracket set on the deck is THE bracket; the estimate only when none is set
         if r.get("bracket_set"):
             bits.append(f"bracket {r['bracket_set']}")
         elif r.get("bracket_estimate"):
             bits.append(f"bracket about {r['bracket_estimate']}")
-        sim = "with a goldfish simulation" if r.get("has_goldfish") else "statistics only"
+        results = result_words(r)
+        sim = (
+            "the solo test is running"
+            if r.get("research") == "running"
+            else " · ".join(results)
+            if results
+            else "with a solo test"
+            if r.get("has_goldfish")
+            else "statistics only"
+        )
+        if results:  # the result says more than the deck's make-up
+            bits = []
         client = r.get("created_by_client")
         app = (
             _app(actor_label(client, (client_names or {}).get(client) if client else None))
@@ -274,23 +430,32 @@ def build_events(
                 "deck_name": r.get("deck_name") or r.get("deck_id"),
                 # the report's overall status (reports.report_status), shown unless complete
                 "state": r["status"] if r.get("status") and r.get("status") != "complete" else "",
-                "line": _esc((", ".join(bits) + f" · {sim}") if bits else sim),
+                "line": ui.facts(
+                    [
+                        source_label_html(r),
+                        *(_esc(x) for x in ((", ".join(bits) + f" · {sim}") if bits else sim).split(" · ")),
+                    ],
+                    html=True,
+                ),
                 "app": app,
                 "client": client,
                 "who": True,
                 "action": open_report,
-                "details": f"<div class='ui-actions'>{open_report}</div>",
+                "href": href,  # its one home: the row opens the report, with no Details here
+                "details": "",
             }
         )
     events.sort(key=lambda e: e["ts"], reverse=True)
     return events
 
 
-# Type labels (status label shape): Snapshot grey, Restore green, Report blue; a report's status beside it
+# Type labels (status label shape): Change and Restore green, Snapshot grey, Test blue; a test's status
+# beside it
 KIND_LABELS = {
+    "change": ("Change", "green", "check"),
     "snapshot": ("Snapshot", "grey", "bookmark"),
     "restore": ("Restore", "green", "undo"),
-    "report": ("Report", "blue", "report"),
+    "report": ("Test", "blue", "report"),
 }
 REPORT_STATES = {
     "running": ("Running", "orange", "spinner"),
@@ -319,37 +484,51 @@ def _day_label(day: str, today: str, yesterday: str) -> str:
     return time.strftime("%A %d %B %Y", t).replace(" 0", " ")
 
 
-COLS = ("8rem minmax(0,1fr) 4rem 6.5rem 17rem", "minmax(0,1fr) auto", "minmax(0,1fr) 44px")
+# one row per entry at every width (ui-rows): the deck's name, what the entry is on one line and
+# its facts under it, then the main action and the ⋮
+COLS = ("minmax(0,1fr) auto",) * 3
+
+
+def deck_href(deck_id: Any) -> str:
+    """Where an entry's deck name leads: the deck, My lists for a change to the member's lists, the
+    Binder for a change to it (a clear, a copy kept before one)."""
+    if str(deck_id) == BINDER_ID:
+        return "/collection"
+    return "/lists" if str(deck_id) == LISTS_ID else f"/decks/{_esc(str(deck_id))}"
 
 
 def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
+    """One entry: the deck's name opens the entry (its Details, or a test's report), the line
+    under it says what it is, the facts line its type, who and when; then Details (or Open
+    report) as a capsule and the ⋮. The deck's own page is in the ⋮ and in the Details (F14).
+    A snapshot's Restore (or Make a new deck from this) is in the ⋮ and in its Details; the form
+    stays in the row, out of sight, for the menu to send."""
     name = _esc(e["deck_name"])
-    deck = (
-        f"<a class='t' href='/decks/{_esc(e['deck_id'])}'>{name}</a>"
-        if e.get("deck_id")
-        else f"<span class='t'>{name}</span>"
-    )
+    href = e.get("href") or "/history" + query_string(query, open=e["key"])
+    word = "Open report" if e.get("href") else "Details"
     who = (
-        _chip(e)
-        if e["who"]
-        else f"<span class='ui-when' title='{_esc(NO_WHO)}'>—"
-        f"<span class='sr-only'>{_esc(NO_WHO)}</span></span>"
+        _chip(e) if e["who"] else f"<span class='ui-when'><span class='sr-only'>{_esc(NO_WHO)}</span></span>"
     )
     when = ui.when(e["ts"], now=now)
-    details = "/history" + query_string(query, open=e["key"])
-    acts = e.get("action") or ""
-    if e["kind"] != "report":
-        acts += f"<a class='btn btn-plain' href='{_esc(details)}'>Details</a>"
-    chev_href = details
-    chev_text = "Details"
     cls = "tr" + (" open" if query.get("open") == e["key"] else "")
+    deck = (
+        f" data-deck='{_esc(e['deck_id'])}' data-deck-href='{deck_href(e['deck_id'])}'"
+        if e.get("deck_id")
+        else ""
+    )
+    label = f"{KIND_LABELS[e['kind']][0]}: {e['deck_name']}"
+    # the ⋮ (static/menus.js) offers the review page and the backup copy from these
+    links = (f" data-review='{_esc(e['review'])}'" if e.get("review") else "") + (
+        f" data-backup='{_esc(e['backup'])}'" if e.get("backup") else ""
+    )
+    acts = ui.row_actions(
+        ui.row_open(href, word), ui.row_menu(href, label), hidden_html=e.get("action") or ""
+    )
     return (
-        f"<div class='{cls}'><span class='md-hide'>{_type_html(e)}</span>"
-        f"<span class='title'>{deck}<span class='deck'>{e['line']}</span>"
-        f"<span class='sub'>{_type_html(e)}{_chip(e) if e['who'] else ''}{when}</span></span>"
-        f"<span class='md-hide'>{who}</span><span class='md-hide'>{when}</span>"
-        f"<span class='act'><span class='sm-hide acts'>{acts}</span>"
-        f"<a class='sm-only chev' href='{_esc(chev_href)}' aria-label='{chev_text}'>›</a></span></div>"
+        f"<div class='{cls}'{deck}{links}>"
+        f"<span class='title'><a class='t' href='{_esc(href)}'>{name}</a>"
+        f"<span class='deck'>{e['line']}</span>"
+        f"<span class='sub'>{_type_html(e)}{who}{when}</span></span>{acts}</div>"
     )
 
 
@@ -366,19 +545,7 @@ def events_html(
     newest entry and each deck's rows newest first."""
     query = query or {}
     now = int(time.time()) if now is None else now
-    sort = f"<span class='hy-sort'>When {icon('sort')}</span>"
-    out = [
-        ui.table_open(*COLS, cls="hy-table", label="History"),
-        ui.table_header(
-            [
-                ui.Column("Type", "md-hide"),
-                ui.Column("Deck and what"),
-                ui.Column("By", "md-hide"),
-                ui.Column("When", "md-hide", html=sort),
-                ui.Column(""),
-            ]
-        ),
-    ]
+    out = [ui.table_open(*COLS, cls="hy-table ui-rows", label="History")]
     if group == "deck":
         order: list[str] = []
         by_deck: dict[str, list[dict[str, Any]]] = {}
@@ -392,15 +559,16 @@ def events_html(
             rows = by_deck[key]
             name = _esc(rows[0].get("deck_name") or key)
             deck_id = rows[0].get("deck_id")
-            heading = f"<a href='/decks/{_esc(deck_id)}'>{name}</a>" if deck_id else name
+            heading = f"<a href='{deck_href(deck_id)}'>{name}</a>" if deck_id else name
             n = len(rows)
             extra = ""
             if deck_id and not query.get("deck_id"):
                 own = query_string({**query, "offset": 0, "open": ""}, deck_id=str(deck_id))
-                extra = f" · <a href='/history{_esc(own)}'>only this deck</a>"
+                extra = ui.cap_link("Only this deck", f"/history{own}")
             out.append(
-                f"<div class='tr group hy-group'><span>{heading}</span>"
-                f"<span class='meta'>{n} {'entry' if n == 1 else 'entries'}{extra}</span></div>"
+                f"<div class='tr group hy-group nochk'><span class='m'>{heading}"
+                f"<small>{n} {'entry' if n == 1 else 'entries'}</small></span>"
+                f"<span class='act'>{extra}</span></div>"
             )
             out += [_row_html(e, query, now=now) for e in rows]
     else:
@@ -419,22 +587,71 @@ def events_html(
     return "".join(out)
 
 
-def details_panel(e: dict[str, Any], query: dict[str, Any]) -> str:
-    """One row's Details: beside the list from 1100 px, its own page below that."""
+DELETED_NOTICES = {"report": "The report was deleted.", "snapshot": "The snapshot was deleted."}
+
+
+def delete_box_html(
+    what: str,
+    action: str,
+    csrf_input: str,
+    *,
+    box_id: str,
+    held: str = "",
+    open: bool = False,
+    close_href: str,
+) -> tuple[str, str]:
+    """(the red-outline Delete… opener, its confirm box) for one report or snapshot. ``held``: why
+    it can't be deleted now; the box then says so and has no Delete button."""
+    opener_href = close_href + ("&" if "?" in close_href else "?") + "box=delete"
+    opener = ui.box_opener("Delete…", opener_href, box_id, kind="danger")
+    if held:
+        body = f"<p>{_esc(held)}</p>"
+        actions = [ui.box_button("Close", cancel=True)]
+    else:
+        gone = (
+            "Its numbers leave your Reports and History pages and any deck trend it was part of."
+            if what == "report"
+            else "Restore can no longer put the deck back to it."
+        )
+        body = (
+            f"<form id='{box_id}f' class='inbox' method='post' action='{_esc(action)}'>{csrf_input}"
+            f"<p>{gone} This can't be undone. Nothing changes on Archidekt.</p></form>"
+        )
+        actions = [
+            ui.box_button("Keep it", cancel=True),
+            ui.box_button(f"Delete {what}", kind="danger-solid", form=f"{box_id}f"),
+        ]
+    box = ui.box(box_id, f"Delete this {what}?", body, actions=actions, open=open, close_href=close_href)
+    return opener, box
+
+
+def details_panel(
+    e: dict[str, Any], query: dict[str, Any], *, extra_html: str = "", extra_actions: Sequence[str] = ()
+) -> str:
+    """One row's Details: beside the list from 1100 px, its own page below that. Its buttons
+    (Restore or Make a new deck from this, Test this version, then ``extra_actions``: Delete…)
+    are one row under the words; ``extra_html`` (the Delete box) follows."""
     word = KIND_LABELS[e["kind"]][0]
+    actions = [*e.get("panel_actions", ()), *extra_actions]
+    acts = f"<div class='ui-actions'>{''.join(actions)}</div>" if actions else ""
     body = (
         f"<div class='pills'>{_type_html(e)}</div>"
         f"<p class='ui-why'>{e['line']}</p>"
         + ui.meta(
             [
-                ("Deck", f"<a href='/decks/{_esc(e['deck_id'])}'>{_esc(e['deck_name'])}</a>")
+                (
+                    {LISTS_ID: "Lists", BINDER_ID: "Binder"}.get(str(e["deck_id"]), "Deck"),
+                    f"<a href='{deck_href(e['deck_id'])}'>{_esc(e['deck_name'])}</a>",
+                )
                 if e.get("deck_id")
                 else ("Deck", _esc(e["deck_name"])),
-                ("By", _chip(e) if e["who"] else "—"),
+                ("By", _chip(e) if e["who"] else "<span class='muted'>Not recorded</span>"),
                 ("When", time_html(e["ts"])),
             ]
         )
         + e["details"]
+        + acts
+        + extra_html
     )
     return ui.side_panel(
         _esc(f"{word}: {e['deck_name']}"),
@@ -446,8 +663,9 @@ def details_panel(e: dict[str, Any], query: dict[str, Any]) -> str:
 
 
 COLLECTION_ID = "collection"  # decks.Decks.COLLECTION_TARGET: collection proposals file under it
-COLLECTION_LABEL = "Your Archidekt collection"
+COLLECTION_LABEL = "Your binder"
 LISTS_ID = "lists"  # account_lists.LISTS_TARGET: changes to the member's lists file under it
+BINDER_ID = "collection"  # collection_bulk.TARGET: a clear and the copy kept before it
 LISTS_LABEL = "Your Archidekt lists"
 
 
@@ -707,7 +925,7 @@ def trend_html(trend: dict[str, Any] | None) -> str:
     shown = trend["metrics"]
     turns = any(isinstance(p.get("until_turn"), int) for p in series)
     head = "".join(f"<th scope='col'>{_esc(m['label'])}</th>" for m in shown)
-    head += "<th scope='col'>Turns simulated</th>" if turns else ""
+    head += "<th scope='col'>Turns played</th>" if turns else ""
     head += "<th scope='col'>Settings</th>"
     rows = []
     for p in series:
@@ -722,15 +940,15 @@ def trend_html(trend: dict[str, Any] | None) -> str:
     n = trend["reports"]
     changed = (
         "<p class='notice warn'>The run settings changed between these reports (see Settings in the "
-        "numbers by report). A simulation number is only compared across reports run the same way.</p>"
+        "numbers by report). A solo test number is only compared across reports run the same way.</p>"
         if trend.get("settings_changes")
         else ""
     )
     return (
         "<section class='card trend' aria-labelledby='trend-h'><h2 id='trend-h'>Report trends</h2>"
         f"<p class='muted'>How this deck's {n} most recent stored reports moved, oldest to newest, from "
-        f"{time_html(trend['first_at'])} to {time_html(trend['latest_at'])}. The goldfish numbers come "
-        "from the reports that ran a simulation.</p>"
+        f"{time_html(trend['first_at'])} to {time_html(trend['latest_at'])}. The solo test numbers come "
+        "from the reports that ran a solo test.</p>"
         + changed
         + f"<ul class='plain tmetrics'>{''.join(items)}</ul>"
         "<details class='tdata'><summary class='fold-btn'>The numbers by report</summary>"
@@ -748,13 +966,18 @@ HISTORY_CSS_C = ""
 HISTORY_CSS = (
     """
 /* History (UI standard): the shared table, widgets and side panel are theme.UI_CSS */
-.hy-table .act .acts form{display:contents}
-.hy-table .act .acts .btn,.hy-table .act .acts button{margin:0}
 .hy-table .title .deck a{font-weight:400}
-.hy-table .group.hy-group{grid-template-columns:minmax(0,1fr) auto}
 .hy-table .ui-lbl + .ui-lbl{margin-left:.25rem}
-.hy-table .th .hy-sort{display:inline-flex;align-items:center;gap:.2rem}
-.hy-table .th .hy-sort svg.i{width:14px;height:14px}
+/* a row is its deck's name, what the entry is on one line (the rest is in its Details) and its
+   facts under it, which wrap by word on a narrow phone when they don't fit; links are in the ⋮
+   and the Details, never a capsule that wraps onto a line of its own (review 2, L9) */
+/* the line says all of itself, on a second line by word where it must, never cut with an ellipsis
+   (final polish: no text cut short) */
+.hy-table .title .deck{overflow-wrap:break-word;min-width:0}
+.hy-table .title .sub{min-width:0}
+/* the Details' buttons: one row, each form inline */
+.ui-drawer .ui-actions form{display:contents}
+.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{margin:0}
 .hy-copies .act .btn{display:inline-flex;align-items:center;gap:.35rem;margin:0}
 .hy-copies .act .chev svg.i{width:20px;height:20px}
 h2.hy-backups{font-size:1.2rem}

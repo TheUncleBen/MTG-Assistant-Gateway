@@ -1,6 +1,7 @@
 package local.mtgassistantgateway.app
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -40,6 +41,11 @@ import kotlin.random.Random
  * key is nobody's or notifications are off (the member switched them off, or pressed Disconnect my
  * phones), and when the app is set up for another gateway. A connection that fails is tried again
  * after [Push.backoffSeconds], at once when the phone's network comes back.
+ *
+ * Deep sleep: a sleeping phone runs none of the app's own timers (the wait between tries, the
+ * socket's read timeout), so the next try and the check on a quiet connection are also set as an
+ * alarm ([Push.nextAlarm], `setAndAllowWhileIdle`: no exact-alarm permission). The alarm ([Tick])
+ * wakes the phone, and a short wake lock ([Push.TRY_HOLD_MS]) keeps it awake through the connect.
  */
 class NotifyService : Service() {
     private lateinit var prefs: Prefs
@@ -48,6 +54,11 @@ class NotifyService : Service() {
     private var worker: Thread? = null
     private val wake = Object() // the worker waits on it between tries; the network callback wakes it
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    /** elapsedRealtime of the next try (0: now), and of the open connection's last line. */
+    @Volatile private var retryAt = 0L
+    @Volatile private var lastLineAt = 0L
+    /** Keeps the phone awake from an alarm (or the network coming back) through the connect. */
+    private var hold: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -55,6 +66,9 @@ class NotifyService : Service() {
         super.onCreate()
         prefs = Prefs(this)
         channels(this)
+        hold = getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mtgassistant:connect")
+            ?.apply { setReferenceCounted(false) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -84,13 +98,16 @@ class NotifyService : Service() {
             watchNetwork()
             worker = Thread({ loop(origin, key!!) }, "notifications").also { it.start() }
         }
+        if (intent?.action == ACTION_TICK) tick()
         return START_STICKY // Android starts it again if it had to stop it for memory
     }
 
     override fun onDestroy() {
         running = false
+        cancelAlarm()
         unwatchNetwork()
         connection?.disconnect()
+        releaseHold()
         synchronized(wake) { wake.notifyAll() }
         worker?.interrupt()
         super.onDestroy()
@@ -123,13 +140,23 @@ class NotifyService : Service() {
                 Push.Refusal.RETRY -> failures++
             }
             val waitS = if (failures == 0) 1L else Push.backoffSeconds(failures, Random.nextDouble())
+            retryAt = SystemClock.elapsedRealtime() + TimeUnit.SECONDS.toMillis(waitS)
+            schedule() // the alarm wakes a sleeping phone for the try
+            releaseHold()
             synchronized(wake) {
                 try {
-                    wake.wait(TimeUnit.SECONDS.toMillis(waitS))
+                    // By elapsedRealtime, which counts deep sleep: after the alarm's wake-up the
+                    // try is due even though this wait's own timer stood still while asleep.
+                    while (running) {
+                        val left = retryAt - SystemClock.elapsedRealtime()
+                        if (left <= 0) break
+                        wake.wait(left)
+                    }
                 } catch (e: InterruptedException) {
                     return
                 }
             }
+            holdAwake()
         }
     }
 
@@ -148,6 +175,7 @@ class NotifyService : Service() {
             c.setRequestProperty("Authorization", "Bearer $key")
             c.setRequestProperty("Accept", "application/x-ndjson")
             c.setRequestProperty("User-Agent", "MTGAssistant/" + BuildConfig.VERSION_NAME)
+            lastLineAt = SystemClock.elapsedRealtime()
             val status = c.responseCode
             if (status != 200) {
                 val body = try {
@@ -158,9 +186,13 @@ class NotifyService : Service() {
                 return Push.refusal(status, body)
             }
             val seen = Push.Seen(prefs.pushSeen)
+            lastLineAt = SystemClock.elapsedRealtime()
+            schedule() // the check on a quiet connection
+            releaseHold()
             BufferedReader(InputStreamReader(c.inputStream, Charsets.UTF_8)).use { r ->
                 while (running) {
                     val line = r.readLine() ?: break
+                    lastLineAt = SystemClock.elapsedRealtime()
                     handle(Push.parse(line), seen)
                 }
             }
@@ -168,6 +200,63 @@ class NotifyService : Service() {
         } finally {
             connection = null
             c.disconnect()
+        }
+    }
+
+    /**
+     * The alarm went off ([Tick]): a connection that has sent nothing for too long is dropped (the
+     * loop then tries again), a wait whose time has come ends, and the next alarm is set.
+     */
+    private fun tick() {
+        if (!running) return
+        holdAwake()
+        val c = connection
+        if (c != null && Push.stale(lastLineAt, SystemClock.elapsedRealtime())) {
+            Log.i(TAG, "no line from the gateway for too long; connecting again")
+            Thread({ c.disconnect() }, "notifications-drop").start() // never network work on the main thread
+        } else if (c != null) {
+            schedule()
+        }
+        synchronized(wake) { wake.notifyAll() }
+    }
+
+    private fun alarmIntent(): PendingIntent = PendingIntent.getBroadcast(
+        this, 0, Intent(this, Tick::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /** Sets (or moves) the one alarm: the next try while waiting, the quiet check while connected. */
+    private fun schedule() {
+        if (!running) return
+        val at = Push.nextAlarm(connection != null, retryAt, lastLineAt)
+        try {
+            getSystemService(AlarmManager::class.java)
+                ?.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, alarmIntent())
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "alarm not set: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun cancelAlarm() {
+        try {
+            getSystemService(AlarmManager::class.java)?.cancel(alarmIntent())
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "alarm not cancelled: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun holdAwake() {
+        try {
+            hold?.acquire(Push.TRY_HOLD_MS) // timed: never kept past one try, whatever happens
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "wake lock not taken: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun releaseHold() {
+        try {
+            if (hold?.isHeld == true) hold?.release()
+        } catch (e: RuntimeException) { // its timeout released it a moment ago
+            Log.i(TAG, "wake lock already released")
         }
     }
 
@@ -239,6 +328,10 @@ class NotifyService : Service() {
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                if (connection == null) {
+                    holdAwake()
+                    retryAt = 0L
+                }
                 synchronized(wake) { wake.notifyAll() }
             }
         }
@@ -268,8 +361,29 @@ class NotifyService : Service() {
         }
     }
 
+    /**
+     * The alarm ([schedule]): keeps the phone awake a moment, then hands the tick to the running
+     * service, which takes its own wake lock. Not exported: only the app's own alarm reaches it.
+     */
+    class Tick : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            context.getSystemService(PowerManager::class.java)
+                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mtgassistant:tick")
+                ?.acquire(10_000) // timed: covers the hand-over to the service
+            if (!Push.isKey(Prefs(context).pushKey)) return
+            try {
+                // The service runs in the foreground, so the app counts as in the foreground and may
+                // start (reach) it; if Android stopped it, this starts it again.
+                context.startService(Intent(context, NotifyService::class.java).setAction(ACTION_TICK))
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "tick not delivered: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "MtgNotify"
+        private const val ACTION_TICK = "local.mtgassistantgateway.app.NOTIFY_TICK"
         private const val ONGOING_ID = 1
         private const val MESSAGE_ID = 2
         const val CHANNEL_MESSAGES = "messages"

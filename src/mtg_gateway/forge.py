@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from . import dbwait, refusals
 from .decklist import DecklistError, parse_decklist
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ def forge_deck(text: str) -> dict[str, Any]:
     try:
         cards = parse_decklist(text)
     except DecklistError as exc:
-        raise ForgeError("invalid", f"decklist could not be read: {exc}") from exc
+        raise ForgeError("invalid", f"Decklist could not be read: {refusals.sentence(exc)}") from exc
     commander: list[str] = []
     main: dict[str, int] = {}
     for c in cards:
@@ -124,6 +125,12 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
     how each seat lost."""
     results = job.get("results") or []
     games = len(results)
+
+    def seated(r: dict[str, Any]) -> bool:
+        """A winner at one of this run's seats; any other number (0, past the last seat) is unread."""
+        w = r.get("winner")
+        return isinstance(w, int) and not isinstance(w, bool) and 1 <= w and (not seats or w <= len(seats))
+
     out: dict[str, Any] = {
         "games": games,
         "games_requested": job.get("games_requested"),
@@ -161,23 +168,27 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
         out["median_turn"] = statistics.median(turns)
         out["turns_range"] = [min(turns), max(turns)]
     out["ended"] = {
-        "won": sum(1 for r in results if isinstance(r.get("winner"), int)),
+        "won": sum(1 for r in results if seated(r)),
         "draw": sum(1 for r in results if r.get("draw") and not r.get("stopped_slow")),
         "time_limit": out["stopped_slow"],
-        "unread": sum(1 for r in results if r.get("unparsed")),
+        "unread": sum(
+            1
+            for r in results
+            if r.get("unparsed") or (r.get("winner") is not None and not seated(r) and not r.get("draw"))
+        ),
     }
     out["game_list"] = [
         {
             "game": r.get("game"),
             "seconds": round(r["ms"] / 1000, 1) if isinstance(r.get("ms"), int) else None,
             "turn": r.get("turn") if isinstance(r.get("turn"), int) else None,
-            "winner": r.get("winner") if isinstance(r.get("winner"), int) else None,
+            "winner": r.get("winner") if seated(r) else None,
             "ended": "time_limit"
             if r.get("stopped_slow")
             else "draw"
             if r.get("draw")
             else "won"
-            if isinstance(r.get("winner"), int)
+            if seated(r)
             else "unread",
         }
         for r in results[:MAX_GAMES_LISTED]
@@ -195,6 +206,8 @@ MORE_GONE = (
     "can't be played at the same table. Run the report (or its comparison) again."
 )
 FORGE_SILENT = "Forge stopped answering about this run."
+# Shown to members when Forge can't be reached (it is down, restarting or still loading its cards).
+FORGE_UNREACHABLE = "Forge couldn't be reached, so no Forge games were played. Run the test again later."
 
 
 async def _addresses(host: str, port: int) -> list[str]:
@@ -331,7 +344,11 @@ class ForgeClient:
         try:
             r = await self._client.request(method, path, json=body)
         except httpx.HTTPError as exc:
-            raise ForgeError("unavailable", f"Forge did not answer ({type(exc).__name__}).") from exc
+            await dbwait.settle()
+            # the cause for whoever runs the gateway goes to its log; the member reads plain words
+            logger.info("Forge did not answer %s %s: %s", method, path, type(exc).__name__)
+            raise ForgeError("unavailable", FORGE_UNREACHABLE) from exc
+        await dbwait.settle()  # a background job's database work waits off the loop
         try:
             data = r.json()
         except ValueError:
@@ -343,7 +360,11 @@ class ForgeClient:
         if r.status_code == 429:
             raise ForgeError("busy", "Forge's queue is full. Try again later.")
         if r.status_code >= 400:
-            raise ForgeError("invalid", data.get("error") or f"HTTP {r.status_code}")
+            if r.status_code >= 500 and not data.get("error"):
+                raise ForgeError(
+                    "unavailable", "Forge had a problem answering, so no Forge games were played."
+                )
+            raise ForgeError("invalid", data.get("error") or "Forge refused the request.")
         return data
 
     async def health(self) -> dict[str, Any]:
@@ -811,7 +832,7 @@ async def start_solo_run(
     time limit (``game_seconds``, else the service's own) stops it; only turns up to
     ``until_turn`` count."""
     if not 1 <= until_turn <= SOLO_MAX_TURN:
-        raise ForgeError("invalid", f"until_turn must be from 1 to {SOLO_MAX_TURN}")
+        raise ForgeError("invalid", f"until_turn must be from 1 to {SOLO_MAX_TURN}.")
     deck = forge_deck(deck_text)
     fmt = "Commander" if deck["commander"] else "Constructed"
     names = list(dict.fromkeys(deck["commander"] + [name for _, name in deck["main"]]))

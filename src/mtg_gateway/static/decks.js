@@ -48,7 +48,12 @@
     var opts = { credentials: "same-origin", headers: { Accept: "application/json" } };
     if (ctl) opts.signal = ctl.signal;
     return fetch(src, opts)
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(String(r.status))); })
+      .then(function (r) {
+        if (r.ok) return r.json();
+        var err = new Error(String(r.status));
+        err.wait = (r.status === 429 || r.status === 503) ? parseInt(r.headers.get("Retry-After") || "", 10) : NaN;
+        return Promise.reject(err);
+      })
       .then(function (data) {
         if (!data || typeof data.html !== "string") throw new Error("bad answer");
         if (mine !== seq) return null;  // a newer load is on its way: this one says nothing
@@ -63,8 +68,34 @@
       });
   }
 
+  // A cold list can take Archidekt a while (the gateway waits up to 25 s): after a few seconds the
+  // placeholder says so in words, not only grey bars; an answer that Archidekt is busy (429 or 503
+  // with Retry-After) is asked again once, after the wait it names (polish AD4).
+  var STILL_MS = 3000, BUSY_WAIT_MAX = 30;
+  function still(box) {
+    if (!box.hasAttribute("aria-busy")) return;
+    var say = box.querySelector("[role=status]");
+    if (!say) {
+      say = document.createElement("p");
+      say.setAttribute("role", "status");
+      box.appendChild(say);
+    }
+    say.className = "muted";
+    say.textContent = "Still reading your decks from Archidekt.";
+  }
   boxes.forEach(function (box) {
-    load(box, box.getAttribute("data-decks-src")).catch(function () { failed(box); });
+    var src = box.getAttribute("data-decks-src");
+    var timer = setTimeout(function () { still(box); }, STILL_MS);
+    function done() { clearTimeout(timer); }
+    load(box, src).then(done, function (err) {
+      var wait = err && err.wait;
+      if (wait > 0 && wait <= BUSY_WAIT_MAX && box.hasAttribute("aria-busy")) {
+        still(box);
+        return new Promise(function (go) { setTimeout(go, wait * 1000); })
+          .then(function () { return load(box, src); });
+      }
+      throw err;
+    }).then(done, function () { done(); failed(box); });
   });
 
   // -- My decks: the filter panel refreshes the list in place --------------------------------------
@@ -80,7 +111,9 @@
   // Packages only) applies in place as it changes, never asking the gateway again. A package the
   // deck listing left out is drawn from this read at the top level. When the read fails, Show
   // stays usable for Decks and packages and one muted line says packages couldn't be told apart.
-  var pkgs = null, pkgFailed = false, pkgAsked = false, PKG_PAGES = 4;
+  // Archidekt busy or unreachable (429 or 503 with Retry-After): the read is sent once more after
+  // that wait, when the wait is short, before the line says so
+  var pkgs = null, pkgFailed = false, pkgAsked = false, pkgRetried = false, PKG_PAGES = 4, PKG_WAIT_MAX = 120;
   var NOT_TOLD = "Packages couldn't be told apart from decks just now; every deck is shown.";
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -115,13 +148,20 @@
     var found = {}, page = 1;
     function one() {
       return fetch("/decks/api/packages?whose=mine&page=" + page, { credentials: "same-origin", headers: { Accept: "application/json" } })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d || !d.ok) throw new Error("packages");
-          (d.packages || []).forEach(function (p) { found[String(p.id)] = p; });
-          if (d.more && page < PKG_PAGES) { page += 1; return one(); }
-          return null;
+        .then(function (r) {
+          var wait = parseInt(r.headers.get("Retry-After") || "", 10);
+          if ((r.status === 429 || r.status === 503) && !pkgRetried && wait > 0 && wait <= PKG_WAIT_MAX) {
+            pkgRetried = true;
+            return new Promise(function (go) { setTimeout(go, wait * 1000); }).then(one);
+          }
+          return r.json().then(answered);
         });
+    }
+    function answered(d) {
+      if (!d || !d.ok) throw new Error("packages");
+      (d.packages || []).forEach(function (p) { found[String(p.id)] = p; });
+      if (d.more && page < PKG_PAGES) { page += 1; return one(); }
+      return null;
     }
     one().then(function () { pkgs = found; window.MtgPackages = found; mark(); },
       function () { pkgFailed = true; mark(); });
@@ -211,26 +251,38 @@
       });
     }
     var total = $("#decks-total"), head = list.querySelector("#fv-decks");
-    var empty = $("#pk-empty");
+    // the one empty state of the Packages tab, under the Packages heading (where the decks
+    // would be, after the folders); the deck list's own ("This folder is empty.") is off meanwhile
+    var empty = $("#pk-empty"), none = list.querySelector("#fv-decks ~ p.empty");
     if (mode === "packages" && !shownPk && !empty) {
-      empty = el("p", "muted", "No packages here yet. New package makes one.");
+      empty = el("p", "empty", "No packages here yet. New package makes one.");
       empty.id = "pk-empty";
       empty.setAttribute("role", "status");
-      list.parentNode.insertBefore(empty, list);
+      if (head) head.parentNode.insertBefore(empty, head.nextSibling);
+      else list.parentNode.insertBefore(empty, list);
     }
     if (empty) empty.hidden = mode !== "packages" || shownPk > 0;
+    if (none) none.hidden = mode === "packages";
     if (mode === "packages") {
       if (total) total.textContent = plural(shownPk, "package");
       if (head) head.textContent = "Packages";  // the results bar carries the count
     } else if (mode === "decks") {
-      if (total) total.textContent = plural(shownDk, "deck");
+      // every deck, as Home counts them, and how many sit in this level's folders (polish C5)
+      var inFolders = 0;
+      Array.prototype.forEach.call(list.querySelectorAll("li.folder[data-decks]"), function (f) {
+        inFolders += parseInt(f.getAttribute("data-decks"), 10) || 0;
+      });
+      if (total) total.textContent = plural(shownDk + inFolders, "deck") + (inFolders ? " · " + inFolders + " in folders" : "");
       if (head) head.textContent = "Decks";
     }
     list.dispatchEvent(new CustomEvent("decks:marked", { bubbles: true }));
   }
+  // through the panel (static/searchpanel.js address): the entry keeps its state, the sheet's
+  // while it is open (audit N1: a null state wiped the sheet's entry)
   function setAddress() {
-    var q = params().toString();
-    history.replaceState(null, "", "/decks" + (q ? "?" + q : ""));
+    var q = params().toString(), url = "/decks" + (q ? "?" + q : "");
+    var P = window.MtgSearchPanel;
+    if (P && P.address) P.address(url); else history.replaceState(history.state, "", url);
   }
   list.addEventListener("decks:loaded", function () { if (pkgs || pkgFailed) mark(); else readPackages(); });
   if (!list.hasAttribute("data-decks-src")) setTimeout(readPackages, 0); // the list came drawn
@@ -239,7 +291,11 @@
     fd.forEach(function (v, k) { if (String(v) !== "") out.append(k, String(v)); });
     return out;
   }
-  function refresh() {
+  // the form as the list on screen was drawn for (audit F-11: Show with nothing changed asked
+  // again and rewrote the address)
+  var shownQ = params().toString();
+  // ``keep``: the address stays as it is (a redraw from the address Back landed on)
+  function refresh(keep) {
     var p = params();
     var api = new URLSearchParams(p);
     api.set("shape", "list");
@@ -247,8 +303,8 @@
     load(list, "/api/decks/mine?" + api.toString())
       .then(function (data) {
         if (!data) return;  // an older load: a newer one draws and sets the address
-        var q = p.toString();
-        history.replaceState(null, "", "/decks" + (q ? "?" + q : ""));
+        shownQ = p.toString();
+        if (!keep) setAddress();
       })
       .catch(function () { failed(list); });
   }
@@ -261,9 +317,71 @@
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     clearTimeout(timer);
-    refresh();
+    // Show with the form as the list shows it: the sheet closes, nothing is asked for again
+    if (params().toString() !== shownQ) refresh();
+    else list.removeAttribute("aria-busy");
     if (window.MtgSearchPanel) window.MtgSearchPanel.closeSheet();
   });
+
+  // -- My Decks or Packages: the switch at the top works in place ----------------------------------
+  // Its links are whole pages (a reload or a shared link shows the same side); with scripts a
+  // press draws the other side at once, without a page load: the form's show value, the heading,
+  // the filter box's words, the page's orange button and the address follow it (the browser's
+  // Back comes back the same way), and mark() shows the packages or the decks.
+  var seg = $(".hubhead .hubseg");
+  function isPackages(href) { return /[?&]show=packages(?:&|$)/.test(href || ""); }
+  function applyShow(packages, href) {
+    var s = form.querySelector("input[name=show]");
+    if (packages && !s) {
+      s = document.createElement("input");
+      s.type = "hidden";
+      s.name = "show";
+      form.appendChild(s);
+    }
+    if (s) { if (packages) s.value = "packages"; else s.parentNode.removeChild(s); }
+    Array.prototype.forEach.call(seg.querySelectorAll("a"), function (a) {
+      if (isPackages(a.getAttribute("href")) === packages) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+    var word = packages ? "Packages" : "My Decks";
+    var h1 = $(".hubhead h1");
+    if (h1) h1.textContent = word;
+    document.title = document.title.replace(/^(My Decks|Packages)/, word);
+    var newDeck = $(".hubhead .acts a[href='/decks/new']"), newPkg = $(".hubhead .acts a[href='/decks/new-package']");
+    if (newDeck) newDeck.classList.toggle("btn-primary", !packages);
+    if (newPkg) newPkg.classList.toggle("btn-primary", packages);
+    var q = $("#q", form), lab = form.querySelector("label[for=q]"), show = form.querySelector(".sp-show");
+    if (q) q.placeholder = packages ? "Package name" : "Deck name";
+    if (lab) lab.textContent = packages ? "Filter package name" : "Filter deck name";
+    if (show) show.textContent = packages ? "Show packages" : "Show decks";
+    if (href !== null) {
+      history.pushState({ show: packages ? "packages" : "" }, "", href);
+      if (window.MtgSearchPanel && window.MtgSearchPanel.showing) window.MtgSearchPanel.showing();
+    }
+    if (pkgs || pkgFailed) mark(); else readPackages();
+  }
+  if (seg) {
+    seg.addEventListener("click", function (ev) {
+      var a = ev.target && ev.target.closest ? ev.target.closest("a[href]") : null;
+      if (!a || !seg.contains(a) || ev.defaultPrevented || ev.button !== 0) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;  // a new tab is the member's
+      ev.preventDefault();
+      if (a.hasAttribute("aria-current")) return;
+      applyShow(isPackages(a.getAttribute("href")), a.getAttribute("href"));
+    });
+  }
+  // Back or Forward onto an entry of this page with another address (the other side of the
+  // switch, the page's own entry under the one a reload with the sheet open left: audit R1): the
+  // side, the form's boxes and the list follow the address, in place
+  function fromAddress() {
+    if (seg) applyShow(isPackages(window.location.search), null);
+    var P = window.MtgSearchPanel;
+    if (P && P.setForm) P.setForm(new URLSearchParams(window.location.search));
+    clearTimeout(timer);
+    refresh(true);
+  }
+  if (window.MtgSearchPanel && window.MtgSearchPanel.onAddress) window.MtgSearchPanel.onAddress(fromAddress);
+  else if (seg) window.addEventListener("popstate", function () { applyShow(isPackages(window.location.search), null); });
   form.addEventListener("input", function (e) {
     var t = e.target;
     if (t && t.type === "search") soon();

@@ -257,7 +257,7 @@ async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack:
     )
     out = structured(res)
     assert res.get("isError") is True and out["ok"] is False and out["error"] == "invalid"
-    assert "changes.0.action" in out["message"] and "'set_quantity'" in out["message"]
+    assert "changes[0].action must be" in out["message"] and "set_quantity" in out["message"]
     # a refusal from the tool itself carries the error flag too
     res = await call(stack.h, token, "get_deck", {"deck_ref": "not a deck"})
     assert res.get("isError") is True and structured(res)["ok"] is False
@@ -381,7 +381,8 @@ async def test_get_deck_views_trade_detail_for_size(stack: Stack) -> None:
         assert ("cards" in out) == (view in ("cards", "full")), view
         assert ("decklist_text" in out) == (view in ("text", "full")), view
         assert ("archidekt_text" in out) == (view in ("export", "full")), view
-    assert sizes["summary"] < sizes["text"] < sizes["full"] and sizes["cards"] < sizes["full"]
+    # text and cards carry the headline statistics only (stats_brief), summary the whole (AT-31)
+    assert sizes["text"] < sizes["summary"] < sizes["full"] and sizes["cards"] < sizes["full"]
     default = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))
     assert default["view"] == "text" and "decklist_text" in default
     # rules text needs card rows: asked with a view that has none, it comes with the cards view
@@ -507,7 +508,7 @@ async def test_the_apply_line_names_the_collection_on_a_collection_proposal(manu
     b = Browser(manual.h)
     await b.login(f"/proposals/{col['proposal_id']}")
     page = await b.http.get(f"/proposals/{col['proposal_id']}")
-    assert "writes these changes to your collection on Archidekt" in page.text, page.text[-3000:]
+    assert "writes these changes to your binder on Archidekt" in page.text, page.text[-3000:]
     page = await b.http.get(f"/proposals/{deck['proposal_id']}")
     assert "writes these changes to your deck on Archidekt" in page.text
 
@@ -597,7 +598,7 @@ async def test_linking_archidekt_needs_the_risk_note_acknowledged(stack: Stack) 
     b = Browser(stack.h)
     await b.login("/account")
     try:
-        page = await b.http.get("/account/details", headers=NAV)
+        page = await b.http.get("/account/details/archidekt", headers=NAV)
         assert "terms of service restrict automated access" in page.text
         assert (
             "name='accept_risk'" in page.text
@@ -670,9 +671,9 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     p = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     assert p["ok"] and p["kind"] == "details" and p["risk"] == "high", p
     diff = p["diff"]
-    assert "folder: Top level (no folder) -> Cube" in diff, diff
-    assert "tags: none -> budget, Spicy (adds budget, Spicy)" in diff, diff
-    assert f"cover: automatic -> {cover_name}" in diff  # Archidekt picks it now: said so
+    assert "Folder: No folder → Cube" in diff, diff
+    assert "Deck tags: none → budget, Spicy (adds budget, Spicy)" in diff, diff
+    assert f"Cover image: automatic → {cover_name}" in diff  # Archidekt picks it now: said so
     tags_row = next(r for r in p["rows"] if r.get("field") == "tags")
     assert tags_row["added"] == ["budget", "Spicy"] and tags_row["removed"] == []
     assert ark.deck_tags.get(42, []) == [] and 42 not in ark.deck_folder  # nothing sent yet
@@ -698,7 +699,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
             stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"add_tags": ["gwtest"]}}
         )
     )
-    assert new["ok"] is False and "no deck tag called 'gwtest'" in new["message"], new
+    assert new["ok"] is False and "no deck tag called “gwtest”" in new["message"], new
     assert ark.tag_creates == 0
     # the next change names the cover it replaces and the tag it takes off
     other = ark.decks[42]["cards"][1]
@@ -706,8 +707,8 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     swap = {"cover": other["card"]["oracleCard"]["name"], "remove_tags": ["Spicy"]}
     q = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": swap}))
     assert q["ok"], q
-    assert f"cover: {cover_name} -> {swap['cover']}" in q["diff"], q["diff"]
-    assert "tags: budget, Spicy -> budget (removes Spicy)" in q["diff"], q["diff"]
+    assert f"Cover image: {cover_name} → {swap['cover']}" in q["diff"], q["diff"]
+    assert "Deck tags: budget, Spicy → budget (removes Spicy)" in q["diff"], q["diff"]
     await call(stack.h, token, "reject_proposal", {"proposal_id": q["proposal_id"]})
     # taking a tag off names a tag the deck has; anything else is refused before any proposal
     off = structured(
@@ -715,7 +716,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
             stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"remove_tags": ["nope"]}}
         )
     )
-    assert off["ok"] is False and "no tag 'nope'" in off["message"]
+    assert off["ok"] is False and "no tag “nope”" in off["message"]
     bad = structured(
         await call(
             stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"folder": "Nowhere"}}
@@ -809,15 +810,13 @@ async def test_a_guessed_name_is_flagged_on_the_proposal_the_review_and_the_card
     )
     assert p["ok"], p
     assert p["guessed_names"] == [{"name": "Sol Ring", "read_as": "Sol Rimg"}], p
-    assert "name guessed from 'Sol Rimg'" in p["diff"]
+    assert "name guessed from “Sol Rimg”" in p["diff"]
     island = next(r for r in p["rows"] if r.get("name") == "Island")
     assert "guessed_from" not in island  # an exact scan match is not flagged
     b = Browser(manual.h)
     await b.login(f"/proposals/{p['proposal_id']}")
     page = await b.http.get(f"/proposals/{p['proposal_id']}")
-    assert (
-        "name guessed from &#x27;Sol Rimg&#x27;" in page.text or "name guessed from 'Sol Rimg'" in page.text
-    )
+    assert "name guessed from “Sol Rimg”" in page.text
 
 
 async def test_a_guessed_name_is_flagged_on_a_new_deck_and_a_collection_proposal(manual: Stack) -> None:
@@ -911,8 +910,13 @@ class SearchInput(BaseModel):
 def test_paper_search_query_only_for_commander_searches_without_a_game() -> None:
     from mtg_gateway.mf_proxy import paper_search_query
 
-    for q in ("t:angel id<=wu", "o:flying commander:wu", "t:dragon f:commander", "is:commander t:angel"):
+    for q in ("t:dragon f:commander", "is:commander t:angel", "t:angel id<=wu legal:brawl"):
         assert paper_search_query(q) == q + " game:paper", q
+    # a color identity with no format named is a Commander deck's search: only Commander-legal
+    # cards (no Un-cards); a format named keeps its own (assistant tool review, 2026-10-28)
+    for q in ("t:angel id<=wu", "o:flying commander:wu"):
+        assert paper_search_query(q) == q + " game:paper f:commander", q
+    assert paper_search_query("t:cat or t:dog id<=r") == "(t:cat or t:dog id<=r) game:paper f:commander"
     for q in (
         "t:angel",
         'o:"commander"',
@@ -935,8 +939,9 @@ async def test_a_commander_search_through_the_proxy_asks_for_paper_cards() -> No
     proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(mf))
     listed = {t["name"]: t for t in await proxy.tools()}
     assert "adds game:paper" in listed["scryfall_search"]["description"]
+    assert "f:commander" in listed["scryfall_search"]["description"]
     out = await proxy.call("scryfall_search", {"query": "t:angel id<=w"})
-    assert out.content[0].text == "query=t:angel id<=w game:paper"
+    assert out.content[0].text == "query=t:angel id<=w game:paper f:commander"
     out = await proxy.call("scryfall_search", {"params": {"query": "t:angel id<=w game:arena"}})
     assert out.content[0].text == "query=t:angel id<=w game:arena"
     out = await proxy.call("scryfall_search", {"query": "t:angel"})

@@ -50,10 +50,10 @@ from .deck_stats import (
     primary_category,
     primary_type,
 )
-from .decks import mana_value_text, split_label
+from .decks import DELETE_KEPT_NOTE, category_keys, mana_value_text, split_label
 from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
-from .theme import card_size_control, esc, icon, plural
+from .theme import SPINNER, card_size_control, esc, icon, plural
 from .views import cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -145,9 +145,10 @@ def money(value: float | None) -> str:
 
 
 def est_cost_html(stats: dict[str, Any]) -> str:
-    """The deck's estimated cost: a dash with an explanation while no card has a price."""
+    """The deck's estimated cost: "unknown", muted, while no card has a price (an orange dash read
+    as a broken value: polish C7)."""
     if not stats.get("priced_cards"):
-        return "<span title='No prices from Archidekt yet'>–</span>"
+        return "<span class='muted unpriced' title='No prices from Archidekt yet'>unknown</span>"
     return money(stats.get("price_total"))
 
 
@@ -340,6 +341,12 @@ def updated_when(iso: str) -> str:
     return ui.when(ts)
 
 
+def salt_text(stats: dict[str, Any] | None) -> str:
+    """The banner's Salt sum, one decimal (the page's script draws an edit's answer the same)."""
+    salt = (stats or {}).get("salt_total")
+    return "–" if salt is None else f"{float(salt):.1f}"
+
+
 def banner_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -349,10 +356,12 @@ def banner_html(
     writes_enabled: bool,
     forge_on: bool = False,
     waiting: int = 0,
+    making: bool = False,
 ) -> str:
     """The deck banner: name, facts, the buttons (Edit deck the page's one orange button, Clone
     deck, Test and play, More; the same on every screen, the owner 2026-10-25) and the deck menu.
     ``waiting``: the member's proposals waiting on this deck, the count on the Proposals pill.
+    ``making``: a new deck whose cards are still going in, whose Edit deck is off until it is done.
     The menu is the shared deck menu (static/deck.js builds it with cardmenu.js's layer, from the
     ⋮ More button, a right-click on the banner or a press and hold). Without scripts it is a
     details drop-down of the items that work as links, and its Export…, Compare with… and Delete
@@ -373,18 +382,25 @@ def banner_html(
         else ""
     )
     brackets = banner_bracket_html(deck, stats)  # bracket_view.py
-    salt = stats.get("salt_total") if stats.get("salt_total") is not None else "–"
-    tags = (
-        "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
-        if deck.tags
-        else "<span class='notags'>No deck tags</span>"
-    )
+    salt = salt_text(stats)
+    # the deck's tags; none: no "No deck tags" line (noise, as on the tiles)
+    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
+    tags = f"<div class='tags'>{icon('tag')} {pills}</div>" if deck.tags else ""
     csrf_in = f"<input type='hidden' name='csrf' value='{esc(csrf)}'>" if csrf else ""
     did = esc(deck.id)
     title = deck_title(deck)
     primary = ""
-    if own and csrf:
-        primary += f"<a class='btn btn-primary' href='/decks/{did}/edit'>{icon('edit')} Edit deck</a>"
+    if own and csrf and making:
+        primary += (
+            "<button type='button' class='btn btn-primary' disabled "
+            f"title='Changes wait until the deck is made'>{icon('edit')} "
+            "<span class='lg'>Edit deck</span><span class='sm'>Edit</span></button>"
+        )
+    elif own and csrf:
+        primary += (
+            f"<a class='btn btn-primary' href='/decks/{did}/edit'>{icon('edit')} "
+            "<span class='lg'>Edit deck</span><span class='sm'>Edit</span></a>"
+        )
     if csrf:
         # Any deck the member can read can be cloned into their own account, as on archidekt.com
         # (its Clone button is on public decks and precons too). The button opens the Clone box
@@ -392,7 +408,7 @@ def banner_html(
         primary += (
             f"<button type='submit' form='clonef' class='btn' {ui.box_open_attr('clone')} "
             "title='Copy this deck into your own Archidekt account'>"
-            f"{icon('clone')} Clone deck</button>"
+            f"{icon('clone')} <span class='lg'>Clone deck</span><span class='sm'>Clone</span></button>"
         )
     # Test and play: the ways to try the deck out, on the gateway and on other sites, in one menu
     # (static/deck.js opens it as the shared menu; without scripts it is this drop-down).
@@ -411,8 +427,8 @@ def banner_html(
             f"<form method='post' action='/decks/{did}/report' id='fullf'>{csrf_in}"
             "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
             "opponents), a legality check and the deck statistics, plus Forge games against precons when "
-            "Forge is on and the deck has a commander; saved under History. The solo test takes up to a "
-            f"minute; the result page opens when the solo test is done.'>{icon('stats')} Run full test"
+            "Forge is on and the deck has a commander; saved under History. The report opens at once and "
+            f"fills in as each part finishes.'>{icon('stats')} Run test"
             "</button></form>"
         )
     if csrf and forge_on:
@@ -480,9 +496,38 @@ def banner_html(
         else ""
     )
     when = updated_when(deck.updated_at)
+    # The facts, in three rows on a wide screen. On a phone (mockup screen 5) the rows flow as
+    # one wrapping line beside a 64 px art thumbnail: the long labels (.lg: "72 distinct cards",
+    # "Size:", "(Archidekt prices)", "Salt sum:") give way to short ones (.sm: "100 cards",
+    # "Est", "Salt"), and the owner's name joins the line, as the avatar is not shown there.
+    size = stats.get("card_count", sum(c.quantity for c in deck.main_cards))
+    owner_sm = (
+        f"<a class='owner-sm sm' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
+        f"{esc(deck.owner or 'unknown')}</a>"
+    )
+    thumb = (
+        f"<img class='thumb' src='{esc(art_url)}' alt='' loading='lazy' decoding='async'>" if art_url else ""
+    )
+    rows = (
+        "<div class='rows'><div class='row'>"
+        + owner_sm
+        + (f"<span>{when}</span>" if when else "")
+        + f"<span class='lg'>{plural(stats.get('distinct', 0), 'distinct card')}</span>"
+        "</div><div class='row'>"
+        f"<span class='fmt'>{esc(format_label(deck.format))}</span>{legality}{brackets}"
+        f"<span class='sm'>{plural(size, 'card')}</span>"
+        "</div><div class='row'>"
+        f"<span class='lg'>Size: {size}</span>"
+        "<span><span class='lg'>Est cost: </span><span class='sm'>Est </span>"
+        f"<b class='orange'>{est_cost_html(stats)}</b><span class='lg'> (Archidekt prices)</span></span>"
+        "<span><span class='lg'>Salt sum: </span><span class='sm'>Salt </span>"
+        f"<b class='orange'>{esc(salt)}</b></span>"
+        "</div></div>"
+    )
     data = (
         f" data-deck-id='{did}' data-deck-name='{esc(title)}' data-own='{1 if own and csrf else 0}'"
         f" data-can='{1 if csrf else 0}' data-forge='{1 if forge_on and csrf else 0}'"
+        + (" data-making='1'" if making else "")
     )
     return (
         f"<section class='banner{'' if art_url else ' noart'}'{style}{data} aria-label='Deck: {esc(title)}'>"
@@ -491,19 +536,11 @@ def banner_html(
         f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
         f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
         "<div class='info'>"
+        f"<div class='top'>{thumb}<div class='titles'>"
         f"<h1 class='deckname{'' if deck.name else ' unnamed'}'>{privacy}"
         f"<span title='{esc(title)}'>{esc(title)}</span></h1>"
-        "<div class='row'>"
-        + (f"<span>{when}</span>" if when else "")
-        + f"<span>{plural(stats.get('distinct', 0), 'distinct card')}</span>"
-        "</div><div class='row'>"
-        f"<span>{esc(format_label(deck.format))}</span>{legality}{brackets}"
-        "</div><div class='row'>"
-        f"<span>Size: {stats.get('card_count', sum(c.quantity for c in deck.main_cards))}</span>"
-        f"<span>Est cost: <b class='orange'>{est_cost_html(stats)}</b> (Archidekt prices)</span>"
-        f"<span>Salt sum: <b class='orange'>{esc(salt)}</b></span>"
-        "</div>"
-        f"<div class='tags'>{icon('tag')} {tags}</div>"
+        f"{rows}</div></div>"
+        f"{tags}"
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
         f"{social_html(deck, own=own, writes_enabled=writes_enabled, waiting=waiting) if csrf else ''}"
         "</div>"
@@ -538,14 +575,17 @@ def _export_pane(key: str, title: str, text: str, *, current: bool) -> str:
     )
 
 
-def export_box_html(deck: Deck, *, open: bool = False) -> str:
+def export_box_html(deck: Deck, *, open: bool = False, pdf: bool = False) -> str:
     """The Export box (F3): tabs Archidekt text, Plain list, Side and maybe (when the deck has
-    rows outside the deck) and Files, with the seven downloads. Without scripts every pane
-    shows, one under the other."""
+    rows outside the deck) and Files, with the seven downloads and, on the member's own deck
+    (``pdf``), the Registration PDF (mockup screen 2: it is an export format, so the More menu's
+    own item for it went; the row opens the Registration PDF box, deck_extras.py). Without
+    scripts every pane shows, one under the other."""
     from .decks import deck_to_archidekt_text, deck_to_text
+    from .export_formats import to_plain
 
     did = esc(deck.id)
-    main = deck_to_text(deck)
+    main = to_plain(deck)
     side = deck_to_text(deck, zone="side")
     arch = deck_to_archidekt_text(deck)
     tabs = [("exp-arch", "Archidekt text", "Archidekt import text", arch)]
@@ -567,12 +607,17 @@ def export_box_html(deck: Deck, *, open: bool = False) -> str:
         f"<a class='btn' href='/decks/{did}/{path}' download>{icon('download')} {esc(label)}</a>"
         for path, label in EXPORT_FILES
     )
+    if pdf:
+        files += (
+            f"<a class='btn regpdf' href='/decks/{did}/registration' {ui.box_open_attr('pdf')}>"
+            f"{icon('pdf')} Registration PDF…</a>"
+        )
     panes += (
         "<div class='xpane' data-pane='exp-files' hidden>"
         "<p class='muted small'>Downloads are made in this browser from the deck as read now.</p>"
         f"<div class='files'>{files}</div></div>"
     )
-    body = f"<div class='segc xtabs' role='tablist' aria-label='Export'>{tablist}</div>{panes}"
+    body = f"<div class='hubseg segc xtabs' role='tablist' aria-label='Export'>{tablist}</div>{panes}"
     return ui.box(
         "export",
         f"Export “{deck_title(deck)}”",
@@ -593,11 +638,8 @@ def delete_box_html(
     did = esc(deck.id)
     title = deck_title(deck)
     n = sum(c.quantity for c in deck.cards if deck.in_deck(c))
-    undo = (
-        "A snapshot of the deck is kept under History"
-        + (", and a private copy is made in your backup folder on Archidekt first" if backups else "")
-        + ". Archidekt itself has no undo for a deleted deck."
-    )
+    # no backup copy on Archidekt for a delete (decks.DELETE_KEEPS_NO_COPY), whatever ``backups`` is
+    undo = DELETE_KEPT_NOTE
     body = (
         (ui.notice(error, "error", role="alert") if error else "")
         + f"<form id='delf' method='post' action='/decks/{did}/delete' class='deleteform'>"
@@ -605,7 +647,7 @@ def delete_box_html(
         f"<p>This deletes the deck ({plural(n, 'card')}) from your Archidekt account. {esc(undo)}</p>"
         "<div class='field'><label for='typed'>Type the deck's name to confirm</label>"
         f"<input id='typed' type='text' name='name' autocomplete='off' required maxlength='200' "
-        f"placeholder='{esc(title)}' data-typed='{esc(title)}'></div></form>"
+        f"{ui.hint_attrs('Deck name|Name')} data-typed='{esc(title)}'></div></form>"
     )
     return ui.box(
         "delete",
@@ -627,9 +669,10 @@ def compare_box_html(deck: Deck, *, open: bool = False) -> str:
     own decks as a list to pick from."""
     did = esc(deck.id)
     body = (
-        f"<form id='cmpf' method='get' action='/decks/{did}/compare' class='stack'>"
+        f"<form id='cmpf' method='get' action='/decks/{did}/compare' class='stack' "
+        f"data-draft='compare:{did}'>"
         "<div class='field'><label for='cmp-with'>Other deck</label>"
-        "<input id='cmp-with' type='text' name='with' placeholder='Precon name, deck link or deck ID' "
+        "<input id='cmp-with' type='text' name='with' placeholder='Link or ID' "
         "autocomplete='off'></div>"
         "<details class='fold'><summary class='fold-btn'>…or paste a decklist</summary>"
         "<textarea name='paste' rows='5' aria-label='Paste a decklist' "
@@ -653,7 +696,7 @@ def folder_options_html(folders: dict[str, Any] | None, chosen: str) -> str:
     level, then the member's folders indented by depth, the backup folder left out. ``folders``:
     decks.folders' flattened tree, or None when it could not be read (the top level is then the
     only choice). ``chosen``: the picked folder's id, "" for the top level."""
-    opts = "<option value=''" + (" selected" if not chosen else "") + ">Top level (no folder)</option>"
+    opts = "<option value=''" + (" selected" if not chosen else "") + ">No folder</option>"
     for f in (folders or {}).get("folders", []):
         if f.get("backup") or not f.get("depth"):
             continue  # the backup folder is no place for a new deck; the root is the top level
@@ -722,7 +765,7 @@ def deck_boxes_html(
     ``box_error`` shows in it)."""
     if not csrf:
         return ""
-    out = export_box_html(deck, open=open_box == "export")
+    out = export_box_html(deck, open=open_box == "export", pdf=own)
     out += compare_box_html(deck, open=open_box == "compare")
     out += clone_box_html(
         deck,
@@ -822,7 +865,7 @@ def comments_html(deck: Deck, *, writes_enabled: bool = True) -> str:
     With Archidekt writes switched off the thread is read-only: no form, no Reply, votes or edits."""
     did = esc(deck.id)
     form = (
-        "<form class='newcomment'><label for='ctext'>Add a comment</label>"
+        f"<form class='newcomment' data-draft='comment:{did}'><label for='ctext'>Add a comment</label>"
         "<textarea id='ctext' name='text' rows='3' maxlength='2000' "
         "placeholder='Say something about this deck…'></textarea>"
         "<div class='replyto' hidden></div>"
@@ -840,8 +883,14 @@ def comments_html(deck: Deck, *, writes_enabled: bool = True) -> str:
         f"data-root='{esc(deck.comment_root or '')}'>"
         f"<div class='panel-head'><h2>Comments</h2><span class='muted small' data-count></span></div>"
         f"<div class='thread' data-src='/social/api/decks/{did}/comments'><p class='muted'>Comments from "
-        f"Archidekt appear here. <a href='https://archidekt.com/decks/{did}' target='_blank' "
-        "rel='noreferrer noopener'>Read the thread on Archidekt</a>.</p></div>"
+        "Archidekt appear here. "
+        + ui.cap_link(
+            "Read the thread on Archidekt",
+            f"https://archidekt.com/decks/{did}",
+            icon_name="external",
+            attrs="target='_blank' rel='noreferrer noopener'",
+        )
+        + "</p></div>"
         f"{form}</section>"
     )
 
@@ -882,7 +931,12 @@ DECK_CSS_A = (
   justify-content:flex-start;text-align:left;text-decoration:none}
 .sharebox .sharerow + .sharerow{border-top:1px solid var(--border-soft)}
 .sharebox .sharerow svg{width:20px;height:20px;flex:none;color:var(--orange-text)}
-.sharebox .sharerow .t{flex:1;min-width:0}
+.sharebox .sharerow .t{flex:1 1 auto;min-width:0}
+.sharebox .sharerow small{min-width:0}
+@container (max-width:17em){
+  .sharebox .sharerow{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.8rem;row-gap:0}
+  .sharebox .sharerow svg{grid-row:1 / span 2}
+  .sharebox .sharerow .t,.sharebox .sharerow small{grid-column:2} }
 .sharebox .sharerow small{color:var(--text-muted)}
 .sharebox .sharerow:hover{background:var(--surface-2)}
 .banner h1.deckname.unnamed > span{color:#cfcfcf;font-style:italic}
@@ -914,7 +968,6 @@ DECK_CSS_A = (
 .mtgbox .body .fold textarea{min-height:7rem;margin-top:.5rem}
 .mtgbox .body .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .mtgbox .body .field input:not([type=file]),.mtgbox .body .field select{width:100%}
-.mtgbox.dangerbox .bh h2{color:var(--danger-text)}
 /* a phone at card size L: one stack a row (S and M stay two a row) */
 @media (max-width:420px){ html[data-card-size=l] .deckview.stacks{grid-template-columns:minmax(0,1fr)} }
 """
@@ -932,19 +985,28 @@ def _select(name: str, options: dict[str, str], current: str, label: str, ic: st
     )
 
 
-def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: str) -> str:
+def toolbar_html(
+    deck: Deck, *, own: bool, view: str, group: str, sort: str, q: str, making: bool = False
+) -> str:
     """The toolbar panel. Two separate forms: Quick add (goes to the editor) and the view controls.
     They must never nest: HTML has no nested forms, the parser would end the outer form at the
-    inner one's close tag and the View / Group / Sort selects would submit nothing."""
+    inner one's close tag and the View / Group / Sort selects would submit nothing. ``making``: a
+    new deck whose cards are still going in, whose Quick add and Add a package are off meanwhile."""
     did = esc(deck.id)
+    if own and making:
+        return _toolbar_making(toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q), did)
     add = (
         "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
-        "<label for='quick'>Add card</label><div class='quickrow'>"
-        "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' data-suggest='cards' "
+        "<label for='quick'>Add to the deck</label><div class='quickrow'>"
+        # the placeholder is short enough to read whole in the phone toolbar's field (the full
+        # name of the control is its label, "Add to the deck", and the + beside it says Add)
+        "<input id='quick' type='text' name='add' placeholder='Name' data-suggest='cards' "
+        "data-suggest-submit "
         "autocomplete='off'>"
-        # on a phone the label is hidden and only the icon shows: the name stays the same
-        f"<button type='submit' aria-label='Card search'>{icon('search')} "
-        "<span>Card search</span></button>"
+        # on a phone the label is hidden and only the icon shows: the name stays the same. The
+        # page adds one copy in place (deck.js); without scripts the form opens the editor.
+        f"<button type='submit' aria-label='Add'>{icon('plus')} "
+        "<span>Add</span></button>"
         # Add a package, where cards are added (the owner, 2026-10-25: packages easy to find): the
         # package box (deck_extras.py); its old address opens this page with the box open
         f"<a class='btn addpkg' href='/decks/{{did}}/package' {ui.box_open_attr('package')}>"
@@ -961,18 +1023,10 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         + _select("group", GROUPS, group, "Group by", "grid")
         + _select("sort", SORTS, sort, "Sort by", "sort")
         + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
-        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Filter deck (eg: Sol Ring)' "
+        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Find' "
         "autocomplete='off'>"
         f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
-        "</span></div>"
-        + (
-            # the hint is the grip icon's hover text (show, not tell); the grip itself is deck.js's
-            f"<span class='hint' title='{DRAG_HINT}' aria-label='{DRAG_HINT}' role='img'>"
-            f"{icon('drag')}</span>"
-            if own and view in PICTURE_VIEWS
-            else ""
-        )
-        + "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
+        "</span></div><noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></div></section>"
     )
 
@@ -1287,7 +1341,7 @@ def custom_image_card(card: CustomDeckCard, *, deck: Deck) -> str:
     shows until the picture is there and stays when there is none."""
     body = (
         "<span class='ph'><span class='t'>"
-        f"<span class='nm'>{esc(card.name)}</span></span>"
+        f"<span class='nm' title='{esc(card.name)}'>{esc(card.name)}</span></span>"
         f"<span class='ty'>{esc(card.type_line)}</span></span>"
     ) + (
         f"<img class='pic' src='{custom_picture_url(deck, card)}' alt='{esc(card.name)}' loading='lazy'>"
@@ -1322,7 +1376,8 @@ def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = Non
         if img
         else (
             "<span class='ph'><span class='t'>"
-            f"<span class='nm'>{esc(card.name)}</span>{mana_html(card.mana_cost)}</span>"
+            f"<span class='nm' title='{esc(card.name)}'>{esc(card.name)}</span>"
+            f"{mana_html(card.mana_cost)}</span>"
             f"<span class='ty'>{esc(' '.join(card.types) or '')}</span></span>"
         )
     )
@@ -1363,6 +1418,12 @@ def cards_html(
         return "<section class='panel'><p class='muted'>No cards match the filter.</p></section>"
     did = esc(deck.id)
     excluded = deck.excluded_categories()
+    # the member's own deck grouped by its categories: each stack's ⋮ edits that category on the
+    # page (deck.js: Rename…, Add category…, Add from template…, the Premier / In deck / In price
+    # switches, Edit cards in editor and Delete…; mockup screen 4, review F8), and "+ Add
+    # category" follows the last stack. Without scripts the ⋮ is this drop-down to the editor
+    # and to Deck settings, where the same changes are made with forms.
+    editable = own and group == "category"
     sections = []
     for name, cards in groups:
         own_customs = customs.get(name, [])
@@ -1370,13 +1431,14 @@ def cards_html(
         price = sum((c.price or 0) * c.quantity for c in cards)
         strike = " strike" if name in excluded else ""
         menu = (
-            f"<details class='dd'><summary class='icon-only btn-ghost' aria-label='Options for {esc(name)}' "
-            f"title='Category options'>{icon('more')}</summary><div class='menu'>"
+            f"<details class='dd catdd'><summary class='icon-only btn-ghost' "
+            f"aria-label='Options for {esc(name)}' title='Category options'>{icon('more')}</summary>"
+            "<div class='menu'>"
             f"<a href='/decks/{did}/edit#cat-{quote(name, safe='')}'>{icon('edit')} Edit cards in "
             f"{esc(name)}</a>"
             f"<a href='/decks/{did}/settings#categories'>{icon('settings')} Category options</a>"
             "</div></details>"
-            if own and group == "category"
+            if editable
             else ""
         )
         head = (
@@ -1420,6 +1482,7 @@ def cards_html(
             for n in (
                 "eye",
                 "bookmark",
+                "pin",
                 "swap",
                 "tag",
                 "eye-off",
@@ -1433,14 +1496,47 @@ def cards_html(
                 "copy",
                 "plus",
                 "collection",
+                "layers",
             )
         )
         + "</template>"
     )
+    # What each category is (deck.js draws the ⋮ menu from it and sends the change as Deck
+    # settings' form would, with the same ``was_`` baseline): its form key, record id, name, the
+    # three switches, how many copies it holds, and whether it touches the commander
+    catinfo = (
+        f" data-catinfo='{esc(json.dumps(category_info(deck), separators=(',', ':')))}'" if editable else ""
+    )
+    addcat = (
+        f"<a class='btn addcat' href='/decks/{did}/settings#categories' data-addcat>"
+        f"{icon('plus')} Add category</a>"
+        if editable
+        else ""
+    )
     return (
         f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}' "
-        f"data-grouping='{esc(group)}'{droppable}>{icons}{''.join(sections)}</div>"
+        f"data-grouping='{esc(group)}'{droppable}{catinfo}>{icons}{''.join(sections)}{addcat}</div>"
     )
+
+
+def category_info(deck: Deck) -> list[dict[str, Any]]:
+    """The deck's categories for the deck page's category menus (``data-catinfo``): one entry per
+    category as Deck settings lists them (decks.deck_categories), with ``key``, the form key its
+    fields carry there (decks.category_keys)."""
+    return [
+        {
+            "key": key,
+            "id": c["id"],
+            "name": c["name"],
+            "premier": c["premier"],
+            "not_in_deck": c["not_in_deck"],
+            "not_in_price": c["not_in_price"],
+            "cards": int(c["cards"]),
+            "commander": bool(c["commander"]),
+            "record": bool(c["record"]),
+        }
+        for key, c in category_keys(deck)
+    ]
 
 
 def _bar(parts: dict[str, float], *, label: str) -> str:
@@ -1506,8 +1602,10 @@ def _odds_html(cards: list[DeckCard]) -> str:
         f"<input type='number' name='n' value='7' min='1' max='{size}' aria-label='Cards drawn'> "
         "<span data-plural='n'>cards</span>"
         "</form>"
-        "<table class='qty oddstable'><thead><tr><th>Group</th><th>Qty</th><th>Odds</th></tr></thead>"
+        "<div class='qtyscroll'><table class='qty oddstable'><thead><tr><th>Group</th><th>Qty</th>"
+        "<th>Odds</th></tr></thead>"
         "<tbody><tr><td class='muted' colspan='3'>Turn on scripts to see the odds.</td></tr></tbody></table>"
+        "</div>"
         f"<script type='application/json' id='odds-data'>{data}</script>"
         "</div>"
     )
@@ -1580,7 +1678,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                     zone.get("ok", True),
                 )
             )
-            outside = checks.get("colour_identity_violations") or []
+            outside = checks.get("color_identity_violations") or []
             rows.append(
                 ("Color identity", "all cards inside" if not outside else names(outside), not outside)
             )
@@ -1867,7 +1965,7 @@ def colours_html(deck: Deck, stats: dict[str, Any]) -> str:
     """The colour panel with Archidekt's toggles: Bar or Pie, Lands only (production counted from
     the lands alone), and the mana-cost pips outside the commander's colour identity."""
     cards = deck.main_cards
-    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
+    pips = {k: float(v) for k, v in (stats.get("color_pips") or {}).items()}
     cost_members: dict[str, list[DeckCard]] = {}
     cost_cards: Counter[str] = Counter()
     for c in cards:
@@ -1907,9 +2005,10 @@ def colours_html(deck: Deck, stats: dict[str, Any]) -> str:
         )
     ctl = (
         "<div class='statctl' role='group' aria-label='Colors' hidden><span>Colors</span>"
+        "<span class='seg2' role='group' aria-label='Chart'>"
         + _toggle("chart", "bar", "Bar", True)
         + _toggle("chart", "pie", "Pie", False)
-        + "<button type='button' data-set='lands' aria-pressed='false'>Lands only</button></div>"
+        + "</span><button type='button' data-set='lands' aria-pressed='false'>Lands only</button></div>"
     )
     return f"<div class='colourbox statbox'>{ctl}{''.join(variants)}{_identity_html(deck, stats)}</div>"
 
@@ -2017,6 +2116,23 @@ def description_html(deck: Deck) -> str:
     return f"<section class='panel description'><h2>Description</h2>{body}</section>"
 
 
+def _toolbar_making(html: str, did: str) -> str:
+    """The toolbar with Quick add and Add a package off (the deck is still being made)."""
+    return (
+        html.replace("autocomplete='off'>", "autocomplete='off' disabled>", 1)
+        .replace(
+            "<button type='submit' aria-label='Add'>",
+            "<button type='submit' aria-label='Add' disabled>",
+            1,
+        )
+        .replace(
+            f"<a class='btn addpkg' href='/decks/{did}/package' {ui.box_open_attr('package')}>",
+            "<a class='btn addpkg' aria-disabled='true'>",
+            1,
+        )
+    )
+
+
 def deck_page_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -2034,7 +2150,9 @@ def deck_page_html(
     waiting: list[dict[str, Any]] | None = None,
     boxes: str = "",
     before: str = "",
+    making: bool = False,
 ) -> str:
+    # ``making``: a new deck whose cards are still going in (decks.being_made): its edits are off;
     # ``waiting``: the member's waiting proposals for the deck (waiting_strip.py), behind the
     # banner's Proposals pill; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened; ``before``:
     # a strip above the banner (the deck help listing, deck_extras.py)
@@ -2051,12 +2169,13 @@ def deck_page_html(
             writes_enabled=writes_enabled,
             forge_on=forge_on,
             waiting=len(waiting or []),
+            making=making,
         )
         + boxes
         + waiting_strip.deck_box_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice
-        + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
-        + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)
+        + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q, making=making)
+        + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own and not making, owned=owned)
         + stats_panel_html(deck, stats)
         + description_html(deck)
         + (comments_html(deck, writes_enabled=writes_enabled) if csrf else "")
@@ -2160,34 +2279,57 @@ def compare_page_html(
     error: str = "",
     csrf: str | None = None,
     forge_on: bool = False,
+    mine: list[dict[str, Any]] | None = None,
+    snapshots: list[dict[str, Any]] | None = None,
+    ab_on: bool = False,
 ) -> str:
     """Compare decks: a heading with a back link and one purpose line, a compact form (the other
-    deck and Compare on one row, the pasted list in a fold), then widgets, three tables of card
-    rows with the shared card menu, the statistics' differences, and the Forge panel. One orange
-    button: Compare until results show with the Forge panel, then that panel's button (F5: no
-    card size control here, the rows are text)."""
+    deck and Compare on one row, the pasted list in a fold), the member's own decks and this deck's
+    snapshots to pick from (``mine``, ``snapshots``: owner decision C7), then widgets, three tables
+    of card rows with the shared card menu, the statistics' differences, the paired solo test of
+    both (``ab_on``: the research service is set up) and the Forge panel (not for a snapshot: Forge
+    pairs are two decks). One orange button: Compare until results show, then the Forge panel's
+    (or, without it, the paired test's) (F5: no card size control here, the rows are text)."""
     did = esc(deck.id)
     name = esc(deck_title(deck))
     options = esc(json.dumps(precon_labels(precons), ensure_ascii=False))
+    is_snap = other_ref.startswith("snap_")
+    shown = result is not None and other is not None and not error
     forge_html = (
         compare_forge_html(deck, other, other_name, csrf=csrf, forge_on=forge_on)
-        if result is not None and other is not None and not error
+        if shown and not is_snap
         else ""
     )
-    compare_kind = "" if forge_html else "primary"
+    ab_html = (
+        compare_ab_html(
+            deck,
+            other_ref,
+            other_name,
+            csrf=csrf,
+            primary=not forge_html,
+            # Forge games too, as compare_decks plays them with its A/B: two Commander decks
+            forge=forge_on and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other),
+        )
+        if shown and ab_on and isinstance(other, Deck)
+        else ""
+    )
+    compare_kind = "" if forge_html or ab_html else "primary"
     form = (
-        f"<a class='cmp-back' href='/decks/{did}'>← {name}</a>"
+        f"<a class='cmp-back ui-cap' href='/decks/{did}'>← {name}</a>"
         + ui.page_head("Compare decks", f"What “{name}” took out of another deck, put in and changed.")
-        + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form'>"
+        + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form' "
+        f"data-draft='compare:{did}'>"
         "<div class='row'><div class='field fld'><label for='cmp-with'>Other deck</label>"
         f"<input id='cmp-with' type='text' name='with' data-suggest='static' data-options='{options}' "
-        f"value='{esc(other_ref)}' placeholder='Precon name, deck link or deck ID' autocomplete='off'></div>"
+        f"value='{esc('' if is_snap else other_ref)}' placeholder='Link or ID' "
+        "autocomplete='off'></div>"
         f"<button type='submit' class='{compare_kind}'>{icon('swap')} Compare</button></div>"
         f"<details class='fold'{' open' if paste else ''}><summary class='fold-btn'>…or paste a decklist"
         "</summary><textarea name='paste' rows='5' aria-label='Paste a decklist' "
         "placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
         f"{esc(paste)}</textarea></details></form>"
     )
+    form += compare_picker_html(deck, mine, snapshots, other_ref=other_ref, folded=shown)
     if error:
         return form + ui.notice(error, "error", html=True, role="alert")
     if result is None or other is None:
@@ -2267,7 +2409,130 @@ def compare_page_html(
             f"<section class='cmp-stats'><h2 class='cmp-h'>Statistics: this deck minus {oname}</h2>"
             f"<div class='cmp-st2'>{cols}</div></section>"
         )
-    return form + widgets + lists + delta_html + forge_html
+    return form + widgets + lists + delta_html + ab_html + forge_html
+
+
+PICK_MOST = 12  # decks shown before "Show N more"
+
+
+def compare_picker_html(
+    deck: Deck,
+    mine: list[dict[str, Any]] | None,
+    snapshots: list[dict[str, Any]] | None,
+    *,
+    other_ref: str,
+    folded: bool,
+) -> str:
+    """The member's other decks and this deck's snapshots, each a chip that compares with it
+    (audit D-31). Folded once a comparison shows. ``mine`` None: the deck list is still being read
+    (a cold start) or Archidekt could not be asked, so My decks is drawn as a loading box that
+    compare.js fills from /api/decks/mine?shape=pick, with the same chips. Nothing when there is
+    nothing to pick."""
+    did = esc(deck.id)
+    snaps = [x for x in snapshots or [] if x.get("snapshot_id")]
+    decks_html = (
+        compare_mine_html(str(deck.id), mine, other_ref=other_ref)
+        if mine is not None
+        else (
+            "<div class='cmp-chips skeleton' aria-busy='true' aria-label='Reading your decks' "
+            f"data-pick-src='/api/decks/mine?shape=pick&amp;deck={did}&amp;with={esc(other_ref)}'>"
+            "<span></span><span></span><span></span></div>"
+        )
+    )
+    if not decks_html and not snaps:
+        return ""
+    parts = []
+    if snaps:
+        parts.append(
+            "<h3 class='cmp-sub'>Snapshots of this deck</h3><div class='cmp-chips'>"
+            + "".join(
+                _compare_chip(
+                    did,
+                    f"snap_{x['snapshot_id']}",
+                    ui.when_text(x.get("taken_at")),
+                    plural(int(x["card_count"]), "card") if x.get("card_count") else "",
+                    other_ref=other_ref,
+                )
+                for x in snaps
+            )
+            + "</div>"
+        )
+    if decks_html:
+        parts.append(f"<h3 class='cmp-sub' data-pick-head>My decks</h3>{decks_html}")
+    inner = "".join(parts)
+    if folded:
+        return (
+            "<details class='fold cmp-mine'><summary class='fold-btn'>Compare with another of yours</summary>"
+            f"{inner}</details>"
+        )
+    return f"<section class='cmp-mine' aria-label='Your decks and snapshots'>{inner}</section>"
+
+
+def _compare_chip(did: str, ref: str, text: str, sub: str = "", *, other_ref: str) -> str:
+    cur = " aria-current='true'" if ref == other_ref else ""
+    small = f" <span class='s'>{esc(sub)}</span>" if sub else ""
+    href = f"/decks/{did}/compare?with={esc(ref)}"
+    return f"<a class='ui-chip cmp-pick' href='{href}'{cur}>{esc(text)}{small}</a>"
+
+
+def compare_mine_html(deck_id: str, mine: list[dict[str, Any]], *, other_ref: str) -> str:
+    """The member's other decks as chips, newest first, the rest after PICK_MOST folded; the one
+    renderer for the page and for /api/decks/mine?shape=pick. Empty when there is no other deck."""
+    did = esc(deck_id)
+    decks_ = [d for d in mine if str(d.get("id")) != str(deck_id) and d.get("id")]
+    decks_.sort(key=lambda d: str(d.get("updated_at") or ""), reverse=True)
+    if not decks_:
+        return ""
+
+    def named(d: dict[str, Any]) -> str:
+        return _compare_chip(did, str(d["id"]), str(d.get("name") or f"Deck {d['id']}"), other_ref=other_ref)
+
+    first = "".join(named(d) for d in decks_[:PICK_MOST])
+    rest = decks_[PICK_MOST:]
+    more = (
+        f"<details class='fold'><summary class='fold-btn'>Show {len(rest)} more</summary>"
+        "<div class='cmp-chips'>" + "".join(named(d) for d in rest) + "</div></details>"
+        if rest
+        else ""
+    )
+    return f"<div class='cmp-chips'>{first}</div>{more}"
+
+
+COMPARE_AB_LINE = (
+    "Plays both decks alone, game for game under the same seeds, and keeps the result as a report. It "
+    "changes nothing on Archidekt."
+)
+
+
+COMPARE_AB_FORGE = "Forge games too: both decks against the same opponents"
+
+
+def compare_ab_html(
+    deck: Deck, other_ref: str, other_name: str, *, csrf: str | None, primary: bool, forge: bool = False
+) -> str:
+    """The paired solo test of this deck (A) against the other (B), kept as a comparison report
+    (POST /decks/<id>/compare/ab). ``forge``: Forge is on and both are Commander decks, so the
+    form offers both decks' Forge games against the same precons too, ticked as compare_decks
+    plays them with its A/B."""
+    if not csrf or not other_ref:
+        return ""
+    kind = "btn-primary" if primary else "btn-plain"
+    tick = (
+        "<label class='check cmp-ab-forge'><input type='checkbox' name='forge' value='1' checked> "
+        f"{COMPARE_AB_FORGE}</label>"
+        if forge
+        else ""
+    )
+    return (
+        "<section class='ui-card cmp-forge cmp-ab'><h2>Solo test both (A/B)</h2>"
+        f"<p class='muted small'>{COMPARE_AB_LINE}</p>"
+        f"<form method='post' action='/decks/{esc(deck.id)}/compare/ab'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        f"<input type='hidden' name='with' value='{esc(other_ref)}'>{tick}"
+        f"<button type='submit' class='{kind}' data-busy-label='Starting…'>{icon('swap')} Solo test "
+        f"“{esc(deck_title(deck))}” against “{esc(other_name)}”</button></form>"
+        "</section>"
+    )
 
 
 def _has_commander(deck: Deck) -> bool:
@@ -2297,7 +2562,8 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
 
 
 COMPARE_CSS = """
-.cmp-back{display:inline-flex;align-items:center;min-height:44px}
+.cmp-back{margin-bottom:.25rem}
+.cmp-ab .cmp-ab-forge{display:flex;width:100%;min-height:44px;margin:.25rem 0 .75rem}
 .cmp-form{padding:.75rem 1rem;margin:0 0 1rem}
 .cmp-form .row{display:flex;gap:.5rem;align-items:flex-end}
 .cmp-form .row .fld{flex:1;min-width:0;margin:0}
@@ -2327,6 +2593,18 @@ COMPARE_CSS = """
 .cmp-st .v{text-align:right;font-weight:900;font-variant-numeric:tabular-nums}
 .cmp-forge button.btn-primary{white-space:normal;text-align:left;line-height:1.2;margin:0}
 .cmp-forge > p{margin:0 0 .75rem}
+.cmp-forge button{white-space:normal;text-align:left;line-height:1.2;margin:0}
+.cmp-ab{margin:0 0 1rem}
+.cmp-mine{margin:0 0 1rem}
+.cmp-mine .cmp-sub:first-child{margin-top:0}
+.cmp-chips{display:flex;flex-wrap:wrap;gap:.4rem}
+/* a deck's name wraps inside its chip (the quick-filter chips keep theirs on one line) */
+.cmp-pick{min-height:44px;display:inline-flex;align-items:center;gap:.35rem;max-width:100%;overflow-wrap:anywhere;
+  white-space:normal}
+/* My decks while the list is read: three chip-shaped blanks (the site's skeleton) */
+.cmp-chips.skeleton>span{width:9rem;height:44px;border-radius:999px}
+.cmp-pick .s{color:var(--text-muted);font-weight:400}
+.cmp-pick[aria-current]{outline:2px solid var(--accent);outline-offset:1px}
 @media (max-width:599.98px){ .cmp-form .row{flex-direction:column;align-items:stretch}
   .cmp-form .row button{width:100%} }
 """
@@ -2448,7 +2726,7 @@ def forge_solo_line(deck: Deck, solo: dict[str, Any] | None, *, csrf: str | None
         run = (
             f"<form method='post' action='/decks/{did}/report' class='inline'>"
             f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
-            f"<button type='submit' data-busy-label='Testing…'>{icon('stats')} Run full test</button></form>"
+            f"<button type='submit' data-busy-label='Testing…'>{icon('stats')} Run test</button></form>"
             if csrf
             else ""
         )
@@ -2503,12 +2781,17 @@ def goldfish_page_html(
     solo = "" if forge_solo is _NO_SOLO_LINE else forge_solo_line(deck, forge_solo, csrf=csrf)
     return (
         "<section class='panel gf-head'>"
-        f"<a class='gf-back' href='/decks/{did}'>← {name}</a>"
-        "<h1>Goldfish</h1>"
-        f"<p class='muted small gf-intro'>{esc(goldfish_intro(size, commander=commander))}</p>"
+        # the way back is the report and review pages' grey capsule (ui.cap_link), never blue text
+        "<nav class='crumbs gf-crumbs' aria-label='Back'>"
+        f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
+        f"<h1>Goldfish <span class='gf-deck'>{name}</span></h1>"
+        "<p class='muted small gf-intro ui-dots'>"
+        + "".join(f"<span>{esc(x)}</span>" for x in goldfish_intro(size, commander=commander).split(" · "))
+        + "</p>"
         + solo
         + extra_head
-        + "<p class='gf-status' id='gf-status'></p>"
+        # the game's facts line (static/goldfish.js fills it): balanced lines, the dots in the gaps
+        + "<p class='gf-status ui-dots balanced' id='gf-status'></p>"
         "<p class='gf-hint' id='gf-hint'></p>"
         "<div class='gf-controls' role='group' aria-label='Game'>"
         "<button type='button' class='btn-primary' data-act='keep' hidden>Keep hand</button>"
@@ -2541,7 +2824,9 @@ def goldfish_page_html(
 
 GOLDFISH_CSS = """
 .gf-head h1{margin:.1rem 0 .3rem;font-size:1.6rem}
-.gf-back{display:inline-flex;align-items:center;min-height:44px}
+.gf-crumbs{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .25rem}
+.gf-head h1 .gf-deck{font-size:1rem;font-weight:400;color:var(--text-muted);margin-left:.4rem;
+  overflow-wrap:anywhere}
 .gf-intro{margin:0}
 .gf-solo{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:.6rem 0 0}
 .gf-solo form.inline{display:contents} .gf-solo button{margin:0}
@@ -2558,7 +2843,7 @@ GOLDFISH_CSS = """
    let them shrink, down to 44px, instead of the switch cutting off L */
 .gf-size .sizeseg{max-width:100%}
 .gf-size .sizeseg button{flex:0 1 auto;min-width:min(2.75rem,44px)}
-@media (pointer:coarse){ .gf-size .sizeseg button{min-width:44px} }
+.gf-size .sizeseg button{min-width:44px}
 .gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
   padding:.75rem;margin:0 0 1rem;min-width:0}
 .gf-zone h2{font-size:1.1rem;margin:0 0 .5rem}
@@ -2579,10 +2864,14 @@ html[data-card-size=s] .gf-c .kebab{display:none}
   background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
   user-select:none;-webkit-touch-callout:none;transition:transform .15s}
 .gf-card img{width:100%;height:100%;object-fit:cover;display:block}
-.gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;height:100%;padding:.35rem;
+.gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;min-height:100%;padding:.35rem;
   font-size:.78rem;text-align:left;line-height:1.2}
-.gf-card .ph .nm{overflow-wrap:break-word;hyphens:auto}
-.gf-card .ph .ty{color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gf-card .ph .nm{overflow-wrap:break-word}
+.gf-card .ph .ty{color:var(--text);overflow-wrap:break-word}
+/* a placeholder tile (no picture) grows taller than the card's ratio when its words need it
+   (200% text), instead of clipping them (final polish P-12) */
+.gf-card:has(> .ph){min-height:auto;overflow:visible;display:flex;flex-direction:column}
+.gf-card:has(> .ph) > .ph{flex:1 1 auto}
 .gf-card:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 /* a tapped permanent turns sideways inside its cell */
 .gf-card.tapped{transform:rotate(90deg) scale(.72)}
@@ -2633,9 +2922,6 @@ def colour_bar_html(colors: dict[str, Any] | None) -> str:
     return _bar(parts, label="Color identity") if parts else "<div class='cbar empty'></div>"
 
 
-NO_TAGS = "<span class='notags'>No deck tags</span>"
-
-
 def deck_card_html(
     d: dict[str, Any],
     *,
@@ -2644,13 +2930,18 @@ def deck_card_html(
     show_owner: bool = False,
     own: bool = False,
     plain: bool = False,
+    tick: bool = False,
 ) -> str:
     """One deck tile: a link to the deck, and after it the tile's ⋮ (static/menus.js opens the
     deck's menu from it, a right-click, a press and hold or Shift+F10). ``own``: the member's own
     deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest. ``plain``:
-    a precon tile, without the owner's picture and the deck tags (as deck search's tiles)."""
+    a precon tile, without the owner's picture and the deck tags (as deck search's tiles).
+    ``tick``: My decks' Select tick box before the link (deck_bulk.py)."""
     did = esc(d["id"])
     name = d.get("name") or "Unnamed deck"
+    check = ""
+    if tick and own:
+        check = ui.check_cell("deck_id", str(d["id"]), f"Select {name}", form="decks-bulk")
     folder_id = d.get("folder_id")
     data = f" data-deck-id='{did}' data-deck-name='{esc(name)}' data-own='{1 if own else 0}'" + (
         f" data-folder='{esc(str(folder_id))}'" if folder_id is not None else ""
@@ -2665,9 +2956,11 @@ def deck_card_html(
     if not fmt and isinstance(d.get("format"), str):
         fmt = format_label(d["format"])
     line = (fmt or "Custom") + deck_card_bracket_text(d.get("bracket"))  # bracket_view.py
+    # the deck's tags, when it has any (no "No deck tags" line: noise on a list that is the
+    # member's own, 0.7.46 audit D-24); the owner's picture only on other people's decks
     tags = d.get("tags") or []
-    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6]) or NO_TAGS
-    tags_html = "" if plain else f"<span class='tags'>{pills}</span>"
+    pills = "".join(f"<span class='pill' title='{esc(t)}'>{esc(t)}</span>" for t in tags[:6])
+    tags_html = f"<span class='tags'>{pills}</span>" if pills and not plain else ""
     initial = esc((d.get("name") or "?")[:1].upper())
     size = d.get("size")
     sub_bits = []
@@ -2681,13 +2974,13 @@ def deck_card_html(
     when = ui.when(iso_ts(d.get("updated_at") or ""))  # the one list date (feedback.js keeps it current)
     sub_html = esc(sub_text) + (f"{' · ' if sub_text else ''}{when}" if when else "")
     return (
-        f"<li class='deck{' selected' if selected else ''}'{data}><a href='/decks/{did}'>"
+        f"<li class='deck{' selected' if selected else ''}'{data}>{check}<a href='/decks/{did}'>"
         f"<span class='thumb{' noart' if not art else ''}'{style}><span class='ini'>{initial}</span>"
         + (f"<span class='views'>{plural(size, 'card')}</span>" if size else "")
         + colour_bar_html(d.get("colors"))
         + "</span>"
         f"<span class='info{' plain' if plain else ''}'>"
-        + ("" if plain else avatar_html(d.get("owner") or "", "sm"))
+        + (avatar_html(d.get("owner") or "", "sm") if show_owner and not plain else "")
         + f"<span class='text'><span class='name' title='{esc(name)}'>{esc(name)}</span>"
         f"<span class='fmt' title='{esc(line)}'>{esc(line)}</span>"
         f"<span class='sub' title='{esc(sub_text)}'>{sub_html}</span>"
@@ -2720,16 +3013,19 @@ def deck_list_html(
     folder: str = "",
     own: bool = False,
     plain: bool = False,
+    tick: bool = False,
 ) -> str:
     """The deck tiles. ``own``: the member's own decks (My decks, Home), whose tiles' menus carry
     the owner's actions; a listing of other members' decks leaves it off. ``plain``: precon tiles
-    (no owner picture, no tags)."""
+    (no owner picture, no tags). ``tick``: My decks' Select tick boxes."""
     if not decks:
         if folder:
             return (
                 f"<div class='panel'><p>No decks in the folder “{esc(folder)}”"
                 + (f" matching “{esc(q)}”" if q else "")
-                + ". <a href='/decks'>Show every folder</a>.</p></div>"
+                + ". "
+                + ui.cap_link("Show every folder", "/decks")
+                + "</p></div>"
             )
         return (
             "<div class='panel'><p>No decks yet"
@@ -2744,6 +3040,7 @@ def deck_list_html(
             show_owner=show_owner,
             own=own,
             plain=plain,
+            tick=tick,
         )
         for d in decks
     )
@@ -2802,11 +3099,66 @@ def deck_list_held_html(read_at: float) -> str:
     return f"<p class='notice warn' role='status'>{esc(deck_list_held_text(read_at))}</p>"
 
 
-def deck_count_text(total: int | None, *, pending: bool = False) -> str:
-    """The count in the deck list's results bar ("3 decks"); blank while the list is being read."""
+def _age_words(read_at: float, now: float | None = None) -> str:
+    seconds = max(0, int((time.time() if now is None else now) - read_at))
+    n, unit = (max(1, seconds // 60), "minute") if seconds < 3600 else (seconds // 3600, "hour")
+    return f"{n} {unit}{'' if n == 1 else 's'}"
+
+
+def deck_held_text(read_at: float, why: str, *, now: float | None = None) -> str:
+    """What the deck page says over a deck shown as last read because Archidekt can't be asked
+    (DeckService.page_deck_view's ``held_at``); ``why`` is the busy page's title for the refusal."""
+    return (
+        f"{why.rstrip('.')}, so this is the deck as it was read {_age_words(read_at, now)} ago. "
+        "Changes are off until Archidekt can be asked again."
+    )
+
+
+def deck_held_html(read_at: float, why: str, url: str) -> str:
+    """The deck page's strip over a held copy, with Try again (a fresh read of the page)."""
+    return (
+        f"<p class='notice warn held' role='status'>{esc(deck_held_text(read_at, why))} "
+        f"<a class='btn' href='{esc(url)}'>Try again</a></p>"
+    )
+
+
+def deck_check_html(deck_id: str, read_at: float | None, *, reload: bool) -> str:
+    """A deck shown as last read while it is read again (DeckService.page_deck_view's
+    ``checking``): static/feedback.js asks /decks/{id}/check what that read found. On a Reload
+    the strip says so and the page is loaded again when the deck changed; on another view it stays
+    hidden unless the deck changed or Archidekt could not be asked."""
+    age = _age_words(read_at) if read_at else ""
+    failed = (
+        f"Archidekt can't be reached right now, so this is the deck as it was read {age} ago."
+        if age
+        else "Archidekt can't be reached right now, so this is the deck as it was last read."
+    )
+    return (
+        f"<p class='notice deck-check' role='status' data-check='/decks/{esc(deck_id)}/check'"
+        f" data-reload='{'1' if reload else '0'}' data-failed='{esc(failed)}'"
+        f"{'' if reload else ' hidden'}>{'Checking Archidekt for changes…' if reload else ''}</p>"
+    )
+
+
+def deck_saving_html(deck_id: str, changes: int) -> str:
+    """The strip while an apply on the deck runs (DeckService.deck_saving), after a reload too:
+    static/deck.js asks /decks/{id}/busy now and then and loads the page again once it ends, so
+    the rows show what Archidekt took (0.7.46 audit D-06)."""
+    what = "1 change" if changes == 1 else f"{changes} changes"
+    return (
+        f"<p class='notice saving' role='status' data-busy='/decks/{esc(deck_id)}/busy'>"
+        f"{SPINNER} Saving {what}…</p>"
+    )
+
+
+def deck_count_text(total: int | None, *, pending: bool = False, in_folders: int = 0) -> str:
+    """The count in the deck list's results bar ("5 decks · 2 in folders": every deck, as Home
+    counts them, and how many sit in folders at this level: polish C5); blank while the list is
+    being read."""
     if pending or total is None:
         return "Decks"
-    return f"{total} deck{'' if total == 1 else 's'}"
+    text = f"{total} deck{'' if total == 1 else 's'}"
+    return f"{text} · {in_folders} in folders" if in_folders else text
 
 
 def deck_list_controls_html(
@@ -2822,6 +3174,8 @@ def deck_list_controls_html(
     colour_mode: str = "incl",
     fmt: str = "",
     show: str = "",
+    count_extra: str = "",
+    in_folders: int = 0,
 ) -> str:
     """The filter panel over the deck list (searchpanel.py, the panel the search pages share):
     the name box, Colors and Format
@@ -2833,7 +3187,8 @@ def deck_list_controls_html(
     packages apart after the list is drawn, from the Packages page's own listing, so the deck
     list's cold load stays one Archidekt listing); it rides in the form so a filter keeps it.
     ``pending``: the list is still being read (no count yet; decks.js fills it). ``total`` None:
-    the list couldn't be read, so no count."""
+    the list couldn't be read, so no count. ``count_extra``: markup after the count (My decks'
+    Select button)."""
     keep = [("folder", folder)] if folder else []
     if show == "packages":
         keep.append(("show", show))
@@ -2860,7 +3215,10 @@ def deck_list_controls_html(
         ]
     )
     bar = sp.results_bar(
-        count_html=sp.count_html(deck_count_text(total, pending=pending), count_id="decks-total"),
+        count_html=sp.count_html(
+            deck_count_text(total, pending=pending, in_folders=in_folders), count_id="decks-total"
+        )
+        + count_extra,
         sort_html=sp.sort_group(
             order_name="order",
             orders=LIST_ORDERS.items(),
@@ -2873,7 +3231,7 @@ def deck_list_controls_html(
         clear_html=f"<a class='btn sp-clear clr' href='{esc(here)}'>Clear filters</a>",
     )
     return (
-        "<section class='panel spanel'><form method='get' action='/decks' id='listform' "
+        "<section class='panel spanel'><form method='get' action='/decks' id='listform' autocomplete='off' "
         "data-live>"
         + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")
         + ("<input type='hidden' name='show' value='packages'>" if show == "packages" else "")
@@ -2881,7 +3239,7 @@ def deck_list_controls_html(
             label="Filter package name" if show == "packages" else "Filter deck name",
             name="q",
             value=q,
-            placeholder="Example package name" if show == "packages" else "Example deck name",
+            placeholder="Package name|Name" if show == "packages" else "Deck name|Name",
             input_id="q",
             search_label="Filter",
             attrs=" maxlength='80'",
@@ -2902,7 +3260,10 @@ def deck_list_controls_html(
 DECK_CSS = (
     """
 /* deck banner (cardBanner / deckHeaderInfo) */
-.banner{position:relative;margin:0 -1rem 1rem;color:#fff;isolation:isolate;z-index:2}
+.banner{position:relative;margin:0 calc(-1 * var(--gutter)) 1rem;color:#fff;isolation:isolate;z-index:2}
+/* the banner meets the top bar at every width (the 0.7.46 Fold mockup): it takes back the page's
+   top padding (on a phone too: a 14 px band of the page's colour sat above it, confirmation P-16) */
+.banner{margin-top:calc(-1 * var(--main-top,1rem))}
 /* the toolbar below is positioned too; while a banner menu is open the banner must win */
 .banner:has(details[open]){z-index:6}
 /* no featured art: no empty grey band on phones */
@@ -2917,15 +3278,19 @@ DECK_CSS = (
 .banner .controls details.dd .menu{z-index:40}
 .banner .content{display:flex;justify-content:space-between;gap:1rem;max-width:2300px;margin:0 auto}
 .banner .info{min-width:0;flex:1}
-.banner h1.deckname{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:28px;
-  font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.banner h1.deckname > span{overflow:hidden;text-overflow:ellipsis}
+.banner h1.deckname{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:min(2rem,5vw);
+  font-weight:700;color:#fff;overflow-wrap:break-word;line-height:1.2}
+.banner h1.deckname > span{min-width:0}
 /* the banner's grey text: #d6d6d6 reads at 4.5:1 over the whole shade (theme.py --banner-a/b)
    in both themes; the list date in the first row takes this colour, not its muted grey */
 .banner .privacy{color:#d6d6d6;display:inline-flex}
-.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#d6d6d6;
+.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:1.143rem;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
-.banner .row b.orange{color:var(--orange);font-weight:700}
+.banner .row b.orange{color:#ffa94d;font-weight:700}  /* 4.5:1 on the banner's grey (audit D14) */
+/* muted words on the banner ("unknown" for a price nobody knows): the page's muted grey is 1.5:1
+   on the shade in the light theme (polish R2), so the banner's white at reduced opacity, which
+   follows the shade and keeps 4.5:1 across the whole gradient as the row's #d6d6d6 does */
+.banner .row .muted{color:rgba(255,255,255,.72)}
 .banner .row .ui-when{color:inherit;font-size:inherit}  /* the list date's muted grey: faint here */
 .banner .legal{display:inline-flex;align-items:center;gap:.3rem}
 .banner .legal.ok svg{color:#1ebb6c} .banner .legal.bad svg{color:#f21b3f}
@@ -2944,13 +3309,28 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .deltatable th{text-align:left;font-weight:500;padding:.3rem 1rem .3rem 0}
 .deltatable td{text-align:right;font-variant-numeric:tabular-nums}
 .banner .social{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
-/* a phone: the four pills (Like, Bookmark, then Comments and Proposals, or Follow and Comments)
-   two by two, even, instead of three and a lone fourth */
-@media (max-width:599.98px){ .banner .social{display:grid;grid-template-columns:1fr 1fr}
-  .banner .social .soc{justify-content:center} .banner .social .confirm{grid-column:1/-1} }
-.banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
+/* a phone (mockup screen 5): the chips on one row, each its icon and count, the words for a
+   screen reader; a confirmation (social.js) takes the row under them. The chips are equal (each
+   grows from nothing); a chip the confirmation stands in for is hidden and the others share the
+   row (a grid's columns did not: with the confirmation across them the chips fell on top of each
+   other) */
+@media (max-width:599.98px){
+  .banner .social{display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;align-items:center}
+  .banner .social .soc{flex:1 1 0}
+  /* the chips' row narrower than 20em (large text): two and two, never three and one (P-17) */
+  .banner .info{container-type:inline-size}
+  @container (max-width:20em){ .banner .social .soc{flex:0 1 calc(50% - .2rem)} }
+  .banner .social .soc{justify-content:center;min-width:44px;height:36px;padding:0 .6rem;gap:.3rem}
+  .banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap;padding:0;margin:0;line-height:1}
+  /* the count stands alone beside the heart here: its box is trimmed to the digit's cap height, so
+     centring the box centres the ink (a digit's ink sits above its line box's centre: polish B1) */
+  .banner .social .soc .n{text-box:trim-both cap alphabetic}
+  .banner .social .confirm{flex:1 1 100%} }
+.banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;min-height:34px;height:auto;
+  padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
-  font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1}
+  font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1.2}
 .banner .social .soc:hover,.banner .social .soc:focus-visible{border-color:var(--orange);color:var(--orange)}
 /* dark text on orange (white on Archidekt's orange is 2.4:1) */
 .banner .social .soc.on{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
@@ -3005,9 +3385,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   font-variant-numeric:tabular-nums}
 .comments .cmt .acts button.vote svg.i{width:16px;height:16px}
 .comments .cmt .acts button.vote[aria-pressed=true]{color:var(--orange-text);font-weight:700}
-@media (pointer:coarse),(max-width:599.98px){
   .comments .cmt .acts button{min-height:44px;height:auto;padding:0 .75rem}
-}
 .comments .cmt .acts .confirm{display:inline-flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-width:0;
   font-size:.85rem}
 .comments .cmt .acts .confirm > span{min-width:0;overflow-wrap:anywhere}
@@ -3030,35 +3408,65 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;
   background:var(--surface-3);color:var(--text);font-weight:900;border:1px solid var(--border);flex:none}
 .banner .avatar{background:#3a3a3a;color:#fff;border-color:rgba(255,255,255,.4)}
-.avatar.lg{width:50px;height:50px;font-size:1.4rem} .avatar.sm{width:40px;height:40px;font-size:1.1rem}
-.avatar.xl{width:80px;height:80px;font-size:2rem}
-@media (max-width:600px){
+.avatar.lg{width:2.55em;height:2.55em;font-size:1.4rem} .avatar.sm{width:2.6em;height:2.6em;font-size:1.1rem}
+.avatar.xl{width:2.86em;height:2.86em;font-size:2rem}
+/* the wide banner: no thumbnail, the long labels, the three fact rows as they were */
+.banner .thumb,.banner .sm{display:none}
+.banner .top,.banner .titles,.banner .rows{display:contents}
+/* a phone (mockup screen 5): a slim header. A 64 px art thumbnail beside the name and one
+   wrapping line of facts (the short labels), the owner's name in it; Edit / Clone / Test / More
+   as four equal buttons; the social chips on one row with the deck's tags at its end. The cards
+   start at about 300 px instead of 1100. */
+@media (max-width:599.98px){
+  .banner{margin-bottom:.5rem}
   .banner .shade{padding:0}
   .banner .content{flex-direction:column;gap:0}
-  .banner .strip{display:block;height:110px;background:var(--surface-2) var(--art,
-    none) center 30%/cover no-repeat}
-  .banner .info{padding:0 1rem 1rem}
-  .banner h1.deckname{font-size:24px;margin-top:.5rem}
-  .banner .row{font-size:13px}
-  .banner .owner{flex-direction:row;justify-content:flex-end;max-width:none;padding:.5rem 1rem 0;order:-1}
-  .banner .owner .avatar{width:80px;height:80px;font-size:2rem;margin-right:auto;margin-top:0;
-    border-width:3px;border-color:var(--bg)}
-  /* phones: the actions in two columns instead of five full-width rows; a column is at least 9rem,
-     so at large text sizes they go one a row, and a long label wraps whole instead of being cut */
-  .banner .controls .primary{display:grid;width:100%;gap:.5rem;
-    grid-template-columns:repeat(auto-fill,minmax(min(100%,9rem),1fr))}
+  .banner .strip,.banner .owner{display:none}
+  .banner .info{padding:.65rem .75rem .6rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem}
+  .banner .top{display:flex;gap:.7rem;align-items:flex-start;flex-basis:100%;min-width:0;max-width:100%}
+  .banner .thumb{display:block;width:64px;height:64px;border-radius:8px;object-fit:cover;flex:none;
+    background:var(--surface-2);border:1px solid rgba(255,255,255,.25)}
+  .banner .titles{display:block;min-width:0;flex:1 1 auto}
+  .banner h1.deckname{font-size:min(1.357rem,6vw);margin:0 0 .15rem;line-height:1.25}
+  /* the facts flow as one wrapping text (inline rows, each part spaced by a margin), so 200% text
+     wraps rather than widens the page; each row keeps a box of its own (the contrast checks) */
+  .banner .rows{display:block;font-size:.929rem;color:#d6d6d6;line-height:1.5;min-width:0}
+  .banner .rows .row{display:inline;margin:0}
+  /* each part its own inline block: a line can break between parts that the markup does not
+     separate with a space */
+  .banner .rows .row > :not(.lg):not(.legal){display:inline-block;margin-right:.6rem}
+  .banner .rows .row > .legal{margin-right:.6rem}
+  .banner .rows .fmt,.banner .rows .owner-sm{font-weight:700;color:#fff}
+  /* an owner's name can be one long word (Archidekt allows 64 letters): it breaks inside the
+     line rather than widen the page */
+  .banner .rows .owner-sm{text-decoration:none;max-width:100%;overflow-wrap:anywhere}
+  /* a 44 px tap target on the facts line without a taller line: the padding makes the box, the
+     negative margins keep the line box as it is (review 2, L8) */
+  .banner .rows .owner-sm{padding:10px 0;margin-top:-10px;margin-bottom:-10px;min-width:44px}
+  .banner .rows .owner-sm:hover,.banner .rows .owner-sm:focus-visible{color:var(--orange);
+    text-decoration:underline}
+  .banner .lg{display:none} .banner .sm{display:inline}
+  .banner .tags{margin:0 0 0 auto;order:6;font-size:.929rem}
+  .banner .controls{flex-basis:100%;margin:0;order:4}
+  .banner .controls .primary{display:grid;width:100%;gap:.4rem;
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}
   .banner .controls .primary .btn,.banner .controls .primary button,.banner .controls details.dd{width:100%;
     min-width:0}
-  .banner .controls .primary .btn,.banner .controls .primary button{padding-left:.5rem;padding-right:.5rem;
-    white-space:normal;overflow-wrap:normal;text-align:center}
+  .banner .controls .primary .btn,.banner .controls .primary button{padding-left:.35rem;padding-right:.35rem;
+    white-space:normal;overflow-wrap:normal;text-align:center;min-height:44px;gap:.3rem}
   .banner .controls .primary form.inline{display:contents}
   .banner .controls details.dd > summary.btn{width:100%}
+  .banner .social-off{flex-basis:100%;margin:0;order:7}
 }
 
 /* toolbar panel (filterBar) */
 .toolbar{padding:.5rem 1rem 1rem;position:relative;z-index:1}
 .toolbar .controls{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,2fr);gap:1rem;align-items:end}
-.toolbar .controls > form.views:only-child{grid-column:1 / -1}
+/* a deck that is not the member's own has no Quick add, so the view controls take the whole row:
+   the first child, not the only one, because static/deck.js adds the phone's View and More
+   buttons after the form (with :only-child the form sat in the 1.2fr column at 1280 px and at
+   200% text Group by, Sort by and the filter ran over each other; final polish item 3) */
+.toolbar .controls > form.views:first-child{grid-column:1 / -1}
 .toolbar form.quick{margin:0} .toolbar .quickrow{display:flex;gap:.5rem}
 .toolbar .quickrow input{min-width:0;flex:1}
 .toolbar .quickrow button{margin:0;flex:none}
@@ -3068,6 +3476,48 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   gap:.5rem 1rem;margin:0}
 .toolbar .views .field{margin:0}
 .toolbar .views .hint{grid-column:1 / -1;margin:0;color:var(--text-muted);font-size:.9rem;align-self:center}
+/* a phone (mockup screen 5): one row, Quick add with its +, View and ⋮. View opens a sheet with
+   Layout, Group by, Sort by, Filter and Select cards (deck.js); ⋮ holds Add a package, Undo and
+   Redo. The server's View as / Group by / Sort by form and the Add a package button stay for
+   wider screens and for a page without scripts. */
+.toolbar .viewbtn,.toolbar .toolmore{display:none}
+@media (max-width:599.98px){
+  .toolbar.compact{padding:.5rem .75rem}
+  .toolbar.compact .controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+  /* the row's spare width goes to the text field (its placeholder reads whole), not to View,
+     which keeps its own width; under 360 px the field has the first row to itself and View fills
+     the next one beside ⋮ */
+  .toolbar.compact form.quick{flex:1 1 9rem;min-width:0;margin:0}
+  .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0)}
+  .toolbar.compact .quickrow{flex-wrap:nowrap}
+  .toolbar.compact .quickrow .addpkg,.toolbar.compact form.views{display:none}
+  .toolbar.compact .viewbtn{display:inline-flex;flex:0 0 auto;margin:0;min-height:var(--ctl);gap:.35rem;
+    justify-content:center;max-width:100%}
+  @media (max-width:359.98px){
+    .toolbar.compact form.quick{flex-basis:100%}
+    .toolbar.compact .viewbtn{flex:1 0 auto}
+  }
+  .toolbar.compact .controls > .viewbtn:first-child{flex:1 1 auto;justify-content:center}
+  .toolbar.compact .toolmore{display:inline-flex;flex:0 0 auto;margin:0;width:var(--ctl);min-width:var(--ctl);
+    min-height:var(--ctl);padding:0;justify-content:center}
+  /* the select bar shows while cards are being selected (the View sheet's switch) */
+  .bulkbar:not(.on){display:none}
+  /* the one "hold a card to move it" line, at the top (deck.js), instead of one under every category */
+  .movehint{margin:-.25rem 0 .4rem;font-size:.85rem;color:var(--text-muted)}
+  .deckview[data-drop][data-hint-top] .stackhead .meta::after{content:none}
+}
+/* the View sheet's rows */
+.viewsheet .vrow{display:flex;align-items:center;justify-content:space-between;gap:.75rem;min-height:52px;
+  border-top:1px solid var(--border-soft)}
+.viewsheet .vrow:first-child{border-top:0}
+.viewsheet .vrow > label,.viewsheet .vrow > .lbl{font-weight:600;flex:0 0 auto}
+.viewsheet .vrow select,.viewsheet .vrow input[type=search]{width:auto;max-width:58%;min-width:0;margin:0;
+  min-height:44px}
+.viewsheet .vrow .sizeseg{margin:0}
+/* the sheet is for a phone: its size buttons are as tall as its selects (44 px), mouse or touch */
+.viewsheet .vrow .sizeseg button{min-height:44px;min-width:44px}
+.viewsheet .vrow .switch{margin:0}
 /* with the card size switch (0.7.29) next to View as: it takes only its own width. Above 1200 px the
    boxes share one row while they fit and wrap onto the next row when large text makes them wider
    (one grid row let Group by and Sort by run over each other at 200% text) */
@@ -3080,15 +3530,23 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
-.field .sel > svg ~ select,.field .sel > svg ~ .msel-btn{padding-left:2.1rem}
+.field .sel > svg ~ select,.field .sel > svg ~ .msel-btn{padding-left:calc(.75rem + 20px)}
 .field .search{margin:0}
 .toolbar .apply{margin-top:.5rem}
-@media (max-width:1200px){ .toolbar .controls{grid-template-columns:1fr}
+.toolbar{container-type:inline-size}
+@container (max-width:80em){ .toolbar .controls{grid-template-columns:1fr}
   .toolbar .views{grid-template-columns:repeat(3,minmax(0,1fr))}
   .toolbar .views:has(.cardsize){grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr))}
   .toolbar .views .field.cardsize .sizeseg{width:100%}
   .toolbar .views .field.cardsize .sizeseg button{flex:1 1 0}
   .toolbar .filter{grid-column:1 / -1} }
+/* three selects need 9em each (Categories, with its icon): two to a row under that, one under 18em */
+@container (max-width:30em){ .toolbar .controls .views{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .toolbar .controls .views:has(.cardsize){grid-template-columns:repeat(2,minmax(0,1fr))}
+  .toolbar .controls .views .field:nth-child(3){grid-column:1 / -1} }
+@container (max-width:18em){ .toolbar .controls .views,.toolbar .controls .views:has(.cardsize){
+    grid-template-columns:1fr}
+  .toolbar .controls .views .field:nth-child(3){grid-column:auto} }
 @media (max-width:600px){ .toolbar{padding:.5rem .75rem .75rem}
   .toolbar .views{grid-template-columns:1fr 1fr}
   .toolbar .views .field:nth-child(3){grid-column:1 / -1}
@@ -3100,20 +3558,58 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 
 /* category (stack) headers */
 .stackhead{padding-top:.5rem;margin-bottom:.25rem}
-.stackhead h2{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:14px;
+.stackhead h2{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:1rem;
   font-weight:700;min-height:28px;margin:0}
-.stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* min-width 0: a long unbroken name shortens with … instead of widening the stack past the screen */
+.stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .stackhead .title.strike{text-decoration:line-through;color:var(--text-muted)}
-.stackhead .meta{font-size:12px;color:var(--text-muted);display:block}
-.stackhead summary.icon-only{width:28px;height:28px;border:0;background:transparent;color:var(--text-muted)}
+.stackhead .meta{font-size:.857rem;color:var(--text-muted);display:block}
+.stackhead summary.icon-only{min-width:28px;min-height:28px;width:auto;height:auto;border:0;
+  background:transparent;
+  color:var(--text-muted)}
 .stackhead summary.icon-only:hover{color:var(--orange)}
+/* the category's ⋮ (deck.js puts it in place of the no-script drop-down): a finger-sized button
+   that sits in the 28 px head (negative margins), the icon muted until hovered or focused */
+.stackhead .kebab{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;
+  height:32px;min-height:0;margin:-2px 0;padding:0;border:0;border-radius:50%;background:transparent;
+  color:var(--text-muted);cursor:pointer}
+.stackhead .kebab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
+.stackhead .kebab:hover,.stackhead .kebab:focus-visible{color:var(--orange-text);background:var(--surface-2)}
+.stackhead .kebab{width:44px;height:44px;margin:-8px -6px -8px 0}
+/* a press and hold on a category's head opens its menu: no text selection under the finger */
+.deckview[data-catinfo] .stackhead h2{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+/* "+ Add category" after the last stack: a dashed outline, the width of a stack */
+.deckview .addcat{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.4rem;
+  width:100%;min-height:var(--ctl);margin:.5rem 0 0;padding-left:min(1rem,6%);padding-right:min(1rem,6%);
+  border:2px dashed var(--control-border);background:transparent;
+  color:var(--text);font-weight:700;text-decoration:none;break-inside:avoid;page-break-inside:avoid}
+.deckview .addcat:hover,.deckview .addcat:focus-visible{border-color:var(--orange-text);
+  color:var(--orange-text)}
+.deckview.text .addcat,.deckview.brewer .addcat{display:inline-flex;width:100%}
+/* the category boxes (Rename, Add category, Add from template, Delete; deck.js): the switches
+   in one row, each a finger-sized label; the template list one tick per line */
+.mtgbox .catform .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;margin-top:.5rem}
+.mtgbox .catform label.sw{display:inline-flex;align-items:center;gap:.45rem;min-height:var(--ctl);
+  font-weight:700;cursor:pointer}
+.mtgbox .catform label.sw input{margin:0}
+.mtgbox .tplform .tree{display:flex;flex-direction:column;max-height:40vh;overflow:auto}
+.mtgbox .tplform .tree label.sw{font-weight:400}
 
 .stats .pip,.ccard .pip{width:18px;height:18px}
 
 /* text view rows (textViewCard: 30px, bold name, mana column): the categories flow down
    columns like a newspaper, so a short category leaves no hole under it */
-.deckview.text{columns:300px;column-gap:2rem}
+.deckview.text{columns:max(300px,21.4286em);column-gap:2rem}  /* 300px at 14px: wider with the text */
 .deckview.text .stack{break-inside:avoid;page-break-inside:avoid;margin-bottom:.75rem}
+/* each stack clips its own overflow, which makes it one unbreakable piece for the column layout
+   (it never split across columns anyway: break-inside): a change to one row (the Companion word,
+   a count) then relays out that stack alone, not every row of every column, 10-20x less work
+   (measured: 45-145 ms down to 4-8 ms at 4x CPU; review 2, L13). The row's hover picture
+   escapes the clip as a fixed box, placed by deck.js. */
+.deckview.text .stack,.deckview.brewer .stack{overflow:hidden;padding:0 12px;margin-left:-12px;
+  margin-right:-12px}  /* room for the stackhead's ⋮ (it overhangs 6px on touch) and the focus rings */
+/* a row's focus ring draws inside the row, so the clip never cuts it at the stack's bottom edge */
+.deckview.text li.row:focus-visible,.deckview.brewer li.row:focus-visible{outline-offset:-2px}
 ul.rows{list-style:none;margin:0;padding:0}
 /* --rowh: the row's one line (44 px on touch, theme.py); a row with a second line (the Companion
    word) keeps that first line and grows under it */
@@ -3121,20 +3617,25 @@ ul.rows .row{display:grid;grid-template-columns:1.6rem minmax(0,1fr) auto 3rem 4
   gap:.4rem;--rowh:30px;min-height:var(--rowh);grid-template-rows:minmax(var(--rowh),auto);
   border-top:1px solid var(--surface-2);position:relative;font-size:1rem}
 ul.rows .row:hover{background:var(--surface-2)}
-ul.rows .row.side{opacity:.7}
+/* a sideboard or maybeboard row is quieter by its colour, not by fading the whole row (faded set
+   codes fell under 4.5:1; audit D14) */
+ul.rows .row.side .name,ul.rows .row.side .ty{color:var(--text-muted)}
 ul.rows .q{color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
 ul.rows .n{display:flex;align-items:center;gap:.35rem;min-width:0}
-ul.rows .n .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the category and owned dots follow the name, so every name starts at the same x (polish B2) */
+ul.rows .n > .tagdot,ul.rows .n > .owned{order:1}
+ul.rows .n .name{font-weight:700;overflow-wrap:anywhere;min-width:0}
 ul.rows .mc{min-width:0}
 ul.rows .set{font-size:.78rem;color:var(--text-muted);text-align:center}
 ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
-.finish{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;
-  border-radius:3px;
-  font-size:10px;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
+.finish{display:inline-flex;align-items:center;justify-content:center;min-width:16px;min-height:16px;
+  width:auto;height:auto;padding:0 .15em;border-radius:3px;
+  font-size:.714rem;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
   color:#111;flex:none}
 /* one of the member's custom cards in the deck (deckpage.custom_card_row): a small Custom mark */
-.custom-badge{display:inline-flex;align-items:center;height:16px;padding:0 .35rem;border-radius:3px;
-  font-size:10px;font-weight:900;letter-spacing:.02em;text-transform:uppercase;flex:none;
+.custom-badge{display:inline-flex;align-items:center;min-height:16px;height:auto;padding:0 .35rem;
+  border-radius:3px;
+  font-size:.714rem;font-weight:900;letter-spacing:.02em;text-transform:uppercase;flex:none;
   background:var(--orange-tint);color:var(--orange-text);border:1px solid var(--orange-text)}
 .deckview .c .custom-badge{position:absolute;right:6px;bottom:6px;background:#fff3e0;color:#7a3d00;
   border-color:#7a3d00}
@@ -3166,37 +3667,29 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 @media (hover:hover) and (min-width:700px){ ul.rows .row:hover .hover{display:block} }
 @media (max-width:600px){ ul.rows .row{grid-template-columns:1.6rem minmax(0,1fr) auto}
   ul.rows .set,ul.rows .price{display:none} }
+/* a list narrow in its own text (200% text on a phone): the mana cost goes under the name, which
+   keeps the row's width, so a name wraps between words and never inside one (re-audit, 320 px) */
+ul.rows{container-type:inline-size}
+@container (max-width:22em){
+  ul.rows .row:not(.brew){grid-template-columns:minmax(1.6rem,max-content) minmax(0,1fr)}
+  ul.rows .row:not(.brew) > .mc{grid-column:2;grid-row:2;justify-self:start;margin:-.1rem 0 .3rem}
+  ul.rows .row:not(.brew) > .mc:empty{display:none}
+  /* the name first, the category and owned dots after it: a name wider than the cell takes the
+     cell whole and the dots go under it, instead of the name losing their width */
+  ul.rows .row:not(.brew) > .n{flex-wrap:wrap;row-gap:.1rem}
+  ul.rows .row:not(.brew) > .n > .tagdot,ul.rows .row:not(.brew) > .n > .owned{order:1}
+  ul.rows .row:not(.brew) > .compmark,ul.rows .row:not(.brew) > .custom-badge{grid-row:3} }
 
-/* stack order handles (deck.js): drag, or arrow keys while focused */
-/* button.stackgrip, so the 28 px drawn size wins over the theme's icon-only width (the control height,
-   44 px on touch); the ::before halo below is the finger target */
-button.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;
-  margin:0 .25rem 0 0;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;
-  -webkit-touch-callout:none;color:var(--text-muted);font-size:1rem;line-height:1;flex:none}
-/* a 44 px target for a finger without making the header taller */
-.stackgrip::before{content:'';position:absolute;inset:-8px}
-/* no press-down nudge (theme buttons move 1 px): in the columns that lays every column out again */
-.stackgrip:active:not(:disabled){cursor:grabbing;transform:none;filter:none}
 /* no opacity here or on a dragged row: in the text and Brewer views' columns a change of opacity
    lays every column out again, which takes as long as moving the stack itself */
-.stack.moving{outline:2px dashed var(--orange);outline-offset:4px;background:var(--surface-2)}
-/* while a stack is dragged a bar shows where it lands and its name follows the pointer; both, and
-   a card slid by a finger, move by transform only */
-/* nor does a row's hover picture or a stack's fan open under the pointer meanwhile, nor while a
-   card is dragged (deck.js): the fan would cover the top of the stack directly below */
-.deckview.sorting ul.rows .row:hover .hover,.deckview.carddrag ul.rows .row:hover .hover{display:none}
-.deckview.sorting.stacks .c:hover ~ .c{transform:none}
+/* a card slid by a finger moves by transform only; no row's hover picture or stack fan opens
+   under the pointer meanwhile (deck.js): the fan would cover the top of the stack directly below */
+.deckview.carddrag ul.rows .row:hover .hover{display:none}
 /* at once, not after the fan's 0.3 s slide: a quick drag reaches the lower stack before that */
 .deckview.carddrag.stacks .c:hover ~ .c{transform:none;transition:none}
-.stackdrop,.stacktag,.dragghost{position:fixed;left:0;top:0;pointer-events:none;will-change:transform;margin:0}
-.stackdrop{z-index:70;width:1px;height:1px;opacity:0;transform-origin:0 0;background:var(--orange)}
-.stacktag{z-index:71;max-width:60vw;padding:.3rem .6rem;border-radius:var(--radius);background:var(--surface);
-  color:var(--text);border:1px solid var(--orange);box-shadow:var(--shadow);font-size:.9rem;font-weight:700;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dragghost{z-index:70;opacity:.92;box-shadow:var(--shadow);background:var(--surface);border-radius:4.5%}
+.dragghost{position:fixed;left:0;top:0;pointer-events:none;will-change:transform;margin:0;z-index:70;
+  opacity:.92;box-shadow:var(--shadow);background:var(--surface);border-radius:4.5%}
 .dragghost .row{border-top:0;padding:0 .25rem}
-.stack-reset{margin:.25rem 0 1rem}
-.stackhead .stackgrip ~ .title{flex:1;min-width:0}
 /* select several cards (own deck): the bar above the cards, and the chosen cards ringed */
 .bulkbar{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:0 0 .75rem}
 .bulkbar .bulktools{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
@@ -3204,7 +3697,7 @@ button.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-hei
 .bulkbar select:not(.msel-native){width:auto;max-width:100%;min-width:0;min-height:36px}
 .bulkbar .msel-btn{max-width:100%;min-width:0}
 .bulkbar .count{font-weight:600}
-.bulkbar .histtools{display:inline-flex;gap:.25rem}
+.bulkbar .histtools{display:inline-flex;gap:.5rem}
 .bulkbar .tagform{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;flex-basis:100%}
 .bulkbar .tagform[hidden]{display:none}
 .bulkbar .tagform input[type=text]{width:auto;flex:1 1 10rem;min-width:0;max-width:18rem}
@@ -3233,6 +3726,16 @@ button.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-hei
   .deckview.table ul.rows .row,.deckview.table ul.rows .th{
     grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
   .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
+/* the same fold by the list's own width in its text (under 47.7em: a 668 px list at 14px, 1336 px at
+   200%), so the rem-sized columns never leave the name 157 px at 900 px with large text */
+@container (max-width:47.7em){
+  .deckview.table ul.rows .row,.deckview.table ul.rows .th{
+    grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
+  .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
+/* the table narrow in its own text (200% text on a phone): the name's row, as the text view's */
+@container (max-width:22em){
+  .deckview.table ul.rows .row{grid-template-columns:1.6rem minmax(0,1fr)}
+  .deckview.table ul.rows .th,.deckview.table ul.rows .mv{display:none} }
 /* Scroll view: each group one row of whole cards, scrolled sideways inside its own strip */
 /* brewer view: each card's picture, name and cost, type line and rules text, in columns */
 .deckview.brewer{columns:340px;column-gap:1.5rem}
@@ -3240,8 +3743,12 @@ button.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-hei
 ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padding:.4rem 0}
 .row.brew .art{width:56px;aspect-ratio:63/88;border-radius:4px;object-fit:cover;flex:none;
   background:var(--surface-2)}
-.row.brew .bd{display:flex;flex-direction:column;gap:.15rem;min-width:0;flex:1}
-.row.brew .n .q{min-width:1.2rem}
+.row.brew .bd{display:flex;flex-direction:column;gap:.15rem;min-width:0;flex:1;
+  container-type:inline-size}
+/* a column too narrow for the quantity and the cost beside a long name (a phone at 200% text):
+   the name takes a line of its own, whole words */
+@container (max-width:12em){ .row.brew .n{flex-wrap:wrap} .row.brew .n .name{flex:1 1 100%} }
+.row.brew .n .q{min-width:1.6rem;text-align:right}
 .row.brew .n .mc{margin-left:auto;flex:none}
 .row.brew .ty{font-size:.82rem;color:var(--text-muted)}
 .row.brew .tx{font-size:.82rem;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;
@@ -3253,13 +3760,17 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview.scroll .c{flex:0 0 clamp(140px,22vw,200px);scroll-snap-align:start}
 /* image cards: stacks and grid (basicCard 5:7, 4.5% radius, 2px border, corner quantity) */
 .deckview.stacks,.deckview.grid{display:grid;gap:1rem;align-items:start}
+/* a stack never widens its column for a long unbroken category name (its heading shortens with …) */
+.deckview .stack{min-width:0}
 .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(min(100%,170px),1fr))}
 .deckview.grid{grid-template-columns:1fr}
 .deckview .c{position:relative;aspect-ratio:5/7;border-radius:4.5%;border:2px solid var(--card-border);
   overflow:hidden;background:var(--surface-2);transition:transform .3s ease-in-out}
 .deckview .c img{width:100%;height:100%;display:block;object-fit:cover}
-.deckview .c .qty{position:absolute;top:0;left:0;width:38px;height:38px;clip-path:polygon(0 0,0 100%,100% 0);
-  border-radius:11px 0 0 0;background:#3a3a3a;color:#fff;font-size:12px;font-weight:700;padding:5px 0 0 7px}
+.deckview .c .qty{position:absolute;top:0;left:0;width:3.17em;height:3.17em;
+  clip-path:polygon(0 0,0 100%,100% 0);
+  border-radius:11px 0 0 0;background:#3a3a3a;color:#fff;font-size:.857rem;font-weight:700;
+  padding:.42em 0 0 .58em}
 .deckview .c .finish{position:absolute;right:6px;bottom:6px}
 .deckview .c .corner{position:absolute;top:0;right:0;width:30px;height:30px;
   clip-path:polygon(100% 0,0 0,100% 100%)}
@@ -3267,15 +3778,23 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 /* a tile without a picture: its name starts below the 38 px quantity corner (and clear of the
    30 px companion corner), and its type line sits above the owned dot and the finish badge in the
    bottom corners, at every card size (0.7.43: the dot sat on "Artifact") */
-.deckview .c .ph{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
-  padding:max(12%,34px) 8% max(8%,26px);background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
+.deckview .c .ph{position:relative;min-height:100%;display:flex;flex-direction:column;
+  justify-content:space-between;
+  padding:max(12%,3.04em) 8% max(8%,2.33em);
+  background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
   font-size:.8rem}
+/* a tile without a picture is as tall as the card's ratio, or taller when its words need more
+   (200% text): the ratio's automatic minimum height applies only with overflow visible */
+.deckview .c:has(> .ph){overflow:visible;display:flex;flex-direction:column}
+.deckview .c:has(> .ph) > .ph{flex:1 1 auto}
 .deckview .c .ph .t{display:flex;justify-content:space-between;gap:.3rem;align-items:flex-start}
-.deckview .c .ph .nm{font-weight:700;overflow-wrap:anywhere}
-.deckview .c .ph .ty{color:var(--text-muted);font-size:.72rem}
+.deckview .c .ph .nm{font-weight:700;overflow-wrap:anywhere;min-width:0}
+.deckview .c .ph .ty{color:var(--text);font-size:.72rem;overflow-wrap:anywhere;min-width:0}
 .deckview.stacks .cards{display:flex;flex-direction:column}
 .deckview.stacks .c + .c{margin-top:-123%}
 .deckview.stacks .c .ph{padding:3% 6% max(8%,26px) 42px}
+.deckview{container-type:inline-size}
+@container (max-width:16em){ .deckview.stacks .addcat{grid-column:1 / -1} }
 .deckview.stacks .c:has(.corner) .ph .t{padding-right:26px}
 .deckview.stacks .c .ph .t{align-items:center;min-height:0}
 .deckview.stacks .c .ph .nm{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;
@@ -3291,7 +3810,7 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .c.dragging{opacity:.4}
 .deckview .row.dragging{outline:2px dashed var(--orange);outline-offset:-2px;background:var(--surface-2)}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorize';
+.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to move them';
   color:var(--text-muted)}
 @media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
@@ -3354,8 +3873,19 @@ html.cardview-open{overflow:hidden}
 .cardview .prices table{border-collapse:collapse;font-variant-numeric:tabular-nums;margin:.3rem 0}
 .cardview .prices th,.cardview .prices td{padding:.15rem .6rem .15rem 0;text-align:left;
   border-bottom:1px solid var(--border-soft)}
+/* the Printing row: a button the width of the text column that opens the Printings sheet */
+.cardview .printrow{display:flex;align-items:center;gap:.6rem;width:100%;min-height:44px;margin:0;
+  padding:.5rem .85rem;text-align:left;font:inherit;color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius);background:var(--surface-2);cursor:pointer}
+.cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--orange)}
+.cardview .printrow .pic{display:inline-flex;flex:none;color:var(--orange-text)}
+.cardview .printrow .lbl{flex:none;color:var(--text-muted);font-weight:700}
+.cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.cardview .printrow .chev{flex:none;color:var(--text-muted);font-size:1.4rem;line-height:1}
+/* the action rows: [− n +] [Move to…] [Remove], then (after .br) [Add to binder] [Edit in deck editor] */
 .cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;padding-top:.25rem}
-.cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
+.cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto;justify-content:center;text-align:center}
+.cardview .acts .br{flex-basis:100%;height:0;margin:-.5rem 0 0}
 @media (max-width:700px){
   .cardview{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
   .cardview .box{grid-template-columns:minmax(0,44%) minmax(0,1fr);grid-template-rows:auto auto;
@@ -3366,11 +3896,18 @@ html.cardview-open{overflow:hidden}
   .cardview .head{flex-direction:column-reverse;align-items:flex-end;justify-content:flex-end;gap:.5rem}
   .cardview .head h3{align-self:stretch;font-size:1.2rem}
   .cardview .cardtext,.cardview .rulings{overflow:visible}
-  .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
+  .cardview .acts .btn,.cardview .acts button{min-height:44px}
+  .cardview .more .btn{min-height:44px} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
 /* the card menu (deck.js): its base is theme.CARD_MENU_CSS */
-.ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
+/* the menu's head: the card's name, and on your own deck its count with − and + at the end */
+/* the head row (mockup screen 3): the card's name with its count and − and + beside it */
+.ctxmenu .headrow{display:flex;align-items:center;gap:.5rem;padding:0 .5rem .35rem 0;margin-bottom:.25rem;
+  border-bottom:1px solid var(--border)}
+.ctxmenu .headrow .head{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-weight:700;border-bottom:0;
+  margin-bottom:0;padding-bottom:0}
+.ctxmenu .qtyrow{display:flex;align-items:center;gap:.35rem;flex:none;min-height:38px;cursor:default}
 .ctxmenu .qtyrow .lbl{flex:1}
 .ctxmenu .mvform{display:flex;flex-direction:column;gap:.4rem;padding:.25rem .75rem .5rem}
 .ctxmenu .mvform label{font-weight:600}
@@ -3388,24 +3925,31 @@ html.cardview-open{overflow:hidden}
   font-weight:700;line-height:1}
 .ctxmenu .qtyrow .step:hover:not(:disabled){background:var(--border)}
 .ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
-.ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
-.ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
-.ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
+/* a folded group (More on a phone): its name as a row that opens it, the chevron turning */
+.ctxmenu button.ghead.fold{display:flex;align-items:center;gap:.5rem;width:100%;padding:.35rem 1rem;
+  font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--menu-head);
+  min-height:44px}
+.ctxmenu .grp{display:flex;flex-direction:column}
+.ctxmenu .grp[hidden]{display:none}
+.ctxmenu .fold .chev,.ctxmenu .more .chev,.ctxmenu .finbtn .chev{margin-left:auto;color:var(--text-muted);
+  font-size:1.2rem;line-height:1}
+.ctxmenu .fold[aria-expanded=true] .chev,.ctxmenu .more[aria-expanded=true] .chev,
+.ctxmenu .finbtn[aria-expanded=true] .chev{transform:rotate(90deg)}
+.ctxmenu .sub,.ctxmenu .finsub{display:flex;flex-direction:column;background:var(--surface);
+  border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
-.ctxmenu .sub[hidden]{display:none}
-.ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
-.ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu .sub[hidden],.ctxmenu .finsub[hidden]{display:none}
+.ctxmenu .sub button,.ctxmenu .finsub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
+.ctxmenu .sub .on:disabled,.ctxmenu .finsub .on:disabled{color:var(--toolbar-active);font-weight:700}
 .ctxmenu .off[aria-disabled=true]{color:var(--text-muted);cursor:default}
 /* finger-sized on touch screens: every row, the − and + steps and the Move to list's rows */
-@media (pointer:coarse){
   .ctxmenu .qtyrow{min-height:44px}
   .ctxmenu .qtyrow .step{width:44px;min-width:44px;height:44px;min-height:44px}
-  .ctxmenu .sub button{min-height:44px}
+  .ctxmenu .sub button,.ctxmenu .finsub button{min-height:44px}
   .ctxmenu .mvform input,.ctxmenu .mvform .acts .btn{min-height:44px}
   /* the viewer's × and its − / + steppers: finger-sized (set after their own rules, so this wins) */
-  .cardview .close{width:44px;height:44px;min-height:44px}
+  .cardview .close{width:max(44px,2.4rem);height:max(44px,2.4rem);min-height:44px}
   .cardview .acts .qtyctl button{width:44px;min-width:44px;min-height:44px}
-}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
@@ -3414,6 +3958,8 @@ html.cardview-open{overflow:hidden}
 /* the note of a save sits above the card menu, which stays open for more quantity steps; a
    question ("Save anyway?") and an error sit above the card viewer too */
 .deck-toast[role=alertdialog],.deck-toast.error{z-index:66}
+/* a note that was there before the card menu opened goes under it (deck.js) */
+.deck-toast.under-menu{z-index:57}
 .deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
 .deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
@@ -3431,7 +3977,8 @@ html.cardview-open{overflow:hidden}
 .edhplay-dialog details.disclosure{margin:0;padding-top:.15rem}
 /* finger-sized (44 px): the fold's summary and the box's x */
 .edhplay-dialog details.disclosure > summary{min-height:44px}
-.picker.edhplay-dialog .pickbox .close{width:44px;min-height:44px;height:44px;margin:-.2rem -.35rem 0 0}
+.picker.edhplay-dialog .pickbox .close{width:max(44px,2.4rem);min-height:44px;height:max(44px,2.4rem);
+  margin:-.2rem -.35rem 0 0}
 .edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
 .edhplay-dialog p{margin:0}
 .edhplay-dialog .edhplay-state{display:flex;flex-direction:column;gap:.5rem}
@@ -3441,10 +3988,14 @@ html.cardview-open{overflow:hidden}
 .edhplay-dialog .notice.error{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .75rem;margin:0}
 .edhplay-dialog .notice.error span{flex:1 1 12rem}
 .edhplay-dialog .notice.error .btn{margin:0}
-@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
+@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none}
+  /* while a card menu sheet is open the toast moves to the top: Undo stays in reach, and the
+     sheet's own rows and forms (Mana value, Finish) are never under it */
+  body:has(.ctxmenu.cs-menu) .deck-toast{bottom:auto!important;
+    top:calc(50px + .5rem + env(safe-area-inset-top))} }
 @media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
 /* the viewer's own copies control: one fewer, the count, one more */
-.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:1 1 auto}
+.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:0 0 auto}
 .cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
 .cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
   font-variant-numeric:tabular-nums}
@@ -3457,8 +4008,15 @@ html.cardview-open{overflow:hidden}
 .deckview.stacks .stack{min-width:0}
 
 /* deck stats panel */
+.stats{container:stats/inline-size}
 .stats .head{display:flex;justify-content:space-between;align-items:center;gap:1rem}
 .stats .grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(16rem,1fr);gap:1.5rem}
+/* the narrowest phones at large text (a 320 px phone at 200% text leaves the panel 7em inside its
+   padding): the stats take half of the padding and the side tables drop their cells' side
+   padding, so a type name ("Enchantment") wraps whole rather than inside the word */
+@container stats (max-width:16em){ .stats .grid{margin:0 -.5rem}
+  .stats .side table.qty td{padding-left:0;padding-right:0} .stats .side .rowbtn{margin-left:0}
+  .stats .side table.qty td:last-child{padding-left:.5rem} }
 .stats .lbl{font-weight:700;margin:.75rem 0 .25rem}
 .cbar{display:flex;height:36px;border-radius:3px;overflow:hidden;background:var(--surface-2);gap:2px}
 .cbar .seg{display:block;height:100%;clip-path:polygon(0 0,100% 0,calc(100% - 7px) 100%,0 100%);min-width:6px}
@@ -3479,7 +4037,7 @@ html.cardview-open{overflow:hidden}
 .curve{display:flex;align-items:flex-end;gap:min(.5rem,2.1vw);height:9rem;padding:.25rem 0;
   border-bottom:1px solid var(--border)}
 .curve .bar{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;
-  justify-content:flex-end;height:100%;font-size:min(.75rem,3.5vw)}
+  justify-content:flex-end;height:100%;font-size:.75rem}
 .curve .bar .col{display:flex;flex-direction:column-reverse;width:70%;gap:2px;border-radius:2px 2px 0 0;
   overflow:hidden}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
@@ -3492,6 +4050,11 @@ html.cardview-open{overflow:hidden}
 .statctl button{min-height:32px;padding:0 .7rem;font-size:.9rem}
 .statctl button[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--on-orange);
   font-weight:700}
+/* Bar and Pie are one joined switch; Lands only is a toggle of its own, a gap apart (polish B5) */
+.statctl .seg2{display:inline-flex}
+.statctl .seg2 button{margin:0;border-radius:0}
+.statctl .seg2 button:first-child{border-radius:var(--radius) 0 0 var(--radius)}
+.statctl .seg2 button:last-child{border-radius:0 var(--radius) var(--radius) 0;margin-left:-1px}
 .statctl button[data-set=lands]{margin-left:.5rem}
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
@@ -3500,7 +4063,7 @@ html.cardview-open{overflow:hidden}
    growing at a share of the screen width (min(), so 100% text is unchanged) */
 .curveaxis{display:flex;gap:min(.5rem,2.1vw)}
 .curveaxis .mv{flex:1;min-width:0;min-height:28px;padding:0;border:0;background:none;font-weight:700;
-  font-size:min(.8rem,3.8vw);color:var(--text)}
+  font-size:.8rem;color:var(--text)}
 .curveaxis .mv:hover:not(:disabled),.slegend button:hover,.rowbtn:hover{background:var(--surface-2)}
 .slegend{list-style:none;display:flex;flex-wrap:wrap;gap:.25rem .5rem;margin:.5rem 0 0;padding:0}
 .slegend button{min-height:28px;padding:0 .4rem;border:0;background:none;font-size:.85rem;gap:.35rem;
@@ -3518,7 +4081,7 @@ html.cardview-open{overflow:hidden}
 .pie .slegend{flex-direction:column;gap:0}
 .pie .slegend .muted{font-size:.8rem}
 .rowbtn{min-height:24px;padding:0 .25rem;margin:0 0 0 -.25rem;border:0;background:none;color:var(--text);
-  font:inherit;text-align:left;overflow-wrap:anywhere;justify-content:flex-start;gap:.4rem}
+  font:inherit;text-align:left;overflow-wrap:anywhere;justify-content:flex-start;gap:.4rem;max-width:100%}
 .ccard .cname .rowbtn{font-weight:700}
 [data-focus].on{outline:2px solid var(--focus);outline-offset:1px}
 .ooi{display:flex;gap:.4rem;align-items:baseline;margin:.75rem 0 0;font-size:.93rem}
@@ -3531,24 +4094,34 @@ html.cardview-open{overflow:hidden}
 .statfocus span{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
 .statfocus button{min-height:32px}
 /* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
+/* fixed columns: the numbers' column is narrow, the names have the rest, and a name breaks between
+   its words ("Enchantment" stays whole at large text); only a word longer than the whole column
+   (an unbroken category name) breaks inside */
 table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
-table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:anywhere}
+table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:break-word}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+table.qty td:last-child,table.qty th:last-child{width:1%;white-space:nowrap}
+/* the type and rarity tables sit in the stats panel's side without a scroller: a row's name wraps
+   anywhere rather than widening the page (a 320 px phone at 200% text leaves "Enchantment" no
+   room), while the odds table's scroller keeps its words whole */
+.stats .side table.qty td{overflow-wrap:anywhere}
 .legality ul{margin:.25rem 0 0;padding-left:1.2rem} .legality .ok{color:var(--green-text);font-weight:700}
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
   color:var(--text-muted)}
 .odds .oddsform select:not(.msel-native),.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;
-  padding:0 .4rem;
+  padding:.25em .4rem;
   font-size:.9rem;width:auto;min-width:6rem;flex:none}
 .odds .oddsform .msel-btn{padding-right:1.5rem;background-position:right .5rem center}
 /* a long choice (Group by) never runs past the panel on a narrow phone with large text; the hidden
    native select behind a script-drawn one keeps the theme's 1 px size (it used to get 6rem here) */
 .odds .oddsform select:not(.msel-native),.odds .oddsform .msel,.odds .oddsform .msel-btn{max-width:100%}
 .odds .oddsform input{width:4rem;min-width:4rem}
-.odds .oddstable{margin-top:.5rem;max-height:16rem;overflow:auto;display:block;width:100%}
-.odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3){text-align:right;white-space:nowrap}
-.odds .oddstable td:first-child{width:100%}
+.odds .qtyscroll{margin-top:.5rem}
+.odds .oddstable th{text-align:left;padding:.3rem .25rem;font-size:.85rem;color:var(--text-muted)}
+.odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3),
+.odds .oddstable th:nth-child(2),.odds .oddstable th:nth-child(3){text-align:right;white-space:nowrap;
+  width:1%}
 .odds .oddstable th{text-align:left;font-weight:600;color:var(--text-muted);font-size:.8rem}
 .odds .oddstable th:last-child{text-align:right}
 .checks ul{list-style:none;margin:.25rem 0 0;padding:0} .checks li{display:flex;gap:.4rem;
@@ -3564,7 +4137,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
 @media (max-width:1000px){ .stats .grid{grid-template-columns:minmax(0,1fr)} }
 
-.description{font-size:16px} .description .empty{color:var(--text-muted)}
+.description{font-size:1.143rem} .description .empty{color:var(--text-muted)}
 
 /* deck list (deckLink grid: thumbnail with colour bar, info block, tags strip) */
 .listbar .controls{display:grid;grid-template-columns:1fr repeat(2,minmax(140px,auto)) auto;gap:1rem;
@@ -3583,46 +4156,80 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .decks-unreadable .actions .btn{min-height:44px}
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
    and ellipsise inside its tile, not widen the track and scroll the page sideways. */
-ul.decklist.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:25px;
+ul.decklist.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,max(220px,14em)),1fr));gap:25px;
   margin-bottom:1.25rem}
 @media (max-width:600px){ ul.decklist.grid{gap:1rem} }
 ul.decklist .deck,ul.decklist .deck a,ul.decklist .info{min-width:0}
 ul.decklist .deck a{display:flex;flex-direction:column;color:var(--text);text-decoration:none;
   border-radius:5px;overflow:hidden;border:1px solid var(--border);background:var(--surface)}
 ul.decklist .deck.selected a{outline:2px solid var(--orange)}
-ul.decklist .thumb{position:relative;display:block;height:175px;
+/* the picture's height, S 140, M 175, L 220 px (theme.py); the ⋮ is placed under it (menus.py) */
+ul.decklist{--deck-thumb:175px}
+ul.decklist .thumb{position:relative;display:block;height:var(--deck-thumb);container-type:size;
   background:var(--surface-3) center/cover no-repeat;
   overflow:hidden;transition:transform .2s ease}
 ul.decklist .thumb::after{content:'';position:absolute;inset:0;
   background:linear-gradient(to bottom,rgba(0,0,0,0) 55%,var(--surface) 100%)}
 ul.decklist .deck a:hover .thumb{transform:scale(1.02)}
 ul.decklist .thumb .ini{display:none;position:absolute;inset:0;align-items:center;justify-content:center;
-  font-size:4rem;font-weight:900;color:rgba(255,255,255,.25)}
+  font-size:min(4rem,60cqb);font-weight:900;color:rgba(255,255,255,.6)}
 ul.decklist .thumb.noart .ini{display:flex}
 ul.decklist .thumb.noart{background:linear-gradient(135deg,#3a3a3a,#1f1f1f)}
-ul.decklist .thumb .views{position:absolute;right:.5rem;top:.5rem;font-size:12px;color:#fff;
-  background:rgba(0,0,0,.55);padding:.1rem .4rem;border-radius:3px;z-index:1}
+/* the initial and the card count read at 4.5:1 or better over both ends of the gradient and over
+   a white picture (0.7.46 full review, D, F11: .25 and .55 were under it). On a no-art tile the
+   fade to the page starts lower, under the initial: in the light theme it fades to near white,
+   and the initial's lower half sat on it */
+ul.decklist .thumb.noart::after{background:linear-gradient(to bottom,rgba(0,0,0,0) 72%,var(--surface) 100%)}
+ul.decklist .thumb .views{position:absolute;left:.5rem;top:.5rem;font-size:.857rem;color:#fff;
+  background:rgba(0,0,0,.65);padding:.1rem .4rem;border-radius:3px;z-index:1}
 ul.decklist .thumb .cbar{position:absolute;left:0;right:0;bottom:0;height:15px;border-radius:0;z-index:1;
   gap:0}
 ul.decklist .thumb .cbar.empty{display:none}
-ul.decklist .info{display:flex;gap:.6rem;align-items:center;min-height:75px;padding:.5rem .75rem}
-ul.decklist .info .text{display:flex;flex-direction:column;min-width:0;gap:.1rem;flex:1}
+ul.decklist .info{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;min-height:75px;
+  padding:.5rem .75rem}
+ul.decklist .info .text{display:flex;flex-direction:column;min-width:0;gap:.1rem;flex:1 1 8rem}
 /* a deck's name: up to two lines, then an ellipsis (one line cut "Meren Graveyard Value" to
    "Meren Grave…" on a computer's tiles) */
-ul.decklist .info .name{font-size:16px;font-weight:700;overflow:hidden;overflow-wrap:anywhere;
+ul.decklist .info .name{font-size:1.143rem;font-weight:700;overflow:hidden;overflow-wrap:anywhere;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 ul.decklist .deck a:hover .name{text-decoration:underline}
 ul.decklist .info .fmt,ul.decklist .info .sub{font-size:.86rem;color:var(--text-muted);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
-ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;
+  overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}
+ul.decklist .info .name{overflow-wrap:anywhere}
+/* a tile narrow in its own text (200% text on a 320 px phone): the ⋮ goes onto the picture's
+   corner (as Home's covers draw it) and the words keep the tile's width, so a deck's name wraps
+   between words */
+ul.decklist{container-type:inline-size}
+@container (max-width:22em){
+  ul.decklist.grid .deck .info{padding-right:.75rem}
+  ul.decklist.grid .deck > .kebab{top:.25rem;right:.25rem;transform:none;color:#fff;
+    background:rgba(0,0,0,.55)} }
+ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;min-width:0;
   border-top:1px solid var(--border-soft);
   font-size:.86rem;color:var(--text-muted);min-height:2rem;align-items:center}
+/* a tag longer than the row goes on more lines, whole: never cut at the row's edge (final audit
+   N13) nor with an ellipsis (polish, check on c246456a) */
+ul.decklist .tags .pill{max-width:100%;white-space:normal;overflow-wrap:break-word;
+  display:inline-block;vertical-align:middle}
 ul.decklist.list .deck a{flex-direction:row;align-items:center}
 ul.decklist.list .thumb{width:90px;height:60px;flex:none}
-ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{display:none}
-ul.decklist.list .info{flex:1;min-height:0}
-ul.decklist.list .tags{border-top:0;max-width:30%}
+ul.decklist.list .thumb .ini{font-size:min(1.5rem,55cqb)} ul.decklist.list .thumb .views{display:none}
+/* the words ask for 12 em of their own text: at 200% text on a phone they go under the picture
+   and keep the row's width, so a deck's name wraps between words (re-audit, 320 px) */
+ul.decklist.list .info{flex:1 1 12em;min-height:0}
+/* beside a wide row the tags are a column of their own, 40% wide (30% wrapped a 56-letter tag at
+   1280 px), its chips starting at the column's left edge on every row (polish AJ1: it was as wide
+   as its chips, so a row with short tags started them further right) */
+ul.decklist.list .tags{border-top:0;flex:0 0 40%;max-width:40%;justify-content:flex-start}
 @media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
+  ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
+  ul.decklist.list .tags:empty{display:none} }
+/* the same where the row is narrow for its text (a Fold, a small computer window or large text):
+   the tags under the name, the whole row wide, so the name and the tags' words keep their lines
+   (polish, check on c246456a: tags show whole names on more lines; a 30% column left a tag a
+   quarter of a 609 px row, three lines for one name, on 2995cc23) */
+ul.decklist.list .deck{container-type:inline-size}
+@container (max-width:64em){ ul.decklist.list .deck a{flex-wrap:wrap}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
   ul.decklist.list .tags:empty{display:none} }
 ul.decklist.list .deck{margin-bottom:.5rem}
@@ -3631,12 +4238,19 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .editor .edithead .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
 .editor .edithead .kicker{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;
   color:var(--text-muted)}
-.editor .edithead h1.deckname{margin:0;font-size:24px}
+.editor .edithead h1.deckname{margin:0;font-size:min(1.714rem,5vw)}
+/* the name's box gives up its least width, so an unbroken name wraps inside the row instead of
+   running the page wide (638 px at 360) */
+.editor .edithead .info{min-width:0}
 .editor .edithead .btn{margin:0}
+/* a phone's heading is the deck page's size (19px), so at 200% text a ten-letter word in the
+   name ("Commander", "categories") still fits the head's row whole */
+@media (max-width:599.98px){ .editor .edithead h1.deckname{font-size:min(1.357rem,6vw);line-height:1.25} }
 /* the save bar sticks just under the site's top bar (theme.py: sticky, 50px tall, plus the safe
    area in the app), never over it */
 .editbar{position:sticky;top:50px;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
-  background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:0 -1rem 1rem;
+  background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;
+  margin:0 calc(-1 * var(--gutter)) 1rem;
   box-shadow:0 2px 6px rgba(0,0,0,.35)}
 @media (min-width:600px){ body.app .editbar{top:calc(50px + env(safe-area-inset-top))}
   html:has(.editbar){scroll-padding-top:120px} }
@@ -3655,23 +4269,27 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .pendingbox summary{cursor:pointer;font-weight:700}
 .pendingbox summary b{margin-left:.5rem;background:var(--orange);color:var(--on-orange);border-radius:10px;
   padding:0 .5rem}
+.pendingbox summary b.zero{background:var(--surface-3);color:var(--text)}  /* nothing pending (C3) */
 /* add a card: one search bar. Chips above it say where the card goes; the name box leads with the
    Add button and the Foil tick beside it; on wide screens the second column also leaves room for
    the printings that float beside the suggestion list. Never a stray button. */
 .addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;grid-template-columns:minmax(0,1fr) auto}
 .addbox form.addcard .field{margin:0}
 .addbox form.addcard .targets{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
-.addbox .tchip{margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;border-radius:999px;
+/* a chip is a block (not a flex box), so a long name ends in an ellipsis (audit D05); the
+   Maybeboard chip flows after the others, left-aligned like them (polish B10) */
+.addbox .tchip{display:inline-block;margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;
+  border-radius:999px;line-height:1.5rem;
   font-size:.86rem;font-weight:600;background:var(--surface);border:1px solid var(--border);
-  color:var(--text-muted)}
+  color:var(--text-muted);max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;text-align:left;vertical-align:middle}
 .addbox .tchip.on{background:var(--orange-tint);border-color:var(--orange);color:var(--text)}
-.addbox .tchip.side{margin-left:auto}
 .addbox form.addcard .grow{position:relative}
 .addbox form.addcard .go{display:flex;flex-direction:row;align-items:center;gap:.75rem}
 .addbox form.addcard .go button{margin:0;height:var(--ctl);white-space:nowrap}
 .addbox form.addcard .go .foil{display:inline-flex;align-items:center;gap:.35rem;font-size:.9rem;
   white-space:nowrap}
-.addbox form.addcard .addstatus{grid-column:1 / -1;margin:0;min-height:1.2em}
+.addbox form.addcard .addstatus,.addbox form.addcard .addhelp{grid-column:1 / -1;margin:0;min-height:1.2em}
 .addbox form.addcard .addstatus:empty{display:none}
 .addprints{display:none}
 @media (min-width:900px){
@@ -3683,7 +4301,8 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   .addprints .head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
     margin-bottom:.5rem}
   .addprints .head b{overflow-wrap:anywhere}
-  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem;margin:0;
+  .addprints .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,6.5em),1fr));
+    gap:.4rem;margin:0;
     padding:0;list-style:none}
   .addprints .pgrid li{min-width:0}
   .addprints .hint{margin:.5rem 0 0}
@@ -3699,7 +4318,7 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}
 .addbox form.scanpick button{margin:0}
 details.cat summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;
-  font-weight:700;font-size:14px;list-style:none;padding:.25rem 0}
+  font-weight:700;font-size:1rem;list-style:none;padding:.25rem 0}
 details.cat summary::-webkit-details-marker{display:none}
 details.cat summary b{color:var(--text-muted);font-weight:400;flex:none}
 details.cat summary .cname{min-width:0;overflow-wrap:anywhere}
@@ -3761,17 +4380,19 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 .erow .thumb{width:40px;height:56px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)}
 .erow .main{display:flex;flex-direction:column;min-width:0;gap:.1rem}
-.erow .name{font-weight:700;display:flex;align-items:center;gap:.4rem;min-width:0}
+.erow .name{font-weight:700;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;min-width:0;
+  overflow-wrap:anywhere}
 .erow .name .mana{flex:none}
 .erow .name:not(:has(.mana)){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .erow .meta{font-size:.8rem;color:var(--text-muted)}
 .erow .note:empty{display:none}
 .erow .note{color:var(--orange-text)}
 .erow .qty{display:inline-flex;align-items:center;gap:.25rem}
-.erow .qty input{width:min(3.4rem,18vw);height:2.25rem;text-align:center;margin:0;padding:0 .25rem;
+.erow .qty input{width:min(3.4rem,18vw);height:auto;min-height:2.25rem;text-align:center;margin:0;
+  padding:.25em .25rem;
   font-variant-numeric:tabular-nums}
 .erow .qty button.mini{margin:0}
-.erow .sel select,.erow .sel .msel-btn{height:2.25rem}
+.erow .sel select{height:2.25rem} .erow .sel .msel-btn{min-height:2.25rem}
 .erow details.dd summary.mini{display:inline-flex;align-items:center;justify-content:center;width:2.25rem;
   height:2.25rem;padding:0;margin:0}
 .erow .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.5rem .75rem}
@@ -3804,23 +4425,36 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 html.printpick-open{overflow:hidden}
 .printpick .ppbox{position:relative;width:min(100%,76rem);height:min(100%,56rem);display:flex;
   flex-direction:column;gap:.6rem;background:var(--surface);color:var(--text);border:1px solid var(--border);
-  border-radius:var(--radius-panel);padding:1.25rem;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;
-  animation:cardin .16s ease-out}
+  border-radius:var(--radius-panel);padding:1.25rem;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:auto;
+  animation:cardin .16s ease-out;container-type:inline-size}
 @media (prefers-reduced-motion:reduce){ .printpick .ppbox{animation:none} }
 .printpick .pphead{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;min-width:0;
   flex:none}
-.printpick .pphead h2{margin:0;font-size:1.3rem;line-height:1.25;overflow-wrap:anywhere;min-width:0}
+/* the heading shrinks towards 1rem (never under it) where the box is narrow for its words (a
+   phone at 200% text), so a word such as Printings stays whole beside the × */
+.printpick .pphead h2{margin:0;font-size:min(1.3rem,max(1rem,8cqi));line-height:1.25;overflow-wrap:anywhere;
+  min-width:0}
 .printpick .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
 .printpick .pptools{display:flex;flex-direction:column;gap:.5rem;flex:none;min-width:0}
+/* the set filter's hint whole at large text on a phone (confirmation P-5, P-19) */
+.printpick .pptools #pp-q{padding-left:.5em;padding-right:.5em}
 .printpick .ppsearch{display:flex;gap:.5rem;min-width:0}
 .printpick .ppsearch input{flex:1 1 auto;min-width:0;width:auto;margin:0}
+/* the filter box: a filter icon inside it, on the left */
+.printpick .ppq{position:relative;display:flex;flex:1 1 10rem;min-width:0}
+.printpick .ppq svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);width:18px;height:18px;
+  color:var(--text-muted);pointer-events:none}
+.printpick .ppq input{width:100%;padding-left:2.4rem}
 .printpick .ppfiltbtn{display:none;margin:0;flex:none}
+/* the chips: All, Different art, In my binder (mockup screen 3); on a phone the row scrolls sideways */
+.printpick .ppscope{display:flex;gap:.5rem;min-width:0;overflow-x:auto;padding:1px 0}
+.printpick .ppscope .ui-chip{margin:0;min-width:44px;justify-content:center}
 /* the card size switch (0.7.29) keeps its size; on a narrow phone it wraps under the search */
 .printpick .ppsearch{flex-wrap:wrap}
 .printpick .ppsearch input{flex-basis:10rem}
 .printpick .ppsearch .sizeseg{flex:none}
-.printpick .ppfilters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:.5rem;
+.printpick .ppfilters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8em),1fr));gap:.5rem;
   align-items:center;min-width:0}
 .printpick .ppfilters select,.printpick .ppfilters .msel-btn{width:100%;min-width:0;margin:0}
 .printpick .ppall{margin:0;font-size:.93rem;line-height:1.3}
@@ -3828,11 +4462,16 @@ html.printpick-open{overflow:hidden}
   align-items:center;gap:.5rem}
 .printpick .ppstatus.error{color:var(--text)}
 .printpick .ppstatus .btn{margin:0}
+/* the as-of note of an answer from the gateway's copy of the printings: the notice strip, its
+   words muted and plain (a date, not a warning); hidden with a live answer */
+.printpick .ppasof{margin:0;flex:none;font-size:.93rem;font-weight:400;color:var(--text-muted);
+  padding:.5rem .75rem}
+.printpick .ppasof[hidden]{display:none}
 .printpick .ppmain{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 21rem;
-  gap:1rem}
+  grid-template-rows:minmax(0,1fr);gap:1rem;min-height:12rem}
 .printpick .ppscroll{overflow:auto;min-height:0;overscroll-behavior:contain;padding:3px}
 .printpick .ppgrid{list-style:none;margin:0;padding:0;display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.75rem}
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,10.7em),1fr));gap:.75rem}
 .printpick .ppgrid li,.addprints .pgrid li{min-width:0;display:flex}
 .pptile{position:relative;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;
   gap:.4rem;width:100%;height:auto;min-width:0;margin:0;padding:.4rem;border:2px solid var(--border-soft);
@@ -3848,8 +4487,7 @@ html.printpick-open{overflow:hidden}
 .pptile .ph,.pppreview .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;
   padding:.5rem;text-align:center;font-weight:700;color:var(--text-muted);overflow-wrap:anywhere}
 .pptile .ppcap{display:flex;flex-direction:column;gap:.2rem;min-width:0}
-.pptile .ppsetname{font-weight:700;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pptile .ppsetname{font-weight:700;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere}
 .pptile .ppcode{font-size:.82rem;color:var(--text-muted);font-variant-numeric:tabular-nums;
   overflow-wrap:anywhere}
 .pptile .ppprice{font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
@@ -3886,6 +4524,12 @@ html.printpick-open{overflow:hidden}
 .pppreview .ppprices dd{margin:0}
 .pppreview .ppnote{margin:.25rem 0 0;padding:.5rem .65rem;border-left:3px solid var(--orange);
   background:var(--surface-2);font-size:.9rem;color:var(--text)}
+.pppreview .ppfinish{display:flex;flex-wrap:wrap;gap:.25rem .9rem;margin:.25rem 0 0;padding:0;border:0;
+  min-width:0}
+.pppreview .ppfinish legend{padding:0;font-weight:700;color:var(--text-muted);font-size:.9rem;float:left;
+  margin-right:.9rem;line-height:var(--ctl)}
+.pppreview .ppfin{display:inline-flex;align-items:center;gap:.4rem;min-height:var(--ctl);cursor:pointer}
+.pppreview .ppfin input{margin:0;width:1.1rem;height:1.1rem;accent-color:var(--orange)}
 .pppreview .ppacts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem}
 .pppreview .ppacts button{margin:0;flex:1 1 auto}
 .pppreview .ppback{display:none}
@@ -3897,7 +4541,8 @@ html.printpick-open{overflow:hidden}
   .printpick .pppreview{display:none;position:absolute;inset:0;z-index:2;background:var(--surface);
     border:0;border-radius:0;padding:.25rem .25rem env(safe-area-inset-bottom)}
   .printpick .ppbox.previewing .pppreview{display:flex}
-  .printpick .ppbox.previewing .pptools,.printpick .ppbox.previewing .ppstatus{display:none}
+  .printpick .ppbox.previewing .pptools,.printpick .ppbox.previewing .ppstatus,
+  .printpick .ppbox.previewing .ppasof{display:none}
   .printpick .pppreview .ppback{display:inline-flex}
   .pppreview .ppbig{max-width:min(20rem,72%)}
   .printpick .ppfilters{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -3907,27 +4552,48 @@ html.printpick-open{overflow:hidden}
   .printpick .ppbox{width:100%;height:94vh;height:94dvh;
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
-  .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:.5rem} }
+  .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,9.9em),1fr));gap:.5rem} }
 @media (max-width:599.98px){
   .printpick .ppfiltbtn{display:inline-flex}
   .printpick .ppfilters:not(.open){display:none} }
 /* finger-sized on a touch screen (44 px) */
-@media (pointer:coarse){
   /* the stats panel's buttons that pick out cards (colours, types, keywords), the curve's axis
      buttons, the legend and the dialog strip's buttons: 44 px, set here, after their own rules
      above, so the touch size wins */
   .rowbtn,.curveaxis .mv,.slegend button{min-height:44px}
+  .rowbtn,.statctl button{min-width:44px}
   .statctl button{min-height:44px}
+  /* the curve's eight axis buttons share the box's width with no gap, each at least 44 px wide:
+     on a phone too narrow for eight of them (320 and 360 px) the curve scrolls inside its box,
+     the axis with it (final polish P-11) */
+  .curveaxis{gap:0}
+  .curveaxis .mv{min-width:44px}
+  .curvebox [data-curve]{overflow-x:auto;scrollbar-width:thin}
+  .curvebox .curve,.curvebox .curveaxis{min-width:calc(8 * 44px)}
   /* the curve's axis buttons share the box's width (a phone's 320 px holds no eight 44 px
      columns without a sideways scroll): 44 px high, as wide as the box lets them; the stack
      handle keeps its 28 px drawing inside the 44 px finger area its ::before draws */
   .deck-toast .acts button,.deck-toast .acts .btn{min-height:44px}
   .deck-toast .close{width:44px;height:44px;min-height:44px}
-  .printpick .close{width:44px;min-height:44px;height:44px}
-  .printpick input[type=search],.printpick .msel-btn,.printpick select{height:44px;min-height:44px}
+  .printpick .close{width:max(44px,2.4rem);min-height:44px;height:max(44px,2.4rem)}
+  .printpick input[type=search],.printpick select{height:auto;min-height:44px}
+  .printpick .msel-btn{min-height:44px}
   .printpick .ppfiltbtn,.printpick .ppacts button,.printpick .ppmore .btn,.printpick .ppempty .btn,
   .printpick .ppstatus .btn{min-height:44px}
-  .printpick .ppall{min-height:44px} }
+  .printpick .ppall{min-height:44px}
+  /* the deck editor's − and + steps and the count box, its Foil and backup check boxes (the
+     label is the finger area) and the deck page's Undo and Redo: 44 px (review 0.7.46, F18) */
+  .erow .qty button.mini{width:44px;min-width:44px;height:44px;min-height:44px}
+  /* the count box grows with its text from 44 px (confirmation P-5) */
+  .erow .qty input{width:44px;min-width:44px;height:auto;min-height:44px}
+  .erow details.dd summary.mini{width:44px;height:44px;min-height:44px}
+  .erow{grid-template-columns:44px minmax(0,1fr) auto minmax(7rem,10rem) auto}
+  .erow .thumbbtn{min-width:44px;display:flex;justify-content:center}
+  .erow .sel select{height:44px;min-height:44px} .erow .sel .msel-btn{min-height:44px}
+  .erow button.remove{width:44px;min-width:44px;height:44px;min-height:44px}
+  .editbar .backup,.addbox form.addcard .go .foil{min-height:44px;padding:0 .25rem}
+  .editbar .backup input,.addbox form.addcard .go .foil input{width:22px;height:22px;margin:0}
+  .bulkbar .histtools button,.bulkbar .btn-ghost.small{min-height:44px}
 /* Compact width: the save bar sits fixed on top of the bottom tab bar. The same breakpoint as the
    tab bar (theme.py's __MOBILE__, under 600px): at exactly 600px the rail or the top bar is
    showing and the bar stays sticky at the top, so nothing is left under a fixed bar with no room
@@ -3936,22 +4602,30 @@ html.printpick-open{overflow:hidden}
 @media (max-width:599.98px){
   .editbar{top:auto;bottom:calc(56px + env(safe-area-inset-bottom));margin:0;position:fixed;left:0;right:0;
     padding:.35rem max(.75rem,env(safe-area-inset-right)) .35rem max(.75rem,env(safe-area-inset-left));
-    gap:.4rem;flex-wrap:nowrap}
+    gap:.4rem;flex-wrap:wrap}
+  .editbar button{min-height:44px}
+  /* the status (a message, a refusal) on its own line above the buttons, never squeezed beside them */
+  .editbar .status{order:-1;flex-basis:100%;margin:0 0 .15rem}
   .editbar .count{display:none}
   /* Undo and Redo keep their names for screen readers; on a phone the arrows alone show */
   .editbar .undo .bl,.editbar .redo .bl{position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0);white-space:nowrap}
-  .editbar .undo,.editbar .redo{padding-inline:.6rem;flex:none}
+  .editbar .undo,.editbar .redo{padding-inline:.6rem;flex:none;min-width:44px}
   .editbar .backup{font-size:.8rem;white-space:normal;flex:1 1 6rem;min-width:0}
   .editbar .status{flex-basis:100%}
   .editor{padding-bottom:6rem}
   body:has(#editor) footer.site{padding-bottom:calc(11rem + env(safe-area-inset-bottom))}
   .editbar .review{flex:1}
-  /* the card size keeps to the one slim row: no label, narrow S M L */
-  .editbar .cardsize{flex:0 1 auto;min-width:0;margin:0}
-  .editbar .cardsize .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-  .editbar .cardsize .sizeseg{display:flex;max-width:100%}
-  .editbar .cardsize .sizeseg button{min-width:0;flex:1 1 2rem;padding:0 .4rem}
+  /* the card size and the backup tick sit in their own row under the bar (companion.js moves
+     them there), each control 44 px tall */
+  .editopts{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem 1rem;margin:0 0 1rem}
+  .editopts .backup{display:inline-flex;align-items:center;gap:.5rem;margin:0;min-height:44px;font-size:.9rem}
+  .editopts .backup input{margin:0;width:22px;height:22px;accent-color:var(--orange)}
+  .editopts .cardsize{display:flex;flex-direction:row;align-items:center;gap:.5rem;margin:0}
+  .editopts .cardsize .lbl{color:var(--text-muted)}
+  .editopts .cardsize .sizeseg button{min-height:44px;min-width:44px}
+  .addbox form.addcard .go .foil{min-height:var(--ctl)}
+  .addbox form.addcard .go .foil input{width:22px;height:22px;margin:0;accent-color:var(--orange)}
   .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .addbox form.addcard .grow{grid-column:1 / -1;grid-row:1}
   .addbox form.addcard .go{grid-column:1;grid-row:2} .addbox form.addcard .go button{width:100%}
@@ -3970,10 +4644,12 @@ ul.erows{container-type:inline-size}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
 }
-@container (max-width:20rem){
-  .erow .qty{grid-column:2 / -1;grid-row:2}
-  .erow .sel{grid-row:3}
-  .erow details.dd,.erow button.remove{grid-row:3}
+@container (max-width:23rem){
+  .erow{grid-template-rows:auto auto auto}
+  .erow > .main{grid-column:2 / -1;grid-row:1}
+  .erow .qty{grid-column:1 / 3;grid-row:2;justify-self:start}
+  .erow details.dd,.erow button.remove{grid-column:3;grid-row:2}
+  .erow .sel,.erow > .s{grid-column:1 / -1;grid-row:3}
 }
 /* The phone's one-row save bar wraps with large text rather than run off the screen. */
 .editor{container-type:inline-size}

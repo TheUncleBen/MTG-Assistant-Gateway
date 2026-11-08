@@ -6,7 +6,17 @@ prices of the watched printings only, through the shared Scryfall client (its pa
 back-off) with ``POST /cards/collection`` in batches of 75, spaced at the single-lookup pace.
 It stores one price point per printing a day (USD, USD foil, USD etched, EUR, EUR foil, where
 Scryfall has them; Scryfall updates its prices about once a day too) and each watched deck's value
-that day. When nobody watches anything the check makes no request at all.
+that day. When nobody watches anything and no Binder or deck is in use the check makes no request
+at all.
+
+A watch by name alone follows the cheapest printing of the card (0.7.46): the check reads every
+printing of those cards (Scryfall's search, twenty cards a request, at the single-lookup pace) and
+stores, under ``min:`` and the card's oracle id, the lowest price of each finish that day, with the
+printing that had it on the watch.
+
+The same check prices the member's Binder and their own decks (binder_prices.py): the Binders in
+use are read whole from Archidekt first, as their member, while the member's Archidekt allowance has
+room, and every printing in them and in the decks they opened is priced with the watched ones.
 
 A watched deck is read again once a day (one paced Archidekt read per deck, as the member sees
 it), so its value follows the cards it holds; when the read fails, the last card list is used.
@@ -27,12 +37,15 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
+from . import dbwait, refusals
+from .binder_prices import BINDER_PAGE_SIZE, PRICED_FOR_DAYS, BinderStore
 from .decklist import clean_text
-from .decks import DeckError, _clean_deck_id
-from .theme import plural
+from .decks import DeckError, _clean_deck_id, owns_deck
+from .theme import natural_key, plural
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -56,6 +69,39 @@ NUMBER_RE = re.compile(r"^[A-Za-z0-9★-]{1,10}$")
 MAX_NAME = 150
 LOOP_EVERY = 900.0  # seconds between checks whether a daily job is due
 FIRST_DELAY = 60.0
+CHEAPEST = "min:"  # + a card's oracle id: the price_points key of its cheapest printing each day
+CHANGE_DAYS = (1, 7, 30)
+# the points of a series a list row needs: the newest with a price for the row's finish, and the
+# newest at or before 1, 7 and 30 days earlier (watchlist_summaries)
+_PRICED_IN = {
+    "nonfoil": "coalesce(usd, eur)",
+    "foil": "coalesce(usd_foil, eur_foil)",
+    "etched": "usd_etched",
+}
+# a point's price in a row's finish, in dollars and in euros (FINISH_KEYS, as SQL)
+_USD_IN = "CASE {w}.finish WHEN 'foil' THEN {p}.usd_foil WHEN 'etched' THEN {p}.usd_etched ELSE {p}.usd END"
+_EUR_IN = "CASE {w}.finish WHEN 'foil' THEN {p}.eur_foil WHEN 'etched' THEN NULL ELSE {p}.eur END"
+SUMMARIES_KEPT = 16  # members whose watchlist rows are kept worked out (card_summaries)
+# The Watchlist as a want list (0.7.46, mockup screen 8). The alert every new watch gets unless the
+# member set their own defaults (prefs.WATCH_ALERTS): a drop of this much below the price the card
+# had when it was added; the other kinds are off. The owner's decision 1 on screen 8: flip to {} for no
+# shipped default.
+DEFAULT_ALERTS: dict[str, float] = {"drop": 10.0}
+ALERT_KINDS = ("pct", "above", "below", "drop", "rise")
+# A watch that was stopped is kept in memory this long (seconds) so the notice's Undo can bring
+# it back as the same row, alerts, list and added price included (0.7.46 audit QG-09)
+STOPPED_KEEP = 15 * 60
+# each alert's column on watch_cards (drop and rise are percentages of the price when added)
+ALERT_COLUMNS = {
+    "pct": "alert_pct",
+    "above": "alert_above",
+    "below": "alert_below",
+    "drop": "alert_drop_pct",
+    "rise": "alert_rise_pct",
+}
+MAX_LISTS = 50  # watchlist lists a member can have
+MAX_LIST_NAME = 40
+NO_LIST = ""  # the list_name of a watch in no list ("Not in a list" on the page)
 
 
 def now() -> float:
@@ -123,12 +169,15 @@ def _norm(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
-def _ident(c: dict[str, Any]) -> dict[str, str]:
-    """The Scryfall collection identifier for a watched card or deck row."""
+def _ident(c: dict[str, Any]) -> dict[str, str] | None:
+    """The Scryfall collection identifier for a watched card or deck row, or None for a row that
+    names no card (no Scryfall id, no printing, no name), which the daily check skips."""
     if c.get("uid"):
         return {"id": str(c["uid"])}
     if c.get("set") and c.get("cn"):
         return {"set": str(c["set"]), "collector_number": str(c["cn"])}
+    if not str(c.get("name") or "").strip():
+        return None
     if c.get("set"):
         return {"name": str(c["name"]), "set": str(c["set"])}
     return {"name": str(c["name"])}
@@ -156,6 +205,54 @@ def _card_keys(card: dict[str, Any]) -> list[tuple[str, ...]]:
     return keys
 
 
+# Where a watched deck's value comes from, said beside it: deck_stats' price_total is Archidekt's.
+DECK_VALUE_SOURCE = (
+    "Scryfall's daily prices (TCGplayer's, in US dollars) for the printing and finish of each card"
+)
+
+# Beside a card watched by name alone (no set): which printing its price is.
+FOLLOWS_NAME = (
+    "the cheapest printing in this finish at each daily check, which can change; watch a set and "
+    "collector number to price one printing"
+)
+
+
+def series_key(w: dict[str, Any]) -> str | None:
+    """The price_points key a watched card's prices are kept under: its cheapest printing's for a
+    watch by name alone (once its oracle id is known), else its own printing's."""
+    if not w.get("set_code") and w.get("oracle_id"):
+        return CHEAPEST + str(w["oracle_id"])
+    return w.get("scryfall_id") or None
+
+
+def _oracle(card: dict[str, Any]) -> str:
+    faces = card.get("card_faces") if isinstance(card.get("card_faces"), list) else []
+    oid = card.get("oracle_id") or (faces[0].get("oracle_id") if faces and isinstance(faces[0], dict) else "")
+    return str(oid or "")
+
+
+def cheapest_point(cards: list[dict[str, Any]]) -> dict[str, float | None]:
+    """The lowest price of each finish and currency over ``cards`` (every printing of one card)."""
+    out: dict[str, float | None] = dict.fromkeys(PRICE_KEYS)
+    for card in cards:
+        for k, v in point_of(card).items():
+            if v is not None and (out[k] is None or v < out[k]):
+                out[k] = v
+    return out
+
+
+def cheapest_printing(cards: list[dict[str, Any]], finish: str) -> dict[str, Any] | None:
+    """The printing with the lowest price in ``finish``: dollars when any printing has one in that
+    finish, else euros."""
+    for currency in ("usd", "eur"):
+        priced = [(v, c) for c in cards if (v := price_for(point_of(c), finish, currency)) is not None]
+        if priced:
+            return min(priced, key=lambda x: (x[0], str(x[1].get("set")), str(x[1].get("collector_number"))))[
+                1
+            ]
+    return None
+
+
 class PriceService:
     def __init__(
         self,
@@ -170,7 +267,14 @@ class PriceService:
         self.decks = decks
         self._scryfall = scryfall
         self.notifier = notifier
+        self._stopped: dict[str, tuple[str, float, list[dict[str, Any]]]] = {}  # Undo of Stop watching
         self._run_lock = asyncio.Lock()
+        self.binder = BinderStore(db)
+        # each member's watchlist rows as last worked out (card_summaries): (stamp, rows)
+        self._summaries: dict[str, tuple[tuple[int, int, str], list[dict[str, Any]]]] = {}
+        # Reads a member's whole Binder from Archidekt (collection.CollectionService.read_whole,
+        # set by app.py): (rows, complete). None: Binders are not read (no collection service).
+        self.read_binder: Callable[[str], Awaitable[tuple[list[dict[str, Any]], bool]]] | None = None
 
     def _limit(self, key: str) -> int:
         """watch_max_cards / watch_max_decks as the admin Settings page has them now (0.7.29): a
@@ -182,6 +286,16 @@ class PriceService:
     def _rows(self, sql: str, args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self.db._lock:
             return [dict(r) for r in self.db._conn.execute(sql, args).fetchall()]
+
+    def _records(self, sql: str, args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        """As _rows, for many rows: plain tuples made into dicts by their column names, which is
+        quicker than a dict of each sqlite3.Row (a list at the cap is 5,000 rows of 30 columns)."""
+        with self.db._lock:
+            cur = self.db._conn.cursor()
+            cur.row_factory = None
+            cur.execute(sql, args)
+            names = [d[0] for d in cur.description]
+            return [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
 
     def points(self, scryfall_id: str | None, days: int = 365) -> list[dict[str, Any]]:
         """A printing's stored points, oldest first, the last ``days`` days."""
@@ -207,27 +321,50 @@ class PriceService:
             out[f"change_{n}d_pct"] = pct_change(before, last)
         return out
 
-    def card_view(self, w: dict[str, Any], days: int = 90) -> dict[str, Any]:
-        pts = self.points(w.get("scryfall_id"), days)
-        cur = headline(pts[-1], w["finish"])[1] if pts else "usd"
-        series = [(p["day"], price_for(p, w["finish"], cur)) for p in pts]
+    def _since(self, days: int) -> str:
+        return days_before(day_of(now()), max(1, days) - 1)
+
+    def _card_head(self, w: dict[str, Any]) -> dict[str, Any]:
+        """What a watched card's row says whatever its prices: its name, printing, finish, alerts
+        and, for a watch by name alone, the printing that was cheapest at the last check and the
+        words that say which printing its price follows."""
+        cheapest = None
+        if not w.get("set_code") and w.get("cheapest_set"):
+            cheapest = {"set": w["cheapest_set"], "collector_number": w.get("cheapest_cn") or ""}
         return {
             "watch_id": w["id"],
             "name": w["name"],
             "set": w["set_code"] or None,
             "collector_number": w["collector_number"] or None,
             "finish": w["finish"],
+            "cheapest": cheapest,
+            "alerts": {k: w[c] for k, c in ALERT_COLUMNS.items() if w.get(c) is not None},
+            "list": w.get("list_name") or NO_LIST,
+            "added_price": w.get("added_price"),
+            "added_currency": w.get("added_currency") or "usd",
+            "priced": bool(series_key(w)),
+            **({} if w["set_code"] else {"follows": FOLLOWS_NAME}),
+        }
+
+    def card_view(self, w: dict[str, Any], days: int = 90) -> dict[str, Any]:
+        pts = self.points(series_key(w), days)
+        cur = headline(pts[-1], w["finish"])[1] if pts else "usd"
+        series = [(p["day"], price_for(p, w["finish"], cur)) for p in pts]
+        return {
+            **self._card_head(w),
             "currency": cur,
             **self._changes(series),
-            "alerts": {
-                k: w[f"alert_{k}"] for k in ("pct", "above", "below") if w.get(f"alert_{k}") is not None
-            },
             "history": [{"day": d, "price": v} for d, v in series],
-            "priced": bool(w.get("scryfall_id")),
         }
 
     def watched_cards(self, sub: str) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM watch_cards WHERE sub = ? ORDER BY name, set_code, finish", (sub,))
+
+    def watched_names(self, sub: str) -> list[str]:
+        """The names of the cards a member watches (any printing), each once, in their natural
+        order (a 2 before a 10)."""
+        rows = self._rows("SELECT DISTINCT name FROM watch_cards WHERE sub = ?", (sub,))
+        return sorted((r["name"] for r in rows), key=natural_key)
 
     def watched_decks(self, sub: str) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM watch_decks WHERE sub = ? ORDER BY deck_name, deck_id", (sub,))
@@ -240,25 +377,234 @@ class PriceService:
             (sub, deck_id, since),
         )
 
-    def deck_view(self, sub: str, d: dict[str, Any], days: int = 90) -> dict[str, Any]:
-        rows = self.deck_series(sub, d["deck_id"], days)
+    def _deck_head(self, d: dict[str, Any]) -> dict[str, Any]:
         cards = json.loads(d.get("cards_json") or "[]")
         return {
             "deck_id": d["deck_id"],
             "name": d["deck_name"],
-            "cards": sum(int(c.get("qty") or 0) for c in cards),
+            "cards": sum(int(c.get("qty") or 0) for c in cards if isinstance(c, dict)),
             "currency": "usd",
-            **self._changes([(r["day"], r["usd"]) for r in rows]),
-            "history": [{"day": r["day"], "price": r["usd"], "eur": r["eur"]} for r in rows],
+            "price_source": DECK_VALUE_SOURCE,
             "refreshed_at": d.get("refreshed_at"),
         }
 
-    def overview(self, sub: str, days: int = 90) -> dict[str, Any]:
-        s = self.settings
+    def deck_view(self, sub: str, d: dict[str, Any], days: int = 90) -> dict[str, Any]:
+        rows = self.deck_series(sub, d["deck_id"], days)
         return {
-            "cards": [self.card_view(w, days) for w in self.watched_cards(sub)],
-            "decks": [self.deck_view(sub, d, days) for d in self.watched_decks(sub)],
-            "limits": {"cards": self._limit("watch_max_cards"), "decks": self._limit("watch_max_decks")},
+            **self._deck_head(d),
+            **self._changes([(r["day"], r["usd"]) for r in rows]),
+            "history": [{"day": r["day"], "price": r["usd"], "eur": r["eur"]} for r in rows],
+        }
+
+    # -- the Watchlist page: a fixed number of queries, whatever the list's size (0.7.46) ---------
+    def card_summaries(self, sub: str) -> list[dict[str, Any]]:
+        """Every watched card's row without its history: the latest price and its day, and the
+        change over 1, 7 and 30 days, as card_view works them out, in one query (each point is an
+        index lookup), so a list of thousands draws, filters and sorts without reading a year of
+        prices per card. The rows are kept until something they are worked out from is written (a
+        watch, an alert, a list, a price, the member's Binder as last read, by any statement:
+        Database.watchlist_stamp) or the day turns, so a list at the cap costs the query once, not
+        on every view. Writes to anything else (a Binder visit, an assistant's tool call, another
+        member's watches) leave them in place. The stamp is read before the rows: a write between
+        the two only works them out again."""
+        stamp = (*self.db.watchlist_stamp(sub), day_of(now()))
+        kept = self._summaries.get(sub)
+        if kept is not None and kept[0] == stamp:
+            return [dict(v) for v in kept[1]]
+        out = self._card_summaries(sub)
+        while len(self._summaries) >= SUMMARIES_KEPT:
+            self._summaries.pop(next(iter(self._summaries)))
+        self._summaries[sub] = (stamp, out)
+        return [dict(v) for v in out]
+
+    def _card_summaries(self, sub: str) -> list[dict[str, Any]]:
+        span = self._since(366)
+        # a point with a price in the row's finish (dollars or euros), and that price in the
+        # row's currency: dollars when its newest point has them, else euros (as headline)
+        priced = (
+            "(CASE {w}.finish "
+            + " ".join(f"WHEN '{f}' THEN {col}" for f, col in _PRICED_IN.items())
+            + " END) IS NOT NULL"
+        )
+        usd, eur = _USD_IN.format(w="m", p="p"), _EUR_IN.format(w="m", p="p")
+        in_cur = f"CASE WHEN m.u0 IS NOT NULL THEN {usd} ELSE {eur} END"
+
+        def before(n: int) -> str:
+            # the price of the newest priced point at or before n days before the newest one
+            return (
+                f"(SELECT {in_cur} FROM price_points p WHERE p.scryfall_id = m.pkey AND p.day <= "
+                f"date(m.d0, '-{n} day') AND p.day >= ? AND {priced.format(w='m')} "
+                f"ORDER BY p.day DESC LIMIT 1) AS b{n}"
+            )
+
+        # each step is MATERIALIZED, or SQLite works the newest day out again inside each lookup
+        # that uses it; each earlier price is one index search (its day and its price together)
+        rows = self._records(
+            "WITH w AS MATERIALIZED (SELECT watch_cards.*, CASE WHEN set_code = '' AND oracle_id IS "
+            f"NOT NULL THEN '{CHEAPEST}' || oracle_id ELSE scryfall_id END AS pkey FROM watch_cards "
+            "WHERE sub = ?), "
+            "d AS MATERIALIZED (SELECT w.*, (SELECT p.day FROM price_points p WHERE p.scryfall_id = w.pkey "
+            f"AND p.day >= ? AND {priced.format(w='w')} ORDER BY p.day DESC LIMIT 1) AS d0 FROM w), "
+            f"m AS MATERIALIZED (SELECT d.*, {_USD_IN.format(w='d', p='q')} AS u0, "
+            f"{_EUR_IN.format(w='d', p='q')} AS e0 FROM d LEFT JOIN price_points q ON q.scryfall_id = "
+            "d.pkey AND q.day = d.d0) "
+            f"SELECT m.*, {', '.join(before(n) for n in CHANGE_DAYS)} FROM m "
+            "ORDER BY m.name, m.set_code, m.finish",
+            (sub, span, *(span for _ in CHANGE_DAYS)),
+        )
+        # "You own N": the copies of each name in the member's Binder as last read
+        # whole (binder_prices), one query for the whole list; nothing until a first read
+        owned = {
+            r["n"]: int(r["q"] or 0)
+            for r in self._rows(
+                "SELECT lower(name) AS n, SUM(quantity) AS q FROM binder_records WHERE sub = ? "
+                "GROUP BY lower(name)",
+                (sub,),
+            )
+        }
+        out = []
+        for r in rows:
+            view = self._card_head(r)  # a new dict: added to in place
+            view.update(currency="usd", price=None, day=None, key=r["pkey"], scryfall_id=r.get("scryfall_id"))
+            view["owned"] = owned.get(_norm(r["name"]), 0) if owned else 0
+            if r["d0"] is not None:
+                # dollars, or euros when the point has no dollar price (as headline)
+                cur = "usd" if r["u0"] is not None else "eur"
+                price = r["u0"] if cur == "usd" else r["e0"]
+                view.update(currency=cur, price=price, day=r["d0"])
+                for n in CHANGE_DAYS:
+                    view[f"change_{n}d_pct"] = pct_change(r[f"b{n}"], price)
+            out.append(view)
+        return out
+
+    def card_histories(self, views: list[dict[str, Any]], days: int = 30) -> None:
+        """The last ``days`` of prices of ``views`` (card_summaries rows, the ones on screen) as
+        each one's ``history``, and how many days of prices each has in all (``full_days``): two
+        queries for all of them."""
+        keys = sorted({v["key"] for v in views if v.get("key")})
+        pts: dict[str, list[dict[str, Any]]] = {}
+        counts: dict[str, dict[str, int]] = {}
+        since, year = self._since(days), self._since(365)
+        for i in range(0, len(keys), 500):
+            chunk = keys[i : i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self._rows(
+                "SELECT scryfall_id, day, usd, usd_foil, usd_etched, eur, eur_foil FROM price_points "
+                f"WHERE scryfall_id IN ({marks}) AND day >= ? ORDER BY day",
+                (*chunk, since),
+            ):
+                pts.setdefault(r.pop("scryfall_id"), []).append(r)
+            for r in self._rows(
+                "SELECT scryfall_id, COUNT(usd) AS usd, COUNT(usd_foil) AS usd_foil, COUNT(usd_etched) AS "
+                "usd_etched, COUNT(eur) AS eur, COUNT(eur_foil) AS eur_foil FROM price_points "
+                f"WHERE scryfall_id IN ({marks}) AND day >= ? GROUP BY scryfall_id",
+                (*chunk, year),
+            ):
+                counts[r.pop("scryfall_id")] = r
+        for v in views:
+            cur = v.get("currency") or "usd"
+            v["history"] = [
+                {"day": p["day"], "price": price_for(p, v["finish"], cur)}
+                for p in pts.get(v.get("key") or "", [])
+            ]
+            usd_key, eur_key = FINISH_KEYS.get(v["finish"], FINISH_KEYS["nonfoil"])
+            column = usd_key if cur == "usd" else eur_key
+            v["full_days"] = int((counts.get(v.get("key") or "") or {}).get(column or "", 0) or 0)
+
+    def deck_summaries(self, sub: str) -> list[dict[str, Any]]:
+        """Every watched deck's row without its history (as card_summaries), in one query."""
+        span = self._since(366)
+
+        def nth(n: int) -> str:
+            return (
+                "(SELECT json_array(v.day, v.usd) FROM deck_values v WHERE v.sub = k.sub AND v.deck_id = "
+                "k.deck_id AND v.usd IS NOT NULL AND v.day >= ? AND v.day <= "
+                f"date(json_extract(k.p0, '$[0]'), '-{n} day') ORDER BY v.day DESC LIMIT 1)"
+            )
+
+        rows = self._rows(
+            f"SELECT k.*, {nth(1)} AS p1, {nth(7)} AS p7, {nth(30)} AS p30 FROM (SELECT d.*, "
+            "(SELECT json_array(v.day, v.usd) FROM deck_values v WHERE v.sub = d.sub AND "
+            "v.deck_id = d.deck_id AND v.usd IS NOT NULL AND v.day >= ? ORDER BY v.day DESC LIMIT 1) "
+            "AS p0 FROM watch_decks d WHERE d.sub = ?) k ORDER BY k.deck_name, k.deck_id",
+            (span, span, span, span, sub),
+        )
+        out = []
+        for r in rows:
+            view = {**self._deck_head(r), "price": None, "day": None}
+            if r["p0"]:
+                day, price = json.loads(r["p0"])
+                view.update(price=price, day=day)
+                for n in CHANGE_DAYS:
+                    before = json.loads(r[f"p{n}"])[1] if r[f"p{n}"] else None
+                    view[f"change_{n}d_pct"] = pct_change(before, price)
+            out.append(view)
+        return out
+
+    def deck_histories(self, sub: str, views: list[dict[str, Any]], days: int = 30) -> None:
+        """The last ``days`` of values of ``views`` (the decks on screen) and their days in all."""
+        ids = sorted({str(v["deck_id"]) for v in views})
+        if not ids:
+            return
+        marks = ",".join("?" * len(ids))
+        rows = self._rows(
+            f"SELECT deck_id, day, usd, eur FROM deck_values WHERE sub = ? AND deck_id IN ({marks}) "
+            "AND day >= ? ORDER BY day",
+            (sub, *ids, self._since(days)),
+        )
+        counts = {
+            r["deck_id"]: int(r["n"])
+            for r in self._rows(
+                f"SELECT deck_id, COUNT(usd) AS n FROM deck_values WHERE sub = ? AND deck_id IN ({marks}) "
+                "AND day >= ? GROUP BY deck_id",
+                (sub, *ids, self._since(365)),
+            )
+        }
+        by: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            by.setdefault(r["deck_id"], []).append({"day": r["day"], "price": r["usd"], "eur": r["eur"]})
+        for v in views:
+            v["history"] = by.get(str(v["deck_id"]), [])
+            v["full_days"] = counts.get(str(v["deck_id"]), 0)
+
+    def owned_history(self, sub: str, scryfall_id: str, finish: str = "nonfoil") -> dict[str, Any] | None:
+        """The card viewer's price history of a printing the member owns (in their Binder as last
+        read, or in a deck of theirs the daily check prices): a year of its daily prices in
+        ``finish``, dollars or else euros. None for a printing they do not own."""
+        where = self.binder.owned_where(sub, scryfall_id)
+        if not where:
+            return None
+        finish = finish if finish in FINISH_KEYS else "nonfoil"
+        pts = self.binder.history(scryfall_id, self._since(365))
+        cur = headline(pts[-1], finish)[1] if pts else "usd"
+        series = [(p["day"], price_for(p, finish, cur)) for p in pts]
+        return {
+            "where": where,
+            "finish": finish,
+            "currency": cur,
+            **self._changes(series),
+            "history": [{"day": d, "price": v} for d, v in series],
+        }
+
+    def limits(self) -> dict[str, int]:
+        return {"cards": self._limit("watch_max_cards"), "decks": self._limit("watch_max_decks")}
+
+    def overview(self, sub: str, days: int = 90, *, history: bool = True) -> dict[str, Any]:
+        """Every watched card and deck as list rows (card_summaries, deck_summaries), with the
+        last ``days`` of prices each when ``history``."""
+        s = self.settings
+        cards, decks = self.card_summaries(sub), self.deck_summaries(sub)
+        if history:
+            self.card_histories(cards, days)
+            self.deck_histories(sub, decks, days)
+        for v in cards:
+            v.pop("key", None)
+            v.pop("scryfall_id", None)
+        return {
+            "cards": cards,
+            "decks": decks,
+            "lists": self.lists(sub),
+            "limits": self.limits(),
             "checked_daily_at_utc": f"{s.price_hour_utc:02d}:00",
         }
 
@@ -288,12 +634,26 @@ class PriceService:
         alert_pct: float | None = None,
         alert_above: float | None = None,
         alert_below: float | None = None,
+        alert_drop: float | None = None,
+        alert_rise: float | None = None,
         keep_alerts: bool = False,
+        clear_alerts: bool = False,
+        default_pct: float | None = None,
+        defaults: dict[str, Any] | None = None,
+        list_name: str | None = None,
     ) -> dict[str, Any]:
         """Watch a card (or change the alerts of one already watched). The printing is looked
-        up at once, so today's price shows right away; when Scryfall is busy the watch is kept and
-        priced by the next daily check. ``keep_alerts``: a card already watched keeps its alerts
-        (the Watch buttons, which set none)."""
+        up at once, so today's price shows right away (a watch by name alone: its cheapest
+        printing's); when Scryfall is busy the watch is kept and priced by the next daily check.
+        On a card already watched, only the alerts the call names change and the others are kept
+        (a call naming none, such as a move to a list, keeps them all); ``clear_alerts`` turns
+        off the ones it does not name, and on a new watch means no alerts instead of the
+        member's defaults. ``keep_alerts``: a card already watched keeps its alerts
+        whatever is named (the Watch buttons). A new watch that names no alert of its own gets the
+        member's defaults (``defaults``, as prefs.alert_defaults gives them; ``default_pct`` alone
+        is the remembered one-day move) and remembers the price it was added at, the reference
+        for the "drop below" and "rise above" alerts. ``list_name``: the watchlist list to put it
+        in (None: leave a watched card where it is; '' takes it out of its list)."""
         name = clean_text(name or "").strip()[:MAX_NAME]
         set_code = (set_code or "").strip().lower()
         number = (collector_number or "").strip()
@@ -308,28 +668,42 @@ class PriceService:
             raise DeckError("invalid", "A collector number goes with a set code, such as cmm 410.")
         if finish not in FINISHES:
             raise DeckError("invalid", "finish must be nonfoil, foil or etched.")
-        alerts = _alerts(alert_pct, alert_above, alert_below)
+        if list_name is not None:
+            list_name = clean_list_name(list_name)
+        alerts = _alerts(alert_pct, alert_above, alert_below, alert_drop, alert_rise)
+        fresh_alerts = alerts
+        if all(a is None for a in alerts) and not clear_alerts:
+            kept = dict(defaults or {})
+            if default_pct is not None:
+                kept.setdefault("pct", default_pct)
+            fresh_alerts = _alerts(*(kept.get(k) for k in ALERT_KINDS))
         if self._limit("watch_max_cards") <= 0:
-            raise DeckError("invalid", "Watching cards is switched off on this gateway.")
+            raise DeckError("invalid", "Watchlists are switched off on this gateway.")
         row = {"name": name, "set": set_code, "cn": number}
         card: dict[str, Any] | None = None
         note = ""
         try:
-            found, _missing = await self._scry().collection([_ident(row)])
+            found, _missing = await self._scry().collection([_ident(row) or {"name": name}])
             card = found[0] if found else None
             if card is None:
-                raise DeckError("not_found", f"Scryfall knows no card {self._label(name, set_code, number)}.")
+                raise DeckError("not_found", f"No card is {self._label(name, set_code, number)}.")
         except DeckError:
             raise
         except Exception as exc:  # ScryfallError: busy or down; the daily check prices it later
             if not name:
                 raise DeckError(
-                    "unavailable", f"Scryfall could not be asked about this printing: {exc}"
+                    "unavailable",
+                    f"Scryfall could not be asked about this printing: {refusals.sentence(exc)}",
                 ) from exc
-            note = "Scryfall could not be asked just now; today's price comes with the next daily check."
+            # the name is kept as typed: say so, so a misspelt name is not taken for a checked one
+            note = (
+                f"Scryfall couldn't be reached, so the name “{name}” is not checked yet and has no price "
+                "today; the next daily check prices it."
+            )
         if card is not None:
             name = str(card.get("name") or name)
-            if finish not in (card.get("finishes") or ["nonfoil"]):
+            # by name alone the finish is checked over every printing, below
+            if set_code and finish not in (card.get("finishes") or ["nonfoil"]):
                 raise DeckError(
                     "invalid",
                     f"{name} ({str(card.get('set', '')).upper()}) is not printed in {finish}; "
@@ -337,20 +711,64 @@ class PriceService:
                 )
             if set_code:  # a name with only a set: keep the printing Scryfall chose
                 number = number or str(card.get("collector_number") or "")
+        oracle = _oracle(card) if card is not None else ""
+        printings: list[dict[str, Any]] | None = None
+        if oracle and not set_code:
+            # by name alone: every printing, for the cheapest one's price today
+            try:
+                client = self._scry()
+                printings = (await client.printings_of([oracle], interval=client.lookup_interval)).get(oracle)
+            except Exception as exc:  # Scryfall busy: the daily check finds the cheapest
+                logger.info("cheapest printing waits for the daily check: %s", exc.__class__.__name__)
+                note = "Scryfall could not be asked just now; today's price comes with the next daily check."
+        if printings and not any(finish in (p.get("finishes") or ["nonfoil"]) for p in printings):
+            raise DeckError(
+                "invalid",
+                f"{name} is not printed in {finish}; it comes in "
+                + ", ".join(sorted({f for p in printings for f in (p.get("finishes") or ["nonfoil"])}))
+                + ".",
+            )
+        # the same printing in other letter case is the same watch; a watch by name of a card
+        # watched in any printing (in this finish) is the watch it has, never a second one
         existing = self._rows(
-            "SELECT * FROM watch_cards WHERE sub = ? AND name = ? AND set_code = ? AND collector_number = ? "
-            "AND finish = ?",
+            "SELECT * FROM watch_cards WHERE sub = ? AND lower(name) = lower(?) AND lower(set_code) = ? "
+            "AND lower(collector_number) = lower(?) AND finish = ?",
             (sub, name, set_code, number, finish),
         )
+        if not existing and not set_code:
+            existing = [
+                w
+                for w in self.watched_cards(sub)
+                if _norm(w["name"]) == _norm(name) and w["finish"] == finish
+            ][:1]
         t = int(now())
+        # the price when added: the printing's today, or the cheapest printing's for a watch by name
+        added: tuple[float | None, str | None] = (None, None)
+        if printings:
+            added = headline(cheapest_point(printings), finish)
+        elif card is not None:
+            added = headline(point_of(card), finish)
+        if added[0] is None:
+            added = (None, None)
         with self.db.tx() as c:
             if existing:
                 wid = existing[0]["id"]
-                if not keep_alerts:
-                    c.execute(
-                        "UPDATE watch_cards SET alert_pct = ?, alert_above = ?, alert_below = ? WHERE id = ?",
-                        (*alerts, wid),
-                    )
+                if not keep_alerts and (clear_alerts or any(a is not None for a in alerts)):
+                    if not clear_alerts:
+                        was = c.execute(
+                            "SELECT alert_pct, alert_above, alert_below, alert_drop_pct, alert_rise_pct "
+                            "FROM watch_cards WHERE id = ?",
+                            (wid,),
+                        ).fetchone()
+                        alerts = tuple(
+                            a if a is not None else w for a, w in zip(alerts, tuple(was), strict=True)
+                        )
+                    c.execute(_SET_ALERTS + " WHERE id = ?", (*alerts, wid))
+                if list_name is not None:
+                    self._ensure_list(c, sub, list_name, t)
+                    c.execute("UPDATE watch_cards SET list_name = ? WHERE id = ?", (list_name, wid))
+                if oracle:
+                    c.execute("UPDATE watch_cards SET oracle_id = ? WHERE id = ?", (oracle, wid))
                 created = False
             else:
                 count = c.execute("SELECT COUNT(*) FROM watch_cards WHERE sub = ?", (sub,)).fetchone()[0]
@@ -364,10 +782,12 @@ class PriceService:
                         f"Remove {count - most + 1} to add another.",
                     )
                 wid = "w_" + secrets.token_urlsafe(9)
+                self._ensure_list(c, sub, list_name or NO_LIST, t)
                 stored = c.execute(
                     "INSERT INTO watch_cards (id, sub, name, set_code, collector_number, finish, "
-                    "scryfall_id, alert_pct, alert_above, alert_below, created_at) "
-                    "SELECT ?,?,?,?,?,?,?,?,?,?,? "
+                    "scryfall_id, alert_pct, alert_above, alert_below, alert_drop_pct, alert_rise_pct, "
+                    "created_at, oracle_id, list_name, added_price, added_currency) "
+                    "SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? "
                     "WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)",
                     (
                         wid,
@@ -377,8 +797,11 @@ class PriceService:
                         number,
                         finish,
                         card.get("id") if card else None,
-                        *alerts,
+                        *fresh_alerts,
                         t,
+                        oracle or None,
+                        list_name or NO_LIST,
+                        *added,
                         sub,
                     ),
                 ).rowcount
@@ -387,8 +810,30 @@ class PriceService:
                 created = True
             if card is not None:
                 self._store_point(c, str(card["id"]), point_of(card), day_of(t))
+            if printings:
+                self._store_cheapest(c, oracle, printings, day_of(t))
         out = self.card_view(self._rows("SELECT * FROM watch_cards WHERE id = ?", (wid,))[0])
+        # the printing priced today: for a watch by name, the cheapest one in its finish
+        now_card = card
+        if not set_code and out.get("cheapest"):
+            now_card = next(
+                (
+                    p
+                    for p in printings or []
+                    if str(p.get("set") or "") == out["cheapest"]["set"]
+                    and str(p.get("collector_number") or "") == out["cheapest"]["collector_number"]
+                ),
+                {"set": out["cheapest"]["set"], "collector_number": out["cheapest"]["collector_number"]},
+            )
+        if now_card is not None:
+            out["printing_now"] = {
+                "set": str(now_card.get("set") or "") or None,
+                "set_name": str(now_card.get("set_name") or "") or None,
+                "collector_number": str(now_card.get("collector_number") or "") or None,
+            }
         out["created"] = created
+        if card is None:
+            out["name_checked"] = False
         if note:
             out["note"] = note
         return out
@@ -396,21 +841,38 @@ class PriceService:
     @staticmethod
     def _label(name: str, set_code: str, number: str) -> str:
         where = " ".join(p for p in (set_code.upper(), number) if p)
-        return f"named {name!r}" + (f" in {where}" if where else "") if name else f"numbered {where}"
+        return f"called “{name}”" + (f" in {where}" if where else "") if name else f"numbered {where}"
 
     def set_alerts(
-        self, sub: str, watch_id: str, pct: float | None, above: float | None, below: float | None
+        self,
+        sub: str,
+        watch_id: str,
+        pct: float | None,
+        above: float | None,
+        below: float | None,
+        drop: float | None = None,
+        rise: float | None = None,
     ) -> dict[str, Any]:
-        alerts = _alerts(pct, above, below)
+        """A watched card's five alerts, replaced together (an empty one is off)."""
+        alerts = _alerts(pct, above, below, drop, rise)
         with self.db.tx() as c:
-            n = c.execute(
-                "UPDATE watch_cards SET alert_pct = ?, alert_above = ?, alert_below = ? "
-                "WHERE id = ? AND sub = ?",
-                (*alerts, watch_id, sub),
-            ).rowcount
+            n = c.execute(_SET_ALERTS + " WHERE id = ? AND sub = ?", (*alerts, watch_id, sub)).rowcount
         if not n:
             raise DeckError("not_found", "That card is not on your watchlist.")
         return self.card_view(self._rows("SELECT * FROM watch_cards WHERE id = ?", (watch_id,))[0])
+
+    def set_alerts_many(self, sub: str, watch_ids: list[str], **alerts: Any) -> int:
+        """The bulk bar's Price alert: the same five alerts on every selected watch of the
+        member's. Returns how many rows changed."""
+        values = _alerts(*(alerts.get(k) for k in ALERT_KINDS))
+        ids = _own_ids(watch_ids)
+        if not ids:
+            raise DeckError("invalid", "Select at least one card first.")
+        with self.db.tx() as c:
+            n = c.executemany(
+                _SET_ALERTS + " WHERE id = ? AND sub = ?", [(*values, wid, sub) for wid in ids]
+            ).rowcount
+        return n
 
     def unwatch_card(self, sub: str, ref: str) -> list[str]:
         rows = self.find(sub, ref)
@@ -419,6 +881,153 @@ class PriceService:
         with self.db.tx() as c:
             c.executemany("DELETE FROM watch_cards WHERE id = ? AND sub = ?", [(w["id"], sub) for w in rows])
         return [w["name"] for w in rows]
+
+    def unwatch_many(self, sub: str, watch_ids: list[str]) -> int:
+        """The bulk bar's Stop watching: the selected watches of the member's go. Returns how
+        many went (:meth:`stop_watching` keeps them for an Undo)."""
+        return len(self.stop_watching(sub, watch_ids)[1])
+
+    # -- Stop watching with Undo (0.7.46 audit QG-09) ---------------------------------------------
+    def stop_watching(self, sub: str, watch_ids: list[str]) -> tuple[str, list[dict[str, Any]]]:
+        """The selected watches of the member's go, and are kept for STOPPED_KEEP seconds under
+        the returned token, so :meth:`rewatch` can bring them back as they were. Returns
+        ``(token, the rows that went)``."""
+        ids = _own_ids(watch_ids)
+        if not ids:
+            raise DeckError("invalid", "Select at least one card first.")
+        marks = ",".join("?" * len(ids))
+        rows = self._rows(
+            f"SELECT * FROM watch_cards WHERE sub = ? AND id IN ({marks}) ORDER BY name, set_code, finish",
+            (sub, *ids),
+        )
+        with self.db.tx() as c:
+            c.executemany("DELETE FROM watch_cards WHERE id = ? AND sub = ?", [(w["id"], sub) for w in rows])
+        self.forget_stopped()
+        token = secrets.token_urlsafe(18)
+        if rows:
+            self._stopped[token] = (sub, time.time() + STOPPED_KEEP, rows)
+        return token, rows
+
+    def rewatch(self, sub: str, token: str) -> list[str]:
+        """Undo of :meth:`stop_watching`: the rows kept under the member's ``token`` are back
+        with their alerts, list and added price (the same ids, so their history stays theirs).
+        A token that is spent, another member's or forgotten says so."""
+        self.forget_stopped()
+        kept = self._stopped.pop(str(token or ""), None)
+        if kept is None or kept[0] != sub:
+            raise DeckError("not_found", "That Undo is no longer available.")
+        rows = kept[2]
+        with self.db.tx() as c:
+            for w in rows:
+                cols = [k for k in w.keys() if k != "rowid"]
+                self._ensure_list(c, sub, w.get("list_name") or "", int(time.time()))
+                marks = ", ".join("?" * len(cols))
+                c.execute(
+                    f"INSERT OR IGNORE INTO watch_cards ({', '.join(cols)}) VALUES ({marks})",
+                    tuple(w[k] for k in cols),
+                )
+        return [w["name"] for w in rows]
+
+    def forget_stopped(self, now: float | None = None) -> None:
+        """Drop kept rows whose Undo time has passed."""
+        now = time.time() if now is None else now
+        for token in [t for t, (_s, until, _r) in self._stopped.items() if until <= now]:
+            self._stopped.pop(token, None)
+
+    # -- watchlist lists (groups of watched cards; mockup screen 8) ---------------------------------
+    @staticmethod
+    def _ensure_list(c: Any, sub: str, name: str, t: int) -> None:
+        """A list named on a watch exists as a list of the member's (a name of '' is no list)."""
+        if name:
+            c.execute(
+                "INSERT OR IGNORE INTO watch_lists (sub, name, created_at) "
+                "SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)",
+                (sub, name, t, sub),
+            )
+
+    def lists(self, sub: str) -> list[dict[str, Any]]:
+        """The member's watchlist lists in their natural order, each with how many cards it
+        holds (a list can be empty); the cards in no list are not a list here."""
+        rows = self._rows(
+            "SELECT l.name, (SELECT COUNT(*) FROM watch_cards w WHERE w.sub = l.sub AND "
+            "w.list_name = l.name) "
+            "AS n FROM watch_lists l WHERE l.sub = ?",
+            (sub,),
+        )
+        return sorted(
+            ({"name": r["name"], "count": int(r["n"])} for r in rows), key=lambda r: natural_key(r["name"])
+        )
+
+    def create_list(self, sub: str, name: str) -> str:
+        """A new, empty list. Returns its name as kept."""
+        name = clean_list_name(name)
+        if not name:
+            raise DeckError("invalid", "Give the list a name.")
+        with self.db.tx() as c:
+            n = c.execute("SELECT COUNT(*) FROM watch_lists WHERE sub = ?", (sub,)).fetchone()[0]
+            if n >= MAX_LISTS and not self._has_list(c, sub, name):
+                raise DeckError(
+                    "invalid", f"You can have at most {MAX_LISTS} lists. Delete one to add another."
+                )
+            self._ensure_list(c, sub, name, int(now()))
+        return name
+
+    @staticmethod
+    def _has_list(c: Any, sub: str, name: str) -> bool:
+        return bool(c.execute("SELECT 1 FROM watch_lists WHERE sub = ? AND name = ?", (sub, name)).fetchone())
+
+    def rename_list(self, sub: str, name: str, new_name: str) -> str:
+        """Rename a list; its cards follow. Renaming onto a list that exists merges them."""
+        new_name = clean_list_name(new_name)
+        if not new_name:
+            raise DeckError("invalid", "Give the list a name.")
+        with self.db.tx() as c:
+            if not self._has_list(c, sub, name):
+                raise DeckError("not_found", "That list is not on your watchlist.")
+            if new_name != name:
+                c.execute("DELETE FROM watch_lists WHERE sub = ? AND name = ?", (sub, name))
+                self._ensure_list(c, sub, new_name, int(now()))
+                c.execute(
+                    "UPDATE watch_cards SET list_name = ? WHERE sub = ? AND list_name = ?",
+                    (new_name, sub, name),
+                )
+        return new_name
+
+    def delete_list(self, sub: str, name: str) -> int:
+        """Delete a list; its cards stay watched, in no list. Returns how many cards it held."""
+        with self.db.tx() as c:
+            if not self._has_list(c, sub, name):
+                raise DeckError("not_found", "That list is not on your watchlist.")
+            n = c.execute(
+                "UPDATE watch_cards SET list_name = ? WHERE sub = ? AND list_name = ?", (NO_LIST, sub, name)
+            ).rowcount
+            c.execute("DELETE FROM watch_lists WHERE sub = ? AND name = ?", (sub, name))
+        return n
+
+    def move_to_list(self, sub: str, watch_ids: list[str], name: str) -> int:
+        """Put the selected watches in the list ``name`` (made when new; '' takes them out of
+        their lists). Returns how many moved."""
+        name = clean_list_name(name)
+        ids = _own_ids(watch_ids)
+        if not ids:
+            raise DeckError("invalid", "Select at least one card first.")
+        with self.db.tx() as c:
+            if name and not self._has_list(c, sub, name):
+                n = c.execute("SELECT COUNT(*) FROM watch_lists WHERE sub = ?", (sub,)).fetchone()[0]
+                if n >= MAX_LISTS:
+                    raise DeckError(
+                        "invalid", f"You can have at most {MAX_LISTS} lists. Delete one to add another."
+                    )
+            self._ensure_list(c, sub, name, int(now()))
+            moved = c.executemany(
+                "UPDATE watch_cards SET list_name = ? WHERE id = ? AND sub = ?",
+                [(name, wid, sub) for wid in ids],
+            ).rowcount
+        return moved
+
+    def watch_count(self, sub: str) -> int:
+        """How many cards the member watches (the count on Binder's switch)."""
+        return int(self._rows("SELECT COUNT(*) AS n FROM watch_cards WHERE sub = ?", (sub,))[0]["n"])
 
     def _check_deck_limit(self, sub: str, deck_id: str, c: Any = None) -> None:
         sql, args = "SELECT deck_id FROM watch_decks WHERE sub = ?", (sub,)
@@ -439,9 +1048,12 @@ class PriceService:
         today's value."""
         deck_id = _clean_deck_id(deck_ref)
         if self._limit("watch_max_decks") <= 0:
-            raise DeckError("invalid", "Watching decks is switched off on this gateway.")
+            raise DeckError("invalid", "Watchlists are switched off on this gateway.")
         self._check_deck_limit(sub, deck_id)
-        deck = await self.decks.get_any_deck(sub, deck_id)
+        # the deck as a page of it read it moments ago, when there is one (never from before a
+        # change the gateway sent to it); else read now
+        kept = getattr(self.decks, "kept_page_deck", None)
+        deck = (kept(sub, deck_id) if kept else None) or await self.decks.get_any_deck(sub, deck_id)
         t = int(now())
         with self.db.tx() as c:
             # counted again in the same transaction as the insert, so parallel watches cannot pass it
@@ -457,7 +1069,8 @@ class PriceService:
             raise DeckError("not_found", "No gateway account for this member.")
         note = ""
         try:
-            await self._price_missing(day_of(t), only_deck=(sub, deck.id))
+            # the member is waiting: the batch pace, not the daily check's single-lookup pace
+            await self._price_missing(day_of(t), only_deck=(sub, deck.id), waiting=True)
         except Exception as exc:  # Scryfall busy: the daily check prices it
             logger.info("pricing a newly watched deck waits for the daily check: %s", exc.__class__.__name__)
             note = "Scryfall could not be asked just now; today's value comes with the next daily check."
@@ -481,45 +1094,121 @@ class PriceService:
         return str(row[0])
 
     # -- the daily check --------------------------------------------------------------------------
+    def _in_use_since(self) -> float:
+        return now() - PRICED_FOR_DAYS * 86400
+
     def anything_watched(self) -> bool:
+        """Anything to price: a watch, or a Binder or deck in use (binder_prices.PRICED_FOR_DAYS)."""
         with self.db._lock:
-            return bool(
+            watched = bool(
                 self.db._conn.execute(
                     "SELECT EXISTS (SELECT 1 FROM watch_cards) OR EXISTS (SELECT 1 FROM watch_decks)"
                 ).fetchone()[0]
             )
+        return watched or self.binder.anything(self._in_use_since())
 
     async def run_daily(self, day: str | None = None) -> dict[str, Any]:
-        """Today's prices for every watched printing, each watched deck's value, then alerts.
-        Costs nothing (no request) when nobody watches anything."""
+        """Today's prices for every watched printing, each watched deck's value, the Binders and
+        decks in use, the cheapest printing of each watch by name alone, then alerts. Costs nothing
+        (no request) when there is nothing to price."""
         day = day or day_of(now())
         async with self._run_lock:
+            # Binders not opened and decks not read for PRICED_FOR_DAYS: their copies go
+            self.binder.forget_old(self._in_use_since())
             if not self.anything_watched():
                 return {"day": day, "watched": False, "requests": 0}
             refreshed = await self._refresh_decks(day)
+            read = await self._read_binders(day)
             before = self._scry().requests
             priced = await self._price_missing(day)
+            cheapest = await self._price_cheapest(day)
             self._store_deck_values(day)
+            self._fill_added_prices()
             alerts = self._alerts_due(day)
-        for sub, title, message in alerts:
+        for sub, title, message, path in alerts:
             if self.notifier is not None:
-                await self.notifier.send(sub, "prices", title, message, "/watchlist")
+                await self.notifier.send(sub, "prices", title, message, path, retry=True)
+        # each member's Watchlist rows worked out now, in the background, so the first view after
+        # today's prices is as quick as the rest
+        for row in self._rows("SELECT DISTINCT sub FROM watch_cards"):
+            await asyncio.to_thread(self.card_summaries, row["sub"])
         return {
             "day": day,
             "watched": True,
             "decks_refreshed": refreshed,
+            "binders_read": read,
             "priced": priced,
+            "cheapest": cheapest,
             "requests": self._scry().requests - before,
             "alerts": len(alerts),
         }
+
+    def _fill_added_prices(self) -> None:
+        """A watch added while Scryfall was busy has no price when added: its first priced day
+        becomes that reference, so its drop and rise alerts can work from then on."""
+        rows = self._rows("SELECT * FROM watch_cards WHERE added_price IS NULL")
+        found = []
+        for w in rows:
+            key = series_key(w)
+            if not key:
+                continue
+            pts = self._rows("SELECT * FROM price_points WHERE scryfall_id = ? ORDER BY day LIMIT 1", (key,))
+            price, currency = headline(pts[0], w["finish"]) if pts else (None, "usd")
+            if price is not None:
+                found.append((price, currency, w["id"]))
+        if found:
+            with self.db.tx() as c:
+                c.executemany(
+                    "UPDATE watch_cards SET added_price = ?, added_currency = ? "
+                    "WHERE id = ? AND added_price IS NULL",
+                    found,
+                )
+
+    async def _read_binders(self, day: str) -> int:
+        """Read each Binder in use again, whole, once a day (paced like every Archidekt read, as its
+        member): only while the member's Archidekt allowance keeps a quarter back for their own
+        changes, so a big Binder never crowds them out; a Binder not read keeps its last read and
+        is priced as it is. A read that fails is tried again the next day."""
+        if self.read_binder is None:
+            return 0
+        budget = getattr(self.decks, "archidekt_budget", None)
+        n = 0
+        for info in self.binder.in_use(self._in_use_since()):
+            sub = info["sub"]
+            if info.get("read_at") and day_of(info["read_at"]) == day:
+                continue
+            pages = int(info.get("records") or 0) // BINDER_PAGE_SIZE + 2
+            if budget is not None and budget.room(sub) < pages + budget.per_window // 4:
+                logger.info("a Binder is not read today: its member's Archidekt allowance is low")
+                continue
+            try:
+                rows, complete = await self.read_binder(sub)
+            except Exception as exc:
+                logger.info("a Binder was not read today: %s", exc.__class__.__name__)
+                continue
+            self.binder.replace(sub, rows, complete=complete, now=now())
+            n += 1
+        return n
+
+    def note_deck(self, sub: str, deck: Any) -> None:
+        """A deck page read ``deck`` for ``sub`` (decks.read_hooks): a deck of their own has its
+        printings noted, so they are priced daily (binder_prices). Someone else's deck is not."""
+        if not sub:
+            return
+        link = self.db.get_link(sub)
+        if not link or owns_deck(deck, link) is not True:
+            return
+        self.binder.note_deck(sub, str(deck.id), str(deck.name or ""), _deck_rows(deck), now=now())
 
     async def _refresh_decks(self, day: str) -> int:
         """Read each watched deck again (paced like every Archidekt read), once a day: a deck
         already read on ``day`` (watched today, or a retry after Scryfall failed) is not read
         again. A deck that cannot be read keeps its last card list."""
         n = 0
+        # a deck with no read date (the column allows it) is one never read: first in line, as
+        # SQLite sorts NULL first
         for d in self._rows("SELECT sub, deck_id, refreshed_at FROM watch_decks ORDER BY refreshed_at"):
-            if day_of(d["refreshed_at"]) == day:
+            if d["refreshed_at"] is not None and day_of(d["refreshed_at"]) == day:
                 continue
             try:
                 deck = await self.decks.get_any_deck(d["sub"], d["deck_id"])
@@ -535,16 +1224,50 @@ class PriceService:
             n += 1
         return n
 
-    async def _price_missing(self, day: str, *, only_deck: tuple[str, str] | None = None) -> int:
-        """Ask Scryfall (in batches of 75) for the watched printings with no point for ``day``,
-        store their points, and record the printing of rows that had none (a name-only watch, a
-        deck card without a Scryfall id). ``only_deck`` (member, deck id): that deck's cards only."""
-        if only_deck:
+    async def first_read(self, sub: str) -> bool:
+        """A Binder opened before it was ever read whole: read it now, as its member, and price it
+        (its records only), so its value and the price sort are there within minutes, not the
+        next day. Returns whether it was read. A failure leaves it to the daily check."""
+        if self.read_binder is None:
+            return False
+        try:
+            rows, complete = await self.read_binder(sub)
+        except Exception as exc:
+            logger.info("a Binder was not read: %s", exc.__class__.__name__)
+            return False
+        self.binder.replace(sub, rows, complete=complete, now=now())
+        try:
+            await self._price_missing(day_of(now()), only_binder=sub)
+        except Exception as exc:
+            logger.info("a Binder was read but not priced: %s", exc.__class__.__name__)
+        return True
+
+    async def _price_missing(
+        self,
+        day: str,
+        *,
+        only_deck: tuple[str, str] | None = None,
+        only_binder: str | None = None,
+        waiting: bool = False,
+    ) -> int:
+        """Ask Scryfall (in batches of 75) for the watched printings, and those of the Binders and
+        decks in use, with no point for ``day``, store their points, and record the printing of
+        rows that had none (a name-only watch, a deck card or a Binder record without a Scryfall
+        id) and the oracle id of a watch by name alone (its cheapest printing is priced by
+        _price_cheapest, not here). ``only_deck`` (member, deck id): that deck's cards only;
+        ``only_binder`` (member): that member's Binder only. ``waiting``: a member waits for the
+        answer (watch_deck), so the requests go at the batch pace."""
+        owned: list[dict[str, Any]] = []
+        if only_binder:
+            cards, decks = [], []
+            owned = self.binder.to_price(self._in_use_since(), sub=only_binder)
+        elif only_deck:
             cards = []
             decks = self._rows("SELECT * FROM watch_decks WHERE sub = ? AND deck_id = ?", only_deck)
         else:
             cards = self._rows("SELECT * FROM watch_cards")
             decks = self._rows("SELECT * FROM watch_decks")
+            owned = self.binder.to_price(self._in_use_since())
         with self.db._lock:
             have = {
                 r[0]
@@ -552,7 +1275,10 @@ class PriceService:
             }
         wanted: dict[tuple[str, ...], dict[str, str]] = {}
         for w in cards:
-            if w["scryfall_id"] and w["scryfall_id"] in have:
+            by_name = not w["set_code"]
+            if by_name and w.get("oracle_id"):
+                continue  # its cheapest printing is its price
+            if w["scryfall_id"] and w["scryfall_id"] in have and not by_name:
                 continue
             ident = _ident(
                 {
@@ -562,18 +1288,30 @@ class PriceService:
                     "cn": w["collector_number"],
                 }
             )
+            if ident is None:
+                logger.warning("price check: skipped watched card %s, which names no card", w["id"])
+                continue
             wanted[_ident_key(ident)] = ident
         deck_rows = {d["sub"] + "\0" + d["deck_id"]: json.loads(d["cards_json"] or "[]") for d in decks}
-        for rows in deck_rows.values():
-            for r in rows:
-                if r.get("uid") and r["uid"] in have:
-                    continue
-                ident = _ident(r)
-                wanted[_ident_key(ident)] = ident
+        rows_of_decks = [(key, r) for key, rows in deck_rows.items() for r in rows]
+        for key, r in [*rows_of_decks, *(("", r) for r in owned)]:
+            if not isinstance(r, dict) or (r.get("uid") and r["uid"] in have):
+                continue
+            ident = _ident(r)
+            if ident is None:
+                # one bad row must not stop the day's check for every member
+                logger.warning(
+                    "price check: skipped a row of %s that names no card",
+                    f"watched deck {key.split(chr(0), 1)[1]}" if key else "a Binder or deck",
+                )
+                continue
+            wanted[_ident_key(ident)] = ident
         if not wanted:
             return 0
         client = self._scry()
-        found, _missing = await client.collection(list(wanted.values()), interval=client.lookup_interval)
+        found, _missing = await client.collection(
+            list(wanted.values()), interval=None if waiting else client.lookup_interval
+        )
         by_key: dict[tuple[str, ...], dict[str, Any]] = {}
         for card in found:
             for k in _card_keys(card):
@@ -582,16 +1320,29 @@ class PriceService:
             for card in found:
                 self._store_point(c, str(card["id"]), point_of(card), day)
             for w in cards:
-                if not w["scryfall_id"]:
-                    ident = _ident({"name": w["name"], "set": w["set_code"], "cn": w["collector_number"]})
-                    hit = by_key.get(_ident_key(ident))
-                    if hit:
-                        c.execute("UPDATE watch_cards SET scryfall_id = ? WHERE id = ?", (hit["id"], w["id"]))
+                if w["scryfall_id"] and (w["set_code"] or w.get("oracle_id")):
+                    continue
+                ident = _ident(
+                    {
+                        "uid": w["scryfall_id"],
+                        "name": w["name"],
+                        "set": w["set_code"],
+                        "cn": w["collector_number"],
+                    }
+                )
+                hit = by_key.get(_ident_key(ident)) if ident else None
+                if hit:
+                    c.execute(
+                        "UPDATE watch_cards SET scryfall_id = coalesce(scryfall_id, ?), oracle_id = "
+                        "CASE WHEN set_code = '' THEN ? ELSE oracle_id END WHERE id = ?",
+                        (hit["id"], _oracle(hit) or None, w["id"]),
+                    )
             for key, rows in deck_rows.items():
                 changed = False
                 for r in rows:
-                    if not r.get("uid"):
-                        hit = by_key.get(_ident_key(_ident(r)))
+                    ident = _ident(r) if isinstance(r, dict) and not r.get("uid") else None
+                    if ident is not None:
+                        hit = by_key.get(_ident_key(ident))
                         if hit:
                             r["uid"], changed = str(hit["id"]), True
                 if changed:
@@ -600,7 +1351,59 @@ class PriceService:
                         "UPDATE watch_decks SET cards_json = ? WHERE sub = ? AND deck_id = ?",
                         (json.dumps(rows), sub, deck_id),
                     )
+        for r in owned:  # a Binder record that carried no Scryfall id keeps the one found
+            if r.get("rid") is not None and not r.get("uid") and (ident := _ident(r)) is not None:
+                hit = by_key.get(_ident_key(ident))
+                if hit:
+                    self.binder.set_uid(r["sub"], r["rid"], str(hit["id"]))
         return len(found)
+
+    async def _price_cheapest(self, day: str) -> int:
+        """Every printing of each card watched by name alone (twenty cards a Scryfall search, at the
+        single-lookup pace), for the lowest price of each finish that day and the printing that had
+        it. Returns how many cards were priced. Never from the local copy of Scryfall's printings
+        (scan/bulk.py): its prices are its own day's, and this records today's; a card Scryfall
+        can't price now waits for the next check."""
+        watches = self._rows("SELECT * FROM watch_cards WHERE set_code = '' AND oracle_id IS NOT NULL")
+        if not watches:
+            return 0
+        with self.db._lock:
+            done = {
+                r[0]
+                for r in self.db._conn.execute(
+                    "SELECT scryfall_id FROM price_points WHERE day = ? AND scryfall_id LIKE ?",
+                    (day, CHEAPEST + "%"),
+                )
+            }
+        oids = sorted({w["oracle_id"] for w in watches if CHEAPEST + w["oracle_id"] not in done})
+        if not oids:
+            return 0
+        client = self._scry()
+        found = await client.printings_of(oids, interval=client.lookup_interval)
+        with self.db.tx() as c:
+            for oid, cards in found.items():
+                self._store_cheapest(c, oid, cards, day)
+        return len(found)
+
+    def _store_cheapest(self, c: Any, oracle: str, cards: list[dict[str, Any]], day: str) -> None:
+        """The lowest price of each finish over ``cards`` (every printing of the card ``oracle``)
+        as that day's point, and on each watch of it by name the printing that had it."""
+        if not cards:
+            return
+        self._store_point(c, CHEAPEST + oracle, cheapest_point(cards), day)
+        for w in c.execute(
+            "SELECT id, finish FROM watch_cards WHERE set_code = '' AND oracle_id = ?", (oracle,)
+        ).fetchall():
+            best = cheapest_printing(cards, w[1])
+            c.execute(
+                "UPDATE watch_cards SET cheapest_id = ?, cheapest_set = ?, cheapest_cn = ? WHERE id = ?",
+                (
+                    str(best["id"]) if best else None,
+                    str(best.get("set") or "") if best else None,
+                    str(best.get("collector_number") or "") if best else None,
+                    w[0],
+                ),
+            )
 
     @staticmethod
     def _store_point(c: Any, scryfall_id: str, point: dict[str, Any], day: str) -> None:
@@ -643,18 +1446,21 @@ class PriceService:
                     (d["sub"], d["deck_id"], day, round(usd, 2), round(eur, 2), total, priced),
                 )
 
-    def _alerts_due(self, day: str) -> list[tuple[str, str, str]]:
-        """(member, title, message) for each watched card whose alert fired between its last
-        point before ``day`` and today's."""
+    def _alerts_due(self, day: str) -> list[tuple[str, str, str, str]]:
+        """(member, title, message, path) for each watched card whose alert fired between its last
+        point before ``day`` and today's; the path opens that card's row on the Watchlist."""
         out = []
         rows = self._rows(
-            "SELECT * FROM watch_cards WHERE scryfall_id IS NOT NULL AND (alert_pct IS NOT NULL OR "
-            "alert_above IS NOT NULL OR alert_below IS NOT NULL)"
+            "SELECT * FROM watch_cards WHERE (scryfall_id IS NOT NULL OR oracle_id IS NOT NULL) AND "
+            "(alert_pct IS NOT NULL OR alert_above IS NOT NULL OR alert_below IS NOT NULL OR "
+            "alert_drop_pct IS NOT NULL OR alert_rise_pct IS NOT NULL)"
         )
         for w in rows:
+            if not (key := series_key(w)):
+                continue
             pts = self._rows(
                 "SELECT * FROM price_points WHERE scryfall_id = ? AND day <= ? ORDER BY day DESC LIMIT 2",
-                (w["scryfall_id"], day),
+                (key, day),
             )
             if len(pts) < 2 or pts[0]["day"] != day:
                 continue
@@ -671,6 +1477,23 @@ class PriceService:
                 reasons.append(f"rose above {money(w['alert_above'], currency)}")
             if w["alert_below"] is not None and prev > w["alert_below"] >= cur:
                 reasons.append(f"fell below {money(w['alert_below'], currency)}")
+            # a drop or rise from the price when added, in that price's currency
+            added = w.get("added_price")
+            if added is not None and (w.get("added_currency") or "usd") == currency:
+                if w.get("alert_drop_pct") is not None:
+                    floor = round(added * (1 - w["alert_drop_pct"] / 100), 2)
+                    if prev > floor >= cur:
+                        reasons.append(
+                            f"fell {w['alert_drop_pct']:g}% below the {money(added, currency)} "
+                            "it was added at"
+                        )
+                if w.get("alert_rise_pct") is not None:
+                    roof = round(added * (1 + w["alert_rise_pct"] / 100), 2)
+                    if prev < roof <= cur:
+                        reasons.append(
+                            f"rose {w['alert_rise_pct']:g}% above the {money(added, currency)} "
+                            "it was added at"
+                        )
             if reasons:
                 out.append(
                     (
@@ -678,6 +1501,7 @@ class PriceService:
                         "Price alert",
                         f"{label} {' and '.join(reasons)}: "
                         f"{money(prev, currency)} to {money(cur, currency)}.",
+                        f"/watchlist?open={quote(str(w['id']), safe='')}#wr-{quote(str(w['id']), safe='')}",
                     )
                 )
         return out
@@ -713,7 +1537,19 @@ def _deck_rows(deck: Any) -> list[dict[str, Any]]:
     return list(merged.values())
 
 
-def _alerts(pct: Any, above: Any, below: Any) -> tuple[float | None, float | None, float | None]:
+_SET_ALERTS = (
+    "UPDATE watch_cards SET alert_pct = ?, alert_above = ?, alert_below = ?, alert_drop_pct = ?, "
+    "alert_rise_pct = ?"
+)
+
+
+def _alerts(
+    pct: Any, above: Any, below: Any, drop: Any = None, rise: Any = None
+) -> tuple[float | None, float | None, float | None, float | None, float | None]:
+    """The five alerts as numbers (an empty one is None): a one-day move over ``pct`` %, a price
+    crossed ``above`` or ``below``, and a drop or rise of ``drop`` or ``rise`` % from the price
+    when the card was added."""
+
     def num(v: Any, what: str, hi: float) -> float | None:
         if v is None or v == "":
             return None
@@ -729,7 +1565,25 @@ def _alerts(pct: Any, above: Any, below: Any) -> tuple[float | None, float | Non
         num(pct, "The alert percentage", 1000),
         num(above, "The price to alert above", 1_000_000),
         num(below, "The price to alert below", 1_000_000),
+        num(drop, "The drop percentage", 100),
+        num(rise, "The rise percentage", 1000),
     )
+
+
+def _own_ids(watch_ids: Any) -> list[str]:
+    """The watch ids a bulk form sent, each once, ids only (never a name, which would reach every
+    printing of the card)."""
+    out: list[str] = []
+    for raw in watch_ids or []:
+        wid = str(raw or "").strip()[:64]
+        if wid.startswith("w") and wid not in out:
+            out.append(wid)
+    return out[:5000]
+
+
+def clean_list_name(name: Any) -> str:
+    """A watchlist list's name as kept: one line, trimmed, at most MAX_LIST_NAME characters."""
+    return re.sub(r"\s+", " ", clean_text(str(name or ""))).strip()[:MAX_LIST_NAME]
 
 
 class DailyJobs:
@@ -758,7 +1612,12 @@ class DailyJobs:
             )
 
     async def run_due(self) -> dict[str, Any]:
-        """Run what is due now; returns what ran (empty when nothing was due)."""
+        """Run what is due now; returns what ran (empty when nothing was due). Its database work
+        after each Scryfall or Archidekt answer, and after each step, waits off the loop."""
+        with dbwait.job(self.db):
+            return await self._run_due()
+
+    async def _run_due(self) -> dict[str, Any]:
         t = now()
         day = day_of(t)
         if _dt.datetime.fromtimestamp(t, _dt.UTC).hour < self.hour:
@@ -771,9 +1630,11 @@ class DailyJobs:
                 logger.warning("daily price check failed, trying again later: %s", exc.__class__.__name__)
                 out["prices"] = {"error": exc.__class__.__name__}
             else:
+                await dbwait.settle()
                 self._mark("prices", day, out["prices"])
         if self.summaries is not None and self._last_day("summaries") != day:
             out["summaries"] = await self.summaries.send_due(day)
+            await dbwait.settle()
             self._mark("summaries", day, {"sent": out["summaries"]})
         return out
 

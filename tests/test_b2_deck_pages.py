@@ -20,7 +20,9 @@ async def test_the_deck_page_holds_its_boxes_and_one_orange_button(stack: Stack)
     b = await linked_browser(stack)
     try:
         page = (await b.http.get(DECK, headers=NAV)).text
-        assert page.count("btn-primary") == 1 and "Edit deck</a>" in page
+        # the button says Edit deck, and Edit on a phone (the redesigned phone top, mockup screen 5)
+        edit = "<span class='lg'>Edit deck</span><span class='sm'>Edit</span></a>"
+        assert page.count("btn-primary") == 1 and edit in page
         assert "class='btn' data-box-open='clone'" in page and "form='clonef'" in page
         assert "data-deck-name='Sample Commander Deck'" in page and "data-own='1'" in page
         assert "details class='dd deckmore'" in page
@@ -30,7 +32,7 @@ async def test_the_deck_page_holds_its_boxes_and_one_orange_button(stack: Stack)
         assert "href='/decks/42/delete' data-box-open='delete'" in page
         assert "Delete “Sample Commander Deck”?" in page and "data-typed='Sample Commander Deck'" in page
         assert "value='Copy of - Sample Commander Deck'" in page
-        assert "Top level (no folder)" in page
+        assert "No folder" in page
         assert "Clone deck…" not in page  # the banner button keeps its old words
         assert "Deck stats" in page and "Open on Archidekt" in page
     finally:
@@ -247,12 +249,12 @@ async def test_deck_settings_use_the_shared_form_rows(stack: Stack) -> None:
         page = (await b.http.get(f"{DECK}/settings", headers=NAV)).text
         assert "<title>Deck settings" in page and "<h1>Deck settings</h1>" in page
         assert "<p class='ui-sub'>“Sample Commander Deck”</p>" in page
-        assert "class='back' href='/decks/42'>← Sample Commander Deck</a>" in page
+        assert "class='back ui-cap' href='/decks/42'>← Sample Commander Deck</a>" in page
         assert page.count("btn-primary") == 1 and "Save changes</button>" in page
         assert "Commander only. Changing the format clears it." in page
         assert "<label for='private'>Private</label>" in page and "The deck is only visible to you." in page
         assert "<label for='unlisted'>Unlisted</label>" in page
-        assert "Manage folders on <a href='/decks'>My decks</a>." in page
+        assert "Manage folders on <a class='ui-cap' href='/decks'>My decks</a>." in page
         # categories editable (F7 a, tests/test_deck_categories_page.py): the name in its box, the
         # three switches, a plain Save categories
         assert "id='categories'" in page and "<label class='switch ds-flag'>" in page
@@ -261,7 +263,7 @@ async def test_deck_settings_use_the_shared_form_rows(stack: Stack) -> None:
         assert "not available through the gateway yet" not in page
         # delete: red outline opening the typed-name box the page holds
         assert "class='btn btn-outline-danger' href='/decks/42/delete' data-box-open='delete'" in page
-        assert "when backups are on." in page and "id='delete' role='dialog'" in page
+        assert "no copy is made on Archidekt." in page and "id='delete' role='dialog'" in page
         assert "id='ds-delete'" in page
         assert "class='panel settings'" not in page
     finally:
@@ -286,11 +288,16 @@ async def test_goldfish_intro_and_forge_solo_line(stack: Stack) -> None:
     b = await linked_browser(stack)
     try:
         page = (await b.http.get(f"{DECK}/goldfish", headers=NAV)).text
-        assert "Commander: first mulligan free · on the play · Nothing is saved or sent to Archidekt" in page
+        # the facts line's dots are drawn by CSS, so none dangles at a wrapped line's end (polish C1)
+        assert (
+            "<p class='muted small gf-intro ui-dots'><span>100 cards</span>"
+            "<span>Commander: first mulligan free</span><span>on the play</span>"
+            "<span>Nothing is saved or sent to Archidekt" in page
+        )
         assert "class='gf-size'" in page and "data-card-size-set='m'" in page
         assert "Keep this hand, or take a mulligan" not in page
         # no newest_forge_solo on the report service: the plain "No solo test yet." line
-        assert "No solo test yet." in page and "Run full test" in page
+        assert "No solo test yet." in page and "Run test" in page
         reports = stack.h.app.state.gateway.reports
 
         def newest(sub: str, deck_id: str) -> dict:

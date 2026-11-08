@@ -52,6 +52,7 @@ import logging
 import time
 from typing import Any
 
+from . import dbwait
 from .decks import DeckError, DeckService
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,8 @@ class DeckSync:
         text). Returns what it did, for the log and the tests; never raises for Archidekt errors."""
         async with self._lock:
             try:
-                return await self._check(sub)
+                with dbwait.job(self.db):  # its database work after each answer waits off the loop
+                    return await self._check(sub)
             except DeckError as exc:
                 logger.info("deck sync stopped for a member: %s", exc.kind)
                 return {"error": exc.kind}

@@ -16,6 +16,7 @@ names in its ``featured`` URL; no Archidekt image is loaded.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -28,7 +29,7 @@ from starlette.responses import JSONResponse, Response
 from . import prefs, ui
 from . import searchpanel as sp
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
-from .busy import busy_response
+from .busy import busy_response, held_html, outage, same_url
 from .deckpage import (
     WRITES_OFF_FOLLOW,
     WRITES_OFF_TITLE,
@@ -38,7 +39,7 @@ from .deckpage import (
     deck_list_html,
 )
 from .decks import DeckError, _clean_deck_id
-from .pages import NO_STORE, _csrf, browser_session, login_redirect
+from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .theme import esc as _esc
 from .theme import icon, render, stylesheet_link
 
@@ -95,8 +96,10 @@ FORMAT_OPTIONS = sorted(
 )
 BROWSE_CSS = """
 /* the deck search: the shared panel (theme.SEARCH_PANEL_CSS); its Commander and Owner boxes */
-.spanel .fgrid > .fg.cmd{--gw:220px}
-.spanel .fgrid > .fg.who{--gw:160px}
+.spanel .fgrid > .fg.cmd{--gw:15.714em}
+.spanel .fgrid > .fg.who{--gw:11.429em}
+/* the results while the panel's pick is asked for (static/search.js): dimmed, as My decks' list */
+#s-results[aria-busy=true]{opacity:.6;transition:opacity .15s}
 /* Avatar, name and the social row: the name block takes the room and wraps a long unbroken name;
    the social row keeps its own size (Follow ellipsises inside it) and drops under the name when the
    two no longer fit side by side, so neither squeezes the other (a 64-character name). */
@@ -123,11 +126,12 @@ BROWSE_CSS = """
 .profile .social .note{flex-basis:100%;color:var(--text-muted);font-size:.9rem;margin:0}
 @media (max-width:600px){ .profile .social{margin-left:0;flex-basis:100%} }
 .popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
-.popular a{display:inline-flex;align-items:center;height:30px;padding:0 .7rem;border-radius:15px;
+.popular a{display:inline-flex;align-items:center;min-height:44px;padding:.1rem .7rem;border-radius:15px;
+  max-width:100%;overflow-wrap:break-word;
   background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
     border:1px solid var(--border)}
 .popular a:hover{border-color:var(--orange);color:var(--orange)}
-.popular a.precons{gap:.4rem;font-weight:700}
+.popular a.precons{gap:.4rem;font-weight:700;flex-wrap:wrap}
 /* the preconstructed decks: a heading per set, the first row of tiles until Show all */
 .precons .pre-grp{margin:0 0 1.25rem}
 .precons .pre-gh{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;
@@ -148,7 +152,7 @@ BROWSE_CSS = """
 @media (max-width:599.98px){ .precons .sp-xlink-sm{display:block} .precons .sp-xlink-sm .btn{margin:0} }
 .precons .loadmore,.profile-page .loadmore{display:flex;flex-direction:column;align-items:center;gap:.4rem;
   margin:.5rem 0 1.25rem}
-.precons .loadmore .btn,.profile-page .loadmore .btn{margin:0;min-width:12rem}
+.precons .loadmore .btn,.profile-page .loadmore .btn{margin:0;min-width:min(12rem,calc(100vw - 2rem))}
 .precons .loadmore p,.profile-page .loadmore p{margin:0}
 /* a profile: the results bar alone in the panel; the follow question's buttons are 44 px */
 .profile .who h1{font-size:1.5rem;margin:0}
@@ -297,7 +301,7 @@ def search_form_html(
                 name="commander",
                 value=query["commander"],
                 input_id="s-cmd",
-                placeholder="Card name, e.g. Atraxa, Praetors' Voice",
+                placeholder="e.g. Atraxa",
                 attrs=" data-suggest='cards' maxlength='120'",
                 cls="cmd",
             ),
@@ -306,7 +310,7 @@ def search_form_html(
                 name="owner",
                 value=query["owner"],
                 input_id="s-owner",
-                placeholder="Archidekt username",
+                placeholder="Username",
                 attrs=" maxlength='120'",
                 cls="who",
             ),
@@ -328,12 +332,12 @@ def search_form_html(
     )
     return (
         "<section class='panel spanel'><form method='get' action='/search' id='searchform' "
-        "data-apply='submit'>"
+        "autocomplete='off' data-apply='submit'>"
         + sp.name_row(
             label="Deck name, or an Archidekt link or deck ID",
             name="name",
             value=query["name"],
-            placeholder="Deck name, link or ID",
+            placeholder="Name or link|Name",
             input_id="s-name",
             search_label="Search decks",
             cross_html=sp.cross_link("Search cards instead", cards_link, "image"),
@@ -515,7 +519,7 @@ def precon_body(
         if shown < len(decks):
             nxt = precon_link(pq, view_in_link, offset=shown)
             return html + ui.load_more(nxt, text="Load more decks", shown=shown, total=len(decks)), nxt
-        return html + ui.load_more("", done=f"All {len(decks)} decks shown."), ""
+        return html + ui.load_more("", done=ui.all_shown(len(decks), "deck")), ""
     shown_groups = groups[: pq["sets"]]
     html = "".join(precon_group_html(g, view=view, open=filtering) for g in shown_groups)
     if len(shown_groups) < len(groups):
@@ -523,9 +527,7 @@ def precon_body(
         return html + ui.load_more(
             nxt, text="Load more sets", shown=len(shown_groups), total=len(groups)
         ), nxt
-    return html + ui.load_more(
-        "", done=f"All {len(groups)} {'set' if len(groups) == 1 else 'sets'} shown."
-    ), ""
+    return html + ui.load_more("", done=ui.all_shown(len(groups), "set")), ""
 
 
 def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str, count: str) -> str:
@@ -561,7 +563,7 @@ def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str,
     )
     return (
         "<section class='panel spanel'>"
-        "<form method='get' action='/precons' id='searchform' data-apply='submit'>"
+        "<form method='get' action='/precons' id='searchform' data-apply='submit' autocomplete='off'>"
         + sp.name_row(
             label="Set or deck name",
             name="q",
@@ -582,6 +584,33 @@ def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str,
 
 
 # -- a member's profile (UI overhaul 2026-10-21, mockup 22-user-profile) -------------------------
+def profile_empty_html(shown: str, known: bool | None) -> str:
+    """A profile with no public decks: what that means, in place of an empty list. ``known``:
+    the person is on Archidekt (True), Archidekt has no such user (False), or their Archidekt
+    profile could not be read just now (None: Follow is not offered, the page says why)."""
+    name = _esc(shown)
+    if known is False:
+        head, words = (
+            "No such user",
+            f"No Archidekt user called “{name}” was found. Check the spelling.",
+        )
+    elif known is None:
+        head, words = (
+            "No public decks yet",
+            f"“{name}” has no public decks. The gateway couldn't read their Archidekt profile just "
+            "now, so Follow isn't offered here: try again later, or open their Archidekt profile.",
+        )
+    else:
+        head, words = (
+            "No public decks yet",
+            f"“{name}” has no public decks on Archidekt yet. When they make one public, it shows here.",
+        )
+    return (
+        f"<section class='panel pempty' aria-labelledby='pempty-h'><h2 id='pempty-h'>{head}</h2>"
+        f"<p class='muted'>{words}</p></section>"
+    )
+
+
 def profile_bar_html(query: dict[str, Any], found: dict[str, Any] | None, *, view: str) -> str:
     """Deck search's results bar alone: the count, Sort by with its direction, Grid or List and
     the card size. The form sends itself when a drop-down changes (static/searchpanel.js)."""
@@ -602,7 +631,8 @@ def profile_bar_html(query: dict[str, Any], found: dict[str, Any] | None, *, vie
         cls="pub prof",
     )
     return (
-        "<section class='panel spanel'><form method='get' id='searchform' data-apply='submit'>"
+        "<section class='panel spanel'>"
+        "<form method='get' id='searchform' data-apply='submit' autocomplete='off'>"
         + bar
         + "<noscript><button type='submit' class='btn apply'>Apply</button></noscript></form></section>"
     )
@@ -644,6 +674,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             # the search panel's drop-downs and phone sheet, then Load more and Open this deck
             "<script src='/static/searchpanel.js' defer></script>"
             "<script src='/static/search.js' defer></script>"
+            "<script src='/static/loadmore.js' defer></script>"
             # the user page's Follow button (static/social.js, the social actions' own file)
             + ("<script src='/static/social.js' defer></script>" if social else "")
             + "".join(f"<script src='/static/{name}' defer></script>" for name in scripts),
@@ -654,7 +685,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
     def problem(exc: DeckError) -> str:
         text = {
             "rate_limited": str(exc),
-            "unavailable": "Archidekt is not answering right now. Try again later.",
+            "unavailable": outage("unavailable", again=True),
         }.get(exc.kind, "The search could not be run: " + str(exc))
         return f"<p class='notice error'>{_esc(text)}</p>"
 
@@ -679,12 +710,40 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
         return resp
 
+    def search_sort(request: Request, sub: str) -> tuple[str, str]:
+        return prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "search",
+            sorts=SEARCH_ORDERS,
+            default="-viewCount",
+            name="order",
+            dirs=dict(DIRECTIONS),
+            default_dir="auto",
+        )
+
+    def precon_sort(request: Request, sub: str) -> tuple[str, str]:
+        return prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "precons",
+            sorts=dict(PRECON_SORTS),
+            default="set",
+            name="sort",
+            dirs=dict(PRECON_DIRS),
+            default_dir="desc",
+        )
+
     @server.custom_route("/search", methods=["GET"], include_in_schema=False)
     async def search_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/search" + (f"?{request.url.query}" if request.url.query else ""))
+            return login_redirect_here(request)
         query = read_query(request.query_params)
+        # the search opens sorted as it was left (prefs.sort_choice, audit F-10)
+        query["order_by"], query["direction"] = search_sort(request, sub)
         view, remember = view_of(request, sub)
         asked = bool(
             query["name"]
@@ -700,7 +759,15 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         if asked:
             note = ""
             try:
-                found = await run_search(sub, query)
+                # kept briefly per member; while Archidekt can't be asked, the member's last read
+                # of the same search, dated (decks.short_reads)
+                found, held = await decks.short_reads.get_held(
+                    sub,
+                    ("search", json.dumps(query, sort_keys=True, default=str)),
+                    lambda: run_search(sub, query),
+                )
+                if held is not None:
+                    note = held_html(held["refused"], held["held_at"], "this search", same_url(request))
                 if query["commander"] and not found["decks"]:
                     names = await commander_names(state, query["commander"])
                     if not any(n.casefold() == query["commander"].casefold() for n in names):
@@ -718,14 +785,14 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                                 f"Did you mean: {links}?</p>"
                             )
             except DeckError as exc:
-                if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Search decks"):
                     return busy
-                body += search_form_html(query, view=view) + problem(exc)
+                body += search_form_html(query, view=view) + f"<div id='s-results'>{problem(exc)}</div>"
             else:
+                # the panel's filters redraw #s-results in place (static/search.js)
                 body += (
                     search_form_html(query, view=view, found=found, shown=len(found["decks"]))
-                    + note
-                    + search_results_html(found, query, view=view)
+                    + f"<div id='s-results'>{note}{search_results_html(found, query, view=view)}</div>"
                 )
         else:
             body += search_form_html(query, view=view)
@@ -742,7 +809,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 )
             )
             body += (
-                "<section class='panel'><h2>Browse public decks</h2>"
+                "<div id='s-results'><section class='panel'><h2>Browse public decks</h2>"
                 "<p class='muted'>Search every public deck on "
                 "Archidekt by name, commander, owner, format and "
                 "colors, sorted the way the site sorts them. Open "
@@ -750,7 +817,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 "views, stats and export as your own; clone it to your account from its page.</p>"
                 f"<div class='popular'>{popular}"
                 f"<a class='precons' href='/precons'>{icon('box')} Preconstructed decks by set</a></div>"
-                "</section>"
+                "</section></div>"
             )
         return remembered(page("Search decks", body, sub=sub, sid=sid), sub, view, remember)
 
@@ -794,22 +861,23 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         public deck and can be cloned from there."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/precons")
+            return login_redirect_here(request, "/precons")
         pq = precon_query(request.query_params)
+        pq["sort"], pq["dir"] = precon_sort(request, sub)  # as last left (audit F-10)
         view, remember = view_of(request, sub)
         view_in_link = view if request.query_params.get("view") in VIEWS else None
         head = ui.page_head("Preconstructed decks", PRECON_PURPOSE)
         try:
             listing = await decks.precons(sub)
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Preconstructed decks"):
                 return busy
             return page(
                 "Preconstructed decks",
                 head + precon_panel_html({}, pq, view=view, count="Decks") + problem(exc),
                 sub=sub,
                 sid=sid,
-                current="/search",
+                current="/precons",
                 body_class="precons",
             )
         groups = precon_groups(listing, pq)
@@ -820,7 +888,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             head + precon_panel_html(listing, pq, view=view, count=count) + body,
             sub=sub,
             sid=sid,
-            current="/search",
+            current="/precons",
             body_class="precons",
             scripts=("precons.js",),
         )
@@ -836,6 +904,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
             return JSONResponse({"ok": False, "error": "cross_site"}, status_code=403, headers=NO_STORE)
         pq = precon_query(request.query_params)
+        pq["sort"], pq["dir"] = precon_sort(request, sub)
         view = request.query_params.get("view") if request.query_params.get("view") in VIEWS else "grid"
         try:
             listing = await decks.precons(sub)
@@ -853,22 +922,36 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         username = request.path_params["username"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/users/{username}")
+            return login_redirect_here(request, f"/users/{username}")
         query = read_query({**request.query_params, "owner": username})
-        query["order_by"] = (
-            request.query_params.get("order")
-            if request.query_params.get("order") in SEARCH_ORDERS
-            else "-updatedAt"
+        # the profile opens sorted as it was left (prefs.sort_choice)
+        query["order_by"], query["direction"] = prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "profile",
+            sorts=SEARCH_ORDERS,
+            default="-updatedAt",
+            name="order",
+            dirs=dict(DIRECTIONS),
+            default_dir="auto",
         )
         view, remember = view_of(request, sub)
+        asked = archidekt_query(query)
         try:
-            found = await decks.search_decks(sub, **archidekt_query(query))
+            # kept briefly per member, forgotten by any write they send (a follow is one); while
+            # Archidekt can't be asked, the member's last read of the profile, dated
+            found, held = await decks.short_reads.get_held(
+                sub,
+                ("profile", json.dumps(asked, sort_keys=True, default=str)),
+                lambda: decks.search_decks(sub, **asked),
+            )
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title=username):
                 return busy
             return page(
                 username,
-                profile_head_html(username, None, sub) + problem(exc),
+                profile_head_html(username, None, sub, known=None, has_decks=False) + problem(exc),
                 sub=sub,
                 sid=sid,
                 current="/search",
@@ -878,11 +961,28 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
         rows = found["decks"]
         shown = rows[0]["owner"] if rows else username
+        owner_id = rows[0].get("owner_id") if rows else None
+        known: bool | None = True
+        filtered = any(asked.get(k) for k in ("name", "commander", "colors")) or (
+            asked.get("deck_format") is not None or int(asked.get("page") or 1) > 1
+        )
+        if not rows and not filtered:
+            # no public decks: the person is looked up on their Archidekt profile page, so they
+            # can still be followed (and a name nobody has says so)
+            known, shown, owner_id = await _person(sub, username)
+        held_strip = (
+            held_html(held["refused"], held["held_at"], "this profile", same_url(request)) if held else ""
+        )
         resp = page(
             shown,
-            profile_head_html(shown, rows[0].get("owner_id") if rows else None, sub)
-            + profile_bar_html(query, found, view=view)
-            + search_results_html(found, query, view=view, empty_text="No public decks yet."),
+            profile_head_html(shown, owner_id, sub, known=known, has_decks=bool(rows) or filtered)
+            + held_strip
+            + (
+                profile_bar_html(query, found, view=view)
+                + search_results_html(found, query, view=view, empty_text="No public decks yet.")
+                if rows or filtered
+                else profile_empty_html(shown, known)
+            ),
             sub=sub,
             sid=sid,
             social=True,
@@ -890,7 +990,24 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         )
         return remembered(resp, sub, view, remember)
 
-    def profile_head_html(shown: str, owner_id: Any, sub: str) -> str:
+    async def _person(sub: str, username: str) -> tuple[bool | None, str, Any]:
+        """(known, name as Archidekt spells it, user id) of someone with no public decks, from
+        their Archidekt profile page (DeckService.user_profile): known False when Archidekt has
+        no such user, None when the page could not be read (the head then says nothing either
+        way). Kept briefly per member, as the deck listing is."""
+        try:
+            found = await decks.short_reads.get(
+                sub, ("person", username.casefold()), lambda: decks.user_profile(sub, username)
+            )
+        except DeckError:
+            return None, username, None
+        if not found or not str(found.get("id") or "").isdigit():
+            return False, username, None
+        return True, str(found.get("username") or username), found["id"]
+
+    def profile_head_html(
+        shown: str, owner_id: Any, sub: str, *, known: bool | None = True, has_decks: bool = True
+    ) -> str:
         """One header: the avatar, the name as the page title with the line under it, then Follow
         (44 px; disabled with the reason when writes are off) and the Archidekt profile link."""
         link = state.db.get_link(sub) or {}
@@ -912,7 +1029,13 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             if follow and not writes
             else ""
         )
-        line = "Public decks on Archidekt" if owner_id else "No public decks, or no such user"
+        line = (
+            "No such user on Archidekt"
+            if known is False
+            else "Public decks on Archidekt"
+            if has_decks
+            else "Archidekt profile"
+        )
         return (
             f"<section class='profile'>{avatar_html(shown, 'xl')}<div class='who'>"
             f"<h1 class='uname'>{_esc(shown)}</h1><p class='sub'>{line}</p></div>"
@@ -941,16 +1064,12 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         name="search_decks",
         title="Search public Archidekt decks",
         description=(
-            "Search Archidekt's public decks the way its deck search page does. Filters, all optional: "
-            "`name` (part of the deck name), `commander` (a commander's card name; a partial name is "
-            "looked up and, if several commanders match, returned as commander_suggestions), "
-            "`owner` (Archidekt username), `format` (" + ", ".join(sorted(FORMAT_IDS)) + "), "
-            "`colors` (letters from WUBRG: color identity within those colors), "
-            "`order_by` (-viewCount, -updatedAt, -createdAt, -size, edhBracket), `page` (60 decks a "
-            "page) and `limit` (how many of the page to return, default 20). For one user's decks "
-            "(their profile), give `owner` with order_by -updatedAt. Each result has an id and url; "
-            "read one with get_deck. This is the one tool for public deck lists; list_my_decks lists "
-            "the signed-in member's own decks, private ones included. Read-only."
+            "Search Archidekt's public decks as its deck search page does. Filters, all optional: "
+            "name, commander (a partial name is looked up; several matches come back as "
+            "commander_suggestions), owner (an Archidekt username; with order_by -updatedAt, their "
+            "profile's decks), format, colors, order_by, page and limit. Each result has an id and "
+            "url; read one with get_deck. list_my_decks lists the member's own, private ones too. "
+            "Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -968,7 +1087,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
     ) -> dict[str, Any]:
         fmt = FORMAT_IDS.get((format or "").strip().lower()) if format else None
         if format and fmt is None and not str(format).isdigit():
-            return {"ok": False, "error": "invalid", "message": f"unknown format '{format[:30]}'"}
+            return {"ok": False, "error": "invalid", "message": f"unknown format “{format[:30]}”"}
 
         async def run(commander_name: str) -> dict[str, Any]:
             return await decks.search_decks(
@@ -1003,7 +1122,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
                         "decks": [],
                         "count": 0,
                         "commander_suggestions": names,
-                        "message": f"no commander is named exactly '{commander[:60]}'; search again "
+                        "message": f"no commander is named exactly “{commander[:60]}”; search again "
                         "with one of commander_suggestions",
                     }
         except DeckError as exc:

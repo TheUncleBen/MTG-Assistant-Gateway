@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pickle
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -20,12 +21,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes, prefs
-from .archidekt import page_turn
+from .archidekt import hand_save, page_turn
 from .decks import (
     DeckError,
+    changed_anything,
     current_client,
     edit_mismatches,
     is_outside_category,
+    one_click,
     parse_changes,
     printing_not_shown,
     scopes_allow_writes,
@@ -65,6 +68,7 @@ STATUS_FOR = {
     "auth": 409,
     "backup_failed": 502,
     "verify_mismatch": 502,
+    "deck_being_made": 409,
 }
 
 
@@ -82,7 +86,8 @@ def fail(exc: DeckError) -> JSONResponse:
     )
 
 
-def _unauth(message: str = "Sign in to use the API.") -> JSONResponse:
+# the browser's own answer (a page script shows "You're signed out" with Sign in, static/fetchjson.js)
+def _unauth(message: str = "You're signed out. Sign in to carry on.") -> JSONResponse:
     return JSONResponse(
         {"ok": False, "error": "unauthenticated", "message": message, "login": "/login"},
         401,
@@ -249,7 +254,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         a = request.query_params.get("a", "")
         b = request.query_params.get("b", "")
         if not a or not b:
-            raise DeckError("invalid", "give a and b: deck ids or URLs, or snapshot ids")
+            raise DeckError("invalid", "Give a and b: deck IDs or URLs, or snapshot IDs.")
         deck_a = await _deck_or_snapshot(who.sub, a)
         deck_b = await _deck_or_snapshot(who.sub, b)
         return ok({"a": deck_brief(deck_a), "b": deck_brief(deck_b), **deck_stats.compare(deck_a, deck_b)})
@@ -276,11 +281,20 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
         from .deckpage import (
+            GROUPS,
+            ROW_VIEWS,
+            SORTS,
+            VIEWS,
             card_image,
+            card_row,
             checks_panel_html,
+            group_cards,
+            image_card,
             legal_problems,
             legality_chip_html,
             legality_panel_html,
+            salt_text,
+            updated_when,
         )
 
         if who.via != "browser":
@@ -292,15 +306,33 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+        # the page's view, grouping and sort (a quick add draws its new card in place: each
+        # touched row then carries its markup and the stack it belongs in)
+        draw = data.get("view") if data.get("view") in VIEWS else None
+        grouping = data.get("group") if data.get("group") in GROUPS else "category"
+        sorting = data.get("sort") if data.get("sort") in SORTS else "name"
 
         def view(deck: Any, touched: set[str], *, stale: bool) -> dict[str, Any]:
             """The rows of the touched cards and the page fragments, from one read of the deck."""
             stats = deck_stats.compute(deck)
             checks = stats.get("checks") or {}
+            shown = [c for c in deck.cards if front_face(c.name).casefold() in touched]
+            drawn: dict[int, dict[str, Any]] = {}
+            if draw and shown:
+                owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} or None
+                where = {id(c): name for name, group in group_cards(deck, grouping, sorting) for c in group}
+                for c in shown:
+                    html = (
+                        card_row(c, deck=deck, view=draw, owned=owned)
+                        if draw in ROW_VIEWS
+                        else image_card(c, deck=deck, owned=owned)
+                    )
+                    drawn[id(c)] = {"html": html, "stack": where.get(id(c))}
             return {
                 "stale": stale,
                 "rows": [
                     {
+                        **drawn.get(id(c), {}),
                         "name": c.name,
                         "qty": c.quantity,
                         "zone": "main" if deck.in_deck(c) else "side",
@@ -316,8 +348,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "image": card_image(c),
                         "price": c.price,
                     }
-                    for c in deck.cards
-                    if front_face(c.name).casefold() in touched
+                    for c in shown
                 ],
                 "stats": {
                     # the banner's verdict: every format rule met, the deck size included
@@ -331,10 +362,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                     "land_count": stats.get("land_count", 0),
                     "side_count": sum(c.quantity for c in deck.side_cards),
                     "price_total": stats.get("price_total"),
+                    # no card priced: the page draws "–" for the cost, as it does on a load
+                    "priced_cards": stats.get("priced_cards", 0),
                     "salt_total": stats.get("salt_total"),
+                    "salt_text": salt_text(stats),  # as the banner draws it
                     "format": deck.format,
                 },
                 "banner_html": legality_chip_html(deck, stats),
+                "updated_html": updated_when(deck.updated_at),  # the banner's date
                 "checks_html": checks_panel_html(deck, stats),
                 "legality_html": legality_panel_html(deck, stats),
             }
@@ -343,14 +378,20 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             # The page's one follow-up after a stale answer: the deck read again, nothing written.
             names = data.get("names")
             if not isinstance(names, list) or len(names) > 40 or not all(isinstance(n, str) for n in names):
-                raise DeckError("invalid", "names must be a list of up to 40 card names")
+                raise DeckError("invalid", "Names must be a list of up to 40 card names.")
             deck = await decks.get_own_deck(who.sub, deck_id)
             return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
+        decks.refuse_while_made(deck_id)  # its new-deck apply is still putting the cards in
+        # the proposal's read and the apply's verify read, shared with the apply (decks.one_click);
+        # set for the rest of this request only (a request runs in a context of its own)
+        kept: dict[str, Any] = {}
+        one_click.set(kept)
+        hand_save.set(True)  # the member's own click: its calls start from the page burst
         pid = data.get("proposal_id")
         answer = pid is not None
         if answer:
             if not isinstance(pid, str) or not pid:
-                raise DeckError("invalid", "proposal_id must be a string")
+                raise DeckError("invalid", "proposal_id must be a string.")
             p = decks.describe(who.sub, pid)
             if p.get("kind") != "edit" or str(p.get("deck_id")) != deck_id.strip():
                 raise DeckError("invalid", "That proposal is not an edit of this deck.")
@@ -361,7 +402,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if row.get("created_by_client") != BROWSER_CLIENT_ID:
                 raise DeckError(
                     "invalid",
-                    "That proposal was made by an assistant. Approve it on its review page.",
+                    "That proposal was made by an assistant. Apply it on its review page.",
                     review_url=f"/proposals/{pid}",
                 )
             if p.get("state") != "pending":
@@ -370,7 +411,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             # since is refused as changed, so the page asks again
             version = data.get("version")
             if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
-                raise DeckError("invalid", "version must be a whole number")
+                raise DeckError("invalid", "version must be a whole number.")
             if version is None:
                 raise DeckError("invalid", "Send the version of the proposal the page showed.")
         else:
@@ -397,13 +438,39 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
         # gateway's snapshot but not the extra copy on Archidekt: one deck copy per click
         # would fill the backup folder and slow each save by paced Archidekt writes.
-        result = await decks.apply(
-            who.sub,
-            pid,
-            via="browser",
-            archidekt_backup=False,
-            version=data.get("version") if answer else None,
-        )
+        try:
+            result = await decks.apply(
+                who.sub,
+                pid,
+                via="browser",
+                archidekt_backup=False,
+                version=data.get("version") if answer else None,
+            )
+        except DeckError as exc:
+            # The write may have landed although Archidekt never answered (a timeout): the page
+            # never says "not saved" then. It gets what Archidekt has now and draws that (0.7.46
+            # audit D-04). A failure that changed nothing is answered as it is.
+            stored = (state.db.get_proposal(pid, who.sub) or {}).get("result") or {}
+            if not changed_anything(stored):
+                raise
+            try:
+                deck = await decks.get_own_deck(who.sub, deck_id)
+            except DeckError:
+                raise exc from None
+            asked = parse_changes(p.get("changes"), row_flags=True)
+            touched = {front_face(ch.card_name).casefold() for ch in asked}
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": exc.kind,
+                    "message": str(exc),
+                    **exc.extra,
+                    "may_have_changed": True,
+                    "proposal_id": pid,
+                    **view(deck, touched, stale=False),
+                },
+                STATUS_FOR.get(exc.kind, 400),
+            )
         applied = result.get("state") == "applied"
         out: dict[str, Any] = {
             "applied": applied,
@@ -414,13 +481,21 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if not applied:  # a large edit still running: the page says so and offers the review page
             return ok(out, 202)
         changes = parse_changes(result.get("changes") or p.get("changes"), row_flags=True)
-        # The apply verified the deck once; this read is the one the page draws from. Archidekt's
-        # reads have been seen to lag a write, so a deck that does not show the change yet is
-        # read once more after a short pause, and the answer says when it still has not caught up.
-        deck = await decks.get_own_deck(who.sub, deck_id)
+        # The apply's verify read is the one the page draws from (0.7.46 audit D-01: no read of its
+        # own). Archidekt's reads have been seen to lag a write, so a deck that does not show the
+        # change yet is read once more after a short pause, and the answer says when it still has
+        # not caught up.
+        deck = kept.get("verified") or await decks.get_own_deck(who.sub, deck_id)
         stale = False
         try:
-            before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
+            # compared with the deck this write was worked out on (review F2): the snapshot is
+            # shared by the edits of a sitting (db.PAGE_SESSION_SECONDS), so it holds the deck as it
+            # was before the first of them, not before this one
+            before = (
+                pickle.loads(kept["base"])
+                if kept.get("base")
+                else parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
+            )
             # a printing change is compared by its set, number and finish
             if edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck):
                 await asyncio.sleep(EDIT_REREAD_DELAY)
@@ -429,6 +504,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         except DeckError:  # no snapshot to compare with: answer with the read as it is
             logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
         out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
+        # the rules this save broke that the deck kept before (the same judgement that makes an
+        # assistant's proposal high risk), for the page's Saved note: saved, but said
+        broke = p.get("legality_after") or []
+        if broke:
+            out["warnings"] = [f"The deck now breaks its format's rules: {b}." for b in broke]
         return ok(out, 201)
 
     @route("/decks/{deck_id}/custom_cards", "POST", write=True)
@@ -441,7 +521,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         the page sends ``confirmed: true`` or ``{proposal_id, version}``. Answers the deck's
         custom rows as they are now and the page fragments the edit endpoint answers. Browser
         session only: an assistant proposes through propose_custom_card_changes and waits."""
-        from .deckpage import checks_panel_html, legal_problems, legality_chip_html, legality_panel_html
+        from .deckpage import (
+            checks_panel_html,
+            legal_problems,
+            legality_chip_html,
+            legality_panel_html,
+            salt_text,
+            updated_when,
+        )
 
         if who.via != "browser":
             raise DeckError(
@@ -452,10 +539,13 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+        kept: dict[str, Any] = {}
+        one_click.set(kept)  # one read for the proposal, the apply and its check (decks.one_click)
+        hand_save.set(True)
         pid = data.get("proposal_id")
         if pid is not None:
             if not isinstance(pid, str) or not pid:
-                raise DeckError("invalid", "proposal_id must be a string")
+                raise DeckError("invalid", "proposal_id must be a string.")
             p = decks.describe(who.sub, pid)
             if p.get("kind") != "custom_cards" or str(p.get("deck_id")) != deck_id.strip():
                 raise DeckError("invalid", "That proposal is not a custom card change of this deck.")
@@ -463,7 +553,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if row.get("created_by_client") != BROWSER_CLIENT_ID:
                 raise DeckError(
                     "invalid",
-                    "That proposal was made by an assistant. Approve it on its review page.",
+                    "That proposal was made by an assistant. Apply it on its review page.",
                     review_url=f"/proposals/{pid}",
                 )
             if p.get("state") != "pending":
@@ -500,7 +590,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         }
         if not applied:
             return ok(out, 202)
-        deck = await decks.get_own_deck(who.sub, deck_id)
+        deck = kept.get("verified") or await decks.get_own_deck(who.sub, deck_id)  # the verify read
         stats = deck_stats.compute(deck)
         out.update(
             {
@@ -523,8 +613,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                     "land_count": stats.get("land_count", 0),
                     "price_total": stats.get("price_total"),
                     "salt_total": stats.get("salt_total"),
+                    "salt_text": salt_text(stats),
                 },
                 "banner_html": legality_chip_html(deck, stats),
+                "updated_html": updated_when(deck.updated_at),
                 "checks_html": checks_panel_html(deck, stats),
                 "legality_html": legality_panel_html(deck, stats),
             }
@@ -592,9 +684,9 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if kind == "clone":
             name = data.get("name")
             if name is not None and not isinstance(name, str):
-                raise DeckError("invalid", "name must be a string")
+                raise DeckError("invalid", "name must be a string.")
             return ok(await decks.propose_clone(who.sub, str(data.get("deck_id", "")), name), 201)
-        raise DeckError("invalid", "kind must be edit, new_deck, restore, details or clone")
+        raise DeckError("invalid", "Kind must be edit, new_deck, restore, details or clone.")
 
     @route("/proposals/{pid}", "GET")
     async def get_proposal(request: Request, who: Caller) -> Response:
@@ -616,7 +708,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             return data
         version = data.get("version")
         if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
-            raise DeckError("invalid", "version must be a whole number")
+            raise DeckError("invalid", "version must be a whole number.")
         if version is None and who.via == "browser":
             decks.describe(who.sub, pid)  # nobody's proposal but the member's: not_found first
             raise DeckError("invalid", "Send the version of the proposal the page showed.")
@@ -699,6 +791,13 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             201,
         )
 
+    @route("/reports/running", "GET")
+    async def running_reports(request: Request, who: Caller) -> Response:
+        """The member's tests still going, newest first (``deck_id`` for one deck's): each report,
+        its deck and where it stands (``step``: the step in plain words, games done of those
+        asked for and the time so far), as Home and the deck page show them."""
+        return ok({"running": reports.running(who.sub, request.query_params.get("deck_id") or None)})
+
     @route("/reports/{rid}", "GET")
     async def get_report(request: Request, who: Caller) -> Response:
         return ok(reports.get(who.sub, request.path_params["rid"]))
@@ -719,6 +818,12 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         Never asks Archidekt."""
         report = await reports.play_more(who.sub, request.path_params["rid"])
         return ok(report, 202)
+
+    @route("/reports/{rid}/forge/stop", "POST", write=True)
+    async def report_stop(request: Request, who: Caller) -> Response:
+        """Stop a test, as the report page's Stop button does (reports.stop): its Forge parts still
+        waiting or playing end, the games already played stay. Never asks Archidekt."""
+        return ok(reports.stop(who.sub, request.path_params["rid"]))
 
     @route("/reports/{rid}", "DELETE", write=True)
     async def delete_report(request: Request, who: Caller) -> Response:

@@ -11,7 +11,9 @@
 .row.cardrow:hover,.row.cardrow:focus-visible{background:var(--bg2);outline:none}
 .grid .tile .cap .q{color:var(--text);font-weight:600}
 .view .tile{cursor:pointer}
-.gh{grid-column:1 / -1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 2px 0}
+.gh{grid-column:1 / -1;font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 2px 0;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.more{margin:8px auto}
 </style>
 </head>
 <body>
@@ -24,7 +26,7 @@
     <button type="button" class="small" id="viewbtn">Pictures</button>
     <button type="button" class="small hidden" id="expand">Expand</button>
   </div>
-  <div class="scroll" id="scroll"><div id="list" role="list"></div><div class="grid view hidden" id="grid" role="list"></div></div>
+  <div class="scroll" id="scroll"><div id="list" role="list"></div><div class="grid view hidden" id="grid" role="list"></div><div id="morebox"></div></div>
   <div class="actions" id="actions"></div>
   <div class="status hidden" id="status" role="status" aria-live="polite"></div>
 </div>
@@ -40,8 +42,10 @@
 (function () {
   "use strict";
   var B = Bridge, el = B.el, $ = B.$;
-  var MAX_IMAGES = 160;
-  var deck = null, open = {}, pictures = false, textCache = {};
+  // a page of rows (PAGE_ROWS) then Show all: the card grows in the chat's own scroll and
+  // never scrolls inside it
+  var MAX_IMAGES = 160, PAGE_ROWS = 30;
+  var deck = null, open = {}, pictures = false, textCache = {}, showAll = false;
 
   function pips(colours) {
     var p = el("span", "pips");
@@ -52,7 +56,7 @@
     var s = $("stat"); s.replaceChildren();
     var fmt = el("span"); fmt.appendChild(el("b", "", d.format || "deck")); s.appendChild(fmt);
     if (d.commanders && d.commanders.length) { var c = el("span", "", "Commander: "); c.appendChild(el("b", "", d.commanders.join(" / "))); s.appendChild(c); }
-    var ci = el("span", "", "Colors "); ci.appendChild(pips(d.colour_identity)); s.appendChild(ci);
+    var ci = el("span", "", "Colors "); ci.appendChild(pips(d.color_identity || d.colour_identity)); s.appendChild(ci);
     var curve = d.curve || {}, keys = ["0", "1", "2", "3", "4", "5", "6", "7+"], max = 1;
     keys.forEach(function (k) { max = Math.max(max, Number(curve[k]) || 0); });
     var cv = el("span", "curve"); cv.setAttribute("aria-label", "Mana curve");
@@ -67,7 +71,7 @@
     var list = $("list"), grid = $("grid"); list.replaceChildren(); grid.replaceChildren();
     list.className = pictures ? "hidden" : ""; grid.className = pictures ? "grid view" : "grid view hidden";
     $("viewbtn").textContent = pictures ? "List" : "Pictures";
-    var images = 0;
+    var images = 0, drawn = 0, left = 0;
     (deck.categories || []).forEach(function (cat) {
       var cards = (cat.cards || []).filter(function (r) { return rowMatches(r, q); });
       if (!cards.length) return;
@@ -76,6 +80,8 @@
         grid.appendChild(el("div", "gh", cat.name + " (" + cat.count + ")" + (cat.in_deck ? "" : " · not in the deck")));
         if (!isOpen && !q) return;
         cards.forEach(function (r) {
+          if (!showAll && drawn >= PAGE_ROWS) { left++; return; }
+          drawn++;
           var t = el("button", "tile"); t.type = "button"; t.setAttribute("role", "listitem"); t.setAttribute("aria-label", r.qty + " " + r.name);
           if (images < MAX_IMAGES) { t.appendChild(B.picture(B.scryfallImage(r.uid, r.name), "")); images++; }
           var cap = el("span", "cap"); cap.appendChild(el("span", "q", r.qty + "× ")); cap.appendChild(el("b", "", r.name)); t.appendChild(cap);
@@ -92,6 +98,8 @@
       list.appendChild(g);
       if (!isOpen) return;
       cards.forEach(function (r) {
+        if (!showAll && drawn >= PAGE_ROWS) { left++; return; }
+        drawn++;
         var li = el("div", "row cardrow"); li.setAttribute("role", "listitem"); li.tabIndex = 0;
         if (images < MAX_IMAGES) { li.appendChild(B.picture(B.scryfallImage(r.uid, r.name))); images++; } else li.appendChild(el("span", "pic none"));
         var n = el("span"); n.appendChild(el("span", "name", r.name));
@@ -105,6 +113,12 @@
         list.appendChild(li);
       });
     });
+    var box = $("morebox"); box.replaceChildren();
+    if (left > 0) {
+      var more = el("button", "more", "Show all " + (drawn + left) + " cards"); more.type = "button"; more.id = "more";
+      more.onclick = function () { showAll = true; draw(); };
+      box.appendChild(more);
+    }
     B.reportSize();
   }
   function showDetail(r) {

@@ -20,7 +20,7 @@
   var enc = encodeURIComponent;
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
-  var TOP = "Top level (no folder)";
+  var TOP = "No folder";
   var NO_NET = "No connection; nothing was changed.";
 
   // -- small shared pieces -----------------------------------------------------------------------
@@ -57,6 +57,8 @@
     i.autocomplete = "off";
     if (o.maxlength) i.maxLength = o.maxlength;
     if (o.placeholder) i.placeholder = o.placeholder;
+    // shorter hints, for a box too narrow for the full one (topbar.js shows the longest that fits)
+    if (o.shorter) i.setAttribute("data-ph", o.shorter);
     return i;
   }
   function cancelButton(text) { return Box.button(text || "Cancel", "btn", null, { cancel: true }); }
@@ -67,7 +69,8 @@
   }
   function failed(box, d) {
     box.busy(false);
-    box.note((d && d.message) || NO_NET, true);
+    var pr = window.MtgFetch.problem(d, null);
+    box.note(d && (d.signedOut || d.noConnection) ? pr.text : ((d && d.message) || NO_NET), true, pr.actions);
   }
   // where My decks goes after a box: the open folder, and the notice the gateway named
   function currentFolder() {
@@ -203,10 +206,10 @@
       box.setTitle("Delete “" + name + "”?");
       var body = el("div", "stack");
       var n = info.cards || 0;
+      // no copy on Archidekt for a delete: the words of decks.DELETE_KEPT_NOTE
       body.appendChild(el("p", null, "This deletes the deck (" + n + " card" + (n === 1 ? "" : "s") + ") from your Archidekt account. "
-        + "A snapshot of the deck is kept under History" + (info.backups ? ", and a private copy is made in your backup folder on Archidekt first" : "")
-        + ". Archidekt itself has no undo for a deleted deck."));
-      var input = textInput("", { maxlength: 200, placeholder: name });
+        + "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot can't be restored onto a deleted deck; History can make a new deck from it. Archidekt itself has no undo for a deleted deck."));
+      var input = textInput("", { maxlength: 200, placeholder: name, shorter: "Deck name|Name" });
       body.appendChild(field("Type the deck's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete this deck", "danger", function () {
         box.busy(true);
@@ -226,8 +229,8 @@
     getJSON("/decks/api/decks/" + enc(d.id) + "/export").then(function (x) {
       if (!x.ok) return failed(box, x);
       box.setTitle("Export “" + (x.name || d.name) + "”");
-      var tabs = [["Archidekt import text", x.archidekt || ""], ["Plain decklist", x.plain || ""]];
-      if (x.side) tabs.push(["Sideboard and maybeboard", x.side]);
+      var tabs = [["Archidekt text", x.archidekt || ""], ["Plain list", x.plain || ""]];
+      if (x.side) tabs.push(["Side and maybe", x.side]);
       tabs.push(["Files", null]);
       var body = el("div", "stack");
       var bar = el("div", "segc");
@@ -292,7 +295,7 @@
       any.value = "any";
       s.appendChild(any);
       body.appendChild(field("Deck", s, "mb-cmp"));
-      var ref = textInput("", { placeholder: "Archidekt link or deck ID" });
+      var ref = textInput("", { placeholder: "Archidekt link or deck ID", shorter: "Link or deck ID|Link or ID" });
       var refField = field("Archidekt deck", ref, "mb-ref");
       refField.hidden = s.value !== "any";
       body.appendChild(refField);
@@ -375,7 +378,7 @@
     items.push(sep());
     if (!d.own) items.push(item("Clone into my decks", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
     items.push(link("Goldfish", "play", "/decks/" + id + "/goldfish"));
-    items.push(item("Run full test", "stats", function () { submitForm("/decks/" + id + "/report", {}); }));
+    items.push(item("Run test", "stats", function () { submitForm("/decks/" + id + "/report", {}); }));
     if (d.own) {
       items.push(item("Clone", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
       items.push(item("Rename…", "edit", function () { renameDeck(d); }));
@@ -474,6 +477,11 @@
       var ok = Box.button("Move", "primary", function () {
         box.busy(true);
         post("/decks/api/folders/" + enc(f.id) + "/move", { parent_id: picked(tree) }).then(function (r) {
+          if (!r.ok && r.error === "backup_inside") {
+            box.busy(false);
+            backupInTheWay(box, r, "“" + f.name + "” can't be moved yet", function () { moveFolder(f); });
+            return;
+          }
           if (!r.ok) return failed(box, r);
           reloadDecks(r.notice || "folder_moved");
         }, function () { failed(box); });
@@ -484,14 +492,32 @@
     }, function () { failed(box); });
   }
   function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+  // The backup folder sits inside the folder being moved or deleted: when the gateway can move it
+  // to the top level, the box offers that, then asks about the folder again (again()).
+  function backupInTheWay(box, c, title, again) {
+    box.setTitle(title);
+    box.setBody(el("p", null, c.message || ""));
+    if (!c.backup_folder_id) {
+      box.setActions([Box.button("OK", "primary", null, { cancel: true })]);
+      box.focusFirst();
+      return;
+    }
+    var move = Box.button("Move the backup folder to your top level", "primary", function () {
+      box.busy(true);
+      post("/decks/api/folders/backup/" + enc(c.backup_folder_id) + "/top", {}).then(function (r) {
+        if (!r.ok) return failed(box, r);
+        box.close();
+        again();
+      }, function () { failed(box); });
+    });
+    box.setActions([cancelButton(), move]);
+    move.focus();
+  }
   function deleteFolder(f, said) {
     var box = Box.open({ title: "Delete the folder “" + f.name + "”?", body: loading(), actions: [cancelButton("Keep it")], returnFocus: f.focus });
     getJSON("/decks/api/folders/" + enc(f.id) + "/contents").then(function (c) {
       if (!c.ok && c.error === "backup_inside") {
-        box.setTitle("“" + f.name + "” can't be deleted here");
-        box.setBody(el("p", null, c.message || ""));
-        box.setActions([Box.button("OK", "primary", null, { cancel: true })]);
-        box.focusFirst();
+        backupInTheWay(box, c, "“" + f.name + "” can't be deleted yet", function () { deleteFolder(f); });
         return;
       }
       if (!c.ok) return failed(box, c);
@@ -500,13 +526,13 @@
       if (said) body.appendChild(el("p", "notice warn", said));
       body.appendChild(el("p", null, "This deletes, on Archidekt:"));
       var ul = el("ul");
-      ul.appendChild(el("li", null, plural(c.decks, "deck") + ": each gets a snapshot under History first"
-        + (c.backups ? ", and a private copy in your backup folder when backups are on" : "")));
+      ul.appendChild(el("li", null, plural(c.decks, "deck")
+        + ": each gets a snapshot under History first (no copy on Archidekt, and a snapshot can't be restored onto a deleted deck)"));
       ul.appendChild(el("li", null, plural(c.packages, "card package") + ": no snapshot or copy, " + (c.packages === 1 ? "it is" : "they are") + " lost"));
       ul.appendChild(el("li", null, plural(c.folders, "folder") + " inside it, and the folder itself"));
       body.appendChild(ul);
-      body.appendChild(el("p", null, "The gateway makes the snapshots and copies first and stops if any of them fails. Then Archidekt deletes everything in one step, which can't be undone."));
-      var input = textInput("", { maxlength: 100, placeholder: name });
+      body.appendChild(el("p", null, "The gateway makes the snapshots first and stops if any of them fails. Then Archidekt deletes everything in one step, which can't be undone."));
+      var input = textInput("", { maxlength: 100, placeholder: name, shorter: "Folder name|Name" });
       body.appendChild(field("Type the folder's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete folder", "danger", function () {
         box.busy(true);
@@ -640,7 +666,7 @@
       if (f) f.focus();
     }));
     var after = [];
-    if (rm) { after.push(sep()); after.push(item("Remove from collection", "x", function () { rm.click(); }, { danger: true })); }
+    if (rm) { after.push(sep()); after.push(item("Remove from binder", "x", function () { rm.click(); }, { danger: true })); }
     Card.open(cardMenuBase(name, {
       onOpen: thumb ? function () { thumb.click(); } : null, noCollect: true, before: before, after: after, focus: thumb || li
     }), x, y);
@@ -657,8 +683,10 @@
       var h = el("input"); h.type = "hidden"; h.name = n; h.value = src.value; form.appendChild(h);
     });
     var stack = el("div", "stack");
-    [["alert_pct", "Moves more than (%)"], ["alert_above", "Rises above"], ["alert_below", "Falls below"]].forEach(function (f) {
+    [["alert_drop", "Drops below the price when added by (%)"], ["alert_rise", "Rises above the price when added by (%)"],
+     ["alert_pct", "Moves in a day by more than (%)"], ["alert_above", "Rises above"], ["alert_below", "Falls below"]].forEach(function (f) {
       var src = inRow.elements[f[0]];
+      if (!src) return;
       var wrap = el("div", "field"), lab = el("label", null, f[1]), input = el("input");
       input.type = "text"; input.inputMode = "decimal"; input.name = f[0]; input.id = "wxb-" + f[0];
       input.value = src ? src.value : "";
@@ -668,20 +696,52 @@
     var hint = $(".ui-hint", inRow);
     if (hint) stack.appendChild(el("p", "ui-hint", hint.textContent));
     form.appendChild(stack);
-    var save = Box.button("Save alert", "primary", function () {
+    var save = Box.button("Save price alert", "primary", function () {
       if (form.requestSubmit) form.requestSubmit(); else form.submit();
-    }, { icon: "bell" });
+    }, { icon: "tag" });
     Box.open({ title: "Price alert: " + name, body: form, actions: [Box.button("Cancel", "btn", null, { cancel: true }), save], returnFocus: focusBack });
   }
   function watchRowOf(node) {
     var tr = node && node.closest ? node.closest(".tr[id^='wr-']") : null;
     return tr;
   }
+  // a watchlist list's head (mockup screen 8): its ⋮, a right-click or a hold open Rename list…
+  // and Delete list…; "Not in a list" has no menu of its own
+  function watchGroupOf(node) {
+    var head = node && node.closest ? node.closest(".watch-page .tr.wgrp[data-list]") : null;
+    return head && head.getAttribute("data-list") ? head : null;
+  }
+  function openWatchGroupMenu(head, x, y) {
+    var name = head.getAttribute("data-list"), W = window.MtgWatchlist;
+    if (!W || !W.openListBox) return;
+    var items = [
+      item("Rename list…", "edit", function () { W.openListBox("w-rename", head); }),
+      sep(),
+      item("Delete list…", "trash", function () { W.openListBox("w-delete", head); }, { danger: true })
+    ];
+    Menu.open({ head: name, label: "List: " + name, items: items, focusBack: $("summary.kebab", head) || head }, x, y);
+  }
+  // a watchlist list's row on Binder › Lists (lists_page): its ⋮, a right-click or a hold open
+  // the same Rename list… and Delete list… as the list's head on the Watchlist (the links of its
+  // no-script drop-down, which open the Watchlist with that box)
+  function listRowOf(node) {
+    var row = node && node.closest ? node.closest(".lp-hub .yrow.wlrow") : null;
+    return row && $("details.rowmenu", row) ? row : null;
+  }
+  function openListRowMenu(row, x, y) {
+    var name = ($("a.lbl span", row) || row).textContent.trim();
+    var items = [];
+    $$("details.rowmenu .menu > a", row).forEach(function (a) {
+      if (items.length) items.push(sep());
+      items.push(link(a.textContent.replace(/\s+/g, " ").trim(), a.getAttribute("data-icon") || "", a.getAttribute("href"), { danger: a.classList.contains("danger") }));
+    });
+    Menu.open({ head: name, label: "List: " + name, items: items, focusBack: $("summary.kebab", row) || row }, x, y);
+  }
   function openWatchMenu(tr, x, y) {
     var key = tr.id.slice(3);
     var wx = document.getElementById("wx-" + key);
     var more = $(".act .more", tr);
-    var alert = item("Price alert…", "bell", function () {
+    var alert = item("Price alert…", "tag", function () {
       // a card row: its alert form as a box (M16), posting as the in-row form does; a row that is
       // already open, or a deck row (no alert fields), opens the row's details instead
       var inRow = wx ? $("form.wx-alert", wx) : null;
@@ -691,12 +751,17 @@
       if (f) f.focus();
     });
     var rmBtn = wx ? $("form.rm button, button[form^='rm-']", wx) : null;
-    var remove = rmBtn ? item("Remove", "x", function () { rmBtn.click(); }, { danger: true }) : null;
+    var remove = rmBtn ? item("Stop watching", "eye-off", function () { rmBtn.click(); }, { danger: true }) : null;
     var card = $(".wcard[data-card]", tr);
     if (card) {
       var name = card.getAttribute("data-card");
+      // Details opens the row in place; Move to list… selects this row alone and opens the Move box
+      var details = more ? item(more.getAttribute("aria-expanded") === "true" ? "Close details" : "Details", "stats", function () { more.click(); }) : null;
+      var W = window.MtgWatchlist;
+      var move = W && $("#w-move") ? item("Move to list…", "folder", function () { W.selectOnly(tr); W.open("w-move", more || tr); }) : null;
       Card.open(cardMenuBase(name, {
-        onOpen: function () { card.click(); }, noWatch: true, before: [alert], after: remove ? [sep(), remove] : [], focus: card
+        onOpen: function () { card.click(); }, noWatch: true,
+        before: [details, alert, move].filter(Boolean), after: remove ? [sep(), remove] : [], focus: card
       }), x, y);
       return;
     }
@@ -718,8 +783,38 @@
   }
   function openCardLinkMenu(b, x, y) {
     var name = b.getAttribute("data-card");
-    Card.open(cardMenuBase(name, { onOpen: function () { b.click(); }, focus: b }), x, y);
+    // once the menu has closed (its Back step would close a viewer opened before)
+    var open = function () { Menu.whenClosed(function () { b.click(); }); };
+    Card.open(cardMenuBase(name, { onOpen: open, focus: b }), x, y);
   }
+  // A card name drawn as a button opens the card when clicked (the owner, 2026-10-28: the report's names
+  // did nothing): in the card viewer when the page has it (static/cardview.js), its text and
+  // picture read by name, else on Card search. A page with its own use for the click (the
+  // Compare page, My card models' link to Card search) handles it first.
+  function openCardLink(b) {
+    var name = b.getAttribute("data-card") || "";
+    var View = window.MtgCardView;
+    if (!View || !View.open) { Menu.whenClosed(function () { location.href = "/cards?q=" + enc(name); }); return; }
+    var search = el("a", "btn", "Search cards");
+    search.href = "/cards?q=" + enc(name);
+    var base = View.fromElement(b);
+    base.loading = !!View.text;
+    View.open(base, [search]);
+    if (View.text) View.text(name).then(function (t) {
+      var card = {};
+      Object.keys(base).forEach(function (k) { card[k] = base[k]; });
+      if (t) Object.keys(t).forEach(function (k) { if (t[k] || k === "faces") card[k] = t[k]; });
+      delete card.loading;
+      View.update(card, [search]);
+    });
+  }
+  window.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button) return;
+    var b = e.target && e.target.closest ? e.target.closest("button.cardlink[data-card]") : null;
+    if (!b || b.hasAttribute("data-href") || b.closest(".ctxmenu, .cardview")) return;
+    e.preventDefault();
+    openCardLink(b);
+  });
 
   // -- the list pages' rows: Proposals, History, Reports ------------------------------------------
   function proposalRowOf(node) {
@@ -735,12 +830,34 @@
     if (pick) {
       var risk = pick.getAttribute("data-risk") || "";
       var form = pick.form;
+      // Apply and Reject check this row alone and press the bar's own button, so the same box
+      // asks as for a checked row (Reject's red box with its reason, Apply's box with the plan);
+      // without the bar's script the form goes as it is and the server asks on its page
       var send = function (action) {
-        $$("input[name=pick]", form).forEach(function (p) { p.checked = p === pick; });
-        var a = el("input");
-        a.type = "hidden"; a.name = "action"; a.value = action;
-        form.appendChild(a);
-        Menu.whenClosed(function () { form.submit(); });
+        var picks = $$("input[name=pick]", form);
+        var was = picks.filter(function (p) { return p.checked; });
+        picks.forEach(function (p) { p.checked = p === pick; });
+        form.dispatchEvent(new Event("change", { bubbles: true }));
+        var btn = $(".ui-bar button[name=action][value=" + action + "], .wbar button[name=action][value=" + action + "]", form);
+        // "Keep it" (the box gone, nothing sent) puts the picks back as they were
+        var restore = function () {
+          var watch = new MutationObserver(function () {
+            // Apply's box comes from the server: still asking (data-busy) is not "Keep it"
+            if (document.querySelector(".mtgbox-scrim") || (btn && btn.hasAttribute("data-busy"))) return;
+            watch.disconnect();
+            if ($("input[name=action]", form)) return;  // sent: the page is leaving
+            picks.forEach(function (p) { p.checked = was.indexOf(p) !== -1; });
+            form.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+          watch.observe(document.body, { childList: true, subtree: true });
+        };
+        Menu.whenClosed(function () {
+          if (btn && !btn.disabled && btn.hasAttribute("data-asks")) { btn.click(); restore(); return; }
+          var a = el("input");
+          a.type = "hidden"; a.name = "action"; a.value = action;
+          form.appendChild(a);
+          form.submit();
+        });
       };
       // only a change a press here may apply: a deck delete, or a change that needs its review
       // page, is approved there
@@ -757,12 +874,30 @@
   function openHistoryMenu(tr, x, y) {
     var name = $(".title .t", tr) ? $(".title .t", tr).textContent.trim() : "";
     var details = $(".act a[href*='open=']", tr), restore = $("form.hy-restore button", tr);
-    var report = $("a[href^='/history/reports/']", tr), deck = $(".title a.t[href^='/decks/']", tr);
+    var remake = $("form.hy-new-deck button", tr);  // a deleted deck's snapshot
+    var report = $("a[href^='/history/reports/']", tr), deck = tr.getAttribute("data-deck");
+    var deckHref = tr.getAttribute("data-deck-href") || (deck ? "/decks/" + enc(deck) : "");  // a lists change opens My lists
+    var test = $("form.hy-test button", tr);  // the forms stay in the row, out of sight, for the menu
+    // the review page of a change (or the one a snapshot was taken before) and the snapshot's
+    // backup copy: links the row carries, never capsules in its line (review 2, L9)
+    var review = tr.getAttribute("data-review"), backup = tr.getAttribute("data-backup");
     var items = [];
     if (details) items.push(link("Details", "eye", details.getAttribute("href")));
+    if (review) items.push(link(restore || remake || test ? "The change it was taken before" : "Open the review page", "proposals", review));
+    if (backup) items.push(link("Backup copy on Archidekt", "external", backup, { ext: true }));
     if (restore) items.push(item("Restore (review first)", "undo", function () { restore.click(); }));
+    if (remake) items.push(item("Make a new deck from this", "plus", function () { remake.click(); }));
     if (report) items.push(link("Open report", "report", report.getAttribute("href")));
-    if (deck) { items.push(sep()); items.push(link("Open the deck", "decks", deck.getAttribute("href"))); }
+    if (test) items.push(item("Test this version", "report", function () { test.click(); }));
+    if (deckHref) {
+      items.push(sep());
+      // a lists change (templates, tags, pins) opens Binder › Lists, where those lists live
+      var lists = deckHref === "/lists" || deckHref === "/collection/lists";
+      items.push(lists ? link("Open Binder › Lists", "list", "/collection/lists") : link("Open the deck", "decks", deckHref));
+    }
+    // a report or a snapshot: its Details with the confirm box open (restores are proposals)
+    var chev = $("a.chev[href*='open=']", tr), dh = (details || chev) ? (details || chev).getAttribute("href") : "";
+    if (/[?&]open=[sr]-/.test(dh)) { items.push(sep()); items.push(link("Delete…", "trash", dh + "&box=delete", { danger: true })); }
     Menu.open({ head: name, label: "History: " + name, items: items, focusBack: details || report || tr }, x, y);
   }
   function reportRowOf(node) {
@@ -783,6 +918,8 @@
       })
     ];
     if (deck) { items.push(sep()); items.push(link("Open the deck", "decks", "/decks/" + enc(deck))); }
+    items.push(sep());
+    items.push(link("Delete…", "trash", href + "?box=delete", { danger: true }));
     Menu.open({ head: name, label: "Report: " + name, items: items, focusBack: open }, x, y);
   }
 
@@ -791,6 +928,8 @@
     { of: deckOf, open: openDeckMenu, el: function (d) { return d.el; } },
     { of: folderOf, open: openFolderMenu, el: function (f) { return f.el; } },
     { of: collectionRowOf, open: openCollectionMenu },
+    { of: watchGroupOf, open: openWatchGroupMenu },
+    { of: listRowOf, open: openListRowMenu },
     { of: watchRowOf, open: openWatchMenu },
     { of: cardLinkOf, open: openCardLinkMenu },
     { of: proposalRowOf, open: openProposalMenu },
@@ -808,7 +947,9 @@
   }
   Menu.bind(document, {
     itemOf: itemOf,
-    skip: "button, input, select, textarea, summary, form.qty, form.rm, .wbtn",
+    // a hold on a Binder tile's picture (button.thumbbtn, most of the tile) opens the row's
+    // menu, as a hold on a deck tile's link does (0.7.46 audit D08); other buttons act on a tap
+    skip: "button:not(.thumbbtn), input, select, textarea, summary, form.qty, form.rm, .wbtn",
     button: ".kebab",
     open: function (node, x, y) { node.__mtgKind.open(node, x, y); }
   });
@@ -826,7 +967,7 @@
       if (act && act.tagName !== "A") { act.appendChild(k); return; }
       if (!t) return;
       k.classList.add("inline");
-      t.parentNode.insertBefore(k, t.nextSibling);
+      t.parentNode.insertBefore(k, t);  // before the name: the float sits on its first line
     });
     $$(".home .recent a[data-deck-id]").forEach(function (a) {
       if (a.parentNode.classList.contains("rd")) return;
@@ -841,6 +982,7 @@
   }
   decorate();
   document.addEventListener("decks:loaded", decorate);
+  document.addEventListener("rows:loaded", decorate);  // Load more brought rows (reports.js)
 
   // -- My decks' heading: + New folder -----------------------------------------------------------
   document.addEventListener("click", function (e) {
@@ -925,10 +1067,10 @@
           extra = el("div");
           extra.appendChild(el("p", null, "“" + name + "” still has " + n + " card" + (n === 1 ? "" : "s") +
             ". Archidekt only deletes an empty category: pick a category to move " + (n === 1 ? "it" : "them") + " to first."));
-          var lab = el("label", null, "Move its cards to");
-          lab.setAttribute("for", "move_cards_box");
+          var lab = el("label", null, "Move " + (n === 1 ? "it" : "them") + " to");
+          lab.setAttribute("for", "move_to_box");
           var sel = el("select");
-          sel.id = "move_cards_box";
+          sel.id = "move_to_box";
           // nothing picked to start with (the first category is often Commander): Delete waits for a pick
           var none = el("option", null, "Pick a category…");
           none.value = ""; none.disabled = true; none.hidden = true; none.selected = true;

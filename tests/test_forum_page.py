@@ -73,6 +73,15 @@ async def test_the_forum_page_lists_the_groups_and_their_sections(member: Browse
     assert "1,200" in page and ">300<" in page
     # no section chips above the tables: the rows name every section once (0.7.44 L13)
     assert "ui-chip" not in page
+    # a name box narrows the sections as you type (static/forum.js), and on submit without scripts
+    # (0.7.46 audit QG-25)
+    assert "role='search' method='get' action='/forum'" in page and "placeholder='Section name'" in page
+    assert "data-q='general talk about anything" in page.lower() or "data-q='general" in page.lower()
+    narrowed = (await member.http.get("/forum?q=deck")).text
+    assert "Ask for help with a deck" in narrowed and "Talk about anything" not in narrowed
+    assert "value='deck'" in narrowed
+    none = (await member.http.get("/forum?q=zzz")).text
+    assert "No section matches." in none
     # starting a thread stays on Archidekt, with the one line why
     assert "href='https://archidekt.com/forum/thread/new'" in page and "New thread on Archidekt" in page
     assert esc("Archidekt asks you to prove you're human before starting a thread") in page
@@ -184,7 +193,8 @@ async def test_a_thread_shows_its_first_post_and_the_comment_panel_over_its_repl
     assert pre["count"] == 1 and pre["has_more"] is False and isinstance(pre["me"], int)
     assert ark.calls.count(("GET", "/api/comments/700002/")) == 1
     # the reply box, public under the member's name, posting through the same panel
-    assert "<form class='newcomment' data-forum='1' data-me-name='alice'>" in page and "Your reply" in page
+    assert "<form class='newcomment' data-forum='1' data-me-name='alice' data-draft='reply:700002'>" in page
+    assert "Your reply" in page
     assert esc("Public under “alice”. An assistant's reply always waits for your press.") in page
     # the text style buttons above the box, the one orange button under it
     assert "role='toolbar' aria-label='Text style'" in page
@@ -240,13 +250,15 @@ async def test_a_thread_that_is_not_there_and_a_bad_number(member: Browser, stac
     assert r.status_code == 404, r.text
     r = await member.http.get("/forum/thread/abc")
     assert r.status_code == 400, r.text
-    assert esc("thread's number or its link") in r.text
+    assert esc("thread's number or its link") in r.text and "thread_id" not in r.text
+    assert "Back to the forum" in r.text
 
 
 async def test_the_forum_is_in_the_menus_and_needs_a_sign_in(stack: Stack, member: Browser) -> None:
-    # Forum is a row on the Account page (Your account), the same on every screen
-    hub = (await member.http.get("/account")).text
-    assert "<a class='yrow' href='/forum'>" in hub
+    # Forum sits in More's Community group on every screen and on the rail (decision C8)
+    page = (await member.http.get("/decks")).text
+    sheet = page.split("<div class='menu sheet'>")[1].split("</div></details>")[0]
+    assert "href='/forum'" in sheet and "<a href='/forum' class='railonly'>" in page
     anon = Browser(stack.h)
     try:
         r = await anon.http.get("/forum/thread/700001")
@@ -505,15 +517,16 @@ async def test_a_reply_cannot_break_out_of_the_threads_json_block(member: Browse
     assert "<form class='newcomment'" in r.text  # the rest of the page is still there
 
 
-async def test_forum_is_on_the_account_page_and_off_the_bars(member: Browser) -> None:
-    """The navigation is four places and More (the owner, 2026-10-25): Forum is a row on the Account page
-    the picture opens, not a tab, a rail place or a More item."""
+async def test_forum_is_in_more_and_on_the_rail_and_off_the_account_page(member: Browser) -> None:
+    """Decision C8: Forum is a More item (Community) and a rail place on the Fold and a computer,
+    never a phone tab, and no longer a row on the Account page."""
     page = (await member.http.get("/forum")).text
-    header = page[page.index("<header") : page.index("</header>")]
     tabbar = re.search(r"<nav class='tabbar'.*?</details></nav>", page, re.S)
-    assert tabbar and "href='/forum'" not in header + tabbar.group(0)
+    assert tabbar
+    tabs = re.findall(r"<a href='([^']+)'(?: class='([^']*)')?", tabbar.group(0).split("<details")[0])
+    assert ("/forum", "railonly") in tabs and ("/forum", "") not in tabs
     hub = (await member.http.get("/account")).text
-    assert "<a class='yrow' href='/forum'>" in hub
+    assert "<a class='yrow' href='/forum'>" not in hub
 
 
 async def test_a_forum_reply_is_voted_down_and_back_through_the_comment_routes(
@@ -606,3 +619,40 @@ async def test_a_trail_is_only_archidekts_own_names_never_a_members_url(stack: S
     assert "href='/forum/Archidekt/General'>General</a>" in crumbs
     await alice.aclose()
     forum._IN_SECTION.clear()
+
+
+async def test_a_busy_read_answers_429_with_retry_after_not_400(
+    stack: Stack, member: Browser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Independent review 2, L15: a member's own quick page reads that hit the gateway's pace
+    came back as a 400 problem page, which the browser and the app take for a bad request. A busy
+    answer is the shared busy panel: 429 with Retry-After (503 when Archidekt can't be reached)."""
+    from mtg_gateway import forum
+    from mtg_gateway.decks import DeckError
+
+    async def busy(*_a, **_k):
+        raise DeckError("rate_limited", "Too many requests just now.", retry_after=7)
+
+    monkeypatch.setattr(forum, "thread", busy)
+    monkeypatch.setattr(forum, "sections", busy)
+    stack.gw.decks.short_reads.drop("user-1")
+    for path in ("/forum/thread/700001", "/forum"):
+        r = await member.http.get(path)
+        assert r.status_code == 429, (path, r.status_code)
+        assert r.headers["retry-after"] == "7" and r.headers["cache-control"] == "no-store"
+        assert "Try again" in r.text, r.text[:400]
+    # a section's Load more (JSON) answers the same way, never 400 (confirmation pass, N4)
+    monkeypatch.setattr(forum, "threads", busy)
+    r = await member.http.get(SECTION, params={"page": "2"}, headers={"Accept": "application/json"})
+    assert r.status_code == 429, (r.status_code, r.text[:300])
+    assert r.headers["retry-after"] == "7" and r.headers["cache-control"] == "no-store"
+    got = r.json()
+    assert got["ok"] is False and got["error"] == "rate_limited" and got["retry_after"] == 7
+    assert "Try again" not in got["message"] and got["message"]
+
+    async def down(*_a, **_k):
+        raise DeckError("unavailable", "Archidekt could not be reached.")
+
+    monkeypatch.setattr(forum, "thread", down)
+    r = await member.http.get("/forum/thread/700002")
+    assert r.status_code == 503 and "retry-after" in r.headers

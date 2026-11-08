@@ -15,6 +15,7 @@ from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -58,7 +59,7 @@ def test_pages_hold_together_at_200_percent_on_the_narrowest_screens(server: Ser
         for path in ZOOM_PAGES:
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             page.evaluate(ROOT_200)
-            page.wait_for_timeout(80)
+            redrawn(page)
             # the Goldfish hand scrolls sideways on purpose; nothing else may
             found = [f for f in page.evaluate(MEASURE) if "gf-card" not in f]
             problems += [f"{path} @{width}px 200%: {f}" for f in found]
@@ -77,10 +78,18 @@ def test_watchlist_inputs_are_styled_like_every_other_input(server: Server) -> N
         ctx = _context(browser, server, sid, 344, touch=True)
         page = ctx.new_page()
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        # the add form is in the Watch a card box since the want-list redesign: open it as a member does
+        page.locator("[data-box-open='w-add']").first.click()
+        page.locator("#w-name").wait_for(state="visible")
+        page.wait_for_function("() => document.getAnimations().every(a => a.playState !== 'running')")
+        # every box and select; a tick box (Add's "Use this finish and alert next time") is not a box
         heights = page.evaluate(
             "() => [...document.querySelectorAll("
-            "'.watch-page input:not([type=hidden]), .watch-page select:not([aria-hidden=true]),"
-            " .watch-page .msel-btn')].filter(e => e.getClientRects().length && !e.closest('[hidden]'))"
+            "'.watch-page input:not([type=hidden]):not([type=checkbox]),"
+            " .watch-page select:not([aria-hidden=true]),"
+            " .watch-page .msel-btn, #w-add input:not([type=hidden]):not([type=checkbox]),"
+            " #w-add select:not([aria-hidden=true]), #w-add .msel-btn')]"
+            ".filter(e => e.getClientRects().length && !e.closest('[hidden]'))"
             ".map(e => [e.id || e.className, Math.round(e.getBoundingClientRect().height),"
             " getComputedStyle(e).borderRadius])"
         )
@@ -105,7 +114,7 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
         ctx = _context(browser, server, sid, 344, touch=True)
         page = ctx.new_page()
         rows = []
-        for path in ("/admin/users", "/account", "/account/details"):
+        for path in ("/admin/users", "/account", "/account/details", "/account/details/archidekt"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             rows += page.evaluate(
                 # the approval mode's own chevron fold (mode-info) and the Account page's rows that
@@ -118,7 +127,7 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
                 " Math.round(s.getBoundingClientRect().height)])"
             )
         browser.close()
-    assert any(t.startswith("What your sign-in shares") for t, _, _ in rows), rows
+    assert any(t.startswith("What linking gives") for t, _, _ in rows), rows  # the disclosure's fold
     for text, display, height in rows:
         assert display == "marker", (text, display)
         assert height >= 40, (text, height)
@@ -175,7 +184,7 @@ def test_tab_reaches_the_deck_owner_before_the_deck_buttons(server: Server) -> N
             assert owner_first is not None, order
             edit_at = page.evaluate("() => document.activeElement.innerText")
             assert "Edit deck" not in edit_at or owner_first < len(order) - 1, order
-            # the owner link lies above the deck's buttons, as the order now says
+            # The owner link lies above the deck's buttons, as the order now says
             tops = page.evaluate(
                 "() => [document.querySelector('.banner .owner').getBoundingClientRect().top,"
                 " document.querySelector('.banner .controls').getBoundingClientRect().top]"
@@ -188,9 +197,9 @@ def test_tab_reaches_the_deck_owner_before_the_deck_buttons(server: Server) -> N
 TOUCH_TARGETS = {
     "/": ".topbar .icon-btn, a.brand, footer.site .links a, main .btn, main button,"
     " main input:not([type=hidden])",
-    "/reports": ".rp-t .title .t a, .rp-t a.act",
+    "/reports": ".rp-t .title .t a, .rp-t .act > a",
     "/collection?view=list": ".ui-widgets a.ext",
-    "/guide": ".guide h2 .anchor",
+    "/guide/how-export": ".guide h4 .anchor",
     "/decks/42": ".curveaxis .mv, .rowbtn, .banner .social .soc",
     "/decks/42?view=table": "ul.rows .row",
     "/decks/42/edit": ".addbox form.addcard .go .foil",
@@ -226,6 +235,8 @@ def test_small_links_and_buttons_are_44px_targets_on_a_touch_screen(server: Serv
             if path == "/decks/42":
                 if page.locator("#stats").count():
                     page.locator("#stats").scroll_into_view_if_needed()
+            if page.locator("label.glance-lbl").count():  # a phone: the widgets open on a tap
+                page.locator("label.glance-lbl").click()
             found = page.evaluate(
                 "(sel) => [...document.querySelectorAll(sel)].filter(e => e.getBoundingClientRect().width)"
                 ".map(e => [e.className, Math.round(e.getBoundingClientRect().height)])",
@@ -240,18 +251,24 @@ def test_small_links_and_buttons_are_44px_targets_on_a_touch_screen(server: Serv
 
 def test_member_text_no_longer_says_verify(server: Server) -> None:  # noqa: F811
     """The proposal page's apply note said the gateway "verifies the result"; member text never
-    says verify. It says the deck is read back."""
+    says verify. The note is one line with a way to the Guide's "Apply a proposal", which says the
+    deck is read back."""
     sid, pending = _seed(server)
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid}, timeout=30)
     body = h.get(f"/proposals/{pending}").text
     assert "verif" not in body.lower(), re.findall(r".{40}verif.{40}", body, re.I)
-    assert "reads the result back from Archidekt" in body
+    assert "href='/guide#how-approve'>How it works</a>" in body
+    guide = h.get("/guide/how-approve").text  # where static/guide.js takes /guide#how-approve
+    assert "verif" not in guide.lower(), re.findall(r".{40}verif.{40}", guide, re.I)
+    assert "then reads the deck back to confirm" in guide
 
 
 def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(server: Server) -> None:  # noqa: F811
-    """Dragging a card into the Commander stack asks "Save anyway?" in the deck page's own dialog
-    strip. On a 344 px touch screen, at 100 % and 200 % text, the strip stays inside the window above
-    the tab bar, nothing in it is clipped, and its buttons are 44 px targets."""
+    """Dragging a card into the Commander stack asks "Save anyway?" in the pop-up box every risky
+    confirm uses (audit F-7: it was the deck page's dialog strip, with Save anyway focused). On a
+    344 px touch screen, at 100 % and 200 % text, the box stays inside the window with its scrim
+    over the tab bar, nothing in it is clipped, its buttons are 44 px targets, Keep it has the
+    focus and the red Save anyway comes last."""
     from playwright.sync_api import sync_playwright
 
     from .test_text_zoom_browser import ROOT_200
@@ -265,16 +282,30 @@ def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(se
             page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
             if zoom:
                 page.evaluate(ROOT_200)
-                page.wait_for_timeout(100)
+                redrawn(page)
+            # the main deck's Sol Ring, from the stack under Commander: the Maybeboard copy sits
+            # below every stack that counts now (0.7.46 audit D-14), a drag of thousands of pixels.
+            # The page is scrolled so the Commander stack's head sits clear of the sticky top bar
+            # with the card in view under it: the drag's own scroll centres the card, which at
+            # 200% text can leave the head under the bar, where the drop never lands
+            page.evaluate(
+                "() => { document.querySelector(\".stack[data-group='Commander'] .stackhead\")"
+                ".scrollIntoView({block: 'start'}); window.scrollBy(0, -120); }"
+            )
             page.drag_and_drop(
-                ".deckview .row[data-card='Sol Ring'][data-zone='side']",
+                ".deckview .row[data-card='Sol Ring'][data-zone='main']",
                 ".stack[data-group='Commander'] .stackhead",
             )
-            dialog = page.locator(".deck-toast[role='alertdialog']")
+            dialog = page.locator(".mtgbox-scrim.in > .mtgbox")
             dialog.wait_for(timeout=5000)
             assert "Save anyway?" in dialog.inner_text()
+            page.wait_for_function(
+                "() => getComputedStyle(document.querySelector('.mtgbox-scrim.in > .mtgbox'))"
+                ".transform === 'none'"
+            )
+            assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
             m = page.evaluate(
-                "() => { const d = document.querySelector(\".deck-toast[role='alertdialog']\");"
+                "() => { const d = document.querySelector('.mtgbox-scrim.in > .mtgbox');"
                 " const r = d.getBoundingClientRect(); const bar = document.querySelector('.tabbar');"
                 " return {left: r.left, right: r.right, bottom: r.bottom, top: r.top, w: innerWidth,"
                 " bar: bar ? bar.getBoundingClientRect().top : innerHeight,"
@@ -283,9 +314,17 @@ def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(se
                 " Math.round(b.getBoundingClientRect().height)])} }"
             )
             assert m["left"] >= 0 and m["right"] <= m["w"] and m["top"] >= 0, m
-            assert m["bottom"] <= m["bar"] + 1, m  # above the bottom tab bar
+            # a phone's box is a sheet at the window's foot, over the tab bar: the scrim covers the
+            # bar, so nothing under the box can be pressed while it asks
+            assert m["bottom"] <= page.viewport_size["height"] + 1, m
+            assert page.evaluate(
+                "() => { const b = document.querySelector('.tabbar'); if (!b) return true;"
+                " const r = b.getBoundingClientRect();"
+                " const e = document.elementFromPoint(r.left + 10, r.top + r.height / 2);"
+                " return !!e && !!e.closest('.mtgbox-scrim'); }"
+            ), m
             assert not m["clipped"], m
             assert all(h >= 44 for _, h in m["buttons"]), m
-            assert m["buttons"][0][0] == "Save anyway", m
+            assert m["buttons"][-1][0] == "Save anyway", m
             ctx.close()
         browser.close()

@@ -1,0 +1,37 @@
+Subject: the price history tests read their dated prices whatever today is
+
+Two upstream tests wrote prices dated 2026-07-09 to 2026-08-08 and read them
+with price_history's default window, the last 90 days from today, so from
+2026-11-07 the prices fell out of it and the tests failed with no code change
+(as the sparkline test did, 0019). They now ask for a window as wide as the
+upstream cheapest-across test already does (days=3650); what they check is
+unchanged.
+
+diff --git a/tests/test_watchlist_tools.py b/tests/test_watchlist_tools.py
+--- a/tests/test_watchlist_tools.py
++++ b/tests/test_watchlist_tools.py
+@@ -296,7 +296,9 @@
+     await server.watchlist_add(server.WatchlistAddInput(name="Sol Ring",
+                                                         passphrase=pp))
+     _seed_prices(db_path)
+-    out = await server.price_history(server.PriceHistoryInput(name="Sol Ring"))
++    # the prices are dated 2026-07/08 and price_history reads 90 days back from today by default:
++    # from 2026-11-07 they fell out of it, so the window is as wide as the cheapest-across test's
++    out = await server.price_history(server.PriceHistoryInput(name="Sol Ring", days=3650))
+     assert "2026-08-08" in out and "7.0" in out
+ 
+ 
+@@ -373,10 +375,11 @@
+     watchlist_db.upsert_price(db, "uuid-b", "2026-08-08", "tcgplayer",
+                               "normal", 20.0)
+     db.close()
++    # (dated 2026-08-08: a window as wide as the cheapest-across test's, as above)
+     out = await server.price_history(server.PriceHistoryInput(
+-        name="Sol Ring", set_code="LTC", collector_number="284"))
++        name="Sol Ring", set_code="LTC", collector_number="284", days=3650))
+     assert "uuid-b" in out and "20.0" in out
+-    out = await server.price_history(server.PriceHistoryInput(name="Sol Ring"))
++    out = await server.price_history(server.PriceHistoryInput(name="Sol Ring", days=3650))
+     assert "uuid-a" in out                    # unpinned = cheapest
+ 
+ 

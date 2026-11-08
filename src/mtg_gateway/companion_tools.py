@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from types import SimpleNamespace
@@ -11,10 +12,18 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import card_models_view, deck_stats, prefs, ui
-from .archidekt import Deck
+from .archidekt import Deck, parse_deck
 from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
-from .cardsearch_view import watched_names
-from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
+from .cardsearch_view import watched_name_list, watched_names
+from .companion import (
+    DECK_CSP,
+    DECK_ERR_MESSAGES,
+    DECKS_JSON_TIMEOUT,
+    EDITOR_CSP,
+    TEXT_PLAIN,
+    _filename,
+    _json_for_html,
+)
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     COMPARE_CSS,
@@ -22,17 +31,19 @@ from .deckpage import (
     GOLDFISH_GUIDE_PREF,
     card_image,
     compare_page_html,
+    deck_check_html,
     deck_title,
     goldfish_page_html,
     precon_by_label,
 )
-from .decks import DeckError, current_client, is_outside_category
+from .decks import DeckError, current_client, is_busy, is_outside_category, split_label
+from .history_view import DELETED_NOTICES
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
     csrf_header_ok,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .reports import NO_FORGE_TO_SHARE, PAIR_NO_FORGE
@@ -45,6 +56,7 @@ from .reports_page import matches as reports_matches
 from .theme import (
     card_size_control,
     icon,
+    time_text,
 )
 from .theme import (
     esc as _esc,
@@ -62,6 +74,12 @@ COMPARE_NO_COMMANDER = (
     "Forge plays only decks with a commander, and the deck you are comparing from has none now, so no "
     "report was made."
 )
+
+
+def _checking(deck: Deck, how: dict[str, Any]) -> str:
+    """The deck page's strip for a deck shown as last read while it is read again
+    (decks.page_deck_live's ``checking``): static/feedback.js says when that read found a change."""
+    return deck_check_html(deck.id, how.get("read_at"), reload=False) if how.get("checking") else ""
 
 
 def add_deck_tool_routes(
@@ -87,11 +105,13 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/edit")
+            return login_redirect_here(request, f"/decks/{deck_id}/edit")
         try:
-            deck = await decks.get_own_deck(sub, deck_id)
+            # the deck as its page last read it (decks.page_deck_live): a change the gateway sent
+            # to it forgets that read, and the save checks the deck on Archidekt itself
+            deck, how = await decks.page_own_deck(sub, deck_id)
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Edit deck"):
                 return busy
             return page(
                 "Cannot edit this deck",
@@ -190,13 +210,14 @@ def add_deck_tool_routes(
         }
         side_name = _esc(deck.side_category())
         # Each suggestion in the add box has the card menu (static/cardmenu.js); with
-        # watchlists on also a Watch button, "Watching" for the names the member watches already
+        # watchlists on also a Watch button, "On your watchlist" for the names the member watches already
         watch_attr = " data-suggest-menu"
         if state.prices is not None:
-            watched = sorted(watched_names(state.prices.watched_cards(sub)))[:200]
+            watched = watched_name_list(watched_names(state.prices.watched_cards(sub)))[:200]
             watch_attr = f" data-suggest-watch='{_esc(json.dumps(watched))}'"
         body = (
-            f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
+            _checking(deck, how)
+            + f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
             "<div id='editor' class='editor'>"
             "<section class='panel edithead'><div class='row'><div class='info'>"
             f"<div class='kicker'>Editing</div><h1 class='deckname'>{_esc(deck.name)}</h1></div>"
@@ -230,12 +251,14 @@ def add_deck_tool_routes(
             # the card size every view with card pictures shares (R-175): the rows' thumbnails
             + card_size_control(cls="field cardsize")
             + "<p class='status' role='status'></p></div>"
-            "<details class='panel pendingbox'><summary>Pending changes <b class='n'>0</b></summary>"
+            "<details class='panel pendingbox'><summary>Pending changes <b class='n zero'>0</b></summary>"
             "<div class='pending'></div><p class='muted small limit'></p></details>"
             # One search bar that adds (the "Search bar" option): chips pick where a card goes,
             # Enter adds it, "3 sol ring" adds three, and the printings of the highlighted card show
             # beside the list on wide screens (static/companion.js).
-            "<section class='panel addbox'><h2>Add a card</h2>" + picker + "<form class='addcard'>"
+            "<section class='panel addbox'><h2>Add a card</h2>"
+            + picker
+            + f"<form class='addcard' data-draft='editor-add:{_esc(deck.id)}'>"
             "<div class='targets' role='group' aria-label='Add to'>"
             "<button type='button' class='tchip on' data-cat='' data-zone='main' aria-pressed='true'>"
             "Auto</button>"
@@ -251,18 +274,21 @@ def add_deck_tool_routes(
             + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false' "
             f"aria-label='{side_name} zone' title='The {side_name} zone: kept outside the deck'>"
             f"{side_name}</button></div>"
-            "<div class='field grow'><label for='addname'>Card name</label>"
-            "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "
-            f"data-suggest-rich data-suggest-qty{watch_attr} placeholder='Type a card name; Enter adds one, "
-            "“3 sol ring” adds three' autocomplete='off' required>"
+            "<div class='field grow'><label for='addname'>Name</label>"
+            "<input id='addname' type='text' name='name' data-suggest='cards' data-suggest-submit "
+            f"data-suggest-rich data-suggest-qty{watch_attr}{ui.hint_attrs('Type a name|Name')} "
+            "autocomplete='off' "
+            "required aria-describedby='addname-help'>"
             "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
             f"<div class='field go'><button>{icon('plus')} Add</button>"
             "<label class='foil'><input type='checkbox' name='foil'> Foil</label></div>"
             "<input type='hidden' id='addcat' name='addcat' value=''>"
             "<input type='hidden' id='addzone' name='addzone' value='main'>"
+            "<p class='muted small addhelp' id='addname-help'>Enter adds one; “3 sol ring” adds three.</p>"
             "<p class='addstatus muted small' role='status' aria-live='polite'></p></form>"
             "<details class='pastebox'><summary class='fold-btn'>Paste a list</summary>"
-            "<form class='pastelist'><label for='pastetext'>One card per line, with a count in front "
+            f"<form class='pastelist' data-draft='editor-paste:{_esc(deck.id)}'>"
+            "<label for='pastetext'>One card per line, with a count in front "
             "(“2 Lightning Bolt”)</label>"
             "<textarea id='pastetext' name='text' rows='6' maxlength='20000' "
             "placeholder='4 Lightning Bolt&#10;1 Sol Ring'></textarea>"
@@ -299,7 +325,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/export")
+            return login_redirect_here(request, f"/decks/{deck_id}/export")
         return await h.deck_page_response(request, sub, sid, deck_id, box="export")
 
     @server.custom_route("/decks/{deck_id}/export.archidekt.txt", methods=["GET"], include_in_schema=False)
@@ -314,22 +340,17 @@ def add_deck_tool_routes(
 
     @server.custom_route("/decks/{deck_id}/export.txt", methods=["GET"], include_in_schema=False)
     async def export_txt(request: Request) -> Response:
-        from .decks import deck_to_text
+        """The plain list (export_formats.to_plain): names under Commander, Deck and Sideboard,
+        no Archidekt marks. The Archidekt .txt is the one that keeps printings and categories."""
+        from .export_formats import to_plain
 
-        def make(deck: Deck) -> str:
-            text = deck_to_text(deck)
-            side = deck_to_text(deck, zone="side")
-            if side:
-                text += "\n\n// Sideboard\n" + side
-            return text + "\n"
-
-        return await _download(request, ".txt", make, TEXT_PLAIN)
+        return await _download(request, ".txt", to_plain, TEXT_PLAIN)
 
     async def _download(request: Request, ext: str, make: Any, media_type: str) -> Response:
         """One export-only file for a deck the member may read: ``make(deck)`` gives the body."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         if not prefs.from_this_site(request):  # a link on another site: Archidekt is not asked
             return Response(
                 "Open this from the gateway's own pages.", 403, headers={"Cache-Control": "no-store"}
@@ -414,7 +435,7 @@ def add_deck_tool_routes(
 
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         if not prefs.from_this_site(request):  # a link on another site: Archidekt is not asked
             return Response(
                 "Open this from the gateway's own pages.", 403, headers={"Cache-Control": "no-store"}
@@ -479,7 +500,9 @@ def add_deck_tool_routes(
                         c.collector_number,
                         cell(c.categories[0]) if c.categories else "",
                         cell(",".join(cell(x) for x in c.categories[1:])),
-                        cell(c.label),
+                        # the tag's name only, as Archidekt's own export writes it ("Have", not
+                        # "Have,#37d67a"); an untagged row (",#656565") is blank
+                        cell(split_label(c.label)[0]),
                         "" if c.cmc is None else (int(c.cmc) if float(c.cmc).is_integer() else c.cmc),
                         cell(c.mana_cost),
                         cell(" ".join(c.supertypes + c.types)),
@@ -497,7 +520,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         data = await form(request)
         if not check_csrf(sid, data):
             return page(
@@ -511,7 +534,8 @@ def add_deck_tool_routes(
         # forge=0 runs the report without Forge games (a quick goldfish-only run)
         no_forge = str(data.get("forge", "")).strip().lower() in ("0", "false", "off", "no")
         try:
-            report = await reports.run(sub, deck_id, forge=False if no_forge else None)
+            # answered once the report is stored: its page opens and fills in while the run goes on
+            report = await reports.start(sub, deck_id, forge=False if no_forge else None)
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
@@ -524,7 +548,7 @@ def add_deck_tool_routes(
         The gateway's own database only."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/reports")
+            return login_redirect_here(request, "/reports")
         query = ReportsQuery.parse(request.query_params)
         now = time.time()
         index = reports.index(sub)
@@ -544,6 +568,8 @@ def add_deck_tool_routes(
         # the newest three decks tested: the lethal turn of each one's newest report and the one before
         two: dict[str, list[dict[str, Any]]] = {}
         for r in index:
+            if r.get("source_label"):  # a list's, a proposal's or a comparison's report: no deck trend
+                continue
             if r["deck_id"] in two or len(two) < 3:
                 two.setdefault(r["deck_id"], [])
                 if len(two[r["deck_id"]]) < 2:
@@ -571,9 +597,12 @@ def add_deck_tool_routes(
             latest=latest,
             trends=trends,
             now=now,
+            # the address names what went; the words are the page's own
+            notice=DELETED_NOTICES.get(request.query_params.get("deleted") or "", ""),
+            csrf=_csrf(s, sid) or "",
         )
         return page(
-            "Reports",
+            "Assistant: Reports",
             body,
             sub=sub,
             sid=sid,
@@ -581,6 +610,7 @@ def add_deck_tool_routes(
             heading=False,
             main_class="ui-wide",
             extra_css=REPORTS_PAGE_CSS,
+            extra_scripts=("reports.js",),
         )
 
     @server.custom_route("/decks/{deck_id}/goldfish", methods=["GET"], include_in_schema=False)
@@ -591,9 +621,9 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/goldfish")
+            return login_redirect_here(request, f"/decks/{deck_id}/goldfish")
         try:
-            deck = await decks.get_any_deck(sub, deck_id)
+            deck, how = await decks.page_deck_live(sub, deck_id)
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         # The deck's newest Forge solo test, for the line under the intro (the Goldfish thread's
@@ -627,7 +657,7 @@ def add_deck_tool_routes(
                 guide_hidden=state.db.get_pref(sub, GOLDFISH_GUIDE_PREF) == "hidden",
                 forge_solo=forge_solo if isinstance(forge_solo, dict) else None,
                 csrf=_csrf(s, sid),
-                extra_head=extra,
+                extra_head=_checking(deck, how) + extra,
             )
             + models_html,
             sub=sub,
@@ -675,7 +705,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/compare")
+            return login_redirect_here(request, f"/decks/{deck_id}/compare")
         data = await form(request)
         if not check_csrf(sid, data):
             return page(
@@ -742,7 +772,7 @@ def add_deck_tool_routes(
             if (plan := busy_plan(exc)) is not None:
                 # the shared busy page, but Try again opens the Compare page: this route takes POST only
                 compare_url = f"/decks/{deck_id}/compare{query}"
-                busy = page(plan.title, busy_body(plan, compare_url), sub=sub, sid=sid, status=plan.status)
+                busy = page("Compare", busy_body(plan, compare_url), sub=sub, sid=sid, status=plan.status)
                 busy.headers.update(_headers(plan))
                 return busy
             # the deck lost its commander after the page loaded: plain words, not the assistant's
@@ -756,20 +786,23 @@ def add_deck_tool_routes(
             )
         finally:
             reports.release_pair(sub, hold)
-        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}", status_code=303)
+        # the pair side by side (owner decision C7); each report links to it
+        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}/head-to-head", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:
         """This deck against another: a preconstructed deck (the picker lists Archidekt's), any
-        deck id or link, or a pasted list. The same comparison the assistant's compare_decks
-        makes: what was taken out of the other deck, what was put in, what changed count, and
-        the statistics' differences."""
+        deck id or link, one of the member's decks or this deck's snapshots (listed under the box,
+        ``with=snap_<id>`` for a snapshot), or a pasted list. The same comparison the assistant's
+        compare_decks makes: what was taken out of the other deck, what was put in, what changed
+        count, and the statistics' differences; then the paired solo test of both (kept as a
+        report) and, for two Commander decks, Forge games against the same opponents."""
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/compare")
+            return login_redirect_here(request, f"/decks/{deck_id}/compare")
         try:
-            deck = await decks.get_any_deck(sub, deck_id)
+            deck, how = await decks.page_deck_live(sub, deck_id)
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         qp = request.query_params
@@ -790,6 +823,14 @@ def add_deck_tool_routes(
                 other_name = "the pasted list"
             except DecklistError as exc:
                 error, status = f"The pasted list could not be read: {_esc(exc)}", 400
+        elif other_ref.startswith("snap_"):
+            # one of the member's snapshots (the picker under the box): the deck as it stood then
+            snap = state.db.get_snapshot(other_ref[5:], sub)
+            if snap:
+                other = parse_deck(snap["deck"])
+                other_name = f"{other.name or 'this deck'} (snapshot, {time_text(snap['taken_at'])})"
+            else:
+                error, status = "That snapshot isn't in your history. It may have been deleted.", 404
         elif other_ref:
             try:
                 # a precon picked by name (the suggestion list) is looked up in the precon listing
@@ -797,12 +838,23 @@ def add_deck_tool_routes(
                 other = await decks.get_any_deck(sub, str(precon_id) if precon_id else other_ref)
                 other_name = other.name or f"deck {other.id}"
             except DeckError as exc:
+                if is_busy(exc):  # Archidekt can't be asked now: the shared busy page, as for this deck
+                    return h.deck_problem(request, exc, sub=sub, sid=sid)
                 error, status = (
                     f"That deck could not be read: {_esc(exc)}",
                     400 if exc.kind != "not_found" else 404,
                 )
         result = deck_stats.compare(other, deck) if other is not None else None
-        body = compare_page_html(
+        try:  # the member's decks for the picker, as cached: the page never waits on Archidekt for it
+            mine = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), DECKS_JSON_TIMEOUT)
+        except (DeckError, TimeoutError):
+            mine = None
+        if mine is None:  # cold or Archidekt unavailable: the list as last read, if any
+            try:
+                mine = decks.last_deck_list(sub)
+            except DeckError:
+                mine = None
+        body = _checking(deck, how) + compare_page_html(
             deck,
             other=other,
             other_name=other_name,
@@ -813,6 +865,9 @@ def add_deck_tool_routes(
             error=error,
             csrf=_csrf(s, sid),
             forge_on=reports.forge is not None,
+            mine=mine,
+            snapshots=decks.list_snapshots(sub, deck_id=str(deck.id), limit=8),
+            ab_on=reports.mf is not None,
         )
         return page(
             f"Compare: {deck_title(deck)}",

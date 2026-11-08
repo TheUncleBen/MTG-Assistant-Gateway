@@ -28,6 +28,22 @@ def _arena_line(c: DeckCard) -> str:
     return line
 
 
+def side_rows(deck: Deck) -> list[DeckCard]:
+    """The rows every export takes as the sideboard: those kept outside the deck, except the
+    Maybeboard, which no game client has and which is never exported to one."""
+    return [c for c in deck.side_cards if "Maybeboard" not in c.categories]
+
+
+def _summed(cards: list[DeckCard]) -> list[tuple[str, int]]:
+    """``(name, copies)`` per card name, sorted by name: rows of other printings, finishes or
+    categories are one card to a game client."""
+    out: dict[str, list] = {}
+    for c in cards:
+        if c.name.strip() and c.quantity > 0:
+            out.setdefault(c.name.casefold(), [c.name, 0])[1] += c.quantity
+    return [(name, n) for _key, (name, n) in sorted(out.items())]
+
+
 def to_arena(deck: Deck) -> str:
     """Arena's import text: ``1 Name (SET) 123`` under ``Commander``, ``Companion``, ``Deck`` and
     ``Sideboard`` headings (the headings Arena's own export writes). Cards with the Archidekt
@@ -36,7 +52,7 @@ def to_arena(deck: Deck) -> str:
     commanders = [c for c in deck.main_cards if deck.is_commander(c)]
     companions = [c for c in deck.cards if "Companion" in c.categories and not deck.is_commander(c)]
     main = [c for c in deck.main_cards if c not in commanders and c not in companions]
-    side = [c for c in deck.side_cards if c not in companions and "Maybeboard" not in c.categories]
+    side = [c for c in side_rows(deck) if c not in companions]
     blocks: list[str] = []
     for title, rows in (
         ("Commander", commanders),
@@ -192,17 +208,32 @@ def to_edhplay(deck: Deck) -> EdhplayList:
     return EdhplayList(text, commanders, left_out, companion)
 
 
+def to_plain(deck: Deck) -> str:
+    """A plain list: ``1 Name`` lines under ``Commander``, ``Deck`` and ``Sideboard`` headings,
+    with no printing, finish, category or tag marks, so any app or person can read it. Rows of the
+    same card are one line; the sideboard follows the export rule (``side_rows``)."""
+    commanders = [c for c in deck.main_cards if deck.is_commander(c)]
+    main = [c for c in deck.main_cards if c not in commanders]
+    blocks = [
+        title + "\n" + "\n".join(f"{n} {name}" for name, n in _summed(rows))
+        for title, rows in (("Commander", commanders), ("Deck", main), ("Sideboard", side_rows(deck)))
+        if _summed(rows)
+    ]
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+
 def to_mtgo_dek(deck: Deck) -> str:
     """An MTGO ``.dek`` file: the ``Deck``/``Cards`` XML the MTGO client exports, one ``Cards``
-    element per row with ``Quantity``, ``Sideboard`` and ``Name``. MTGO's own catalogue ids
-    (``CatID``) are not known to the gateway and are left out; the client matches by name."""
+    element per card name and zone with ``Quantity``, ``Sideboard`` and ``Name``. The sideboard
+    follows the export rule (``side_rows``: no Maybeboard). MTGO's own catalogue ids (``CatID``)
+    are not known to the gateway and are left out; the client matches by name."""
     rows = []
-    for c in _sorted(deck.cards):
-        side = "false" if deck.in_deck(c) else "true"
-        rows.append(
-            f"  <Cards Quantity={quoteattr(str(c.quantity))} Sideboard={quoteattr(side)} "
-            f'Name={quoteattr(c.name)} Annotation="0" />'
-        )
+    for zone, cards in (("false", deck.main_cards), ("true", side_rows(deck))):
+        for name, n in _summed(cards):
+            rows.append(
+                f"  <Cards Quantity={quoteattr(str(n))} Sideboard={quoteattr(zone)} "
+                f'Name={quoteattr(name)} Annotation="0" />'
+            )
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<Deck xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '

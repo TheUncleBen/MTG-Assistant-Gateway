@@ -1,7 +1,7 @@
-"""Watch this card from Card search: a Watch button on each result's picture ("Watching"
+"""Watch this card from Card search: a Watch button on each result's picture ("On your watchlist"
 with a check when the card is already watched; an icon in the list view), the page hint, the
 card menu (right-click, press and hold, the Menu key or Shift+F10) with Open card, Watch this card,
-Art variants…, Add to deck… and Open on Scryfall, the toast with Undo, and nothing of it when
+Printings…, Add to deck… and Open on Scryfall, the toast with Undo, and nothing of it when
 watchlists are off. A Watch button on a card already watched keeps its alerts."""
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from .test_cardsearch_browser import CATALOG, _chromium
 from .test_deck_menu_browser import PNG
 from .test_suggest_browser import Server
 from .test_watchlist import Clock, _browser, _options
+from .waits import quiet
 
 stack_options = stack_with(_options())
 
@@ -48,7 +49,8 @@ def test_tiles_have_a_watch_button_only_with_watchlists_on() -> None:
         SOL, can_add=True, reason="", watched=cv.watched_names([{"name": "sol  RING"}])
     )
     assert "class='wbtn on'" in watched and "aria-label='Sol Ring is on your watchlist'" in watched
-    assert "title='On your watchlist'" in watched and "<span>Watching</span>" in watched
+    assert "title='On your watchlist'" in watched and "<span>On your watchlist</span>" in watched
+    assert "Watching" not in watched
 
 
 def test_a_printing_search_watches_the_shown_printing_and_the_list_has_an_icon() -> None:
@@ -150,7 +152,11 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         btn.click()
         toast = page.locator(".toast.cards-toast")
         toast.wait_for(timeout=5000)
-        assert toast.locator(".msg").inner_text() == "Sol Ring added to your watchlist."
+        # with the price alert it came with, the member's default (independent review 2, L5)
+        assert re.fullmatch(
+            r"Sol Ring added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+            toast.locator(".msg").inner_text(),
+        ), toast.locator(".msg").inner_text()
         assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Ring"
         page.wait_for_function(
             "() => document.querySelector(\".wbtn[data-watch='Sol Ring']\").classList.contains('on')"
@@ -174,9 +180,10 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         assert items == [
             "Open card",
             "Add to deck…",
-            "Add to collection",
+            "Add to binder",
             "Watch this card",
-            "Art variants…",
+            "Printings…",
+            "Pin card",
             "Copy name",
             "Open on Scryfall",
         ]
@@ -190,7 +197,7 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         pic.focus()
         page.keyboard.press("Shift+F10")
         menu.wait_for(timeout=3000)
-        menu.locator("button", has_text="Art variants…").click()
+        menu.locator("button", has_text="Printings…").click()
         page.locator(".printpick.open").wait_for(timeout=3000)
         assert page.evaluate("document.documentElement.scrollWidth") <= vw
         # browse mode: a printing has "Watch this printing" (no "Use this printing" off a deck)
@@ -199,11 +206,33 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         watch.wait_for(timeout=3000)
         assert page.locator(".printpick .ppuse").count() == 0
         watch.click()
+        # watched: it says so, offers no second watch, and opens its watchlist entry
         page.wait_for_function(
-            "() => document.querySelector('.printpick .ppwatch').textContent === 'Watching'"
+            "() => document.querySelector('.printpick .ppwatch').textContent === 'On your watchlist'"
         )
+        assert watch.is_disabled()
+        name = pic.get_attribute("data-card")
+        entry = page.locator(".printpick .ppwatched:visible")
+        assert entry.inner_text() == "Open the watchlist"
+        assert entry.get_attribute("href") == "/watchlist?q=" + name.replace(" ", "%20")
         rows = server.app.state.gateway.prices.watched_cards("user-1")
         assert len(rows) == 1 and rows[0]["set_code"] and rows[0]["collector_number"]
+        # opened again, the printing is on the watchlist from the start
+        for _ in range(2):  # on a phone the first Escape closes the preview sheet
+            if page.locator(".printpick.open").count():
+                page.keyboard.press("Escape")
+                quiet(page)
+        page.wait_for_function("() => !document.querySelector('.printpick.open')")
+        pic.focus()
+        page.keyboard.press("Shift+F10")
+        menu.wait_for(timeout=3000)
+        menu.locator("button", has_text="Printings…").click()
+        page.locator(".printpick.open .pptile").first.click()
+        page.wait_for_function(
+            "() => document.querySelector('.printpick .ppwatch').textContent === 'On your watchlist'"
+        )
+        assert page.locator(".printpick .ppwatch:visible").is_disabled()
+        assert len(server.app.state.gateway.prices.watched_cards("user-1")) == 1
         assert errors == []
         browser.close()
 
@@ -232,21 +261,70 @@ def test_the_deck_page_card_menu_watches_a_card_and_opens_art_variants(tmp_path:
             menu = page.locator(".ctxmenu[role=menu]")
             menu.wait_for(timeout=3000)
             labels = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
-            # the two new items right under Open card
-            assert labels[:3] == ["Open card", "Watch this card", "Art variants…"], labels
+            # Printings… right under Open card; Watch this card in the Elsewhere group (0.7.46)
+            assert labels[:2] == ["Open card", "Printings…"] and "Watch this card" in labels, labels
             menu.locator("button", has_text="Watch this card").click()
             toast = page.locator(".deck-toast", has_text="watchlist")
             toast.wait_for(timeout=5000)
-            assert toast.locator(".msg").inner_text() == "Sol Ring added to your watchlist."
+            assert re.fullmatch(
+                r"Sol Ring added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+                toast.locator(".msg").inner_text(),
+            ), toast.locator(".msg").inner_text()
             assert [w["name"] for w in s.app.state.gateway.prices.watched_cards("user-1")] == ["Sol Ring"]
             toast.locator("button", has_text="Undo").click()
             page.locator(".deck-toast", has_text="no longer").wait_for(timeout=5000)
             assert s.app.state.gateway.prices.watched_cards("user-1") == []
+            # watched (and on the next visit too): the menu opens its watchlist entry instead
             card.click(button="right")
             menu.wait_for(timeout=3000)
-            menu.locator("button", has_text="Art variants…").click()
+            menu.locator("button", has_text="Watch this card").click()
+            page.locator(".deck-toast", has_text="added to your watchlist").wait_for(timeout=5000)
+            for again in (False, True):
+                if again:
+                    page.reload(wait_until="networkidle")
+                card.click(button="right")
+                menu.wait_for(timeout=3000)
+                labels = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
+                assert labels[:2] == ["Open card", "Printings…"] and "On your watchlist" in labels, labels
+                entry = menu.locator("a[role=menuitem]", has_text="On your watchlist")
+                assert entry.get_attribute("href") == "/watchlist?q=Sol%20Ring"
+                page.keyboard.press("Escape")
+            assert len(s.app.state.gateway.prices.watched_cards("user-1")) == 1
+            card.click(button="right")
+            menu.wait_for(timeout=3000)
+            menu.locator("button", has_text="Printings…").click()
             page.locator(".printpick.open").wait_for(timeout=3000)
             assert errors == []
             browser.close()
     finally:
         s.stop()
+
+
+async def test_a_new_watch_says_the_price_alert_it_came_with(stack: Stack, monkeypatch) -> None:
+    """Independent review 2, L5: the Watch toast said only "added to your watchlist", though the
+    new watch came with the member's default price alert (a 10% drop), and so with a push later.
+    The answer carries the toast's words, and the card menus show them."""
+    from pathlib import Path
+
+    Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        csrf = await b.csrf("/watchlist")
+        hdr = {"Content-Type": "application/json", "X-CSRF-Token": csrf}
+        r = await b.http.post("/watchlist/api/watch", content=json.dumps({"name": "Sol Ring"}), headers=hdr)
+        d = r.json()
+        assert r.status_code == 200 and d["watch"]["created"] is True
+        assert d["watch"]["alerts"] == {"drop": 10.0}
+        assert d["message"].startswith(
+            "Sol Ring added to your watchlist, with a price alert: drops 10% below $"
+        )
+        again = await b.http.post(
+            "/watchlist/api/watch", content=json.dumps({"name": "Sol Ring"}), headers=hdr
+        )
+        assert again.json()["message"] == "Sol Ring is on your watchlist."
+    finally:
+        await b.aclose()
+    static = Path(__file__).resolve().parent.parent / "src" / "mtg_gateway" / "static"
+    for script in ("cardmenu.js", "deck.js"):
+        text = (static / script).read_text(encoding="utf-8")
+        assert re.search(r"toast\(d\.message \|\| [^;]*added to your watchlist\.\"", text), script

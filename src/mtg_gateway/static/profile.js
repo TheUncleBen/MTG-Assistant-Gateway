@@ -23,15 +23,8 @@
       if (i.type === "checkbox") body.append(i.name, i.checked ? "1" : "0");
       else if (i.name) body.append(i.name, i.value);
     });
-    return fetch(form.getAttribute("action"), {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: body.toString()
-    }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () {
-        return { ok: false, status: r.status, message: "The gateway sent an answer this page could not read. Reload the page to see whether the change was made." };
-      });
-    });
+    // never rejects: signed out and no connection come back as {ok: false} in the site's words
+    return window.MtgFetch.answer(form.getAttribute("action"), { method: "POST", body: body.toString(), form: true });
   }
   function revert(form) {
     var was = $("[name=was]", form), sw = $("input[type=checkbox]", form), sel = $("select", form);
@@ -58,7 +51,7 @@
     postForm(form).then(function (d) {
       form.removeAttribute("aria-busy");
       $$("input, select", form).forEach(function (i) { i.disabled = false; });
-      if (!d.ok) { revert(form); toast(d.message || "Archidekt refused the change.", { error: true }); return; }
+      if (!d.ok) { revert(form); if (Menu && Menu.fail) Menu.fail(d, "Archidekt refused the change."); else toast(d.message || "Archidekt refused the change.", { error: true }); return; }
       remember(form);
       if (d.verified === false) toast(d.notice || "Sent to Archidekt, but the read-back didn't confirm the change.", { error: true });
       else toast(d.notice || "Saved on Archidekt.", { ok: true, ms: 5000 });

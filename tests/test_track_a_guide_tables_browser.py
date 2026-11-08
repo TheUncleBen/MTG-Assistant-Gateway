@@ -38,6 +38,9 @@ TABLES = """() => [...document.querySelectorAll('.guide .tbl table')].map(t => {
   };
 })"""
 
+# the Reference topics that hold a table (the tool names' fold is ref-tools)
+TABLE_TOPICS = ("ref-assistant", "ref-pages", "ref-approval", "ref-keys", "ref-formats", "ref-tools")
+
 SIZES = [(344, 882, True), (390, 844, True), (673, 841, True), (1280, 800, False)]
 
 
@@ -67,6 +70,8 @@ def test_the_guide_tables_stay_readable_at_every_width_and_text_size(server: Ser
                         color_scheme=scheme,
                         is_mobile=phone,
                         has_touch=phone,
+                        # the site's service worker answers the second page itself, past ctx.route
+                        service_workers="block",
                     )
                     ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
 
@@ -77,17 +82,22 @@ def test_the_guide_tables_stay_readable_at_every_width_and_text_size(server: Ser
                         route.fulfill(response=got, body=body)
 
                     if text != "100%":
-                        ctx.route("**/guide", sized)
+                        ctx.route("**/guide/ref-*", sized)
                     page = ctx.new_page()
                     errors: list[str] = []
                     page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
-                    page.goto(f"{server.base}/guide", wait_until="networkidle")
                     where = (vw, text, scheme)
-                    tables = page.evaluate(TABLES)
+                    tables = []
+                    # a page a topic (decision C8): each reference table on its topic's page
+                    for topic in TABLE_TOPICS:
+                        page.goto(f"{server.base}/guide/{topic}", wait_until="networkidle")
+                        found = page.evaluate(TABLES)
+                        assert len(found) == 1, (where, topic, found)
+                        tables += found
+                        width = page.evaluate("() => document.documentElement.scrollWidth")
+                        assert width <= vw, (where, topic, width)
                     print(where, tables)
                     assert len(tables) == 6, where  # the five reference tables and the tool-names fold
-                    width = page.evaluate("() => document.documentElement.scrollWidth")
-                    assert width <= vw, (where, width)
                     for t in tables:
                         # a wrapped cell holds at least about ten letters a line (squeezed, about
                         # two at 200% text and three or four at 100%)

@@ -5,18 +5,22 @@ and the backend's own words (decks.category_line, decks.CATEGORIES_SAVED) everyw
 
 from __future__ import annotations
 
+import html
 import re
 
+from mtg_gateway import decks as decks_mod
 from mtg_gateway import modes
 from mtg_gateway.decks import CATEGORIES_SAVED, OPEN_TABS_NOTE
 from mtg_gateway.theme import esc
 
-from .conftest import Stack
+from .conftest import Stack, aged_stamp
 from .test_companion import NAV, linked_browser
 from .test_deck_categories import RAMP, _give_categories
 
 SETTINGS = "/decks/42/settings"
 POST = "/decks/42/categories"
+# where a delete goes: the notice, with its Undo (review F10)
+DELETED = r"\?ok=category_deleted&undo=[A-Za-z0-9_-]+#categories$"
 
 
 def _ids(page: str) -> dict[str, int]:
@@ -141,6 +145,77 @@ async def test_a_category_without_a_record_is_edited_like_any_other(stack: Stack
         await b.aclose()
 
 
+async def test_a_new_deck_shows_archidekts_default_maybeboard_and_sideboard(stack: Stack) -> None:
+    """The owner, 2026-10-28: a new deck's Categories said "No categories yet." though every Archidekt
+    deck has a Maybeboard and a Sideboard. Missing from the deck's answer, they show as rows
+    without a record (Not in deck on), edited like any other: the save gives one its record."""
+    deck = stack.ark.decks[42]
+    deck["categories"] = []
+    for row in deck["cards"]:
+        row["categories"] = []
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        assert "No categories yet." not in page
+        rows = dict(re.findall(r"<li data-cat='(d\d)' data-name='([^']+)'>", page))
+        assert sorted(rows.values()) == ["Maybeboard", "Sideboard"], rows
+        for cid in rows:
+            row = page.split(f"<li data-cat='{cid}'")[1].split("</li>")[0]
+            assert f"name='not_in_deck_{cid}' value='1' checked" in row and "name='delete'" not in row
+        side = next(k for k, v in rows.items() if v == "Sideboard")
+        data = dict(re.findall(r"<input type='hidden' name='(was_[a-z_]+_d\d)' value='([^']*)'>", page))
+        for cid, name in rows.items():
+            data[f"name_{cid}"] = name
+            for flag in ("not_in_deck", "not_in_price"):
+                if f"name='{flag}_{cid}' value='1' checked" in page:
+                    data[f"{flag}_{cid}"] = "1"
+        data[f"name_{side}"] = "Side"
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "save", "confirmed": "1", **data}, headers=NAV
+        )
+        assert r.status_code == 303, r.text
+        assert [c["name"] for c in stack.ark.category_creates] == ["Sideboard"]
+        assert stack.ark.category_creates[0]["includedInDeck"] is False
+        assert [p["name"] for p in stack.ark.category_patches] == ["Side"]
+    finally:
+        await b.aclose()
+
+
+async def test_a_category_save_costs_a_read_a_write_and_the_read_back(stack: Stack, monkeypatch) -> None:
+    """Review F1: one category create from the panel sent 8 to 11 Archidekt calls (the deck read
+    five times, and the backup copy on the first save of a sitting). Now: the page's own read
+    (which also serves the proposal, the snapshot and the check before the write), the write, and
+    the read back (which also draws the panel). The gateway's snapshot is still taken; as on the
+    deck page, the member's own one-click save makes no backup copy on Archidekt."""
+    # a busy test machine may take longer than ONE_CLICK_REUSE between the read and the write
+    # (the save then reads again, as it should); the window itself is tested on its own
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 60.0)
+    _give_categories(stack.ark)
+    assert stack.gw.decks.live.get("archidekt_backups")  # backups on, as shipped
+    b = await linked_browser(stack)
+    try:
+        _page, csrf = await _csrf(b)
+        for name in ("Removal", "Draw"):
+            stack.ark.calls.clear()
+            r = await b.http.post(
+                POST,
+                data={"csrf": csrf, "action": "create", "category": name, "json": "1"},
+                headers={"Accept": "application/json"},
+            )
+            assert r.status_code == 200 and r.json()["ok"] is True, r.text
+            assert name in r.json()["html"]  # the panel drawn from the read back
+            assert [m + " " + p for m, p in stack.ark.calls] == [
+                "GET /api/decks/42/",
+                "POST /api/decks/createCategory/",
+                "GET /api/decks/42/",
+            ], stack.ark.calls
+        history = (await b.http.get("/api/v1/decks/42/history")).json()
+        assert [p["state"] for p in history["proposals"]] == ["applied", "applied"]
+        assert history["snapshots"]  # the gateway's snapshot from before the first save
+    finally:
+        await b.aclose()
+
+
 async def test_create_a_category_from_the_panel(stack: Stack) -> None:
     _give_categories(stack.ark)
     b = await linked_browser(stack)
@@ -230,7 +305,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
             data={"csrf": csrf, "action": "delete", "delete": str(ids["Maybeboard"]), "confirmed": "1"},
             headers=NAV,
         )
-        assert r.status_code == 303 and r.headers["location"].endswith("?ok=category_deleted#categories")
+        assert r.status_code == 303 and re.search(DELETED, r.headers["location"]), r.headers
         assert stack.ark.category_deletes == [ids["Maybeboard"]]
         # a category with cards: the confirm asks where its cards go (Archidekt only deletes an
         # empty category), and the cards move before the delete
@@ -245,7 +320,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         assert "muted small" not in form.split("</form>")[0]
         # nothing is picked in advance (the first category is often Commander)
         assert (
-            "<select id='move_cards_to' name='move_cards_to' required>"
+            "<select id='move_to' name='move_to' required>"
             "<option value='' disabled selected hidden>Pick a category…</option><option value='Commander'>"
         ) in r.text
         assert "<option value='Ramp'>" not in r.text
@@ -257,7 +332,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         )
         assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
         assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
-        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<select id='move_to' name='move_to' required>" in r.text
         # a forged yes without a pick gets the same page, not a bare refusal
         r = await b.http.post(
             POST,
@@ -266,7 +341,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         )
         assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
         assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
-        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<select id='move_to' name='move_to' required>" in r.text
         r = await b.http.post(
             POST,
             data={
@@ -278,7 +353,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
             },
             headers=NAV,
         )
-        assert r.status_code == 303 and r.headers["location"].endswith("?ok=category_deleted#categories")
+        assert r.status_code == 303 and re.search(DELETED, r.headers["location"]), r.headers
         assert ids["Ramp"] in stack.ark.category_deletes
         assert "Ramp" not in [c["name"] for c in stack.ark.decks[42]["categories"]]
         assert all(
@@ -345,7 +420,11 @@ async def test_save_applies_at_once_and_the_panel_says_so(stack: Stack) -> None:
         assert "Net " not in review and ">2 changes<" not in review
         assert "Undo this change</button>" in review
         history = (await b.http.get("/history", headers=NAV)).text  # the snapshot, linking the change
-        assert f"<a href='/proposals/{pid}'>the change</a>" in history
+        assert f" data-review='/proposals/{pid}'" in history  # in the row's ⋮, not the line (L9)
+        assert f"<a class='ui-cap' href='/proposals/{pid}'>The change it was taken before</a>" not in history
+        snap_id = re.search(r"name='snapshot_id' value='([^']+)'", history).group(1)
+        opened = (await b.http.get(f"/history?open=s-{snap_id}", headers=NAV)).text
+        assert f"<a class='ui-cap' href='/proposals/{pid}'>The change it was taken before</a>" in opened
     finally:
         await b.aclose()
 
@@ -403,9 +482,13 @@ async def test_a_change_to_which_cards_count_asks_first_then_saves(stack: Stack)
     try:
         page, csrf = await _csrf(b)
         ids = _ids(page)
+        # Archidekt's default Sideboard is there without a record: a rename onto it is refused
+        data = _form(page, ids, **{f"name_{ids['Ramp']}": "Sideboard"})
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)
+        assert r.status_code == 400 and "already has a category named" in html.unescape(r.text)
         for change in (
             {f"not_in_deck_{ids['Maybeboard']}": None},
-            {f"name_{ids['Ramp']}": "Sideboard"},
+            {f"name_{ids['Maybeboard']}": "Maybe"},
         ):
             data = _form(page, ids, **change)
             r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)
@@ -677,7 +760,7 @@ def test_the_category_words_fill_in_names_and_counts() -> None:
     assert modes.category_names_line(["A"]) == "Deletes “A”."
     assert modes.category_words("move_commander", n=1) == (
         "Cards in a Premier category are the deck's commanders. Moving this card there makes it a "
-        "commander, which can change the deck's legality and its colours."
+        "commander, which can change the deck's legality and its colors."
     )
     assert modes.category_words("move_counts", n=1).startswith(
         "Moving this card there changes whether it counts"
@@ -687,3 +770,67 @@ def test_the_category_words_fill_in_names_and_counts() -> None:
     )
     for text in modes.CATEGORY_WORDS.values():
         assert "—" not in text and "verify" not in text.lower() and '"' not in text
+
+
+async def test_a_category_delete_has_its_own_snapshot_and_an_undo_that_puts_it_back(stack: Stack) -> None:
+    """Review F10 (T-190 step 7): the settings page's saves of a sitting shared one snapshot, so
+    there was no snapshot from just before a category delete, and a delete that moved the cards had
+    no Undo. A delete starts a snapshot of its own; the notice after it offers Undo, which re-creates
+    the category and moves its cards back (a restore of that snapshot, the member's own press)."""
+    _give_categories(stack.ark)
+    stack.ark.decks[42]["categories"].append(
+        {"name": "Removal", "isPremier": False, "includedInDeck": True, "includedInPrice": True}
+    )
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        # an earlier save of the sitting: its snapshot holds the deck before the create
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "create", "category": "Draw"}, headers=NAV)
+        assert r.status_code == 303, r.text
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(ids["Ramp"]),
+                "move_cards_to": "Removal",
+                "move_ok": "1",
+            },
+            headers=NAV,
+        )
+        assert r.status_code == 303, r.text
+        assert "Ramp" not in [c["name"] for c in stack.ark.decks[42]["categories"]]
+        history = (await b.http.get("/api/v1/decks/42/history")).json()
+        rows = [stack.gw.decks.db.get_proposal(p["id"], "user-1") for p in history["proposals"]]
+        (delete,) = [p for p in rows if any(c.get("op") == "delete" for c in p["changes"]["categories"])]
+        (create,) = [p for p in rows if p is not delete]
+        assert create["snapshot_id"] != delete["snapshot_id"]  # a snapshot from just before the delete
+        page = (await b.http.get(r.headers["location"], headers=NAV)).text
+        m = re.search(
+            r"<form method='post' action='/proposals/undo' class='undo' data-undo-box>(.*?)</form>", page
+        )
+        assert m and ">Undo</button>" in m.group(1), page
+        fields = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", m.group(1)))
+        assert fields["snapshot"] == delete["snapshot_id"] and fields["applied"] == delete["id"]
+        r = await b.http.post("/proposals/undo", data=fields)  # what Undo puts back
+        assert r.status_code == 200 and "name='action' value='undo'" in r.text, r.text
+        confirm = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.text))
+        confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
+        r = await b.http.post("/proposals/undo", data=confirm)
+        # back to Deck settings' categories with its notice (independent review 2, M2)
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=undone#categories", (
+            r.text
+        )
+        back = (await b.http.get(r.headers["location"], headers=NAV)).text
+        assert "Undone. The deck is back as it was before that change." in back
+        names = [c["name"] for c in stack.ark.decks[42]["categories"]]
+        assert "Ramp" in names and "Draw" in names  # the earlier save stays
+        filed = {
+            c["card"]["oracleCard"]["name"]
+            for c in stack.ark.decks[42]["cards"]
+            if c["categories"] == ["Ramp"]
+        }
+        assert filed == set(RAMP)
+    finally:
+        await b.aclose()

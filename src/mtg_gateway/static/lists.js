@@ -17,7 +17,52 @@
   }
   showTab();
   if (curTab && window.ResizeObserver) new ResizeObserver(showTab).observe(curTab);
+  // the other tabs' counts, read after the page has drawn (lists_page.COUNTS_API); the hub's rows
+  // (Binder › Lists, .lp-hubrows) ask the same way
+  var tabBar = document.querySelector(".lp-tabs[data-counts], .lp-hubrows[data-counts]");
+  if (tabBar && window.fetch) {
+    fetch(tabBar.getAttribute("data-counts"), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.counts) return;
+        Array.prototype.forEach.call(tabBar.querySelectorAll("a[href]"), function (a) {
+          var n = d.counts[a.getAttribute("href").split("/").pop()];
+          if (typeof n !== "number" || a.querySelector(".n")) return;
+          // the hub's rows (Binder › Lists) carry a value cell; the tab bar a small count
+          var val = a.querySelector(".val");
+          if (val) { if (!val.textContent) val.textContent = n.toLocaleString("en"); return; }
+          var span = document.createElement("span");
+          span.className = "n";
+          span.textContent = n.toLocaleString("en");
+          a.appendChild(span);
+        });
+        showTab(); // the tabs before the current one grew: bring it back into view
+      })
+      .catch(function () { /* the counts stay blank */ });
+  }
   var Menu = window.MtgMenu, Box = window.MtgBox;
+  // the hub: the list rows narrow as you type (0.7.46 audit QG-25); a group with no row left
+  // folds away, and New list… stays
+  var hubIn = document.querySelector(".lp-hub") ? document.querySelector(".ui-tools input[type=search]") : null;
+  if (hubIn) {
+    var narrowHub = function () {
+      var q = hubIn.value.trim().toLowerCase(), n = 0;
+      Array.prototype.forEach.call(document.querySelectorAll(".lp-hub .ygrp"), function (g) {
+        var shown = 0;
+        Array.prototype.forEach.call(g.querySelectorAll(".yrow[data-q]"), function (row) {
+          var on = !q || row.getAttribute("data-q").indexOf(q) >= 0;
+          row.hidden = !on;
+          if (on) shown++;
+        });
+        g.hidden = !shown;
+        n += shown;
+      });
+      var status = document.querySelector("[data-filter-count]");
+      if (status) status.textContent = !q ? "" : n ? n + " shown." : "No list matches.";
+    };
+    hubIn.addEventListener("input", narrowHub);
+    if (hubIn.value) narrowHub();
+  }
   var root = document.querySelector(".lp[data-tab]");
   if (!root || !Menu || !Box) return;
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -39,23 +84,32 @@
   function kebabOf(tr) { return $(".kebab", tr); }
 
   // (a form's .action is its action= input here, so the attribute is read instead)
+  // never rejects: signed out and no connection come back as {ok: false} in the site's words
   function postForm(path, fields) {
     var body = new URLSearchParams();
     Object.keys(fields).forEach(function (k) { if (fields[k] !== undefined && fields[k] !== null) body.append(k, fields[k]); });
     if (!fields.csrf) body.append("csrf", Menu.csrf());
-    return fetch(path, {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: body.toString()
-    }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () {
-        return { ok: false, status: r.status, message: "The gateway sent an answer this page could not read. Reload the page to see whether the change was made." };
-      });
-    });
+    return window.MtgFetch.answer(path, { method: "POST", body: body.toString(), form: true });
   }
-  function said(d, fallback) {
-    if (d.verified === false) toast(d.notice || fallback, { error: true });
-    else toast(d.notice || fallback, { ok: true, ms: 5000 });
+  // a saved change answers with an Undo token for a while (lists_page.py): the toast offers it,
+  // and the page reloads with the reverse change applied (0.7.46 audit QG-09)
+  function said(d, fallback, path) {
+    if (d.verified === false) { toast(d.notice || fallback, { error: true }); return; }
+    var actions = [];
+    if (d.undo && path) {
+      var undo = el("button", "btn small", "Undo");
+      undo.type = "button";
+      undo.addEventListener("click", function () {
+        undo.disabled = true;
+        postForm(path, { action: "undo", token: d.undo }).then(function (r) {
+          if (r.ok) { location.reload(); return; }
+          undo.disabled = false;
+          toast(r.message || "That Undo is no longer available.", { error: true });
+        });
+      });
+      actions.push(undo);
+    }
+    toast(d.notice || fallback, { ok: true, ms: actions.length ? 15000 : 5000, actions: actions });
   }
 
   // -- the boxes -----------------------------------------------------------------------------------
@@ -81,7 +135,7 @@
   }
   function countOf(field) {
     var id = field.getAttribute("data-count"), c = id ? document.getElementById(id) : null;
-    if (c) c.textContent = field.value.length + " / " + (field.getAttribute("maxlength") || "");
+    if (c) c.textContent = field.value.length + "\u00a0/\u00a0" + (field.getAttribute("maxlength") || "");
   }
   function clearNote(box) {
     var n = $(".boxnote", box);
@@ -213,7 +267,7 @@
         if (crop) resetCrop(crop, has, has ? "/lists/api/custom_picture/" + d.id + "?face=" + pf[1] : "");
       });
       setValue(box, "set_code", editing ? (d.setCode || "") : "");
-      setValue(box, "collector_number", editing ? (d.collectorNumber || "") : "");
+      setValue(box, "cn", editing ? (d.collectorNumber || "") : "");
       var back = $("#cc-back", box);
       if (back) back.checked = editing && !!d.hasBack;
       backFace(box);
@@ -233,6 +287,13 @@
       if (gate) { gate.checked = false; gateButton(box, false); }
     }
   };
+  // what is typed into the custom card and template editors is kept and put back (static/draft.js),
+  // one draft per card or template being edited and one for a new one
+  function draftOf(box, mode, d) {
+    var form = box.id === "cc-box" ? $("#cc-f", box) : box.id === "tpl-box" ? $("#tpl-f", box) : null;
+    if (!form || !window.MtgDraft) return;
+    window.MtgDraft.keep(form, box.id + ":" + (mode === "edit" ? (d.id || d.name || "edit") : "new"));
+  }
   function openBox(id, mode, tr, back) {
     var box = document.getElementById(id);
     if (!box) return;
@@ -240,6 +301,7 @@
     var name = tr ? nameOf(tr) : "";
     clearNote(box);
     if (fillers[id]) fillers[id](box, mode, d);
+    draftOf(box, mode, d);
     retitle(box, mode, name);
     $$("[data-count]", box).forEach(countOf);
     Box.openElement(box, { returnFocus: back || (tr ? kebabOf(tr) : null) });
@@ -252,6 +314,7 @@
     if (!box || !fillers[box.id] || opener.closest(".tr")) return;
     clearNote(box);
     fillers[box.id](box, "new", {});
+    draftOf(box, "new", {});
     retitle(box, "new", "");
     $$("[data-count]", box).forEach(countOf);
   }, true);
@@ -387,8 +450,10 @@
     var status = $("[data-filter-count]");
     if (status) status.textContent = q ? n + " shown." : "";
   }
+  // the tables that are on the page whole (or a Load more away) narrow as you type: Default
+  // categories, and the templates, tags and pins too (0.7.46 audit QG-25)
   var searchIn = $(".lp .ui-tools input[type=search]");
-  if (searchIn && tab === "defaults") {
+  if (searchIn && tab !== "custom") {
     searchIn.addEventListener("input", function () { filterRows(searchIn.value); });
     if (searchIn.value) filterRows(searchIn.value);
   }
@@ -413,7 +478,7 @@
     if (!table) return Promise.resolve();
     if (a) { a.setAttribute("aria-busy", "true"); a.setAttribute("aria-disabled", "true"); }
     return Menu.getJSON(href).then(function (d) {
-      if (!d.ok) throw new Error(d.message || "");
+      if (!d.ok) { var no = new Error(d.message || ""); no.answered = true; throw no; }
       if (replace) $$(".tr:not(.th)", table).forEach(function (tr) { tr.remove(); });
       var tmp = el("div");
       tmp.innerHTML = d.html;
@@ -436,9 +501,10 @@
       var count = $(".list-head .ui-sub");
       if (count && d.total != null) count.textContent = d.total.toLocaleString();
       if (!replace && first) { var k = $(".kebab", first); if (k) k.focus({ preventScroll: true }); }
-    }).catch(function () {
+    }).catch(function (err) {
       if (a) { a.removeAttribute("aria-busy"); a.removeAttribute("aria-disabled"); }
-      toast("No connection; the rows could not be read. Try again.", { error: true });
+      // the gateway's own words when it answered (Archidekt busy or unreachable, a refusal)
+      toast((err && err.answered && err.message) || "No connection; the rows could not be read. Try again.", { error: true });
     });
   }
   document.addEventListener("click", function (e) {
@@ -481,10 +547,10 @@
     postForm(form.getAttribute("action"), { action: "edit", pin_id: $("[name=pin_id]", form).value, quantity: want }).then(function (d) {
       form.removeAttribute("aria-busy");
       $$("button", form).forEach(function (x) { x.disabled = false; });
-      if (!d.ok) { drawCopies(tr, dataOf(tr).quantity); toast(d.message || "Archidekt refused the change.", { error: true }); return; }
+      if (!d.ok) { drawCopies(tr, dataOf(tr).quantity); Menu.fail(d, "Archidekt refused the change."); return; }
       pinChanged(tr, { quantity: want });
       drawCopies(tr, want);
-      said(d, "Saved on Archidekt.");
+      said(d, "Saved on Archidekt.", form.getAttribute("action"));
     }, function () {
       form.removeAttribute("aria-busy");
       $$("button", form).forEach(function (x) { x.disabled = false; });
@@ -501,9 +567,10 @@
       ta.setAttribute("aria-busy", "true");
       postForm(form.getAttribute("action"), { action: "edit", pin_id: $("[name=pin_id]", form).value, notes: text }).then(function (d) {
         ta.removeAttribute("aria-busy");
-        if (!d.ok) { toast(d.message || "Archidekt refused the note.", { error: true }); return; }
+        if (!d.ok) { Menu.fail(d, "Archidekt refused the note."); return; }
         pinChanged(tr, { notes: text });
-        said(d, "Saved on Archidekt.");
+        if (window.MtgDraft) window.MtgDraft.clear(form.getAttribute("data-draft"));
+        said(d, "Saved on Archidekt.", form.getAttribute("action"));
       }, function () { ta.removeAttribute("aria-busy"); toast(NO_CONNECTION, { error: true }); });
     };
     ta.addEventListener("blur", saveNote);
@@ -770,7 +837,7 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           use.disabled = false; drop.disabled = false; use.removeAttribute("aria-busy");
-          if (!d.ok) { toast(d.message || "Archidekt refused the picture.", { error: true }); return; }
+          if (!d.ok) { Menu.fail(d, "Archidekt refused the picture."); return; }
           resetCrop(crop, true);
           said(d, "Picture saved on Archidekt and read back.");
           var tr = $$(".lp .ui-table .tr[data-row]").filter(function (x) { return nameOf(x) === name; })[0];

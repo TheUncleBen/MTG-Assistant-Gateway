@@ -10,14 +10,22 @@ from mcp.server.mcpserver import Context
 from mcp_types import CallToolResult
 from pydantic import Field
 
+from ..busy import outage
 from ..cards import PICKER_CARD_URI, PRINTINGS_CARD_URI, ask_choices, tool_meta, with_card
 from ..schemas import change_for_assistant
-from .service import ScanError, ScanService, parse_cards, parse_text
+from . import bulk
+from .service import SUGGESTED_WAIT_SECONDS, ScanError, ScanService, parse_cards, parse_text
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from ..cards import CardLinks
+
+# card_printings' note, true whether or not the app shows the printings card
+PRINTINGS_NOTE = (
+    "In an app that shows cards, every printing with its picture is on the card in the chat, where the "
+    "user can tap the one they mean. Otherwise ask which set, then call again with set_code."
+)
 
 CARD_FIELDS = (
     "name",
@@ -38,13 +46,32 @@ def _sub() -> str:
     return token.subject
 
 
+def not_looked_up(name: str, retry_in: int) -> ScanError:
+    """The refusal for a name the resolver handed back unread: Scryfall asked the gateway to wait
+    (retry_in seconds), or this call's lookup time ran out. Never "no card found": the name was
+    never looked up (whole-application audit, row 4)."""
+    if retry_in > 0:
+        return ScanError(
+            "rate_limited",
+            f"{outage('slow_down', 'Scryfall')} “{name}” was not looked up yet. Try again after the "
+            "wait in retry_in (seconds).",
+            extra={"retry_in": retry_in},
+        )
+    return ScanError(
+        "busy",
+        f"The card lookups took too long, so “{name}” was not looked up yet. Try again.",
+        extra={"retry_in": SUGGESTED_WAIT_SECONDS},
+    )
+
+
 def _err(exc: ScanError) -> dict[str, Any]:
-    return {"ok": False, "error": exc.kind, "message": str(exc)}
+    return {"ok": False, "error": exc.kind, "message": str(exc), **getattr(exc, "extra", {})}
 
 
-# Card fields the Scan page draws with (image links, the Scryfall page) and the assistant has no
-# use for: left out of what the tools return, which keeps a card's printings list small.
-_PAGE_ONLY = ("image_small", "image_normal", "image_art", "image_large", "scryfall_uri")
+# Card fields the Scan page draws with (image links, the Scryfall page, the prices behind its
+# running value) and the assistant has no use for: left out of what the tools return, which keeps
+# a card's printings list small.
+_PAGE_ONLY = ("image_small", "image_normal", "image_art", "image_large", "scryfall_uri", "prices")
 
 
 def _slim(card: Any) -> Any:
@@ -113,23 +140,22 @@ def summarize_sets(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(sets.values(), key=lambda r: str(r.get("newest") or ""), reverse=True)
 
 
-def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks | None = None) -> None:
+def add_scan_tools(
+    server: MCPServer, service: ScanService, *, links: CardLinks | None = None, public_url: str = ""
+) -> None:
     @server.tool(
         name="resolve_cards",
         title="Resolve card names to exact cards",
         description=(
-            "Turn card names read from photos, a typed list or a decklist into exact Magic cards via "
-            "Scryfall. Give either `cards` (list of {name, set?, collector_number?, quantity?}) or `text` "
-            "(one card per line, e.g. '2 Sol Ring (CMR) 472'). Each result has a status: exact, printing "
-            "(matched by set and number), fuzzy (name corrected; confirm with the user), ambiguous or "
-            "not_found (with suggestions), or conflict (the set and number are a different card, shown in "
-            "`requested`; ask which is meant). Without a set, a card keeps Scryfall's default printing when "
-            "that one is out on paper (in foil when foil is asked for), else the newest printing that is "
-            "out on paper; the newer ones passed over are listed in `newer_printings`. "
-            "Returns a decklist and `changes` ready for propose_deck_changes, without conflicts. "
-            "In an app that shows cards, the user sees the recognized cards with pictures, can drop some, "
-            "pick among suggestions and confirm; wait for that before proposing. "
-            "Does not touch Archidekt."
+            "Turn card names (photos, a typed list, a decklist) into exact Magic cards via Scryfall: "
+            "cards ({name, set?, collector_number?, quantity?}) or text (one per line, e.g. '2 Sol "
+            "Ring (CMR) 472'). Status: exact, printing (by set and number), fuzzy (name corrected: "
+            "confirm with the user), ambiguous or not_found (with suggestions), or conflict (set and "
+            "number are another card, in requested: ask). No set: Scryfall's default printing if on "
+            "paper, else the newest paper one (newer_printings: those passed over). Returns a decklist "
+            "and changes for propose_deck_changes. In an app that shows cards the user confirms them "
+            "first: wait. One lookup per account at a time (else busy, suggested_wait). Does not touch "
+            "Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PICKER_CARD_URI) if links is not None else None,
@@ -142,13 +168,16 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         try:
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
-                raise ScanError("invalid", "give `cards` or `text` with at least one card")
-            results = await service.resolve(inputs, owner=_sub())
+                raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
+            waited: list[float] = []
+            results = await service.resolve(inputs, owner=_sub(), waited=waited)
             results = await _ask_about_ambiguous(ctx, results)
         except ScanError as exc:
             return with_card(_err(exc), None)
         described = service.describe(results)
         out = {"ok": True, **_for_assistant(described)}
+        if waited and waited[0] >= 1:  # it waited for the account's other card lookup (AT-38)
+            out["waited_seconds"] = round(waited[0])
         return with_card(out, {"rows": _picker_rows(described["cards"])} if links is not None else None)
 
     async def _ask_about_ambiguous(ctx: Context, results: list[Any]) -> list[Any]:
@@ -161,7 +190,7 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         if not asks:
             return results
         questions = [
-            {"key": f"q{i}", "title": f"Which card is '{r.input.name}'?", "options": list(r.suggestions)[:12]}
+            {"key": f"q{i}", "title": f"Which card is “{r.input.name}”?", "options": list(r.suggestions)[:12]}
             for i, r in asks
         ]
         answers = await ask_choices(
@@ -184,11 +213,11 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         for (i, inp), res in zip(redo, fresh, strict=True):
             if res.status == "deferred":  # Scryfall is backing off: keep the row with its suggestions
                 kept = out[i]
-                note = f"the pick '{inp.name}' could not be checked yet; ask again"
+                note = f"the pick “{inp.name}” could not be checked yet; ask again"
                 out[i] = replace(kept, note=f"{kept.note}; {note}" if kept.note else note)
                 continue
             original = results[i].input
-            picked_note = f"picked from the suggestions for '{original.name}'"
+            picked_note = f"picked from the suggestions for “{original.name}”"
             res = replace(res, input=original, note=f"{res.note}; {picked_note}" if res.note else picked_note)
             out[i] = res
         return out
@@ -197,23 +226,19 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         name="card_printings",
         title="List the printings of a card",
         description=(
-            "The printings of one Magic card (set, set name, collector number, release date, rarity, "
-            "finishes) from Scryfall: released paper printings first, newest first (the first is the "
-            "default when no set is named), then previews not out yet (`unreleased: true`) and printings "
-            "not sold on paper (`paper: false`). Give `oracle_id` from a resolve_cards result, or `name`. "
-            "Narrow it with `set_code` (e.g. cmr) and `finish` (foil or etched: printings that come in it). "
-            "`matching_total` printings match, `returned_count` of them are in `cards`; `limit` caps the "
-            "rows (default 25) and `truncated` means that cap cut the list. `sets` lists the sets the card "
-            "was printed in, newest first, not narrowed by set_code or finish; `limit` caps it too, "
-            "`sets_total` counts them all and `sets_truncated` means the cap cut it. In an app that "
-            "shows cards, the user sees every printing's picture and taps the one they mean; wait for "
-            "that pick. Does not touch Archidekt."
+            "A Magic card's printings from Scryfall (set, set name, collector number, release date, "
+            "rarity, finishes): released paper printings newest first (the first is the default when "
+            "no set is named), then previews and non-paper ones (paper false). oracle_id (from "
+            "resolve_cards) or name; narrow with set_code and finish. matching_total match; "
+            "returned_count are in cards (truncated: limit cut it); sets: every set it was printed in "
+            "(sets_total, sets_truncated). In an app that shows cards the user taps the printing: wait "
+            "for that pick. Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PRINTINGS_CARD_URI) if links is not None else None,
     )
     async def card_printings(
-        oracle_id: Annotated[str | None, Field(description="The card's Scryfall oracle id.")] = None,
+        oracle_id: Annotated[str | None, Field(description="The card's Scryfall oracle ID.")] = None,
         name: Annotated[str | None, Field(description="Or the card's name.")] = None,
         set_code: Annotated[str | None, Field(description="Only printings from this set, e.g. cmr.")] = None,
         finish: Annotated[
@@ -224,13 +249,26 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         try:
             if not oracle_id:
                 if not name:
-                    raise ScanError("invalid", "give oracle_id or name")
-                results = await service.resolve(parse_cards([{"name": name}]), owner=_sub())
-                card = results[0].card if results else None
-                if not card or not card.get("oracle_id"):
-                    raise ScanError("not_found", f"no card found for '{name}'")
-                oracle_id = str(card["oracle_id"])
-                name = str(card.get("name") or name)
+                    raise ScanError("invalid", "Give oracle_id or name.")
+                try:
+                    results = await service.resolve(parse_cards([{"name": name}]), owner=_sub())
+                    if results and results[0].status == "deferred":
+                        raise not_looked_up(name, service.scryfall.retry_in())
+                except ScanError as exc:
+                    # Scryfall can't place the name now: the local copy knows the card's names
+                    kept = None
+                    if exc.kind in ("unavailable", "rate_limited", "busy"):
+                        kept = await service.oracle_from_copy(name)
+                    if kept is None:
+                        raise
+                    results = []
+                    oracle_id, name = kept
+                if not oracle_id:
+                    card = results[0].card if results else None
+                    if not card or not card.get("oracle_id"):
+                        raise ScanError("not_found", f"No card is called “{name}”.")
+                    oracle_id = str(card["oracle_id"])
+                    name = str(card.get("name") or name)
             out = await service.printings(oracle_id, owner=_sub())
         except ScanError as exc:
             return with_card(_err(exc), None)
@@ -252,18 +290,23 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "cards": rows,
             # this tool's own limit cut the matching rows; nothing to do with Scryfall's pages
             "truncated": len(cards) > shown,
+            # more printings exist than the rows returned, whatever cut them
+            "has_more": len(cards) > shown or bool(out.get("has_more")),
             # Scryfall shows 175 printings a page; past that, filters only see the newest 175
-            "has_more": bool(out.get("has_more")),
+            "scryfall_more_pages": bool(out.get("has_more")),
             "total_cards": out.get("total_cards"),  # every printing of the card, before any filter
             "sets": sets[:shown],
             "sets_total": len(sets),
             "sets_truncated": len(sets) > shown,
             "sets_scope": "the sets the card was printed in, not narrowed by set_code or finish",
-            "note": (
-                "Every printing with its picture is on the card in the chat, where the user can tap the "
-                "one they mean. Without the card, ask which set, then call again with set_code."
-            ),
+            "note": PRINTINGS_NOTE,
         }
+        if out.get("from_local_copy"):
+            # Scryfall can't answer now: the gateway's local copy did, as of its day
+            data["from_local_copy"] = True
+            data["as_of"] = out.get("as_of")
+            as_of = out.get("as_of")
+            data["note"] = "\n".join([bulk.as_of_line(as_of), bulk.prices_line(as_of), PRINTINGS_NOTE])
         card = None
         if links is not None:
             card = {
@@ -290,7 +333,7 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         try:
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
-                raise ScanError("invalid", "give `cards` or `text` with at least one card")
+                raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
             results = await service.resolve(inputs, owner=_sub())
             # A conflict (the printing named is a different card) is saved without a card, so it
             # is listed as unresolved and stays out of the session's changes until someone picks.
@@ -325,10 +368,9 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         name="get_scan_session",
         title="Get a scan session",
         description=(
-            "Fetch one of the signed-in user's scan sessions by id (scan_…) or by name. Returns the "
-            "resolved cards, a decklist text and `changes` (add actions) that can be passed to "
-            "propose_deck_changes for a deck the user owns. Items without a `card` were not resolved; "
-            "ask the user about them."
+            "One of the user's scan sessions, by ID (scan_…) or name: the resolved cards, a decklist text "
+            "and changes (adds) for propose_deck_changes. Items without a card were not resolved: ask the "
+            "user about them."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
@@ -337,3 +379,28 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             return {"ok": True, **_for_assistant(service.find_session(_sub(), session))}
         except ScanError as exc:
             return _err(exc)
+
+    @server.tool(
+        name="propose_delete_scan_session",
+        title="Ask to delete a scan session",
+        description=(
+            "Ask the user to delete one of their scan sessions (id or name), only when they asked. It "
+            "deletes nothing itself: delete_url opens the Scan page with the Delete question open, where "
+            "only the user's press deletes it."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def propose_delete_scan_session(session: str) -> dict[str, Any]:
+        try:
+            found = service.find_session(_sub(), session)
+        except ScanError as exc:
+            return _err(exc)
+        return {
+            "ok": True,
+            "deleted": False,
+            "delete_url": f"{public_url}/scan?delete={found['id']}",
+            "message": (
+                f"Nothing is deleted until the user presses Yes under “{found['name']}” on that page; "
+                "give them the link. It can't be undone, and nothing changes on Archidekt."
+            ),
+        }

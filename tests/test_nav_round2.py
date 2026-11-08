@@ -44,19 +44,19 @@ def _client(server: Server, *, admin: bool = False) -> httpx.Client:
 # -- the bars --------------------------------------------------------------------------------------
 
 
-def test_the_places_are_four_and_more_holds_two_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_places_are_four_and_more_holds_three_groups(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", True)
     assert [label for _h, label, _i in theme.NAV_LINKS] == ["Home", "Decks", "Binder", "Assistant"]
     groups = theme.more_groups()
-    assert [g for g, _links in groups] == ["Find", "Your cards"]
+    assert [g for g, _links in groups] == ["Find", "Your cards", "Community"]
     hrefs = [h for _g, links in groups for h, _l, _i in links]
-    assert hrefs == ["/search", "/precons", "/scan", "/watchlist", "/lists"]
+    # Watchlist lives in Binder and My lists under Account (decision C8): neither is in More
+    assert hrefs == ["/search", "/precons", "/scan", "/history/models", "/forum"]
 
 
-def test_watchlist_leaves_more_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_watchlist_leaves_binder_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", False)
-    hrefs = [h for _g, links in theme.more_groups() for h, _l, _i in links]
-    assert "/watchlist" not in hrefs and "/lists" in hrefs
+    assert [h for h, _l, _i in theme.binder_pages()] == ["/collection", "/collection/lists"]
 
 
 def test_the_switch_marks_its_page_and_counts_on_its_first_part() -> None:
@@ -91,12 +91,23 @@ def test_history_and_reports_mark_assistant_as_the_place(server: Server) -> None
 
 def test_the_history_purpose_line_links_to_proposals(server: Server) -> None:
     page = _client(server).get("/history").text
-    assert "proposed are on <a href='/proposals'>Proposals</a>.</p>" in page
+    # History is the decks' timeline (owner decision C7); the changes still waiting are on Proposals,
+    # named in plain words (the tab is in the switch above; no capsule mid-sentence, 0.7.46)
+    assert "Changes still waiting for you are under Proposals.</p>" in page
     assert "&lt;a href" not in page
 
 
-def test_a_long_word_scrolls_the_switch_not_the_page() -> None:
-    assert ".hubseg{display:flex;width:100%;overflow-x:auto;scrollbar-width:none}" in theme.CSS
+def test_a_long_word_wraps_the_switch_not_the_page() -> None:
+    # the switch's parts wrap onto a second line at every width instead of scrolling inside it, so
+    # every part is in sight (large text on a Fold's inner screen beside the rail pushed the page
+    # sideways); full width on a phone; position:relative keeps its hidden counts inside the switch
+    # (they widened /collection at 200% text)
+    assert (
+        ".hubseg{display:inline-flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:12px;"
+        "background:var(--seg-track);\n  max-width:100%;position:relative;border:0;margin:0}"
+    ) in theme.CSS
+    assert "overflow-x:auto;scrollbar-width:none;position:relative" not in theme.CSS
+    assert ".hubseg{display:flex;width:100%}" in theme.CSS
     js = (Path(theme.__file__).parent / "static" / "topbar.js").read_text(encoding="utf-8")
     assert 'seg.querySelector("[aria-current=page]")' in js
 
@@ -142,18 +153,22 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
         assert f"<h2>{name}</h2>" in hub, name
     for href in (
         "/account/details",
+        "/collection/lists",  # the lists live in Binder (mockup screen 8); Account keeps a row
         "/activity",
-        "/forum",
         "/guide",
         "/install?for=skill",
         "/install?for=android",
     ):
         assert f"<a class='yrow' href='{href}'>" in hub, href
     assert "href='/admin'" not in hub and "<h2>This app</h2>" not in hub
+    # Forum is in More and on the rail now (decision C8), not on the Account page
+    assert "<a class='yrow' href='/forum'>" not in hub
     assert "<form method='post' action='/theme'>" in hub and "<form method='post' action='/layout'>" in hub
     # Sign out: one real button, centred at the foot
     assert re.search(
-        r"<form class='ysignout' method='post' action='/logout'>.*Sign out</span></button></form></div>$",
+        r"<form class='ysignout' method='post' action='/logout'>.*Sign out</span></button>"
+        r"<p class='muted small'>Unsent drafts, scan drafts and other unsaved work kept on this device are "
+        r"cleared too.</p></form></div>$",
         hub.split("</main>")[0],
     )
     details = h.get("/account/details").text
@@ -180,6 +195,21 @@ def test_admins_and_the_app_get_their_own_rows(server: Server) -> None:
     assert "openInBrowser" not in app
 
 
+def test_this_app_says_how_sign_in_comes_back(server: Server) -> None:
+    """Review F2: This app has a line, from the app itself, saying whether the browser sign-in
+    comes back by itself (an Auth Tab browser) or may wait for a tap. Drawn hidden: only an app
+    that answers shows it (feedback.js), so an older app shows no empty row."""
+    app = _client(server).get("/account", headers=APP_UA).text
+    m = re.search(
+        r"<div class='yrow' data-native-state='signInReturn' data-native-row hidden>(.*?)</div>", app
+    )
+    assert m, app
+    assert "<span class='lbl'>Sign-in</span>" in m.group(1)
+    assert "<span class='val' data-native-show='auto'>Comes back by itself</span>" in m.group(1)
+    assert "<span class='val' data-native-show='tap'>May need a tap in the browser</span>" in m.group(1)
+    assert "signInReturn" not in _client(server).get("/account").text  # not on the website
+
+
 # -- Decks -----------------------------------------------------------------------------------------
 
 
@@ -197,7 +227,7 @@ def test_test_and_play_holds_the_runs_and_the_other_sites() -> None:
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     test = html.split("<details class='dd decktest'>")[1].split("</details>")[0]
     assert "Test and play</summary>" in html
-    assert " Goldfish</a>" in test and "id='fullf'" in test and "Run full test</button>" in test
+    assert " Goldfish</a>" in test and "id='fullf'" in test and "Run test</button>" in test
     assert "Playtest on Archidekt</a>" in test and "data-edhplay" in test
     # the banner's buttons are not repeated in the no-script More
     more = html.split("<details class='dd deckmore'>")[1].split("</details>")[0]
@@ -217,8 +247,15 @@ def test_the_proposals_pill_counts_the_decks_waiting_changes() -> None:
 def test_the_deck_menus_groups_in_order() -> None:
     js = (Path(theme.__file__).parent / "static" / "deck.js").read_text(encoding="utf-8")
     body = js.split("function items() {")[1].split("\n  }\n")[0]
+    # The Share group's head is chosen by a switch (SHARE_SECOND, on since the redesign of the deck
+    # menu, mockup screen 2): Share comes second, before Look into it, and is named "Share".
+    assert re.search(r"\bSHARE_SECOND = true\b", js)
+    body = body.replace('head(SHARE_SECOND ? "Share" : "Share and print")', 'head("Share")')
+    assert "if (SHARE_SECOND) out = out.concat(shareItems, [sep()], look);" in body
     heads = re.findall(r'head\("([^"]+)"\)', body)
-    assert heads == ["This deck", "Look into it", "Share and print", "Community"]
+    assert heads == ["This deck", "Share", "Look into it", "Community"]
+    order = [body.index(f'head("{h}")') for h in ("This deck", "Share", "Look into it", "Community")]
+    assert order[0] < order[1] < order[2] < order[3] < body.index('"Delete deck…"')
     for gone in ("Open in a new tab", "Copy link", "Proposals for this deck", '"Goldfish"', "Clone"):
         assert gone not in body, gone
     assert 'item("Share…", "send", share)' in body and 'link("Deck reports"' in body
@@ -282,10 +319,30 @@ def test_the_switch_raises_its_chosen_part_in_both_themes() -> None:
     assert ".hubseg a[aria-current=page]{background:var(--seg-on);" in theme.CSS
 
 
-def test_the_deck_pills_go_two_by_two_on_a_phone() -> None:
+def test_the_deck_pills_share_one_row_on_a_phone() -> None:
+    """On a phone the deck's pills fit without crowding the banner. They went two by two; since the
+    deck page's phone top (mockup screen 5) they share one row, each its icon and count at a 44 px
+    tap width, the words kept for a screen reader, and a confirmation takes the row under them.
+    Edit / Clone / Test / More are equal buttons in one row above them."""
     from mtg_gateway.deckpage import DECK_CSS
 
-    assert ".banner .social{display:grid;grid-template-columns:1fr 1fr}" in DECK_CSS
+    css = " ".join(DECK_CSS.split())
+    # the phone block runs to its last rule, the confirmation's row (a container rule inside it
+    # closes with "} }" too)
+    phone = css.split("@media (max-width:599.98px){ .banner .social{")[1]
+    phone = phone.split(".banner .social .confirm{flex:1 1 100%} }")[0]
+    # equal chips, two and two when the row is narrow (large text), never three and one (P-17)
+    assert phone.startswith("display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;")
+    assert ".banner .social .soc{flex:1 1 0}" in phone
+    assert "@container (max-width:20em){ .banner .social .soc{flex:0 1 calc(50% - .2rem)} }" in phone
+    assert ".banner .social .soc{justify-content:center;min-width:44px;height:36px;" in phone
+    assert ".banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;" in phone
+    assert ".banner .social .confirm{flex:1 1 100%} }" in css
+    assert (
+        ".banner .controls .primary{display:grid;width:100%;gap:.4rem; "
+        "grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}"
+    ) in css
+    assert "grid-template-columns:1fr 1fr}" not in phone
 
 
 def test_menu_icons_read_at_3_to_1_on_the_light_menu() -> None:
@@ -312,3 +369,17 @@ def test_a_deck_tiles_name_takes_two_lines_before_its_ellipsis() -> None:
     from mtg_gateway.deckpage import DECK_CSS
 
     assert "-webkit-line-clamp:2;line-clamp:2}" in DECK_CSS
+
+
+def test_the_account_page_has_an_assistants_row_so_a_mode_change_is_three_taps(server: Server) -> None:
+    """/account › Assistants › the assistant › pick (0.7.46 re-audit QG-14): the "Assistants and
+    apps" group opens with the Assistants row (each assistant's own approval mode), before the
+    Guide and the skill."""
+    h = _client(server)
+    hub = h.get("/account").text
+    group = hub.split("<h2>Assistants and apps</h2>", 1)[1].split("</section>", 1)[0]
+    assert "<a class='yrow' href='/account/assistants?from=account'>" in group
+    assert group.index("href='/account/assistants?from=account'") < group.index("href='/guide'")
+    assert "<span class='lbl'>Assistants</span>" in group
+    assistants = h.get("/account/assistants").text
+    assert "<h1>Assistants</h1>" in assistants

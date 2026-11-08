@@ -63,11 +63,25 @@ def compact_schema(schema: Any) -> Any:
     """The same schema in fewer characters, for the tool list every conversation pays for: no
     generated ``title`` on each field (the field's name says it), and an optional field written
     as its one real type rather than "this type or null, default null". A field whose description
-    mentions null (null clears it, say) keeps its null. Validation is untouched: the server checks
-    the arguments against its own model, never against this listing."""
+    mentions null (null clears it, say) keeps its null. ``additionalProperties: true`` goes too:
+    it is JSON Schema's own default, so it says nothing. Validation is untouched: the server checks
+    the arguments against its own model, never against this listing. An ``enum`` of strings is
+    written without its ``type: string``: the list itself allows nothing else (0.7.46 sweep B-5)."""
     if not isinstance(schema, dict):
         return schema
-    node = {k: v for k, v in schema.items() if not (k == "title" and isinstance(v, str))}
+    node = {
+        k: v
+        for k, v in schema.items()
+        if not (k == "title" and isinstance(v, str)) and not (k == "additionalProperties" and v is True)
+    }
+    values = node.get("enum")
+    if (
+        node.get("type") == "string"
+        and isinstance(values, list)
+        and values
+        and all(isinstance(v, str) for v in values)
+    ):
+        del node["type"]
     branches = node.get("anyOf")
     if (
         isinstance(branches, list)
@@ -91,6 +105,74 @@ def compact_schema(schema: Any) -> Any:
         else:
             out[k] = v
     return out
+
+
+def without_item_descriptions(schema: dict[str, Any], param: str) -> dict[str, Any]:
+    """``schema`` with the per-field descriptions of ``param``'s list items left out (the
+    parameter's own description stays): for a tool that takes the same list as another tool and
+    says so, so the fields are explained once in tools/list (review F15). Fields, types and
+    allowed values are kept."""
+
+    def bare(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        out = {k: v for k, v in node.items() if k != "description"}
+        for k in _SCHEMA_MAPS:
+            if isinstance(out.get(k), dict):
+                out[k] = {name: bare(sub) for name, sub in out[k].items()}
+        for k in _SCHEMA_LISTS:
+            if isinstance(out.get(k), list):
+                out[k] = [bare(sub) for sub in out[k]]
+        for k in _SCHEMA_ONE:
+            if isinstance(out.get(k), dict):
+                out[k] = bare(out[k])
+        return out
+
+    def strip(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        if isinstance(node.get("items"), dict):
+            return {**node, "items": bare(node["items"])}
+        if isinstance(node.get("anyOf"), list):
+            return {**node, "anyOf": [strip(b) for b in node["anyOf"]]}
+        return node
+
+    props = schema.get("properties") or {}
+    if param not in props:
+        return schema
+    return {**schema, "properties": {**props, param: strip(props[param])}}
+
+
+def without_field_descriptions(schema: dict[str, Any], param: str | None = None) -> dict[str, Any]:
+    """``schema`` with the descriptions inside ``param`` left out (its own stays), or inside every
+    parameter when ``param`` is None: for a tool that takes the same fields as another tool and says
+    so, so the fields are explained once in tools/list (whole-application audit, row 2). Fields,
+    types and allowed values are kept."""
+
+    def bare(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        out = {k: v for k, v in node.items() if k != "description"}
+        for k in _SCHEMA_MAPS:
+            if isinstance(out.get(k), dict):
+                out[k] = {name: bare(sub) for name, sub in out[k].items()}
+        for k in _SCHEMA_LISTS:
+            if isinstance(out.get(k), list):
+                out[k] = [bare(sub) for sub in out[k]]
+        for k in _SCHEMA_ONE:
+            if isinstance(out.get(k), dict):
+                out[k] = bare(out[k])
+        return out
+
+    props = schema.get("properties") or {}
+    names = list(props) if param is None else [param] if param in props else []
+    kept = dict(props)
+    for name in names:
+        node = bare(props[name])
+        if param is not None and "description" in props[name]:
+            node["description"] = props[name]["description"]
+        kept[name] = node
+    return {**schema, "properties": kept}
 
 
 def flatten_params(schema: dict[str, Any]) -> dict[str, Any] | None:
@@ -178,27 +260,27 @@ class DeckChange(_Card):
             "set_back_face",
         ],
         BeforeValidator(_lower),
-    ] = Field(description="What to do with the card.")
+    ]
     name: str = Field(description="The card's name, as Archidekt or Scryfall spells it.")
     quantity: StrictInt | None = Field(
         default=None,
         ge=0,
         le=99,
-        description="Copies, 0 to 99: how many to add or remove, or the new count for set_quantity.",
+        description="Copies, 0 to 99: to add or remove, or set_quantity's new count.",
     )
     category: str | None = Field(default=None, description="The category, for add or set_category.")
     set_code: str | None = Field(
         default=None, description="Set code of the exact printing (with collector_number), e.g. cmr."
     )
     collector_number: str | None = Field(default=None, description="Collector number of that printing.")
-    finish: Finish | None = Field(default=None, description="nonfoil, foil or etched.")
+    finish: Finish | None = None
     zone: Annotated[Literal["main", "side"], BeforeValidator(_lower)] | None = Field(
-        default=None, description="main (default, the deck proper) or side (maybeboard and sideboard rows)."
+        default=None, description="main (default) or side (maybeboard and sideboard rows)."
     )
     label: str | None = Field(
         default=None,
         max_length=48,  # a name of up to 40 characters, or Archidekt's own "Name,#rrggbb"
-        description="For set_label: the color tag's name, e.g. Have or Proxy; an empty string takes it off.",
+        description="set_label: the color tag's name, e.g. Have; empty takes it off.",
     )
     color: str | None = Field(
         default=None,
@@ -209,19 +291,19 @@ class DeckChange(_Card):
         default=None,
         ge=0,
         le=15,  # the range the tool enforces
-        description="For set_mana_value: the card's custom mana value, 0 to 15; null takes it off.",
+        description="set_mana_value: a custom mana value, 0 to 15; null takes it off.",
     )
     companion: StrictBool | None = Field(
-        default=None, description="For set_companion: true makes the card the deck's companion, false not."
+        default=None, description="set_companion: true makes it the companion, false not."
     )
     back_face: StrictBool | None = Field(
-        default=None, description="For set_back_face (a two-faced card): true shows its back face by default."
+        default=None, description="set_back_face (two-faced card): true shows its back face."
     )
 
 
 class NewDeckCard(_Card):
-    name: str = Field(description="The card's name.")
-    quantity: StrictInt = Field(default=1, ge=1, le=99, description="Copies, 1 to 99.")
+    name: str
+    quantity: StrictInt = Field(default=1, ge=1, le=99)
     category: str | None = Field(default=None, description="Category, e.g. Commander, Ramp.")
     set_code: str | None = Field(
         default=None, description="Set code of the printing (with collector_number)."
@@ -238,20 +320,16 @@ class CollectionAdd(_Card):
     collector_number: str | None = Field(default=None, description="Collector number of that printing.")
     quantity: StrictInt | None = Field(default=None, ge=1, description="Copies (default 1).")
     finish: Finish | None = Field(default=None, description="nonfoil (default), foil or etched.")
-    condition: Annotated[Literal["NM", "LP", "MP", "HP", "DMG"], BeforeValidator(_upper)] | None = Field(
-        default=None, description="Card condition."
-    )
+    condition: Annotated[Literal["NM", "LP", "MP", "HP", "DMG"], BeforeValidator(_upper)] | None = None
     language: str | None = Field(
         default=None,
-        description="The card's language code: EN (default), ES, FR, DE, IT, PT, JA, KO, RU, ZHS or ZHT.",
+        description="Language: EN (default), ES, FR, DE, IT, PT, JA, KO, RU, ZHS or ZHT.",
     )
 
 
 class CollectionRemove(BaseModel):
     model_config = ConfigDict(extra="allow")
-    id: StrictInt | str | None = Field(
-        default=None, description="The collection row id from list_collection."
-    )
+    id: StrictInt | str | None = Field(default=None, description="The binder row ID from list_collection.")
     name: str | None = Field(default=None, description="Or the card's name: every row of it.")
     quantity: StrictInt | None = Field(
         default=None, ge=1, description="Copies to remove; omit to remove every copy."
@@ -273,18 +351,38 @@ class PackageSettings(BaseModel):
     )
 
 
+class NewDeckFields(BaseModel):
+    """amend_proposal's new_deck: what changes in a waiting new deck or card package. A field left
+    out keeps what the proposal has; a card list replaces the whole list."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+    deck_format: DeckFormat | None = None
+    cards: list[NewDeckCard] | None = Field(default=None, description="The whole new card list.")
+    decklist_text: str | None = Field(default=None, description="Or the whole new list, pasted.")
+    csv_text: str | None = Field(default=None, description="Or an Archidekt CSV export.")
+    json_text: str | dict[str, Any] | None = Field(
+        default=None, description="Or a deck as JSON (get_deck's or the Export page's .json)."
+    )
+    private: StrictBool | None = None
+    theorycrafted: StrictBool | None = Field(default=None, description="Theorycrafted.")
+    game: Literal["any", "paper", "mtgo", "arena"] | None = Field(default=None, description="Game type.")
+    package: PackageSettings | None = Field(default=None, description="A card package's settings.")
+    folder: str | None = Field(default=None, description="One of the user's folders, by name.")
+
+
 class DeckDetails(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, description="New deck name, 1 to 200 characters.")
     description: str | None = Field(
         default=None, description="New description (plain text, up to 20000 characters)."
     )
-    deck_format: DeckFormat | None = Field(default=None, description="New format.")
+    deck_format: DeckFormat | None = None
     edh_bracket: StrictInt | None = Field(
         default=None, ge=1, le=5, description="Bracket 1 to 5; null clears it."
     )
-    private: StrictBool | None = Field(default=None, description="Private deck.")
-    unlisted: StrictBool | None = Field(default=None, description="Unlisted deck.")
+    private: StrictBool | None = None
+    unlisted: StrictBool | None = None
     theorycrafted: StrictBool | None = Field(
         default=None, description="Theorycrafted: not included by default in Archidekt's In decks view."
     )
@@ -293,11 +391,11 @@ class DeckDetails(BaseModel):
     )
     folder: str | None = Field(
         default=None,
-        description='Move the deck into this existing folder (its name; "" or "top" for the top level).',
+        description='Move it into this existing folder (its name; "" or "top": the top level).',
     )
     add_tags: list[str] | None = Field(
         default=None,
-        description="Tags to put on the deck: names from Archidekt's own tag list (it has no custom tags).",
+        description="Tags to add: names from Archidekt's own tag list (no custom tags).",
     )
     remove_tags: list[str] | None = Field(default=None, description="Tags to take off the deck (names).")
     cover: str | None = Field(default=None, description="A card in the deck whose art becomes the cover.")
@@ -327,28 +425,27 @@ class _SimShared(BaseModel):
     model_config = ConfigDict(extra="forbid")
     annotations: list[dict[str, Any]] | None = Field(
         default=None,
-        description="Card annotations as goldfish_annotate writes them, for cards the engine cannot model.",
+        description="Annotations as goldfish_annotate writes them, for cards the engine can't model.",
     )
     combos: list[list[str] | dict[str, Any]] | None = Field(
         default=None,
-        description='Declared combos: each a list of card names, or {"cards": [...], "wins": true}.',
+        description='Combos: each a list of card names, or {"cards": [...], "wins": true}.',
     )
     seed: StrictInt | None = Field(default=None, description="Random seed (default 42), for repeatable runs.")
     until_turn: StrictInt | None = Field(
-        default=None, ge=1, le=30, description="Simulate through this turn (default 10)."
+        default=None, ge=1, le=30, description="Play through this turn (default 10)."
     )
 
 
 class RunOptions(_SimShared):
     opponents: StrictInt | None = Field(
-        default=None, ge=1, le=5, description="Goldfish opponents (default 1)."
+        default=None, ge=1, le=5, description="Opponents who do nothing (default 1)."
     )
     forge_seed: StrictInt | None = Field(
         default=None,
-        description="Seed for the Forge games only. Without it Forge uses seed; without either, the "
-        "gateway picks one and the report records it.",
+        description="Seed for the Forge games only (else seed; else the gateway picks one and records it).",
     )
-    mulligan: Mulligan | None = Field(default=None, description="Mulligan rules.")
+    mulligan: Mulligan | None = None
 
 
 class AbOptions(_SimShared):
@@ -360,7 +457,7 @@ class AbOptions(_SimShared):
     )
     allow_different_commanders: StrictBool | None = Field(
         default=None,
-        description="Compare decks with different commanders anyway (the deltas are then confounded).",
+        description="Compare decks with different commanders anyway (deltas then confounded).",
     )
 
 
@@ -398,9 +495,19 @@ def change_for_assistant(change: Any) -> Any:
     foil = out.pop("foil", None)
     if isinstance(foil, bool) and "finish" not in out:
         out["finish"] = "foil" if foil else "nonfoil"
-    if out.get("finish") == "normal":
-        out["finish"] = "nonfoil"
+    if isinstance(out.get("finish"), str):
+        # stored as Archidekt spells it (Normal, Foil, Etched)
+        out["finish"] = {"normal": "nonfoil"}.get(out["finish"].lower(), out["finish"].lower())
     return out
+
+
+def changes_for_assistant(changes: Any) -> Any:
+    """A proposal's stored change list in the spelling every tool input takes (``name``, never
+    ``card_name``), so an assistant can pass it straight back to amend_proposal. Anything that is
+    not a list of changes (a details or new-deck object) is left as it is."""
+    if not isinstance(changes, list):
+        return changes
+    return [change_for_assistant(c) for c in changes]
 
 
 def new_deck_card_for_service(card: Any) -> Any:
@@ -425,6 +532,7 @@ __all__ = [
     "DeckDetails",
     "FINISH_ALIASES",
     "NewDeckCard",
+    "NewDeckFields",
     "RunOptions",
     "card_aliases",
     "change_for_assistant",
@@ -435,4 +543,5 @@ __all__ = [
     "flatten_params",
     "inline_refs",
     "new_deck_card_for_service",
+    "without_item_descriptions",
 ]

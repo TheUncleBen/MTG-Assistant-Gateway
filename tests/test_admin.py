@@ -167,7 +167,8 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
         # Each state says what to do next, in plain words.
         assert (
             "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no "
-            "longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12." in r.text
+            "longer have access. To turn it on, follow “Optional: removed-member clean-up” "
+            "in docs/IDP-AUTHENTIK.md." in r.text
         )
         o = (await b.http.get("/api/v1/admin/overview")).json()
         assert o["system"]["member_cleanup"]["state"] == "off"
@@ -183,7 +184,7 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
             "Nothing for you to do." in r.text
         )
         assert "&lt;time" not in r.text  # times are markup, never escaped into the text
-        err = "group 'mtg-users' found 0 times (is the name right, and may the token view that group?)"
+        err = "group “mtg-users” found 0 times (is the name right, and may the token view that group?)"
         sweep.last.update(ok=False, at=1_800_003_600, error=err)
         r = await b.http.get("/admin", headers=NAVIGATE)
         assert f"Not working. The last check {ui.when(1_800_003_600)} failed and deleted nothing: " in r.text
@@ -206,7 +207,8 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
         (
             {"state": "off", "cause": "no-token", "reason": "x"},
             "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no longer "
-            "have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12.",
+            "have access. To turn it on, follow “Optional: removed-member clean-up” "
+            "in docs/IDP-AUTHENTIK.md.",
         ),
         (
             {
@@ -217,7 +219,7 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             },
             "Off: the Authentik API token can't be read (file is empty). Check the "
             "mtg_authentik_api_token Docker secret, then redeploy "
-            "(docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
+            "(“Optional: removed-member clean-up” in docs/IDP-AUTHENTIK.md, steps 6 and 7).",
         ),
         (
             {
@@ -232,7 +234,8 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             "MTG_AUTHENTIK_API_TOKEN_FILE: [Errno 2] No such file or directory: "
             "'/run/secrets/mtg_authentik_api_token'). The likely cause: the mtg_authentik_api_token "
             "secret isn't attached to the gateway, as with a stack file from before 0.7.37. Use the "
-            "current stack file, then redeploy (docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
+            "current stack file, then redeploy (“Optional: removed-member clean-up” "
+            "in docs/IDP-AUTHENTIK.md, steps 6 and 7).",
         ),
         (
             {"state": "off", "cause": "no-group", "reason": "x"},
@@ -255,9 +258,9 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             {
                 "state": "failed",
                 "at": 1_800_000_000,
-                "error": "Authentik could not be reached (ConnectError)",
+                "error": "Authentik couldn't be reached (ConnectError)",
             },
-            f"Not working. The last check {_AT} failed and deleted nothing: Authentik could not be "
+            f"Not working. The last check {_AT} failed and deleted nothing: Authentik couldn't be "
             "reached (ConnectError). To fix: Check that the gateway can reach Authentik at the "
             "issuer's address (MTG_OIDC_ISSUER). It tries again by itself.",
         ),
@@ -399,7 +402,11 @@ async def test_revoke_drops_sessions_and_tokens(gw: Harness) -> None:
         assert r.status_code == 302 and r.headers["location"].startswith("/login")
         assert (await whoami(gw, tokens["access_token"])).status_code == 401
         assert gw.db.get_user("user-2")["disabled_at"] is None  # revoke is not disable
-        # A fresh sign-in works: the account is intact.
+        # The way back in says why first (C2), and a fresh sign-in works: the account is intact.
+        r = await member.http.get("/login", params={"next": "/account"})
+        assert r.status_code == 303 and r.headers["location"].startswith("/signed-out")
+        page = await member.http.get(r.headers["location"])
+        assert "An admin of this gateway signed you out on every device." in page.text
         gw.idp.user = {**gw.idp.user, "sub": "user-2", "groups": ["mtg-users"]}
         await member.login("/account")
     finally:
@@ -480,7 +487,7 @@ def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
 
     db = Database(path)
     try:
-        assert db.schema_version == dbmod.SCHEMA_VERSION == 15
+        assert db.schema_version == dbmod.SCHEMA_VERSION == 22
         user = db.get_user("u1")
         assert user["disabled_at"] is None and user["last_seen_at"] == 200 and user["groups"] == ["g"]
         assert db.list_snapshots("u1")[0]["backup_url"] is None
@@ -613,8 +620,9 @@ async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:
 async def test_every_admin_page_has_the_same_even_tab_bar_with_the_current_tab_not_orange(
     gw: Harness,
 ) -> None:
-    """One admin tab bar on all six pages: links in .adm-nav, the current one marked aria-current
-    and tinted, never the orange main button (one orange main button per page)."""
+    """One admin tab bar on all six pages: links in .adm-nav (the site's one switch, .hubseg), the
+    current one marked aria-current and tinted, never the orange main button (one orange main
+    button per page)."""
     b = await admin_browser(gw)
     try:
         paths = (
@@ -628,7 +636,9 @@ async def test_every_admin_page_has_the_same_even_tab_bar_with_the_current_tab_n
         for path in paths:
             page = await b.http.get(path, headers={"Accept": "text/html"})
             assert page.status_code == 200, path
-            nav = page.text.split("<nav class='adm-nav' aria-label='Admin'>", 1)[1].split("</nav>", 1)[0]
+            nav = page.text.split("<nav class='hubseg adm-nav' aria-label='Admin'>", 1)[1].split("</nav>", 1)[
+                0
+            ]
             assert [h for h in paths if f"href='{h}'" in nav] == list(paths), path
             assert nav.count("aria-current='page'") == 1, path
             assert f"<a href='{path}' aria-current='page'>" in nav, path

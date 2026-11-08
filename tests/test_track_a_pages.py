@@ -14,7 +14,9 @@ SUB = "user-1"
 
 async def _propose(h, token: str, changes: list, deck: str = "42", **more: object) -> str:
     p = structured(
-        await call(h, token, "propose_deck_changes", {"deck_id": deck, "changes": changes, **more})
+        await call(
+            h, token, "propose_deck_changes", {"deck_id": deck, "changes": changes, "separate": True, **more}
+        )
     )
     assert p["ok"], p
     return p["proposal_id"]
@@ -56,7 +58,9 @@ async def test_the_list_groups_waiting_changes_by_deck_with_checkboxes(stack: St
         assert "id='deck-42'" in page and "data-all='42'" in page
         assert f"name='pick' value='{one}' data-group='42'" in page
         assert f"name='v_{one}' value='1'" in page
-        assert re.search(r"<span class='ui-lbl orange'>(<svg.*?</svg>)?Waiting</span>", page)
+        # the Waiting chip's own word is not repeated on its rows (one line per row since the rows
+        # redesign); a status other than waiting still is
+        assert not re.search(r"<span class='ui-lbl orange'>(<svg.*?</svg>)?Waiting</span>", page)
         # #2 would now be 13 -> 14
         assert re.search(r"<span class='ui-lbl red'[^>]*>(<svg.*?</svg>)?Needs a look</span>", page)
         assert "Not tied to one of your decks" in page and f"value='{new}' data-group='untied'" in page
@@ -243,6 +247,9 @@ async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stac
         assert "class='nb'" not in pill  # nothing waiting: no count
         assert "Nothing is waiting for this deck." in page
         await _propose(h, token, _add("Opt"))
+        # one change: the box's tick box names it alone, never "All 1 waiting" (confirmation P-6)
+        box = (await b.http.get("/decks/42")).text.split("id='proposals'")[1]
+        assert "<span>The 1 waiting</span>" in box and "All 1" not in box
         await _propose(h, token, _add("Delver of Secrets"))
         page = (await b.http.get("/decks/42")).text
         pill = page.split("<a class='soc prop'")[1].split("</a>")[0]
@@ -251,7 +258,9 @@ async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stac
         box = page.split("id='proposals'")[1]
         assert "<span>All 2 waiting</span>" in box and "name='back' value='/decks/42'" in box
         home = (await b.http.get("/")).text
-        assert "2<small>waiting</small>" in home and "2 on 1 deck · oldest 1 min · next expires in" in home
+        # Home's Needs you row (0.7.46: in place of the old Proposals tile)
+        assert "<b>2 proposals</b> waiting for you" in home
+        assert "<span>2 on 1 deck</span><span>oldest 1 min</span><span>next expires in" in home
     finally:
         await b.aclose()
 
@@ -297,7 +306,14 @@ async def test_apply_checked_opens_the_confirm_as_a_box_for_the_lists_script(sta
         assert "<h2 id='apply-box-title'>Apply this change?</h2>" in box
         assert "A snapshot is kept first, so Undo can put the cards back." in box
         assert "<ol class='order'><li><b>#" in box and "+1 Opt" in box
-        assert "<form id='apply-f' method='post' action='/proposals/apply'>" in box
+        # the confirm page's click guard (clickguard.py, data-tab): the form is a guarded one and
+        # Apply starts locked, in the Tab order, with the hint that says how it unlocks
+        assert (
+            "<form id='apply-f' method='post' action='/proposals/apply' class='guarded' data-tab "
+            "data-dwell='800' data-settle='300'>"
+        ) in box
+        assert "form='apply-f' data-guard aria-disabled='true'>" in box
+        assert "class='muted small guard-hint'>On a phone, tap once to unlock, then tap Apply." in box
         assert "name='shown' value='" in box and f"name='v_{a}' value='1'" in box
         assert f"name='picks' value='{a}'" in box and "name='back' value='/decks/42'" in box
         assert "name='action' value='apply' form='apply-f'" in box and ">Apply</button>" in box

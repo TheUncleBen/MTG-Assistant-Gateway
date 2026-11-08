@@ -19,7 +19,7 @@ from . import ui
 from .theme import esc, icon
 
 BOX_ID = "my-models"
-TITLE = "My card models"
+TITLE = "Card models"
 PAGE = "/history/models"
 REMOVE_ACTION = "/history/models/remove"
 SUB_TEXT = (
@@ -27,7 +27,7 @@ SUB_TEXT = (
     "solo tests, and only you see them here."
 )
 EMPTY_TEXT = (
-    "No saved descriptions yet. When a solo test plays a card without its effect, your assistant can "
+    "No card models yet. When a solo test plays a card without its effect, your assistant can "
     "describe the card for it; the descriptions that pass the gateway's check are kept here."
 )
 REMOVE_TEXT = (
@@ -71,7 +71,7 @@ def _row(m: dict[str, Any]) -> str:
         f"<span class='nm'>{esc(name)}</span></button>"
         + (f"<span class='mm-when'>{when}</span>" if when else "")
         + f"<a class='btn btn-outline-danger small mm-rm' href='{PAGE}?remove={quote(name)}' "
-        f"data-remove-model='{esc(name)}' aria-label='Remove the saved description of {esc(name)}'>"
+        f"data-remove-model='{esc(name)}' aria-label='Remove the card model of {esc(name)}'>"
         f"{icon('trash')} Remove</a></li>"
     )
 
@@ -85,12 +85,12 @@ def box_html(
     body = [f"<p class='ui-sub'>{esc(SUB_TEXT)}</p>"]
     if models:
         body.append(
-            "<div class='field mm-search'><label for='mm-q'>Search by card name</label>"
-            "<input id='mm-q' type='search' data-models-filter placeholder='Card name' autocomplete='off'>"
+            "<div class='field mm-search'><label for='mm-q'>Search by name</label>"
+            "<input id='mm-q' type='search' data-models-filter placeholder='Name' autocomplete='off'>"
             "</div>"
             f"<p class='sr-only' data-models-count role='status' aria-live='polite'></p>"
             f"<ul class='mm-list' data-models-list>{''.join(_row(m) for m in models)}</ul>"
-            "<p class='muted mm-none' data-models-none hidden>No saved description matches that name.</p>"
+            "<p class='muted mm-none' data-models-none hidden>No card model matches that name.</p>"
         )
     else:
         body.append(f"<p class='mm-empty'>{esc(EMPTY_TEXT)}</p>")
@@ -127,7 +127,7 @@ def confirm_box_html(card: str, *, csrf: str, back: str) -> str:
     )
     return ui.box(
         f"rm-mine-{slug(card)}",
-        f"Remove the saved description of “{card}”?",
+        f"Remove the card model of “{card}”?",
         body,
         actions=[
             ui.box_button("Keep it", cancel=True),

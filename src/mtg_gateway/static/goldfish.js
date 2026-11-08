@@ -154,9 +154,16 @@
     fill("hand", [g.hand], "No cards in hand.");
     fill("graveyard", [g.graveyard], "Empty.");
     fill("exile", [g.exile], "Empty.");
-    var status = (g.turn ? "Turn " + g.turn : "Opening hand") + " · Library " + g.library.length +
-      " · Hand " + g.hand.length + " · Graveyard " + g.graveyard.length + " · Exile " + g.exile.length;
-    $("#gf-status").textContent = status;
+    // one span per fact: the line's style (.ui-dots.balanced) draws the dots between them and wraps
+    // the facts as balanced lines, so no dot ends a line and no fact is left alone (polish C1)
+    var status = $("#gf-status");
+    status.textContent = "";
+    [g.turn ? "Turn " + g.turn : "Opening hand", "Library " + g.library.length, "Hand " + g.hand.length,
+      "Graveyard " + g.graveyard.length, "Exile " + g.exile.length].forEach(function (fact) {
+      var span = document.createElement("span");
+      span.textContent = fact;
+      status.appendChild(span);
+    });
     // One line only when a choice is open (the bottom cards after a mulligan): the buttons say
     // the rest, and the intro line above the table says the rules (the mockup, 33-goldfish.js).
     var hint = "";

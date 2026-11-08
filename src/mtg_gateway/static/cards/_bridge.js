@@ -61,24 +61,28 @@ var Bridge = (function () {
       if (typeof ins[side] === "number") root.style.setProperty("--inset-" + side, ins[side] + "px");
     });
     if (ctx.displayMode) root.setAttribute("data-display", String(ctx.displayMode));
-    var dims = ctx.containerDimensions;
-    if (dims && typeof dims.maxHeight === "number") root.style.setProperty("--max-h", dims.maxHeight + "px");
+    // A phone host that lays the card out wide and shrinks it to the screen (no viewport meta of
+    // its own): the pickers then keep to two columns, so a picture stays big enough to read.
+    var sw = window.screen && window.screen.width;
+    if (ctx.platform === "mobile" || (sw && window.innerWidth > sw * 1.25)) root.setAttribute("data-narrow", "");
     if (handlers.context) handlers.context(hostCtx);
   }
 
-  var sizeTimer = null;
+  // The card's own height, for the host to size its frame by: the body's box (the card plus the
+  // body's padding), never the document's scroll height, which inside a frame is at least the
+  // frame's current height and so could only ever grow. A burst of changes (pictures loading, a
+  // list drawn) becomes one report, and a size the host already has is not sent again.
+  var sizeTimer = null, lastSize = "";
   function reportSize() {
-    if (sizeTimer) return;
+    clearTimeout(sizeTimer);
     sizeTimer = setTimeout(function () {
-      sizeTimer = null;
-      var el = document.documentElement;
-      notify("ui/notifications/size-changed", { width: el.scrollWidth, height: el.scrollHeight });
-    }, 30);
+      var b = document.body.getBoundingClientRect(), w = Math.ceil(b.width), h = Math.ceil(b.height);
+      if (w + "x" + h === lastSize) return;
+      lastSize = w + "x" + h;
+      notify("ui/notifications/size-changed", { width: w, height: h });
+    }, 80);
   }
-  if (window.ResizeObserver) {
-    var ro = new ResizeObserver(reportSize);
-    ro.observe(document.documentElement); ro.observe(document.body);
-  }
+  if (window.ResizeObserver) new ResizeObserver(reportSize).observe(document.body);
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -136,11 +140,21 @@ var Bridge = (function () {
     if (uid) return "https://api.scryfall.com/cards/" + encodeURIComponent(uid) + "?format=image&version=" + v;
     return "https://api.scryfall.com/cards/named?exact=" + encodeURIComponent(name || "") + "&format=image&version=" + v;
   }
-  function picture(src, cls) {
-    var img = el("img", cls || "pic");
+  // A card picture. ``cls`` left out: a row's thumbnail (.pic); "" or a class: a picture sized by
+  // its own box. ``big`` (the normal-size picture) goes in a srcset, so a sharp phone screen
+  // draws it instead of stretching the small one; ``opts.large`` (Scryfall's 672px picture) joins
+  // it for a picture drawn across the card. ``opts.onError`` and ``opts.onLoad`` let a card
+  // count what could not be drawn (a picture host blocked or down).
+  function picture(src, cls, big, opts) {
+    var img = el("img", cls == null ? "pic" : cls), o = opts || {};
     img.alt = ""; img.loading = "lazy"; img.decoding = "async"; img.referrerPolicy = "no-referrer";
+    if (big && big !== src) {
+      img.srcset = src + " 146w, " + big + " 488w" + (o.large ? ", " + o.large + " 672w" : "");
+      img.sizes = o.sizes || "146px";
+    }
     img.src = src;
-    img.onerror = function () { img.classList.add("none"); img.onerror = null; };
+    img.onerror = function () { img.classList.add("none"); img.onerror = null; if (o.onError) o.onError(img); };
+    if (o.onLoad) img.onload = function () { o.onLoad(img); };
     return img;
   }
 
@@ -152,27 +166,11 @@ var Bridge = (function () {
   }
   // What the person did on the card, for the assistant's next turn. Hosts that cannot carry
   // it ignore the request; the card already shows the result to the person.
+  // Resolves true when the host took it and false when it could not (no such method, or refused),
+  // so a card can tell the person what to say instead: a pick is never lost in silence.
   function tellModel(text) {
-    return request("ui/update-model-context", { content: [{ type: "text", text: String(text) }] }).catch(function () {});
-  }
-  // After the person approves a change on a card: a short message in the chat, as if they had typed
-  // it, so the assistant carries on at once instead of waiting for their next message. Sent only
-  // where the host says a card may post messages (MCP Apps ui/message), or through ChatGPT's own
-  // follow-up call; anywhere else nothing is sent, and the assistant hears of the press with the
-  // person's next message, as before. Call it after tellModel has settled: the host hands the
-  // assistant that context along with the message. One rule on every card: it is sent once, as
-  // soon as the change is applied or under way (a large change still applying), never on Reject.
-  var NUDGE = "Approved, go on";
-  function nudge() {
-    if (hostCaps.message) {
-      return request("ui/message", { role: "user", content: [{ type: "text", text: NUDGE }] }).catch(function () {});
-    }
-    var oa = window.openai;
-    if (oa && typeof oa.sendFollowUpMessage === "function") {
-      try { return Promise.resolve(oa.sendFollowUpMessage({ prompt: NUDGE })).catch(function () {}); }
-      catch (e) { return Promise.resolve(); }
-    }
-    return Promise.resolve();
+    return request("ui/update-model-context", { content: [{ type: "text", text: String(text) }] })
+      .then(function () { return true; }, function () { return false; });
   }
   // A data value (a card or set name, a user's own words) quoted for the text sent to the model: one
   // line, at most 200 characters, in quotes, so it reads as data and not as part of the sentence.
@@ -216,7 +214,7 @@ var Bridge = (function () {
 
   return {
     start: start, request: request, notify: notify, el: el, $: $, icon: icon, label: label, picture: picture, scryfallImage: scryfallImage,
-    openLink: openLink, tellModel: tellModel, nudge: nudge, quote: quote, reportSize: reportSize, setStatus: setStatus,
+    openLink: openLink, tellModel: tellModel, quote: quote, reportSize: reportSize, setStatus: setStatus,
     displayModes: displayModes, requestDisplayMode: requestDisplayMode, context: function () { return hostCtx; }
   };
 })();

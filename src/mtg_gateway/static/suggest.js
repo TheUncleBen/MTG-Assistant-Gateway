@@ -114,6 +114,7 @@
     var rich = input.hasAttribute("data-suggest-rich"), peeking = null;
     var site = input.getAttribute("data-suggest-site");  // the top bar: card rows open this page, plus a Decks group
     if (site) rich = true;
+    if (site) input.addEventListener("focus", function () { askMyDecks(); });
     // data-suggest-qty: a count in front ("3 sol ring") is kept out of the lookup and kept on pick
     var qtyMode = input.hasAttribute("data-suggest-qty");
     var pendingEnter = false;  // Enter pressed while the list still showed an older text
@@ -242,9 +243,30 @@
       items.push(li);
       return li;
     }
+    /* The member's own decks (/api/decks/names, asked once a page): the ones whose name holds
+       the typed text come first under "Your decks", each opening its deck page. */
+    var myDecks = null, myDecksAsked = false;
+    function askMyDecks() {
+      if (myDecksAsked || !window.fetch) return;
+      myDecksAsked = true;
+      fetch("/api/decks/names", { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { myDecks = d && d.ok ? d.decks || [] : []; })
+        .catch(function () { myDecks = []; });
+    }
+    function myDeckRows(raw) {
+      var q = fold(raw);
+      if (!q || !myDecks) return 0;
+      var hits = myDecks.filter(function (d) { return fold(d.name).indexOf(q) >= 0; }).slice(0, 5);
+      if (!hits.length) return 0;
+      list.appendChild(head("Your decks"));
+      hits.forEach(function (d) { list.appendChild(goRow(d.name, "/decks/" + encodeURIComponent(d.id), "decks")); });
+      return hits.length;
+    }
     function siteRows(names) {
       var raw = text().trim();
       if (names.length) list.insertBefore(head("Cards"), list.firstChild);
+      myDeckRows(raw);
       list.appendChild(head("Decks"));
       list.appendChild(goRow("Search decks named “" + raw + "”", "/search?name=" + encodeURIComponent(raw), "search"));
       commanderRows();
@@ -262,6 +284,14 @@
         if (items.some(function (o) { return o.getAttribute("data-href") === href; })) return;
         list.appendChild(goRow("Decks with commander " + c.name, href, "decks"));
       });
+    }
+    // the card row whose name is exactly the text typed (folded as the lookup folds), or -1
+    function exactRow() {
+      var q = fold(text());
+      for (var i = 0; i < items.length; i++) {
+        if (!items[i].getAttribute("data-href") && fold(items[i].getAttribute("data-name") || "") === q) return i;
+      }
+      return -1;
     }
     function pick(i) {
       var name = items[i] ? items[i].getAttribute("data-name") : "";
@@ -320,7 +350,14 @@
       if (whole) reveal();
       if (rich && names.length) peek(names);
       announce();
-      if (pendingEnter) { pendingEnter = false; if (names.length) pick(0); }
+      // Enter pressed over an older list: the first row of this answer; with no row, the form
+      // goes as typed (the gateway says when the name is no card)
+      if (pendingEnter) {
+        pendingEnter = false;
+        if (site) { if (exactRow() >= 0) pick(exactRow()); else if (input.form) { close(); submit(input.form); } }
+        else if (names.length) pick(0);
+        else if (input.hasAttribute("data-suggest-submit") && input.form) { close(); submit(input.form); }
+      }
     }
     /* A list under a box low on a phone's screen would open under the keyboard: once it shows,
        bring the box to the top of what can be seen (scroll-padding keeps it below the top bar). */
@@ -394,6 +431,12 @@
         // the list belongs to the current text: take its first row; an older list: take the first
         // row of the answer that is on its way (typing again cancels that)
         if (shownFor === fold(text())) pick(0); else pendingEnter = true;
+      } else if (site && items.length) {
+        // the top bar (QOL-21): the exact name typed, its card row on screen, opens the card; any
+        // other text is the deck search. An older list: decided once the answer is in.
+        if (shownFor !== fold(text())) { e.preventDefault(); pendingEnter = true; }
+        else if (exactRow() >= 0) { e.preventDefault(); pick(exactRow()); }
+        else close();
       } else close(); }
       else if (e.key === "Escape") { e.preventDefault(); close(); }
       else if (e.key === "Tab") { close(); }
@@ -406,5 +449,14 @@
     for (var i = 0; i < inputs.length; i++) attach(inputs[i]);
   }
   scan(document);
-  window.MtgSuggest = { attach: attach, scan: scan, narrow: narrow, fold: fold };
+  // A card-name box sent with nothing typed: it keeps the focus and says so, as a required field
+  // does (the browser's own note at the field, in the gateway's words), until something is typed.
+  // The deck page's quick add (static/deck.js, owner decision A5) and the editor's Add
+  // (static/companion.js) share it, so both say "Type a card name." (polish batch 3 N4).
+  var NEED_NAME = "Type a card name.";
+  function needName(input, need) {
+    input.setCustomValidity(need ? NEED_NAME : "");
+    if (need) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+  }
+  window.MtgSuggest = { attach: attach, scan: scan, narrow: narrow, fold: fold, needName: needName };
 })();

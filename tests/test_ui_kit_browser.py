@@ -17,6 +17,7 @@ from mtg_gateway import theme, ui
 
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .waits import SCROLL_WATCH, scrolled
 
 pytest.importorskip("playwright")
 
@@ -64,7 +65,7 @@ def _list(now: float) -> str:
                 ),
                 ui.widget("Needs a look", "alert", 1, detail="Sol Ring changed", tone="alert"),
                 ui.widget(
-                    "Always need your press",
+                    "Only you can apply",
                     "hand",
                     2,
                     detail_html=ui.label_for("your_press", word="Your press 1")
@@ -319,6 +320,8 @@ def test_table_switches_layout_at_600_and_900(kit: KitServer) -> None:
         ctx = _ctx(browser, kit, sid, 1280, 800, False, "light")
         page = ctx.new_page()
         page.goto(kit.base + "/ui-kit", wait_until="networkidle")
+        # below 600 px the widgets sit behind their one line until it is tapped: open them
+        page.evaluate("document.querySelector('.glance-tgl').checked = true")
         for width, cols, head, md, sub, stin in (
             (1280, 7, True, True, False, False),
             (900, 7, True, True, False, False),
@@ -377,8 +380,9 @@ def test_side_panel_beside_the_list_from_1100_and_its_own_page_below(kit: KitSer
             assert page.evaluate("document.documentElement.scrollWidth") <= width
         # the panel stays in view while the list scrolls
         page.set_viewport_size({"width": 1280, "height": 800})
+        page.evaluate(SCROLL_WATCH)
         page.mouse.wheel(0, 1500)
-        page.wait_for_timeout(200)
+        scrolled(page)
         top = page.locator(".ui-drawer").bounding_box()["y"]
         assert 0 <= top < 120, top
         # narrower: the item is its own page, with a way back
@@ -510,6 +514,7 @@ def test_phone_search_box_heading_and_widgets_at_200_percent_text(kit: KitServer
             ctx = _ctx(browser, kit, sid, w, 800, True, "light")
             page = ctx.new_page()
             page.goto(kit.base + "/ui-kit", wait_until="networkidle")
+            page.locator("label.glance-lbl").click()  # the widgets open on a tap on a phone
             got = page.evaluate(PHONE_FIT_JS)
             assert got["border"] == ["1px"] * 4, (w, got)
             assert got["radius"] == [got["theme"]] * 4 and got["theme"] not in ("", "0px"), (w, got)

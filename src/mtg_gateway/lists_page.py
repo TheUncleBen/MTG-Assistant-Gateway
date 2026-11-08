@@ -1,6 +1,11 @@
-"""My lists (/lists): the member's five account-wide Archidekt lists (account_lists.py) as one
-page with five tabs: Category templates, Default categories, Color tags, Pinned cards and Custom
-cards (parity release 2, mockup screens/10-lists.js).
+"""Binder › Lists (/collection/lists; 0.7.46, mockup screen 8): one page under Binder's switch
+with two blocks. "Your Archidekt lists": the member's account-wide Archidekt lists
+(account_lists.py), each a row that opens its own page (/lists/<tab>: Category templates, Default
+categories, Color tags, Custom cards, and Pinned cards at /collection/wants, its old Binder
+address), with the tab bar on those pages as the quick way between them. "Watchlist lists": the
+member's watchlist lists (prices.py), each a row that opens the Watchlist on that list, with
+Rename and Delete, and New list…. The old /lists address lands on the hub; the forms of the
+Archidekt lists still post to /lists/<tab>.
 
 Each tab is one Archidekt read. Every row has a ⋮ (with scripts a menu from the ⋮, a right-click
 or a press and hold, static/lists.js; without them a plain drop-down of links). The boxes (ui.box)
@@ -15,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import time
 from types import SimpleNamespace
 from typing import Any, NamedTuple
@@ -23,29 +29,40 @@ from urllib.parse import parse_qs, quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, custom_pictures, modes, ui
+from . import account_hub, account_lists, custom_pictures, modes, proposals_view, ui
 from .archidekt import no_retry
-from .busy import busy_response
+from .archidekt_account import CUSTOM_CARD_FIELDS
+from .busy import busy_json_response, busy_response, held_html, same_url
 from .companion import DECK_CSP
 from .deckpage import image_url
-from .decks import DeckError, current_client
+from .decks import DeckError, current_client, own_snapshot, reloading
 from .pages import (
     BROWSER_CLIENT_ID,
     TOO_BIG,
     _csrf,
     browser_session,
     limited_form,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .theme import esc, icon
 
 PAGE = "/lists"
-TITLE = "My lists"
+HUB = "/collection/lists"  # Binder › Lists, the hub both blocks live on
+TITLE = "Binder: Lists"
 SUB_TEXT = (
-    "Your Archidekt lists that follow you into every deck. Changes are saved to Archidekt and read "
+    "Your Archidekt lists that shape every deck. Changes are saved to Archidekt and read "
     "back; a copy from just before is kept under History."
 )
+# Pinned cards: the cards pinned on Archidekt, at Binder's old Wants address (the Watchlist is
+# the want list; the pins keep Archidekt's own name)
+WANTS = "/collection/wants"
+WANTS_TITLE = "Binder: Pinned cards"
+WANTS_SUB = (
+    "The cards you pinned on Archidekt, with a note and the copies you are after. Pin one from "
+    "any card's menu."
+)
+HUB_SUB = "The lists that shape your decks on Archidekt, and the lists your watchlist is grouped in."
 # the page shows the chosen picture before it is sent (a blob: address), and a pin's printing
 LISTS_CSP = DECK_CSP.replace("img-src 'self'", "img-src 'self' blob:")
 PICTURE_BODY_LIMIT = account_lists.PICTURE_MAX_BYTES + 64_000  # the file plus the form's own fields
@@ -63,8 +80,20 @@ TABS = (
     Tab("tags", "Color tags", "color_tags"),
     Tab("pins", "Pinned cards", "pins"),
     Tab("custom", "Custom cards", "custom_cards"),
+    Tab("btags", "Binder tags", "collection_tags"),
 )
 BY_SLUG = {t.slug: t for t in TABS}
+PINS = BY_SLUG["pins"]
+ACCOUNT_TABS = tuple(t for t in TABS if t is not PINS)  # the lists under /lists/<tab>
+# each list's own icon on the hub
+TAB_ICONS = {
+    "templates": "tag",
+    "defaults": "list",
+    "tags": "tag",
+    "pins": "bookmark",
+    "custom": "image",
+    "btags": "tag",
+}
 FLAGS = (
     ("in_deck", "In deck", "Counts in the deck"),
     ("in_price", "In price", "Counts in the price"),
@@ -73,6 +102,8 @@ FLAGS = (
 HIST_TAIL = " is kept under History, and the result is read back to check."
 # the member's own text in the box after a save: the mockup's toasts
 NOTICES = {
+    "undone": "Undone. The deck is back as it was before that change.",
+    "list_undone": "Undone. “{name}” is as it was.",
     "template_created": "Template created on Archidekt and read back.",
     "template_saved": "Template saved on Archidekt and read back.",
     "template_deleted": "Deleted “{name}” on Archidekt.",
@@ -81,13 +112,18 @@ NOTICES = {
     "tag_created": "Color tag created on Archidekt and read back.",
     "tag_saved": "Color tag saved on Archidekt and read back.",
     "tag_deleted": "Deleted “{name}” on Archidekt.",
+    "btag_created": "Binder tag created on Archidekt and read back.",
+    "btag_saved": "Binder tag saved on Archidekt and read back.",
+    "btag_deleted": "Deleted “{name}” on Archidekt. The entries that had it keep everything else.",
     "pin_saved": "Saved on Archidekt.",
+    "pinned": "Pinned “{name}” on Archidekt.",
     "pin_removed": "Pin removed on Archidekt.",
     "pins_removed": "All pins removed on Archidekt.",
     "card_created": "Custom card created on Archidekt and read back.",
     "card_saved": "Custom card saved on Archidekt and read back.",
     "card_deleted": "Deleted “{name}” on Archidekt.",
     "card_added": "Added “{name}” to the deck on Archidekt and read back.",
+    "template_added": "Added the category “{name}” to the deck on Archidekt and read back.",
     "picture_saved": "Picture saved on Archidekt and read back.",
 }
 UNCONFIRMED = (
@@ -97,7 +133,7 @@ CUSTOM_FACE_FIELDS = (
     ("Name", "n", "", 200, ""),
     ("Mana cost", "m", "{2}{G}", 200, ""),
     ("Types", "t", "Creature", 200, ""),
-    ("Subtypes", "st", "Human Advisor", 200, ""),
+    ("Subtypes", "st", "Advisor", 200, ""),
     ("Supertypes", "su", "Legendary", 200, ""),
     ("Power", "p", "", 20, ""),
     ("Toughness", "tg", "", 20, ""),
@@ -122,8 +158,99 @@ _ID = re.compile(r"[0-9]{1,12}")
 
 
 def tab_href(slug: str, **params: Any) -> str:
+    """A tab's page address: Pinned cards is Binder's Wants page, the rest are under /lists."""
     q = {k: v for k, v in params.items() if v not in (None, "", 0, False)}
-    return f"{PAGE}/{slug}" + (f"?{urlencode(q)}" if q else "")
+    base = WANTS if slug == "pins" else f"{PAGE}/{slug}"
+    return base + (f"?{urlencode(q)}" if q else "")
+
+
+# Undo of a list edit (0.7.46 audit QG-09): the reverse change of what the member's own press
+# just applied, kept under a token this long (seconds) for the notice's Undo button, which sends
+# it the same way (applied at once and read back). Only the member who made the change can
+# use it, once.
+UNDO_KEEP = 15 * 60
+_UNDOS: dict[str, tuple[str, str, dict[str, Any], str, float]] = {}  # token: (sub, slug, change, name, until)
+
+
+def keep_undo(sub: str, slug: str, change: dict[str, Any], name: str) -> str:
+    now = time.time()
+    for t in [t for t, v in _UNDOS.items() if v[4] <= now]:
+        _UNDOS.pop(t, None)
+    if len(_UNDOS) > 10_000:
+        _UNDOS.clear()
+    token = secrets.token_urlsafe(18)
+    _UNDOS[token] = (sub, slug, change, name, now + UNDO_KEEP)
+    return token
+
+
+def take_undo(sub: str, slug: str, token: str) -> tuple[dict[str, Any], str] | None:
+    """The kept reverse change for the member's ``token`` on this tab (spent by the take)."""
+    kept = _UNDOS.pop(str(token or ""), None)
+    if kept is None or kept[0] != sub or kept[1] != slug or kept[4] <= time.time():
+        return None
+    return kept[2], kept[3]
+
+
+def reverse_of(slug: str, change: dict[str, Any], before: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The change that undoes ``change``, given the item as it was before (``before``: the tab's
+    row for it, None when there was none). None when it cannot be undone this way (Remove all)."""
+    op = change.get("op")
+    name = change.get("new_name") or change.get("name") or ""
+    was = change.get("name") or ""
+    if slug == "templates":
+        if op == "create":
+            return {"op": "delete", "name": name}
+        if op == "edit" and before:
+            out = {"op": "edit", "name": name, **{k: bool(before.get(k)) for k, _w, _l in FLAGS}}
+            if name != was:
+                out["new_name"] = was
+            return out
+        if op == "delete" and before:
+            return {"op": "create", "name": was, **{k: bool(before.get(k)) for k, _w, _l in FLAGS}}
+    elif slug == "defaults":
+        card = change.get("card") or ""
+        if op in ("set", "clear"):
+            if before and before.get("categories"):
+                return {"op": "set", "card": card, "categories": list(before["categories"])}
+            return {"op": "clear", "card": card} if op == "set" else None
+    elif slug in ("tags", "btags"):
+        if op == "create":
+            return {"op": "delete", "name": name}
+        if op == "edit" and before:
+            out = {"op": "edit", "name": name, "color": before.get("color") or None}
+            if name != was:
+                out["new_name"] = was
+            return out
+        if op == "delete" and before:
+            return {"op": "create", "name": was, "color": before.get("color") or None}
+    elif slug == "pins":
+        if op == "edit" and before:
+            out: dict[str, Any] = {"op": "edit", "pin_id": change.get("pin_id")}
+            if "quantity" in change:
+                out["quantity"] = int(before.get("quantity") or 1)
+            if "notes" in change:
+                out["notes"] = before.get("notes") or ""
+            if change.get("set_code") or change.get("finish"):
+                return None  # a printing change: Archidekt's own history has no way back
+            return out
+        if op == "unpin" and before:
+            out = {"op": "pin", "card": before.get("name") or ""}
+            if before.get("set_code"):
+                out["set_code"] = before["set_code"]
+                out["collector_number"] = before.get("collector_number") or ""
+            if (before.get("finish") or "").lower() in ("foil", "etched"):
+                out["finish"] = before["finish"].capitalize()
+            return out
+    elif slug == "custom":
+        if op == "create":
+            return {"op": "delete", "name": name}
+        if op == "edit" and before:
+            fields = {k: before.get(k) for k in CUSTOM_CARD_FIELDS}
+            return {"op": "edit", "name": name, "fields": fields}
+        if op == "delete" and before:
+            fields = {k: before.get(k) for k in CUSTOM_CARD_FIELDS}
+            return {"op": "create", "fields": fields}
+    return None
 
 
 def notice_text(code: str, name: str = "") -> str:
@@ -166,7 +293,7 @@ def warn(lead: str, rest: str) -> str:
 def counter(for_id: str, n: int, limit: int) -> str:
     return (
         f"<div class='lp-under'><span></span><span class='muted small' id='{esc(for_id)}-c' data-counter"
-        f" aria-live='polite'>{n} / {limit}</span></div>"
+        f" aria-live='polite'>{ui.counted(n, limit)}</span></div>"
     )
 
 
@@ -217,6 +344,10 @@ def kebab_menu(name: str, items: list[tuple[str, str, str, dict[str, str]] | Non
     )
 
 
+# the search box's count for screen readers (lists.js fills it as the rows are narrowed)
+FILTER_NOTE = "<p class='sr-only' data-filter-count role='status' aria-live='polite'></p>"
+
+
 def row_attrs(kind: str, name: str, data: dict[str, Any]) -> str:
     return (
         f"class='tr' data-kind='{esc(kind)}' data-name='{esc(name)}' data-row='{esc(json.dumps(data))}' "
@@ -228,14 +359,159 @@ def box_note(error: str) -> str:
     return f"<p class='notice error boxnote' role='alert'>{esc(error)}</p>" if error else ""
 
 
+COUNTS_API = PAGE + "/api/counts"
+
+
+def tab_page_of(tab: Tab) -> str:
+    """A list's own page: the pins at Binder's old Wants address, the rest under /lists."""
+    return WANTS if tab is PINS else f"{PAGE}/{tab.slug}"
+
+
 def tabs_html(current: str, counts: dict[str, int]) -> str:
+    """The tab bar on a list's page: the quick way between the six Archidekt lists. A tab whose
+    list has not been read yet has no number; static/lists.js asks COUNTS_API for them after the
+    page has drawn (data-counts), so the page never waits for them."""
     out = []
     for t in TABS:
         n = counts.get(t.kind)
         cur = " aria-current='page'" if t.slug == current else ""
         num = f"<span class='n'>{n:,}</span>" if n is not None else ""
-        out.append(f"<a href='{PAGE}/{t.slug}'{cur}>{esc(t.label)}{num}</a>")
-    return f"<nav class='adm-nav lp-tabs' aria-label='Lists'>{''.join(out)}</nav>"
+        out.append(f"<a href='{tab_page_of(t)}'{cur}>{esc(t.label)}{num}</a>")
+    missing = any(counts.get(t.kind) is None for t in TABS)
+    fill = f" data-counts='{COUNTS_API}'" if missing else ""
+    return f"<nav class='hubseg adm-nav lp-tabs' aria-label='Lists'{fill}>{''.join(out)}</nav>"
+
+
+def crumbs_html(tab: Tab) -> str:
+    """Lists › Category templates: the way back to the hub, the theme's grey capsule."""
+    return (
+        f"<nav class='crumbs lp-crumbs' aria-label='You are in'>{ui.cap_link('Lists', HUB, icon_name='list')}"
+        f"<span aria-hidden='true'>›</span><span>{esc(tab.label)}</span></nav>"
+    )
+
+
+def hub_html(
+    counts: dict[str, int],
+    watch_lists: list[dict[str, Any]] | None,
+    *,
+    ungrouped: int = 0,
+    csrf: str = "",
+    open_box: str = "",
+    q: str = "",
+) -> str:
+    """The hub's two blocks, in the Account page's grouped-list style (account_hub.HUB_CSS): the
+    six Archidekt lists with the counts known so far (static/lists.js fills the rest from
+    COUNTS_API), and the watchlist lists (None while watchlists are off) with their counts, a ⋮
+    (Rename list…, Delete list…) and New list…, a box posting to the Watchlist. A name box above
+    narrows the rows as you type (static/lists.js; ``q`` is the box submitted without scripts:
+    0.7.46 audit QG-25)."""
+    needle = q.strip().casefold()
+    rows = []
+    for t in TABS:
+        if needle and needle not in t.label.casefold():
+            continue
+        n = counts.get(t.kind)
+        val = f"<span class='val'>{n:,}</span>" if n is not None else "<span class='val'></span>"
+        rows.append(
+            f"<a class='yrow' href='{tab_page_of(t)}' data-q='{esc(t.label.casefold())}'>"
+            f"{icon(TAB_ICONS[t.slug])}"
+            f"<span class='lbl'>{esc(t.label)}"
+            f"</span>{val}<span class='ch'>{icon('chev')}</span></a>"
+        )
+    missing = any(counts.get(t.kind) is None for t in TABS)
+    fill = f" data-counts='{COUNTS_API}'" if missing else ""
+    tools = ui.toolbar(HUB, search_label="Find a list", placeholder="List name", q=q)
+    tools += "<p class='muted small lp-count' data-filter-count aria-live='polite'></p>"
+    arch = (
+        f"<section class='ygrp'{' hidden' if not rows else ''}><h2>Your Archidekt lists</h2>"
+        f"<div class='rows lp-hubrows'{fill}>{''.join(rows)}</div></section>"
+    )
+    if watch_lists is None:
+        return (
+            f"{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div></div></div>"
+        )
+    wrows = []
+    for wl in watch_lists:
+        name = wl["name"]
+        if needle and needle not in name.casefold():
+            continue
+        href = f"/watchlist?{urlencode({'list': name})}"
+        items = "".join(
+            f"<a href='/watchlist?{esc(urlencode({'box': box, 'list': name}))}' data-icon='{ic}'{extra}>"
+            f"{icon(ic)}{text}</a>"
+            for text, ic, box, extra in (
+                ("Rename list…", "edit", "rename", ""),
+                ("Delete list…", "trash", "delete", " class='danger'"),
+            )
+        )
+        wrows.append(
+            f"<div class='yrow wlrow' data-q='{esc(name.casefold())}'><a class='lbl' href='{esc(href)}'>"
+            f"{icon('folder')}"
+            f"<span>{esc(name)}</span></a>"
+            f"<span class='val'>{wl['count']:,}</span>"
+            "<details class='dd rowmenu lp-dd'><summary class='kebab' "
+            f"aria-label='Menu for the list {esc(name)}' "
+            f"title='Menu' aria-haspopup='menu'>{icon('more')}</summary>"
+            f"<div class='menu'><div class='head'>{esc(name)}</div>{items}</div></details></div>"
+        )
+    if ungrouped and (not needle or needle in "not in a list"):
+        wrows.append(
+            "<a class='yrow' href='/watchlist?list=-' data-q='not in a list'>"
+            f"{icon('folder')}<span class='lbl'>Not in a list</span><span class='val'>{ungrouped:,}</span>"
+            f"<span class='ch'>{icon('chev')}</span></a>"
+        )
+    wrows.append(
+        f"<a class='yrow' href='/watchlist?box=newlist' {ui.box_open_attr('wl-new')}>{icon('plus')}"
+        "<span class='lbl'>New list…</span></a>"
+    )
+    watch = (
+        f"<section class='ygrp'><h2>Watchlist lists</h2><div class='rows'>{''.join(wrows)}</div></section>"
+    )
+    box = ui.box(
+        "wl-new",
+        "New list",
+        "<form method='post' action='/watchlist' id='wl-new-f'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        f"<input type='hidden' name='action' value='list_new'><input type='hidden' name='back' value='{HUB}'>"
+        "<label for='wl-newname'>Name<input id='wl-newname' name='name' maxlength='40' autocomplete='off' "
+        "required></label><p class='ui-hint'>A list groups the cards you watch: wants for one deck, cards to "
+        "trade for, anything you like. Move cards into it from their ⋮ on the Watchlist, or with "
+        "Select.</p></form>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Create list", kind="primary", form="wl-new-f"),
+        ],
+        open=open_box == "newlist",
+        close_href=HUB,
+    )
+    return (
+        f"{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div>"
+        f"<div class='ycol'>{watch}</div></div></div>{box}"
+    )
+
+
+HUB_CSS = """
+.lp-hub{max-width:62rem;margin:0}
+/* the name box narrows the rows (QG-25): a hidden row or group is gone, the count line only shows
+   with words */
+.lp-hub .ygrp[hidden],.lp-hub .yrow[hidden]{display:none}
+.lp-count{margin:-.25rem 0 .5rem}.lp-count:empty{display:none}
+.lp-hub .ygrp .yrow .val:empty{display:none}
+.lp-hub .yrow.wlrow{padding-right:.25rem}
+.lp-hub .yrow.wlrow a.lbl{display:inline-flex;align-items:center;gap:.8rem;flex:1 1 auto;min-height:44px;
+  color:var(--text);text-decoration:none;font-weight:400}
+.lp-hub .yrow.wlrow a.lbl svg.i{width:20px;height:20px;color:var(--orange-text)}
+.lp-hub .yrow.wlrow a.lbl:hover span{text-decoration:underline}
+.lp-hub .yrow.wlrow .lp-dd > summary.kebab{display:inline-grid;place-items:center;width:44px;height:44px;
+  border-radius:var(--radius);color:var(--text)}
+.lp-hub .yrow.wlrow .lp-dd > summary.kebab:hover{background:var(--surface-2)}
+.lp-hub .yrow.wlrow .lp-dd .menu{min-width:12rem}
+/* large text on a narrow phone (account_hub.HUB_CSS's grid rows): the list's link, which holds
+   its own icon, spans the icon and label columns */
+@container (max-width:20em){ .lp-hub .yrow.wlrow a.lbl{grid-column:1 / span 2;grid-row:1} }
+.lp-hub .ui-hint{margin:.5rem 0 0}
+.lp-hub + .ui-box form label{display:flex;flex-direction:column;gap:.25rem;font-weight:700}
+"""
 
 
 def list_head(title: str, count_html: str, actions_html: str = "") -> str:
@@ -284,7 +560,7 @@ def templates_rows(items: list[dict[str, Any]]) -> str:
             ],
         )
         out.append(
-            f"<div {row_attrs('template', name, t)}>"
+            f"<div {row_attrs('template', name, t)} data-q='{esc(name.casefold())}'>"
             f"<span class='title'><span class='t'>{esc(name)}</span>"
             f"<span class='sm-only'>{esc(' · '.join(on) or 'Not in deck or price')}</span></span>"
             f"<span class='sm-hide flags'>{lbls}</span>{menu}</div>"
@@ -295,8 +571,8 @@ def templates_rows(items: list[dict[str, Any]]) -> str:
 def template_deck_box(csrf: str, st: dict[str, Any]) -> str:
     """Add to a deck… (parity release 2): the deck picked from the member's decks (read when the
     box opens, static/lists.js; the old address ?add= draws it with the list read here), then the
-    deck gets one category made from the template (account_lists.from_templates), proposed as a
-    categories change and sent to its review page."""
+    deck gets one category made from the template (account_lists.from_templates), applied at once
+    as the member's own press (add_template_to_deck)."""
     name = (st.get("values") or {}).get("name", "")
     rows = st.get("decks") or []
     picked = (st.get("values") or {}).get("deck", "")
@@ -312,8 +588,10 @@ def template_deck_box(csrf: str, st: dict[str, Any]) -> str:
         "<div class='field'><label for='tpl-deck-sel'>Deck</label><span class='sel'>"
         f"<select id='tpl-deck-sel' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
         "</div></form>"
-        "<p class='muted small'>The deck gets a category with this name and these flags. The same as "
-        "Deck settings › Categories › Add template.</p>" + box_note(st.get("error", ""))
+        "<p class='muted small'>The deck gets a category with this name and these flags at once, "
+        "with Undo, as Deck settings › Categories › Add template does. A Premier or Not in deck "
+        "template opens on its review page first, as it changes which cards count.</p>"
+        + box_note(st.get("error", ""))
     )
     return ui.box(
         "tpl-deck",
@@ -357,6 +635,8 @@ def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
         head
         + "<p class='ui-sub'>Categories you can add to any deck in one press. Once added, the deck's copy "
         "and the template are not linked.</p>"
+        + ui.toolbar(tab_href("templates"), search_label="Search by name", placeholder="Name")
+        + FILTER_NOTE
         + table
         + template_box(csrf, box if box.get("box") == "tpl-box" else {})
         + template_delete_box(csrf, box if box.get("box") == "tpl-del" else {})
@@ -532,15 +812,15 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) ->
             tab_href("defaults", page=page + 1, q=q), text=f"Load more ({seen:,} of {total:,} shown)"
         )
         if got["more"]
-        else (ui.load_more("", done=f"All {total:,} shown.") if total else "")
+        else (ui.load_more("", done=ui.all_shown(total, "")) if total else "")
     )
     return (
         head
         + "<p class='ui-sub'>When you add one of these cards to a deck, it goes into these categories; ★ is "
         "the main one. Set them from a card's menu on a deck (Lock personal categories) or here. Choices "
         "come from your category templates.</p>"
-        + ui.toolbar(f"{PAGE}/defaults", search_label="Search by card name", placeholder="Card name", q=q)
-        + "<p class='sr-only' data-filter-count role='status' aria-live='polite'></p>"
+        + ui.toolbar(f"{PAGE}/defaults", search_label="Search by name", placeholder="Name", q=q)
+        + FILTER_NOTE
         + table
         + more
         + defaults_box(csrf, got.get("templates") or [], box if box.get("box") == "def-box" else {})
@@ -611,7 +891,7 @@ def defaults_clear_box(csrf: str, st: dict[str, Any]) -> str:
         f"Clear the default categories of “{name}”?",
         body,
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep them", cancel=True),
             ui.box_button(f"Clear “{name}”", kind="danger-solid", form="def-clear-f", icon_name="x"),
         ],
         open=bool(st),
@@ -631,7 +911,36 @@ def swatch(color: str) -> str:
     return f"<span class='lp-swatch' style='background:{esc(color)}' aria-hidden='true'></span>"
 
 
-def tags_rows(items: list[dict[str, Any]]) -> str:
+# Color tags (the deck tag list) and Binder tags (the tags on binder entries, collection_tags.py)
+# share the rows and boxes; each its own page, so the boxes keep one set of ids
+TAG_WORDS = {
+    "tags": {
+        "title": "Color tags",
+        "one": "color tag",
+        "empty": "No color tags yet.",
+        "purpose": "Tags you can put on cards in any deck. A card keeps the name and color it was "
+        "tagged with, so changes here don't reach cards already tagged.",
+        "edit_warn": "Cards already tagged keep their old name and color. Archidekt doesn't link a card's "
+        "tag to this list.",
+        "delete": "Cards already tagged keep their color and name; the tag only leaves this list and the "
+        "deck's tag picker. A copy of the list from just before is kept under History.",
+        "placeholder": "Cut",
+    },
+    "btags": {
+        "title": "Binder tags",
+        "one": "binder tag",
+        "empty": "No binder tags yet. Make one here, then tick it in a card's Details in your binder.",
+        "purpose": "Tags on the cards in your binder, as Archidekt's collection has them: tick them in a "
+        "card's Details, and filter your binder by one.",
+        "edit_warn": "Every entry with this tag shows the new name and color.",
+        "delete": "Every entry in your binder with this tag loses it; the entries themselves stay. A copy "
+        "of the list from just before is kept under History.",
+        "placeholder": "For trade",
+    },
+}
+
+
+def tags_rows(items: list[dict[str, Any]], slug: str = "tags") -> str:
     out = []
     for t in items:
         name, color = t["name"], t["color"]
@@ -641,20 +950,20 @@ def tags_rows(items: list[dict[str, Any]]) -> str:
                 (
                     "Rename or recolor…",
                     "edit",
-                    tab_href("tags", edit=t["id"]),
+                    tab_href(slug, edit=t["id"]),
                     {"data-box": "tag-box", "data-mode": "edit"},
                 ),
                 None,
                 (
                     "Delete…",
                     "trash",
-                    tab_href("tags", delete=t["id"]),
+                    tab_href(slug, delete=t["id"]),
                     {"class": "danger", "data-box": "tag-del"},
                 ),
             ],
         )
         out.append(
-            f"<div {row_attrs('tag', name, t)}>"
+            f"<div {row_attrs('tag', name, t)} data-q='{esc(name.casefold())}'>"
             f"<span class='title lp-tagc'>{swatch(color)}<span class='t'>{esc(name)}</span>"
             f"<span class='sm-only'><code>{esc(color)}</code></span></span>"
             f"<span class='sm-hide'><code>{esc(color)}</code></span>{menu}</div>"
@@ -662,12 +971,13 @@ def tags_rows(items: list[dict[str, Any]]) -> str:
     return "".join(out)
 
 
-def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
+def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "tags") -> str:
     items = got["items"]
+    w = TAG_WORDS[slug]
     head = list_head(
-        "Color tags",
+        w["title"],
         f"{len(items)}",
-        ui.box_opener("New color tag", tab_href("tags", new=1), "tag-box", kind="primary", icon_name="plus"),
+        ui.box_opener(f"New {w['one']}", tab_href(slug, new=1), "tag-box", kind="primary", icon_name="plus"),
     )
     table = (
         ui.table_open(
@@ -675,34 +985,45 @@ def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
             "minmax(0,1fr) 7rem 44px",
             "minmax(0,1fr) 44px",
             cls="lp-tbl lp-tag",
-            label="Color tags",
+            label=w["title"],
         )
         + ui.table_header([ui.Column("Tag"), ui.Column("Color", "sm-hide"), ui.Column("")])
-        + (tags_rows(items) or "<div class='tr lp-empty'><span class='muted'>No color tags yet.</span></div>")
+        + (
+            tags_rows(items, slug)
+            or f"<div class='tr lp-empty'><span class='muted'>{esc(w['empty'])}</span></div>"
+        )
         + "</div>"
     )
     return (
         head
-        + "<p class='ui-sub'>Tags you can put on cards in any deck. A card keeps the name and color it was "
-        "tagged with, so changes here don't reach cards already tagged.</p>"
+        + f"<p class='ui-sub'>{esc(w['purpose'])}</p>"
+        + ui.toolbar(tab_href(slug), search_label="Search by name", placeholder="Name")
+        + FILTER_NOTE
         + table
-        + tag_box(csrf, box if box.get("box") == "tag-box" else {})
-        + tag_delete_box(csrf, box if box.get("box") == "tag-del" else {})
+        + tag_box(csrf, box if box.get("box") == "tag-box" else {}, slug)
+        + tag_delete_box(csrf, box if box.get("box") == "tag-del" else {}, slug)
     )
 
 
-def tag_box(csrf: str, st: dict[str, Any]) -> str:
+def tag_box(csrf: str, st: dict[str, Any], slug: str = "tags") -> str:
+    w = TAG_WORDS[slug]
     v = st.get("values") or {}
     editing = st.get("mode") == "edit"
     name = v.get("name", "")
     color = v.get("color") or account_lists.DEFAULT_TAG_COLOR
     body = (
-        f"<form id='tag-f' method='post' action='{PAGE}/tags'>"
+        f"<form id='tag-f' method='post' action='{PAGE}/{slug}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='action' value='{'edit' if editing else 'create'}'>"
         f"<input type='hidden' name='was_name' value='{esc(v.get('was_name', ''))}'>"
         + text_field(
-            "tag-n", "name", "Name", name, limit=account_lists.TAG_NAME_MAX, placeholder="Cut", required=True
+            "tag-n",
+            "name",
+            "Name",
+            name,
+            limit=account_lists.TAG_NAME_MAX,
+            placeholder=w["placeholder"],
+            required=True,
         )
         + "<div class='field'><label for='tag-c'>Color</label><div class='lp-tagpv'>"
         f"<input type='color' id='tag-c' value='{esc(color)}' aria-label='Pick a color' "
@@ -714,19 +1035,15 @@ def tag_box(csrf: str, st: dict[str, Any]) -> str:
         f"class='nm'>{esc(name or 'Preview')}</span></span>"
         "</div></div>"
         + f"<div data-edit-only{'' if editing else ' hidden'}>"
-        + warn(
-            "",
-            "Cards already tagged keep their old name and color. Archidekt doesn't link a card's tag to this "
-            "list.",
-        )
+        + warn("", w["edit_warn"])
         + "</div>"
-        + hist("A copy of your color tags from just before")
+        + hist(f"A copy of your {w['title'].lower()} from just before")
         + "</form>"
         + box_note(st.get("error", ""))
     )
     return ui.box(
         "tag-box",
-        f"Rename or recolor “{name}”" if editing else "New color tag",
+        f"Rename or recolor “{name}”" if editing else f"New {w['one']}",
         body,
         actions=[
             ui.box_button("Cancel", cancel=True),
@@ -735,27 +1052,26 @@ def tag_box(csrf: str, st: dict[str, Any]) -> str:
             ),
         ],
         open=bool(st),
-        close_href=f"{PAGE}/tags",
+        close_href=f"{PAGE}/{slug}",
         cls="lp-box",
     ).replace(
         "<div class='ui-box",
-        "<div data-t-new='New color tag' data-t-edit='Rename or recolor “{name}”' data-ok-new='Create tag' "
+        f"<div data-t-new='New {w['one']}' data-t-edit='Rename or recolor “{{name}}”' "
+        "data-ok-new='Create tag' "
         "data-ok-edit='Save tag' data-default-color='" + account_lists.DEFAULT_TAG_COLOR + "' class='ui-box",
         1,
     )
 
 
-def tag_delete_box(csrf: str, st: dict[str, Any]) -> str:
+def tag_delete_box(csrf: str, st: dict[str, Any], slug: str = "tags") -> str:
     name = (st.get("values") or {}).get("name", "")
     body = (
-        f"<form id='tag-del-f' method='post' action='{PAGE}/tags'>"
+        f"<form id='tag-del-f' method='post' action='{PAGE}/{slug}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'><input type='hidden' name='action' "
         "value='delete'>"
         "<input type='hidden' name='confirmed' value='1'><input type='hidden' name='was_name' "
         f"value='{esc(name)}'></form>"
-        "<p>Cards already tagged keep their color and name; the tag only leaves this list and the deck's tag "
-        "picker. A copy of the list from just before is kept under History.</p>"
-        + box_note(st.get("error", ""))
+        f"<p>{esc(TAG_WORDS[slug]['delete'])}</p>" + box_note(st.get("error", ""))
     )
     return ui.box(
         "tag-del",
@@ -766,7 +1082,7 @@ def tag_delete_box(csrf: str, st: dict[str, Any]) -> str:
             ui.box_button(f"Delete “{name}”", kind="danger-solid", form="tag-del-f", icon_name="trash"),
         ],
         open=bool(st),
-        close_href=f"{PAGE}/tags",
+        close_href=f"{PAGE}/{slug}",
         cls="lp-box",
     ).replace(
         "<div class='ui-box",
@@ -808,27 +1124,27 @@ def pin_row(p: dict[str, Any], csrf: str) -> str:
         f"{' disabled' if q >= account_lists.PIN_MAX_COPIES else ''}>{icon('plus')}</button></form>"
     )
     note = (
-        f"<form method='post' action='{PAGE}/pins' class='lp-note'>{csrf_in}"
+        f"<form method='post' action='{PAGE}/pins' class='lp-note' data-draft='pin-note:{pid}'>{csrf_in}"
         f"<input type='hidden' name='action' value='edit'><input type='hidden' name='pin_id' value='{pid}'>"
         f"<textarea name='notes' rows='1' maxlength='{account_lists.PIN_NOTES_MAX}' placeholder='Add a note'"
         f" aria-label='Note on {esc(name)}' data-count='pn-{pid}-c' data-saves>{esc(notes)}</textarea>"
         "<span class='lp-under'><noscript><button type='submit' class='btn-plain small'>Save "
         "note</button></noscript>"
-        f"<span class='muted small c' id='pn-{pid}-c' data-counter>{len(notes)} / "
-        f"{account_lists.PIN_NOTES_MAX}</span></span></form>"
+        f"<span class='muted small c' id='pn-{pid}-c' data-counter>"
+        f"{ui.counted(len(notes), account_lists.PIN_NOTES_MAX)}</span></span></form>"
     )
     menu = kebab_menu(
         name,
         [
             ("Open card", "eye", f"/cards?q={quote(name)}", {}),
-            ("Change printing…", "image", f"/cards?q={quote(name)}", {"data-printing": "1"}),
+            ("Printings…", "image", f"/cards?q={quote(name)}", {"data-printing": "1"}),
             ("Add to deck…", "plus", f"/cards?q={quote(name)}", {}),
             None,
             ("Remove pin", "x", tab_href("pins", remove=pid), {"class": "danger", "data-box": "pin-rm"}),
         ],
     )
     return (
-        f"<div {row_attrs('pin', name, p)}>"
+        f"<div {row_attrs('pin', name, p)} data-q='{esc(name.casefold())}'>"
         f"<span class='title'><span class='cardc'>{thumb(p.get('uid') or '', name)}<span class='tx'>"
         f"<span class='t'>{esc(name)}</span><span "
         f"class='s'>{esc(printing_text(p))}</span></span></span></span>"
@@ -841,7 +1157,7 @@ def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
     n = len(items)
     head = list_head(
         "Pinned cards",
-        f"{n} / {account_lists.MAX_PINS}",
+        ui.counted(n, account_lists.MAX_PINS),
         ui.box_opener(
             "Remove all…", tab_href("pins", remove_all=1), "pin-all", kind="danger", icon_name="trash"
         )
@@ -868,8 +1184,9 @@ def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
     )
     return (
         head
-        + "<p class='ui-sub'>Cards you keep to hand, with a note. Pin one from any card's menu. Notes save "
-        "when you leave the box.</p>"
+        + "<p class='ui-sub'>Notes save when you leave the box.</p>"
+        + ui.toolbar(tab_href("pins"), search_label="Search by name", placeholder="Name")
+        + FILTER_NOTE
         + table
         + pin_remove_box(csrf, box if box.get("box") == "pin-rm" else {})
         + pins_remove_all_box(csrf, n, box if box.get("box") == "pin-all" else {})
@@ -893,11 +1210,11 @@ def pin_remove_box(csrf: str, st: dict[str, Any]) -> str:
         f"Remove the pin on “{name}”?",
         body,
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Remove pin", kind="danger-solid", form="pin-rm-f", icon_name="x"),
         ],
         open=bool(st),
-        close_href=f"{PAGE}/pins",
+        close_href=WANTS,
         cls="lp-box",
     ).replace("<div class='ui-box", "<div data-t='Remove the pin on “{name}”?' class='ui-box", 1)
 
@@ -920,7 +1237,7 @@ def pins_remove_all_box(csrf: str, n: int, st: dict[str, Any]) -> str:
             ui.box_button(f"Remove all {n}", kind="danger-solid", form="pin-all-f", icon_name="trash"),
         ],
         open=bool(st),
-        close_href=f"{PAGE}/pins",
+        close_href=WANTS,
         cls="lp-box",
     )
 
@@ -1044,12 +1361,12 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
     more = (
         ui.load_more(tab_href("custom", page=page + 1, q=q), text=f"Load more ({shown:,} of {total:,} shown)")
         if got["more"]
-        else (ui.load_more("", done=f"All {total:,} shown.") if total else "")
+        else (ui.load_more("", done=ui.all_shown(total, "")) if total else "")
     )
     return (
         head + "<p class='ui-sub'>Cards you made on Archidekt. Add one to a deck from its menu; deleting one "
         "blanks it in every deck that has it.</p>"
-        + ui.toolbar(f"{PAGE}/custom", search_label="Search by card name", placeholder="Card name", q=q)
+        + ui.toolbar(f"{PAGE}/custom", search_label="Search by name", placeholder="Name", q=q)
         + table
         + more
         + custom_box(csrf, box if box.get("box") == "cc-box" else {})
@@ -1060,7 +1377,7 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
 
 ADD_DEFAULT_CATEGORY = "The deck's default"
 ADD_CUSTOM_NOTE = (
-    "The card goes in by its custom card id, as Archidekt's deck page adds it. With no category, "
+    "The card goes in by its custom card ID, as Archidekt's deck page adds it. With no category, "
     "Archidekt files it itself. The deck is read back to check."
 )
 
@@ -1089,15 +1406,15 @@ def custom_add_box(csrf: str, st: dict[str, Any]) -> str:
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'><input type='hidden' name='action' "
         f"value='add_to_deck'><input type='hidden' name='custom_id' value='{esc(str(v.get('id', '')))}'>"
         f"<input type='hidden' name='was_name' value='{esc(name)}'>"
-        "<div class='field'><label for='cc-add-deck'>Deck</label><span class='sel'>"
-        f"<select id='cc-add-deck' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
+        "<div class='field'><label for='cu-add-deck'>Deck</label><span class='sel'>"
+        f"<select id='cu-add-deck' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
         "</div>"
         "<div class='lp-two lp-copies'>"
-        "<div class='field'><label for='cc-add-qty'>Copies</label>"
-        f"<input id='cc-add-qty' name='quantity' type='number' min='1' max='99' step='1' "
+        "<div class='field'><label for='cu-add-qty'>Copies</label>"
+        f"<input id='cu-add-qty' name='quantity' type='number' min='1' max='99' step='1' "
         f"inputmode='numeric' value='{esc(qty)}' required></div>"
-        "<div class='field'><label for='cc-add-cat'>Category</label><span class='sel'>"
-        "<select id='cc-add-cat' name='category' data-src='/api/v1/decks/{id}?cards=0'>"
+        "<div class='field'><label for='cu-add-cat'>Category</label><span class='sel'>"
+        "<select id='cu-add-cat' name='category' data-src='/api/v1/decks/{id}?cards=0'>"
         f"<option value=''>{esc(ADD_DEFAULT_CATEGORY)}</option>{cat_opt}</select></span></div>"
         "</div></form>"
         f"<p class='muted small'>{esc(ADD_CUSTOM_NOTE)}</p>" + box_note(st.get("error", ""))
@@ -1140,7 +1457,7 @@ def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: boo
     return (
         f"<div class='lp-face' id='cc-face-{p}'{'' if req else ' hidden'}>"
         f"<div class='lp-two'>{fld(name_label, 'n')}{fld('Mana cost', 'm', '{2}{G}')}</div>"
-        f"<div class='lp-three'>{fld(types_label, 't', 'Creature')}{fld('Subtypes', 'st', 'Human Advisor')}"
+        f"<div class='lp-three'>{fld(types_label, 't', 'Creature')}{fld('Subtypes', 'st', 'Advisor')}"
         f"{fld('Supertypes', 'su', 'Legendary')}</div>"
         f"<div class='field'><label for='{p}-x'>Rules text</label><textarea id='{p}-x' name='{p}_x' rows='3' "
         f"maxlength='{account_lists.CUSTOM_TEXT_MAX}'>{esc(text)}</textarea></div>"
@@ -1177,7 +1494,7 @@ def custom_box(csrf: str, st: dict[str, Any]) -> str:
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='action' value='{'edit' if editing else 'create'}'>"
         f"<input type='hidden' name='was_name' value='{esc(v.get('was_name', ''))}'>"
-        "<div class='segc lp-faces' role='tablist' aria-label='Face'>"
+        "<div class='hubseg segc lp-faces' role='tablist' aria-label='Face'>"
         "<button type='button' role='tab' data-face='f' aria-selected='true' id='cc-tab-f' "
         "aria-controls='cc-face-f'>Front</button>"
         "<button type='button' role='tab' data-face='b' aria-selected='false' id='cc-tab-b' "
@@ -1186,11 +1503,11 @@ def custom_box(csrf: str, st: dict[str, Any]) -> str:
         + face_fields("back", v, editing=editing, has_picture=bool(v.get("backImageUrl")))
         + switch("has_back", "Has a back face", has_back, fid="cc-back")
         + "<div class='lp-two'>"
-        + text_field("cc-set", "set_code", "Set code", str(v.get("setCode") or ""), limit=None, cls="lp-f")
+        + text_field("cu-set", "set_code", "Set code", str(v.get("setCode") or ""), limit=None, cls="lp-f")
         + text_field(
-            "cc-num",
-            "collector_number",
-            "Collector number",
+            "cu-cn",
+            "cn",
+            "Collector no.",
             str(v.get("collectorNumber") or ""),
             limit=None,
             cls="lp-f",
@@ -1279,17 +1596,11 @@ CSS = """
 .lp .list-head{margin-top:.25rem}
 .lp .list-head .acts{display:flex;gap:8px;flex-wrap:wrap}
 .lp .list-head .acts .btn{margin:0}
+.lp-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;color:var(--text-muted)}
+/* the site's one switch (.hubseg, as the admin tabs); on a phone it scrolls sideways, the
+   current tab brought into view by topbar.js */
 .lp-tabs{margin:0 0 1rem}
-.lp-tabs a{white-space:normal;text-align:center;line-height:1.15;padding:.2rem .4rem;gap:.35rem}
-/* on a phone the five tabs are one row that scrolls sideways (the admin bar's even rows would
-   leave a hole), the current one brought into view by lists.js */
-@media (max-width:599.98px){
-  .lp-tabs{display:flex;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;
-    scrollbar-width:none;margin-left:-1rem;margin-right:-1rem;padding:0 1rem 2px;scroll-padding:0 1rem}
-  .lp-tabs::-webkit-scrollbar{display:none}
-  .lp-tabs a{flex:0 0 auto;white-space:nowrap;scroll-snap-align:start;padding:0 .75rem}
-}
-.lp-tabs a .n{font-weight:400;color:var(--text-muted);margin-left:.1rem}
+.lp-tabs a .n{font-weight:400;color:var(--seg-muted);margin-left:.1rem}  /* legible on the track */
 .lp-tabs a[aria-current] .n{color:inherit}
 .lp .ui-table .tr{min-height:52px}
 .lp .ui-table .tr.lp-empty{display:block}
@@ -1298,7 +1609,7 @@ CSS = """
 .lp .title .s{display:block;font-weight:400;color:var(--text-muted);font-size:.86rem}
 .lp .flags{display:flex;flex-wrap:wrap;gap:.3rem}
 .lp .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
-.lp .cardc .tx{min-width:0;flex:1}
+.lp .cardc > .tx{min-width:0;flex:1}
 .lp-thumb{display:block;width:34px;height:47px;border-radius:3px;border:1px solid var(--border);flex:none;
   object-fit:cover;background:linear-gradient(160deg,var(--surface-3),var(--surface-2))}
 /* a custom card whose picture can't be shown (lists.js): a labelled tile with an image-off glyph */
@@ -1359,8 +1670,8 @@ CSS = """
   border:1px solid var(--control-border);
   border-radius:var(--radius);background:var(--surface);cursor:pointer}
 .lp-tagpv .hex{flex:0 0 8rem;width:8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.lp-tagpv .lp-chip{flex:0 1 auto;max-width:100%;overflow:hidden}
-.lp-tagpv .lp-chip .nm{overflow:hidden;text-overflow:ellipsis}
+.lp-tagpv .lp-chip{flex:0 1 auto;max-width:100%}
+.lp-tagpv .lp-chip .nm{white-space:normal;overflow-wrap:break-word;min-width:0}
 .lp-step{display:inline-flex;align-items:center;gap:4px;margin:0}
 .lp-step button{width:44px;min-width:44px;min-height:44px;padding:0;margin:0}
 .lp-step button svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
@@ -1377,7 +1688,10 @@ CSS = """
 .lp-box .body .segc.lp-faces{margin:0 0 .75rem}
 .lp-face{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem}
 .lp-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.25rem 12px}
-.lp-three{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6rem),1fr));gap:.25rem 12px}
+/* three equal columns where each has 7em, else one a row: never two and one alone, and a box
+   holds its hint whole ("Legendary" was cut in a 6rem column on a 320 px phone, P-19) */
+.lp-three{display:flex;flex-wrap:wrap;gap:.25rem 12px}
+.lp-three > *{flex:1 1 calc((21em + 24px - 100%) * 999);min-width:0}
 .mtgbox.lp-box .body textarea{min-height:5rem;font-family:inherit;font-size:.95rem;line-height:1.4}
 .mtgbox .body .lp-two .field + .field,.mtgbox .body .lp-three .field + .field{margin-top:0}
 .lp-two .field,.lp-three .field{margin-bottom:.5rem}
@@ -1392,7 +1706,7 @@ CSS = """
    .mtgbox .body .field{margin:0} would otherwise win over .lp-img .field) */
 .mtgbox .body .lp-img .field,.lp-img .field{margin-top:.75rem}
 /* the three type fields line up at their inputs when a label wraps on a phone */
-.lp-three{align-items:end}
+.lp-three{align-items:flex-end}
 /* the frame's words when the card's picture can't be shown (lists.js pictureWords) */
 .lp-crop .lp-nm{display:block;font-weight:700;color:var(--text)}
 .lp-crop .lp-ty,.lp-crop .lp-why{display:block}
@@ -1442,7 +1756,34 @@ CSS = """
   .lp .list-head .acts{flex:1 1 auto;justify-content:flex-end}
   .lp-img{grid-template-columns:minmax(0,1fr)}
 }
-@media (pointer:coarse){ .lp-defpick .main{min-height:44px} .lp-tagpv input[type=color]{height:44px} }
+.lp-defpick .main{min-height:44px} .lp-tagpv input[type=color]{height:44px}
+/* the same folds by the table's own width in em (large text; theme.py folds the shared parts at
+   the same widths): the column heads hide with their columns, the pinned rows take their areas */
+@media (min-width:600px){ @container (max-width:46em){
+  .lp-pin .tr:not(.th){grid-template-columns:var(--cols-md);
+    grid-template-areas:"card copies menu" "notes notes notes"}
+  .lp-pin .tr:not(.th) > .title{grid-area:card} .lp-pin .tr:not(.th) > .lp-copies{grid-area:copies}
+  .lp-pin .tr:not(.th) > .lp-notes{grid-area:notes; margin-top:.4rem}
+  .lp-pin .tr:not(.th) > .act{grid-area:menu}
+  .lp-pin .th .lp-notes-h{display:none}
+  .lp-cc .tr{grid-template-columns:var(--cols-md)} .lp-cc .lp-setnum{display:none}
+} }
+@container (max-width:38em){
+  .lp .ui-table .sm-hide{display:none}
+  .lp .ui-table .tr{padding:.55rem .75rem}
+  .lp .ui-table .sm-only.flags{display:flex; gap:.3rem; flex-wrap:wrap; margin-top:.3rem; font-size:inherit;
+    color:inherit; flex-basis:auto}
+  .lp .ui-table .sm-only{display:block;color:var(--text-muted);font-size:.86rem;font-weight:400}
+  .lp .ui-table .sm-only code{font-size:.84rem}
+  .lp-tagc .sm-only{flex-basis:auto}
+  .lp-cc .tr{grid-template-columns:var(--cols-sm)}
+  .lp-pin .tr:not(.th){grid-template-columns:minmax(0,1fr) 44px;
+    grid-template-areas:"card menu" "copies copies" "notes notes"}
+  .lp-pin .tr:not(.th) > .title{grid-area:card} .lp-pin .tr:not(.th) > .lp-copies{grid-area:copies;
+    margin:.4rem 0 0 calc(34px + .6rem)}
+  .lp-pin .tr:not(.th) > .lp-notes{grid-area:notes; margin:.4rem 0 0 calc(34px + .6rem)}
+  .lp-pin .tr:not(.th) > .act{grid-area:menu}
+}
 """
 
 
@@ -1453,26 +1794,33 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     s = h.s
 
     def respond(
-        body: str, sub: str, sid: str | None, *, status: int = 200, scripts: tuple[str, ...] = ("lists.js",)
+        body: str,
+        sub: str,
+        sid: str | None,
+        *,
+        status: int = 200,
+        scripts: tuple[str, ...] = ("lists.js",),
+        tab: Tab | None = None,
     ) -> Response:
+        title = WANTS_TITLE if tab is PINS else f"Binder: {tab.label}" if tab else TITLE
         return page(
-            TITLE,
+            title,
             body,
             sub=sub,
             sid=sid,
             status=status,
-            current=PAGE,
+            current=WANTS if tab is PINS else HUB,
             csp=LISTS_CSP,
             heading=False,
             extra_css=CSS,
-            extra_scripts=("printpick.js", *scripts),
+            extra_scripts=("printpick.js", "undo-box.js", *scripts),
             main_class="ui-wide",
         )
 
     def wants_json(request: Request) -> bool:
         return "application/json" in (request.headers.get("accept") or "")
 
-    def top_notice(q: Any) -> str:
+    def top_notice(q: Any, sub: str = "", csrf: str = "") -> str:
         ok = q.get("ok") or ""
         if ok == "unconfirmed":
             pid = q.get("p") or ""
@@ -1483,12 +1831,48 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             )
             return ui.notice(esc(UNCONFIRMED).replace("review page", link), "warn", html=True, role="status")
         text = notice_text(ok, (q.get("n") or "")[:200])
-        return ui.notice(text, "ok", role="status") if text else ""
+        if not text:
+            return ""
+        token = (q.get("undo") or "")[:64]
+        button = ""
+        if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", token) and token in _UNDOS and _UNDOS[token][0] == sub:
+            # the form posts to the page as looked at (its filter), so Undo comes back to it (F-9)
+            button = (
+                f" <form method='post' action='{esc(tab_href(_UNDOS[token][1], q=q_of(q)))}' class='inline'>"
+                f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+                "<input type='hidden' name='action' value='undo'>"
+                f"<input type='hidden' name='token' value='{esc(token)}'>"
+                "<button type='submit' class='btn small'>Undo</button></form>"
+            )
+        return ui.notice(text + button, "ok", role="status", html=True) + undo_of(q, sub, csrf)
 
-    async def read_tab(sub: str, tab: Tab, *, page_no: int = 1, q: str = "") -> dict[str, Any]:
-        got = await account_lists.read(
-            decks, sub, tab.kind, page=page_no, search=q if tab.kind == "custom_cards" else ""
+    def undo_of(q: Any, sub: str, csrf: str) -> str:
+        """The Undo of a template added to a deck (review F6), for the member's own applied add."""
+        pid = q.get("p") or ""
+        if q.get("ok") != "template_added" or not sub or not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", pid):
+            return ""
+        row = state.db.get_proposal(pid, sub)
+        if row is None or row.get("state") != "applied" or row.get("kind") != "categories":
+            return ""
+        if not row.get("snapshot_id"):
+            return ""
+        return proposals_view.undo_box_form(csrf, row, back=tab_href("templates"))
+
+    async def read_tab(
+        sub: str, tab: Tab, *, page_no: int = 1, q: str = "", fresh: bool = False
+    ) -> dict[str, Any]:
+        search = q if tab.kind == "custom_cards" else ""
+        # kept briefly per member; any change they send (a pin, a template, a custom card) forgets
+        # it (decks.short_reads). A box that changes a row (``fresh``) shows the list as it is now.
+        # While Archidekt can't be asked, the member's last read of the tab, dated (``held_at``).
+        got, held_at = await decks.short_reads.get_held(
+            sub,
+            ("list", tab.kind, page_no, search),
+            lambda: account_lists.read(decks, sub, tab.kind, page=page_no, search=search),
+            fresh=fresh,
         )
+        if held_at is not None:
+            got = {**got, **held_at}
         if tab.kind == "custom_cards":  # the rows' pictures, served by custom_pictures
             custom_pictures.remember(sub, got["items"])
         return got
@@ -1539,7 +1923,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return {"box": "def-box", "values": d}
             if d := by_id(items, q.get("clear"), "oracle_id"):
                 return {"box": "def-clear", "values": d}
-        elif tab.slug == "tags":
+        elif tab.slug in ("tags", "btags"):
             if "new" in q:
                 return {"box": "tag-box", "mode": "new", "values": {}}
             if t := by_id(items, q.get("edit")):
@@ -1570,8 +1954,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             inner = templates_tab(got, csrf, box)
         elif tab.slug == "defaults":
             inner = defaults_tab(got, csrf, box, q)
-        elif tab.slug == "tags":
-            inner = tags_tab(got, csrf, box)
+        elif tab.slug in ("tags", "btags"):
+            inner = tags_tab(got, csrf, box, tab.slug)
         elif tab.slug == "pins":
             inner = pins_tab(got, csrf, box)
         else:
@@ -1582,31 +1966,33 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         tab: Tab, got: dict[str, Any], csrf: str, box: dict[str, Any], q: str, sub: str, notice: str = ""
     ) -> str:
         counts = {**account_lists.counts(sub), tab.kind: int(got["total"])}
+        return head_of(tab, counts) + notice + tab_body(tab, got, csrf, box, q, counts)
+
+    def head_of(tab: Tab, counts: dict[str, int] | None = None) -> str:
+        """A list's page head: Binder's switch (Lists lit), the way back to the hub with the
+        list's name, its purpose line and the tab bar between the six lists."""
+        sub_text = WANTS_SUB if tab is PINS else SUB_TEXT
         return (
-            ui.page_head(TITLE, SUB_TEXT)
-            + tabs_html(tab.slug, counts)
-            + notice
-            + tab_body(tab, got, csrf, box, q, counts)
+            ui.binder_head(HUB, WANTS_TITLE if tab is PINS else f"Binder: {tab.label}", sub_text)
+            + crumbs_html(tab)
+            + tabs_html(tab.slug, counts or {})
         )
 
     def problem(request: Request, exc: DeckError, sub: str, sid: str | None, tab: Tab) -> Response:
         if busy := busy_response(exc, request, page, sub=sub, sid=sid):
             return busy
         if exc.kind == "not_linked":
+            what = "Your pinned cards" if tab is PINS else "Your lists"
             body = (
-                "<div class='card'><h2>Link your Archidekt account</h2><p>Your lists appear here once "
+                f"<div class='card'><h2>Link your Archidekt account</h2><p>{what} appear here once "
                 "Archidekt is "
                 "linked.</p><div class='actions'>"
-                "<a class='btn btn-primary' href='/account/details#archidekt'>Link "
+                "<a class='btn btn-primary' href='/account/details/archidekt'>Link "
                 "Archidekt</a></div></div>"
             )
-            return respond(ui.page_head(TITLE, SUB_TEXT) + body, sub, sid, status=200)
-        body = (
-            ui.page_head(TITLE, SUB_TEXT)
-            + tabs_html(tab.slug, account_lists.counts(sub))
-            + ui.notice(str(exc), "error", role="alert")
-        )
-        return respond(body, sub, sid, status=400 if exc.kind == "invalid" else 502)
+            return respond(head_of(tab) + body, sub, sid, status=200, tab=tab)
+        body = head_of(tab, account_lists.counts(sub)) + ui.notice(str(exc), "error", role="alert")
+        return respond(body, sub, sid, status=400 if exc.kind == "invalid" else 502, tab=tab)
 
     def q_of(q: Any) -> str:
         return (q.get("q") or "").strip()[:100]
@@ -1617,29 +2003,115 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
     @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)
     async def lists_home(request: Request) -> Response:
+        """The old My lists address: Binder › Lists now."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
-        return RedirectResponse(f"{PAGE}/templates", status_code=302)
+            return login_redirect_here(request, HUB)
+        return RedirectResponse(HUB, status_code=302)
+
+    @server.custom_route(HUB, methods=["GET"], include_in_schema=False)
+    async def lists_hub(request: Request) -> Response:
+        """Binder › Lists: the two blocks. The Archidekt counts are the ones read so far (the
+        page never waits on Archidekt; static/lists.js asks for the rest); the watchlist lists
+        are this gateway's own, read in one query."""
+        from .watchlist_page import OK_NOTES
+
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect_here(request, HUB)
+        if reloading(("lists-hub", sub)):  # a reload or the app's pull: the counts are read again
+            account_lists.read_counts_again(sub)
+        prices_svc = getattr(state, "prices", None)
+        watch_lists = None
+        ungrouped = 0
+        badges: dict[str, int] = {}
+        if prices_svc is not None:
+            watch_lists = prices_svc.lists(sub)
+            total = prices_svc.watch_count(sub)
+            ungrouped = total - sum(wl["count"] for wl in watch_lists)
+            badges["/watchlist"] = total
+        q = request.query_params
+        ok = q.get("ok") or ""
+        notice = ui.notice(OK_NOTES[ok], "ok", role="status") if ok in OK_NOTES else ""
+        box = q.get("box") or ""
+        body = (
+            ui.binder_head(HUB, TITLE, HUB_SUB, badges=badges)
+            + notice
+            + hub_html(
+                account_lists.counts(sub),
+                watch_lists,
+                ungrouped=ungrouped,
+                csrf=_csrf(s, sid) or "",
+                open_box=box if box in ("newlist",) else "",
+                q=(q.get("q") or "")[:80],
+            )
+        )
+        return page(
+            TITLE,
+            body,
+            sub=sub,
+            sid=sid,
+            current=HUB,
+            heading=False,
+            extra_css=account_hub.HUB_CSS + HUB_CSS + CSS,
+            extra_scripts=("lists.js",),
+            main_class="ui-wide",
+        )
+
+    @server.custom_route(COUNTS_API, methods=["GET"], include_in_schema=False)
+    async def lists_counts(request: Request) -> Response:
+        """The tab counts the page drew without (read_counts), asked by static/lists.js once the
+        page is there: the page itself reads only its own tab (0.7.46 audit SH-03)."""
+        sub, _sid = browser_session(state, request)
+        headers = {"Cache-Control": "no-store"}
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
+        try:
+            await read_counts(sub)
+        except DeckError:
+            pass  # a count that can't be read stays blank
+        counts = account_lists.counts(sub)
+        # keyed as the tabs' links end (the pins' page ends in "wants")
+        by_tab = {t.slug: counts[t.kind] for t in TABS if t.kind in counts}
+        if "pins" in by_tab:
+            by_tab["wants"] = by_tab["pins"]
+        return JSONResponse({"ok": True, "counts": by_tab}, headers=headers)
+
+    @server.custom_route(WANTS, methods=["GET"], include_in_schema=False)
+    async def wants_page(request: Request) -> Response:
+        """Binder › Lists › Pinned cards, at the old Wants address."""
+        return await tab_page(request, PINS)
 
     @server.custom_route(PAGE + "/{tab}", methods=["GET"], include_in_schema=False)
     async def lists_tab(request: Request) -> Response:
         tab = BY_SLUG.get(request.path_params["tab"])
         if tab is None:
-            return RedirectResponse(f"{PAGE}/templates", status_code=302)
+            return RedirectResponse(HUB, status_code=302)
+        if tab is PINS:  # the old address of the pins: the Pinned cards page, with the same query
+            q = request.url.query
+            return RedirectResponse(WANTS + (f"?{q}" if q else ""), status_code=302)
+        return await tab_page(request, tab)
+
+    async def tab_page(request: Request, tab: Tab) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"{PAGE}/{tab.slug}")
+            return login_redirect_here(request, f"{PAGE}/{tab.slug}")
         q = request.query_params
         search, page_no = q_of(q), page_of(q)
+        # an address that opens a box (edit, new, delete...) reads the list as it is now
+        opens_box = any(k not in ("page", "q", "ok", "n", "p") for k in q.keys())
         try:
-            got = await read_tab(sub, tab, page_no=page_no, q=search)
+            got = await read_tab(sub, tab, page_no=page_no, q=search, fresh=opens_box)
         except DeckError as exc:
             if wants_json(request):
-                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+                # Load more: Archidekt busy or unreachable is 429 or 503 with Retry-After
+                return busy_json_response(exc) or JSONResponse(
+                    {"ok": False, "message": str(exc)}, status_code=400
+                )
             return problem(request, exc, sub, sid, tab)
-        if not wants_json(request):
-            await read_counts(sub)
+        held = ""
+        if got.get("held_at") is not None:  # the list as last read, dated, with Try again
+            held = held_html(got["refused"], got["held_at"], "this list", same_url(request))
         if wants_json(request) and tab.slug in ("defaults", "custom"):
             # Load more with scripts: the next page's rows, appended in place (static/lists.js)
             if tab.slug == "defaults":
@@ -1664,8 +2136,10 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         box = box_from_query(tab, got, q)
         if box.get("box") in ("tpl-deck", "cc-add"):  # the deck list, for the box drawn open without scripts
             box["decks"] = await decks_or_none(sub)
-        body = page_body(tab, got, _csrf(s, sid) or "", box, search, sub, top_notice(q))
-        return respond(body, sub, sid)
+        body = page_body(
+            tab, got, _csrf(s, sid) or "", box, search, sub, held + top_notice(q, sub, _csrf(s, sid) or "")
+        )
+        return respond(body, sub, sid, tab=tab)
 
     async def decks_or_none(sub: str) -> list[dict[str, Any]]:
         try:
@@ -1677,7 +2151,11 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         request: Request, sub: str, sid: str | None, data: dict[str, str]
     ) -> Response:
         """Add to a deck… on a template's row: one category from the template, proposed for the
-        deck (decks.propose_categories) and sent to its review page, where the member applies it."""
+        deck (decks.propose_categories) and applied through this press, as Deck settings › Add
+        template… and a custom card's Add to deck… apply theirs (review F6): back on My lists
+        with a notice and Undo (a snapshot of its own, decks.own_snapshot). A template that asks
+        first there (modes.hand_edit_confirm: Premier, Not in deck) and writes being off send the
+        member to the review page instead, as the box says."""
         tab = BY_SLUG["templates"]
         name = (data.get("was_name") or "").strip()
         deck_id = (data.get("deck") or "").strip()
@@ -1689,6 +2167,15 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 decks, sub, [{"action": "create", "from_template": name}]
             )
             p = await decks.propose_categories(sub, deck_id, changes)
+            pid = p["proposal_id"]
+            decks.keep_no_backup(sub, pid)  # as the settings page's own category saves
+            out: dict[str, Any] = {}
+            if not modes.hand_edit_confirm("categories", p.get("rows")) and s.writes_enabled:
+                alone = own_snapshot.set(True)
+                try:
+                    out = await decks.apply(sub, pid, via="browser")
+                finally:
+                    own_snapshot.reset(alone)
         except DeckError as exc:
             if wants_json(request):
                 return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
@@ -1704,10 +2191,12 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             }
             body = page_body(tab, got, _csrf(s, sid) or "", box, "", sub)
             return respond(body, sub, sid, status=400)
-        where = f"/proposals/{p['proposal_id']}"
-        if wants_json(request):
-            return JSONResponse({"ok": True, "location": where})
-        return RedirectResponse(where, status_code=303)
+        if out.get("state") != "applied":  # asks first, writes off, or still going on Archidekt
+            where = f"/proposals/{pid}"
+            if wants_json(request):
+                return JSONResponse({"ok": True, "location": where})
+            return RedirectResponse(where, status_code=303)
+        return done(request, tab, {"proposal_id": pid, "result": out.get("result")}, "template_added", name)
 
     async def add_custom_to_deck(
         request: Request, sub: str, sid: str | None, data: dict[str, str]
@@ -1816,17 +2305,18 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return {"op": "set", "card": card, "categories": picked}, "defaults_saved", "def-box"
             if action == "clear":
                 return {"op": "clear", "card": card}, "defaults_cleared", "def-clear"
-        elif tab.slug == "tags":
+        elif tab.slug in ("tags", "btags"):
             color = (data.get("color") or "").strip()
+            pre = "b" if tab.slug == "btags" else ""
             if action == "create":
-                return {"op": "create", "name": name, "color": color or None}, "tag_created", "tag-box"
+                return {"op": "create", "name": name, "color": color or None}, f"{pre}tag_created", "tag-box"
             if action == "edit":
                 c = {"op": "edit", "name": was, "color": color or None}
                 if name and name != was:
                     c["new_name"] = name
-                return c, "tag_saved", "tag-box"
+                return c, f"{pre}tag_saved", "tag-box"
             if action == "delete":
-                return {"op": "delete", "name": was}, "tag_deleted", "tag-del"
+                return {"op": "delete", "name": was}, f"{pre}tag_deleted", "tag-del"
         elif tab.slug == "pins":
             pid = data.get("pin_id") or ""
             pin_id = int(pid) if _ID.fullmatch(pid) else None
@@ -1839,10 +2329,23 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     c["notes"] = data["notes"]
                 if data.get("set_code"):
                     c["set_code"] = data["set_code"].strip()[:10]
-                    c["collector_number"] = (data.get("collector_number") or "").strip()[:20]
+                    c["collector_number"] = (data.get("cn") or data.get("collector_number") or "").strip()[
+                        :20
+                    ]
                 if data.get("finish"):
                     c["finish"] = data["finish"]
                 return c, "pin_saved", ""
+            if action == "pin":  # "Pin card" in a card menu (static/cardmenu.js, static/deck.js)
+                c = {"op": "pin", "card": (data.get("card") or "").strip()[:200]}
+                if data.get("set_code"):
+                    c["set_code"] = data["set_code"].strip()[:10]
+                    c["collector_number"] = (data.get("cn") or data.get("collector_number") or "").strip()[
+                        :20
+                    ]
+                fin = (data.get("finish") or "").strip().lower()
+                if fin in ("foil", "etched"):
+                    c["finish"] = fin.capitalize()
+                return c, "pinned", ""
             if action == "unpin":
                 return {"op": "unpin", "pin_id": pin_id}, "pin_removed", "pin-rm"
             if action == "remove_all":
@@ -1868,7 +2371,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 fields[f"{face}{suffix}"] = raw.strip() or None
         fields["hasBack"] = has_back
         fields["setCode"] = (data.get("set_code") or "").strip() or None
-        fields["collectorNumber"] = (data.get("collector_number") or "").strip() or None
+        fields["collectorNumber"] = (data.get("cn") or data.get("collector_number") or "").strip() or None
         fields["cmc"] = cmc_of(fields.get("frontManaCost") or "")
         return fields
 
@@ -1896,7 +2399,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             v["frontName"] = data.get("f_n", "")
             v["hasBack"] = flag(data, "has_back")
             v["setCode"] = data.get("set_code", "")
-            v["collectorNumber"] = data.get("collector_number", "")
+            v["collectorNumber"] = data.get("cn") or data.get("collector_number", "")
         if box_id == "pin-rm":
             v["id"] = data.get("pin_id", "")
         return {"box": box_id, "mode": mode, "values": v, "error": error}
@@ -1922,10 +2425,17 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         box = posted_box(tab, box_id, data, str(exc)) if box_id else {}
         notice = ui.notice(str(exc), "error", role="alert") if not box_id else ""
         body = page_body(tab, got, _csrf(s, sid) or "", box, q_of(request.query_params), sub, notice)
-        return respond(body, sub, sid, status=400)
+        return respond(body, sub, sid, status=400, tab=tab)
 
     def done(
-        request: Request, tab: Tab, out: dict[str, Any], code: str, name: str, *, q: str = ""
+        request: Request,
+        tab: Tab,
+        out: dict[str, Any],
+        code: str,
+        name: str,
+        *,
+        q: str = "",
+        undo: str = "",
     ) -> Response:
         result = out.get("result") if isinstance(out.get("result"), dict) else {}
         params: dict[str, Any] = {"q": q} if q else {}
@@ -1934,7 +2444,11 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             text = UNCONFIRMED
         else:
             params.update(ok=code, n=name[:200] if "{name}" in NOTICES.get(code, "") else "")
+            if code == "template_added":
+                params["p"] = out.get("proposal_id") or ""  # its Undo (top_notice)
             text = notice_text(code, name)
+        if undo and result.get("verified") is not False:
+            params["undo"] = undo  # the notice's Undo button (top_notice), last in the address
         if wants_json(request):
             return JSONResponse(
                 {
@@ -1942,6 +2456,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     "notice": text,
                     "verified": result.get("verified"),
                     "proposal_id": out.get("proposal_id"),
+                    "undo": undo if result.get("verified") is not False else "",
                 }
             )
         return RedirectResponse(tab_href(tab.slug, **params), status_code=303)
@@ -1953,7 +2468,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             return RedirectResponse(f"{PAGE}/templates", status_code=302)
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"{PAGE}/{tab.slug}")
+            return login_redirect_here(request, f"{PAGE}/{tab.slug}")
         raw = await read_limited(request, 64_000)
         fields = parse_qs((raw or b"").decode("utf-8", "replace"), keep_blank_values=True)
         data = {k: v[0] for k, v in fields.items()}
@@ -1971,6 +2486,17 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if tab.slug == "custom" and data.get("action") == "add_to_deck":
             return await add_custom_to_deck(request, sub, sid, data)
         box_id = ""
+        if data.get("action") == "undo":  # the notice's Undo: the kept reverse change, once
+            kept = take_undo(sub, tab.slug, data.get("token", ""))
+            if kept is None:
+                exc = DeckError("not_found", "That Undo is no longer available.")
+                return await fail(request, tab, exc, sub, sid, "", data)
+            try:
+                current_client.set(BROWSER_CLIENT_ID)
+                out = await account_lists.hand_change(decks, sub, tab.kind, kept[0])
+            except DeckError as exc:
+                return await fail(request, tab, exc, sub, sid, "", data)
+            return done(request, tab, out, "list_undone", kept[1], q=q_of(request.query_params))
         try:
             change, code, box_id = change_of(tab, data)
             # a delete, a clear, a pin below one copy and Remove all ask first: the box's own form
@@ -1984,6 +2510,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 key = {
                     "templates": "delete",
                     "tags": "delete",
+                    "btags": "delete",
                     "custom": "delete",
                     "defaults": "clear",
                     "pins": "remove",
@@ -2005,6 +2532,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return RedirectResponse(tab_href(tab.slug, **{key: ident}), status_code=303)
             if tab.slug == "custom" and change["op"] == "delete" and data.get("understood") != "1":
                 raise DeckError("invalid", "Tick the box first: the card stays as a blank in those decks.")
+            before = await item_before(sub, tab, change, data)
             current_client.set(BROWSER_CLIENT_ID)
             out = await account_lists.hand_change(decks, sub, tab.kind, change)
         except DeckError as exc:
@@ -2017,7 +2545,25 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             or (change.get("fields") or {}).get("frontName")
             or ""
         )
-        return done(request, tab, out, code, str(name), q=q_of(request.query_params))
+        reverse = reverse_of(tab.slug, change, before)
+        undo = keep_undo(sub, tab.slug, reverse, str(name)) if reverse else ""
+        return done(request, tab, out, code, str(name), q=q_of(request.query_params), undo=undo)
+
+    async def item_before(
+        sub: str, tab: Tab, change: dict[str, Any], data: dict[str, str]
+    ) -> dict[str, Any] | None:
+        """The tab's row the change is about, as it is before the change (for its Undo); None
+        when the change makes something new, or the row is not found."""
+        if change.get("op") in ("create", "pin", "remove_all"):
+            return None
+        if tab.slug == "pins":
+            got = await read_tab(sub, tab)
+            return by_id(got["items"], str(change.get("pin_id") or ""))
+        want = (change.get("name") or change.get("card") or "").casefold()
+        if not want:
+            return None
+        got = await read_tab(sub, tab, q=want[:100] if tab.slug in ("custom", "defaults") else "")
+        return next((i for i in got["items"] if str(i.get("name") or "").casefold() == want), None)
 
     @server.custom_route(PAGE + "/custom/picture", methods=["POST"], include_in_schema=False)
     async def picture_post(request: Request) -> Response:
@@ -2026,7 +2572,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         tab = BY_SLUG["custom"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"{PAGE}/custom")
+            return login_redirect_here(request, f"{PAGE}/custom")
         posted = await limited_form(request, PICTURE_BODY_LIMIT, max_files=1, max_fields=20)
         if posted is TOO_BIG:
             exc = DeckError(

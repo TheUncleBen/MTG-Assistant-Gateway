@@ -156,13 +156,23 @@ def test_the_card_search_panel_fits_every_width_and_rarity_shows_its_picks(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, exe)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        # card search's filters wait behind the Filters button at every width (a sheet on a
+        # phone, folded in place on a Fold or desktop)
+        page.locator(".sp-open").click()
         if width < 600:
-            page.locator(".sp-open").click()
             page.locator("#sp-filters.open").wait_for(timeout=3000)
+        else:
+            page.locator("#p-t").wait_for(state="visible", timeout=3000)
         _check_panel(page.evaluate(PANEL), width)
         # the rarity drop-down: a checkbox list that names what is picked
         pick = page.locator(".pickm")
         assert page.locator(".pickm .v").inner_text() == "Any rarity"
+        # its arrow is drawn in the orange every drop-down's arrow has (static/chevron.svg; v39
+        # screenshots: it was the text's grey beside Format's orange)
+        assert (
+            page.evaluate("() => getComputedStyle(document.querySelector('.pickm-btn svg path')).stroke")
+            == "rgb(250, 137, 13)"
+        )
         page.locator(".pickm summary").click()
         page.locator(".pickm[open]").wait_for(timeout=3000)
         page.locator(".pickm input[value=r]").check()
@@ -254,11 +264,68 @@ def test_exactly_these_colours_keep_only_decks_of_those_colours(server: Server) 
         assert page.locator("ul.decklist li.deck").count() == 0
         assert "No public decks match" in page.locator("main").inner_text()
         assert page.locator("#s-count").inner_text() == "0 decks"
-        # a pick from the drop-down applies at once (the form sends itself)
+        # a pick from the drop-down applies at once, in place as Card search does (0.7.46 full
+        # review, D, F10): the results and the count change, the address follows, nothing reloads
         page.goto(f"{server.base}/search?format=3&c=U", wait_until="networkidle")
-        with page.expect_navigation():
-            page.locator("select[name=cm]").select_option("exact")
+        assert page.locator("ul.decklist li.deck").count() == 3
+        page.evaluate("() => { window.__same = true; }")
+        page.locator("select[name=cm]").select_option("exact")
+        page.wait_for_function("() => location.search.includes('cm=exact')", timeout=5000)
+        page.wait_for_function("() => !document.querySelector('ul.decklist li.deck')", timeout=5000)
+        assert (
+            page.evaluate("() => window.__same")
+            and "No public decks match" in page.locator("main").inner_text()
+        )
+        assert page.locator("#s-count").inner_text() == "0 decks"
         assert parse_qs(urlparse(page.url).query)["cm"] == ["exact"]
+        # Back brings the earlier results and filters, still in place; a shared link shows the same
+        page.go_back()
+        page.wait_for_function("() => !location.search.includes('cm=exact')", timeout=5000)
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 3", timeout=5000
+        )
+        assert (
+            page.evaluate("() => window.__same") and page.locator("select[name=cm]").input_value() != "exact"
+        )
+        assert page.locator("#s-count").inner_text() == "3 decks"
+        assert errors == [], errors
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_deck_search_filters_apply_in_place_and_keep_the_address(server: Server, width: int) -> None:
+    """Deck search (F10): a format pick, a colour pick in the sheet, the sort and the view each
+    redraw the results in place with the address in step; Load more still works on the new
+    results; a failed fetch falls back to the page itself."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, exe)
+        page.goto(f"{server.base}/search?name=deck", wait_until="networkidle")
+        page.wait_for_selector("ul.decklist li.deck")
+        page.evaluate("() => { window.__same = true; }")
+        if width < 600:
+            page.locator(".sp-open").click()
+            page.locator("#sp-filters.open").wait_for(timeout=3000)
+        page.locator("select[name=format]").select_option("3")
+        page.wait_for_function("() => location.search.includes('format=3')", timeout=5000)
+        page.wait_for_function("() => !document.querySelector('#s-results[aria-busy]')", timeout=5000)
+        assert page.evaluate("() => window.__same")
+        assert server.ark.search_params[-1].get("deckFormat") in (3, "3")
+        if width < 600:
+            page.locator(".sp-show").click()
+            page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
+        else:
+            page.locator("#s-order").select_option("-createdAt")
+            page.wait_for_function("() => location.search.includes('order=-createdAt')", timeout=5000)
+            page.wait_for_function("() => !document.querySelector('#s-results[aria-busy]')", timeout=5000)
+            assert page.evaluate("() => window.__same")
+        # the tiles that came in place carry their ⋮ and the count follows
+        assert page.locator("ul.decklist li.deck .kebab").count() >= 1
+        assert page.locator("#s-count").inner_text().endswith("decks")
+        assert page.evaluate(PANEL)["sw"] <= width
         assert errors == [], errors
         browser.close()
 
@@ -344,13 +411,26 @@ def test_the_deck_page_toolbar_shows_the_size_beside_the_view_with_the_drag_hint
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, exe)
         page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
-        hint = page.locator(".toolbar .hint")  # the grip icon; the words are its hover text
-        drag_words = "Drag a card onto another category to move it; on touch, hold it first."
-        assert hint.get_attribute("title") == drag_words
-        view = page.locator(".toolbar #f-view-btn").bounding_box()
-        size = page.locator(".toolbar .cardsize .sizeseg").bounding_box()
-        assert view and size and abs(view["y"] - size["y"]) <= 2, (view, size)
-        assert page.get_by_role("button", name="Select cards").is_visible()
+        # no lone grip icon in the toolbar (polish B3): each category says where to drag
+        assert page.locator(".toolbar .hint").count() == 0
+        if width >= 600:
+            view = page.locator(".toolbar #f-view-btn").bounding_box()
+            size = page.locator(".toolbar .cardsize .sizeseg").bounding_box()
+            assert view and size and abs(view["y"] - size["y"]) <= 2, (view, size)
+            assert page.get_by_role("button", name="Select cards").is_visible()
+        else:
+            # a phone's toolbar is one row (Quick add, View, ⋮; redesign-deck, mockup screen 5):
+            # the View sheet holds the layout with the card size right under it, and Select cards
+            page.locator(".toolbar .viewbtn").click()
+            sheet = page.locator(".mtgbox[role=dialog]:not([hidden]) .viewsheet")
+            sheet.wait_for(timeout=3000)
+            rows = [
+                t.strip() for t in sheet.locator(".vrow > label:not(.switch), .vrow > .lbl").all_inner_texts()
+            ]
+            assert rows[:2] == ["Layout", "Card size"] and "Select cards" in rows, rows
+            assert sheet.locator(".switch").is_visible()
+            page.keyboard.press("Escape")
+            page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert page.evaluate("() => document.documentElement.scrollWidth") <= width
         # the stack columns follow the card size: at least S 140 / M 170 / L 240 px wide
         if width >= 600:
@@ -403,8 +483,8 @@ def test_the_navigation_rail_reaches_1279_px_on_a_touch_screen(
         if expect == "phone":
             assert got["tabbar"] and got["more"] and not got["rail"], got
         elif expect == "rail":
-            # the rail ends with More (navigation round 2: Find and Your cards), as the phone bar
-            assert got["rail"] and got["more"] and got["links"] == 0 and got["search"], got
+            # the rail lists More's pages itself (0.7.46 redesign, screen 1), so it has no More
+            assert got["rail"] and not got["more"] and got["links"] == 0 and got["search"], got
         else:
             assert not got["tabbar"] and got["links"] > 0, got
             assert got["search"] == (width >= 900), got

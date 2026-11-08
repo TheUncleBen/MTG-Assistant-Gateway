@@ -22,11 +22,13 @@ from mcp import Client
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
-from . import deck_stats
+from . import dbwait, deck_stats
+from .busy import AGAIN, outage
 from .decklist import front_faces
 from .decks import DeckError
 from .report_view import found_not_verified
 from .schemas import compact_schema, flatten_params
+from .tool_labels import tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -75,16 +77,16 @@ OWNED_ELSEWHERE: dict[str, str] = {
 }
 # What each owner does, for the refusal an assistant gets when it calls the hidden duplicate.
 OWNER_NOTES: dict[str, str] = {
-    "run_deck_report": "the gateway's simulation: it reads the deck, validates it, runs the goldfish games "
+    "run_deck_report": "the gateway's test: it reads the deck, validates it, runs the solo test games "
     "with the same options (annotations, combos, seed, until_turn, opponents, mulligan) and stores the "
     "report; compare_decks with simulate=true is the paired A/B of two decks",
-    "get_deck": "the gateway's deck reader: any Archidekt deck by id or link, include_text for rules text, "
+    "get_deck": "the gateway's deck reader: any Archidekt deck by ID or link, include_text for rules text, "
     "archidekt_text to export in Archidekt's import syntax",
     "search_decks": "public decks by name, commander, format, colors or owner; owner plus order_by "
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
     "deck_stats": "legality, structural checks, bracket, curve, colors and price from one read",
     "compare_decks": "the exact adds and cuts between two decks, snapshots or lists, with a precon-style "
-    "summary and an optional paired goldfish A/B",
+    "summary and an optional paired solo test A/B",
 }
 
 # What a simulation's "Full report: goldfish_report(...)" line becomes (see TEXT_REWRITES).
@@ -123,26 +125,38 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
 
 # A scryfall_search in a Commander context (a colour identity or a commander term, or Commander
 # legality) is about paper decks, so it leaves out cards that exist only on Arena or MTGO: the
-# gateway adds game:paper unless the query already names a game. Said in the tool's description.
+# gateway adds game:paper unless the query already names a game. A colour identity with no format
+# named also gets f:commander, so Un-cards and other cards Commander does not allow stay out (an
+# id<=r search listed Goblin Cruciverbalist; assistant tool review, 2026-10-28). Both said in the
+# tool's description.
 _COMMANDER_QUERY = re.compile(
     r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)|\b(?:f|format|legal|is):commander\b",
     re.IGNORECASE,
 )
+_IDENTITY_TERM = re.compile(r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)", re.IGNORECASE)
+_FORMAT_TERM = re.compile(r"(?<![\w])-?(?:f|format|legal|banned|restricted)[:=]", re.IGNORECASE)
 _GAME_TERM = re.compile(r"(?<![\w])-?game[:=]", re.IGNORECASE)
+_OR_TERM = re.compile(r"(?<![\w])or(?![\w])", re.IGNORECASE)
 SEARCH_QUERY_MAX = 500  # Mystic Forge's own limit on scryfall_search's query
 PAPER_SEARCH_NOTE = (
-    " In a Commander search (a color identity such as id<=wu, commander:, f:commander or "
-    "is:commander in the query) the gateway adds game:paper, so cards that exist only on Arena or "
-    "MTGO are left out; put a game: term in the query (e.g. game:arena) to choose otherwise."
+    " In a Commander search (a color identity, commander:, f:commander or is:commander) the gateway "
+    "adds game:paper (no Arena or MTGO only cards) and, with a color identity and no format, "
+    "f:commander (no Un-cards); a game: or format term (game:arena, legal:brawl) overrides it."
 )
 
 
 def paper_search_query(query: str) -> str:
-    """``query`` with game:paper added when it is a Commander search that names no game."""
+    """``query`` with game:paper added when it is a Commander search that names no game, and
+    f:commander too when it has a colour identity and names no format."""
     if not _COMMANDER_QUERY.search(query) or _GAME_TERM.search(query):
         return query
-    paper = f"{query.rstrip()} game:paper"
-    return paper if len(paper) <= SEARCH_QUERY_MAX else query
+    base = query.strip()
+    if _OR_TERM.search(base):  # the added terms apply to the whole query, not its last "or" part
+        base = f"({base})"
+    out = f"{base} game:paper"
+    if _IDENTITY_TERM.search(query) and not _FORMAT_TERM.search(query):
+        out += " f:commander"
+    return out if len(out) <= SEARCH_QUERY_MAX else query
 
 
 def rewrite_text(text: str) -> str:
@@ -153,12 +167,93 @@ def rewrite_text(text: str) -> str:
     return found_not_verified(text)
 
 
+# The output schema the research service lists for a tool that answers with text.
+TEXT_RESULT_SCHEMA = {"properties": {"result": {"type": "string"}}, "required": ["result"], "type": "object"}
+
+# A listed tool's description in fewer words than Mystic Forge's own, with nothing an assistant
+# needs left out: every app reads the whole tool list in every chat, and the list has to stay under
+# 100 KB (whole-application audit, row 2; tests/test_tool_review.py measures it with the recorded
+# listing). Re-read against tests/fixtures/mystic_forge/tools.json when the pin moves.
+DESCRIPTIONS: dict[str, str] = {
+    "format_archidekt": (
+        "Format a decklist you composed for Archidekt's import dialog (a deck already on Archidekt: "
+        "get_deck view 'export'). Names are checked against Scryfall. Lines look like '1x Card Name "
+        "[Category]', '1x Commander Name [Commander{top}]', '1x Maybe Card [Maybeboard{noDeck}{noPrice}]', "
+        "'1x Labeled Card [Draw] ^To Buy,#2ccce4^' and '1x Foil Card (dmr) 281 *F* [Ramp]'. finish 'foil' "
+        "or 'etched' marks *F* or *E*: pair it with include_set_codes. Give each card a role category "
+        "(Ramp, Draw, Removal, Lands, ...)."
+    ),
+    "scryfall_price": (
+        "Current market prices for a card, cheapest printing first (unpriced last). set_code: one set; "
+        "with collector_number: one printing; finish: printings in it. Arena and MTGO printings only with "
+        "include_digital (no paper price). Scryfall updates prices daily."
+    ),
+    "scryfall_price_list": (
+        "Price a decklist and total it, honoring each line's printing and finish ('1x Sol Ring (ltc) 284 "
+        "*F*' is priced as exactly that). Lines naming no set use the newest paper printing, never a "
+        "preview, listed apart so the total says what it guessed. A finish with no price is reported on "
+        "its own with the printing's finishes, never totalled at another's price."
+    ),
+    "goldfish_annotate": (
+        "Pre-flight a deck for the solo test: what the engine models on its own, the cards it can't, and "
+        "oracle text only for the few that need an annotation. deck: an Archidekt deck ID or link, read "
+        "with the member's own access (private decks too) like get_deck, or decklist text with the "
+        "commander first (or its line ending ' *CMDR*')."
+    ),
+    "edhrec_precon_upgrade": (
+        "How a precon is commonly upgraded (EDHREC's Precon Upgrade Guide): the most-added cards and lands "
+        "with inclusion percentages, and the most-cut ranked (an unpopularity score, not a percentage). "
+        "Use it, not web search or memory, for what is cut and added. commander picks the face of a precon "
+        "that builds as several. Exact cut percentages against one deck: compare_decks."
+    ),
+    "scryfall_card_text": (
+        "Exact oracle text for a list of cards in one call: name, mana cost, type line, rules text, P/T. "
+        "Use it before discussing what cards do; never state rules text from memory (similar names are "
+        "different cards; text gets errata). Unmatched cards are under 'Not found'."
+    ),
+    "rules_get": (
+        "Magic's Comprehensive Rules by number or keyword, instead of memory or web search. A number gives "
+        "the exact rule ('702.2' with its subrules; '702' lists the subsection); a keyword or glossary "
+        "term ('deathtouch') gives its entry and the rules it cites. Cite rule numbers."
+    ),
+    "rules_search": (
+        "Full-text search of the Comprehensive Rules and glossary, instead of memory or web search, for a "
+        "question (stack, layers, replacement effects) not starting from a rule number; cite the numbers "
+        "it returns, or open them with rules_get."
+    ),
+    "goldfish_odds": (
+        "Exact hypergeometric draw odds (closed form, no games). Flat mode (copies, optional "
+        "min_successes): the chance at least min_successes of the copies are in the top draws of a "
+        "deck_size-card deck. Joint mode (groups): the chance every group meets its minimum at once, e.g. "
+        "1 piece A and 1 piece B in the top 12. Give exactly one of copies or groups."
+    ),
+    "edhrec_commander": "EDHREC's top cards for a commander: high synergy cards, top cards, game "
+    "changers and cards by type, with inclusion rates and synergy scores.",
+    "precon_decklist": "The official decklist of a precon (commander, main deck and sideboard), instead "
+    "of web search; precon_search finds its fileName.",
+    "precon_export": "A precon in Archidekt's import syntax, commander marked [Commander{top}].",
+    "precon_search": "Search MTGJSON's 2,700+ official precon decks by deck name, set name or set code, "
+    "instead of web search: names, set codes and the fileName precon_decklist takes.",
+    "spellbook_combos": "Combos that use all the given cards together (Commander Spellbook), instead of "
+    "web search: steps, prerequisites and what each produces.",
+    "spellbook_card_combos": "Every combo that uses a card (Commander Spellbook), instead of web search.",
+    "validate_decklist": "Check a Commander decklist: card names against Scryfall, 100 cards with the "
+    "commander and, with commander, color identity. Returns a pass/fail report.",
+    "scryfall_rulings": "Official rulings for a card, dated: interactions, edge cases and errata.",
+    "edhrec_recommendations": "Card suggestions from EDHREC for a commander and the cards a deck already "
+    "has.",
+    "scryfall_search": (
+        "Search cards with Scryfall's full query syntax: color identity (id<=), oracle text (o:), type "
+        "(t:), set (set:), keywords (kw:), mana cost, boolean operators. `limit` cards a page (default "
+        "20); page takes the next. Each card in its newest paper printing (as scryfall_named), unless "
+        "`printing` asks for another."
+    ),
+}
+
 # Added to a listed tool's description: what its own description leaves out.
 DESCRIPTION_NOTES: dict[str, str] = {
-    "edhrec_top_cards": "limit is per section (Top Cards, Creatures, Instants, ...). With color, period "
-    "is ignored: EDHREC's color pages count all decks, with no time period.",
-    "goldfish_annotate": "A deck id or link is read with the member's own Archidekt access (their "
-    "private decks too), like get_deck.",
+    "edhrec_top_cards": "limit is per section (Top Cards, Creatures, ...). With color, period is "
+    "ignored: EDHREC's color pages count all decks.",
 }
 
 # A listed tool's parameter whose upstream description says more than the tool does: the new
@@ -167,7 +262,67 @@ DESCRIPTION_NOTES: dict[str, str] = {
 PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
     ("edhrec_average_deck", "limit"): "Not used by this tool: the whole average deck (about 100 "
     "cards) is always returned.",
+    # shorter, as DESCRIPTIONS
+    ("format_archidekt", "include_set_codes"): (
+        "Add each card's set code: its newest paper printing (not a preview), in its finish if given. Slower."
+    ),
+    ("scryfall_price_list", "decklist"): (
+        "One card per line: names or Archidekt/Moxfield lines with printing and finish ('1x Sol Ring (ltc) "
+        "284 *F* [Ramp]'). At most 500."
+    ),
+    ("scryfall_card_text", "cards"): (
+        "One card per line: names or Archidekt/Moxfield lines (quantity, finish, category ignored). At "
+        "most 500."
+    ),
+    ("goldfish_annotate", "deck"): "Archidekt deck ID/URL, or decklist text ('1 Card Name' per line).",
+    ("rules_get", "ref"): "A rule number at any depth ('702', '702.2b') or a keyword or glossary term.",
+    ("rules_search", "query"): "Words to find, in the rules' own wording ('replacement effect order').",
+    ("scryfall_search", "query"): "Scryfall query, e.g. 'o:\"partner with\" id<=rw', 't:cat', "
+    "'!\"Blind Obedience\"' (https://scryfall.com/docs/syntax).",
+    ("goldfish_odds", "groups"): "Joint mode: up to 8 groups of {copies, min_successes}.",
+    ("scryfall_price", "collector_number"): "Collector number in the set, e.g. '281' (needs set_code).",
+    ("scryfall_price", "finish"): "Only printings that come in this finish, its price first.",
+    ("scryfall_price", "include_digital"): "Include Arena and MTGO printings (no paper price).",
+    ("scryfall_price", "set_code"): "One set, e.g. 'dmr'.",
+    ("edhrec_precon_upgrade", "commander"): "The commander face, for a precon that builds as several.",
+    ("precon_search", "query"): "The deck's name, its set's name or set code (e.g. 'Forces of the "
+    "Imperium', 'MKC').",
+    ("format_archidekt", "cards.category"): "Category name (e.g. 'Ramp', 'Lands').",
+    ("format_archidekt", "cards.label"): "Label text (e.g. 'To Buy').",
+    ("format_archidekt", "cards.label_color"): "Label hex color (e.g. '#2ccce4').",
+    ("format_archidekt", "cards.commander"): "The commander (or a partner).",
+    ("format_archidekt", "cards.maybeboard"): "In the maybeboard.",
+    ("scryfall_price", "name"): "The card's name.",
+    ("scryfall_rulings", "name"): "The card's name.",
+    ("spellbook_card_combos", "card"): "The card's name.",
+    ("goldfish_odds", "deck_size"): "Cards in the library drawn from.",
+    ("format_archidekt", "cards.finish"): "'foil' (*F* on the line) or 'etched' (*E*), as Archidekt imports "
+    "it; omit for a normal card. With include_set_codes the printing comes in this finish; a card with "
+    "none in it gets no marker and a warning.",
+    ("scryfall_search", "printing"): "Each card's printing: 'newest_paper' (default, as scryfall_named), "
+    "'scryfall' (Scryfall's choice), 'cheapest' (lowest USD) or 'oldest'. A prefer: term in the query wins.",
+    ("scryfall_named", "set_code"): "A set code (e.g. 'eld'). Without one: the newest printing out on "
+    "paper, not a preview.",
+    ("validate_decklist", "commander"): "The commander, for the color identity check (skipped without one).",
+    (
+        "validate_decklist",
+        "decklist",
+    ): "'1 Card Name' per line; a line starting with // is a category header.",
+    ("precon_decklist", "file_name"): "fileName from precon_search (e.g. 'ForcesOfTheImperium_40K').",
+    ("precon_export", "file_name"): "fileName from precon_search (e.g. 'ForcesOfTheImperium_40K').",
 }
+
+
+def _param_at(schema: dict[str, Any], path: str) -> dict[str, Any] | None:
+    """The parameter a PARAM_DESCRIPTIONS path names: "cards.finish" is the finish of each item
+    of cards."""
+    spot: Any = schema
+    for part in path.split("."):
+        if isinstance(spot, dict) and spot.get("type") == "array":
+            spot = spot.get("items")
+        props = spot.get("properties") if isinstance(spot, dict) else None
+        spot = props.get(part) if isinstance(props, dict) else None
+    return spot if isinstance(spot, dict) else None
 
 
 # Mystic Forge answers a failed upstream request (Scryfall, EDHREC, Archidekt, Commander
@@ -207,7 +362,7 @@ def research_refusal(result: types.CallToolResult) -> types.CallToolResult:
         return result
     out = {"ok": False, "error": "invalid", "message": f"the research service refused the arguments: {text}"}
     return types.CallToolResult(
-        content=[types.TextContent(type="text", text=json.dumps(out, indent=2))],
+        content=[types.TextContent(type="text", text=json.dumps(out, separators=(",", ":")))],
         structured_content=out,
         isError=True,
     )
@@ -286,9 +441,14 @@ BLOCKED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-# One member may run this many proxied calls at once; another is refused at once ("busy")
-# rather than queued, so one account cannot hold Mystic Forge's simulation slots for everyone.
+# One member may run this many proxied calls at once, so one account cannot hold Mystic Forge's
+# simulation slots for everyone. Another call waits up to QUEUE_WAIT_SECONDS for one of theirs to
+# finish (assistants send tool calls in parallel, AT-38), then is refused ("busy").
 MAX_CALLS_PER_USER = 2
+QUEUE_WAIT_SECONDS = 15.0
+# At most this many of one member's calls wait at once; one more is refused busy without waiting
+# (security review 2, R2-06), so one account can't pile up waiting calls.
+MAX_WAITING_CALLS_PER_USER = 6
 # Every proxied call is cut off after this long (a goldfish run included), so no call holds a
 # slot for hours. Mystic Forge itself may keep working on a cancelled call until it finishes.
 CALL_DEADLINE_SECONDS = 120.0
@@ -297,7 +457,7 @@ CALL_DEADLINE_SECONDS = 120.0
 LIST_DEADLINE_SECONDS = 10.0
 LIST_RETRY_SECONDS = 60.0
 # A call whose shape is unknown because Mystic Forge's tool listing has not succeeded yet.
-NOT_READY_TEXT = "the research service is not ready yet and nothing was sent; try again later"
+NOT_READY_TEXT = f"The research service isn't ready yet, so nothing was sent. {AGAIN}"
 HEALTH_DEADLINE_SECONDS = 3.0  # the health check's own probe: short, so /healthz stays quick
 HEALTH_CACHE_SECONDS = 30.0  # one probe per half minute at most, however often /healthz is asked
 # A failed probe is held for a few seconds only, so a Mystic Forge that was still starting (it
@@ -335,7 +495,8 @@ def _busy(limit: int = MAX_CALLS_PER_USER, retry_after: int | None = None) -> ty
     structured content, error busy with ``retry_after``: the seconds until their oldest call is
     stopped at the latest (each call's deadline), so a slot is free by then."""
     message = (
-        f"{limit} research calls for your account are still running; wait for one to finish and try again"
+        f"{limit} research calls for your account are still running after a short wait; wait for one "
+        "to finish and try again"
     )
     structured: dict[str, Any] = {"ok": False, "error": "busy", "message": message}
     if retry_after is not None:
@@ -464,6 +625,17 @@ def _front_face_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _waited_note(result: types.CallToolResult, waited: float) -> types.CallToolResult:
+    """``result`` with a first line saying the call waited its turn (``waited`` seconds, a second
+    or more), so the assistant knows it was queued rather than slow."""
+    if waited < 1 or not result.content or not isinstance(result.content[0], types.TextContent):
+        return result
+    note = f"(This call waited {round(waited)} s for your other research calls to finish.)"
+    first = result.content[0]
+    content = [first.model_copy(update={"text": f"{note}\n\n{first.text}"}), *result.content[1:]]
+    return result.model_copy(update={"content": content})
+
+
 def is_busy(result: types.CallToolResult) -> bool:
     """True for the refusal ``call`` gives when the owner already runs their share of calls."""
     if not result.is_error or not result.content:
@@ -485,12 +657,15 @@ class MysticForgeProxy:
         client_factory: Any | None = None,
         max_calls_per_user: int = MAX_CALLS_PER_USER,
         deadline: float = CALL_DEADLINE_SECONDS,
+        queue_wait: float = QUEUE_WAIT_SECONDS,
     ):
         self.url = url
+        self.queue_wait = queue_wait
         self.cache_ttl = cache_ttl
         self.max_calls_per_user = max_calls_per_user
         self.deadline = deadline
         self._in_flight: dict[str, int] = {}
+        self._waiting: dict[str, int] = {}  # a member's calls waiting for a slot (_wait_turn)
         self._started: dict[str, list[float]] = {}  # when each of a member's running calls began
         self._client_factory = client_factory or (lambda: Client(url))
         self._tools: list[dict[str, Any]] = []
@@ -558,16 +733,22 @@ class MysticForgeProxy:
                 wrapped.add(t.name)
             if t.name in ALLOWED_TOOLS:
                 d["inputSchema"] = compact_schema(flat if flat is not None else d.get("inputSchema") or {})
-                props = d["inputSchema"].get("properties")
                 for (tool, param), text in PARAM_DESCRIPTIONS.items():
-                    if tool == t.name and isinstance(props, dict) and isinstance(props.get(param), dict):
-                        props[param]["description"] = text
+                    if tool == t.name and isinstance(spot := _param_at(d["inputSchema"], param), dict):
+                        spot["description"] = text
+                d["description"] = DESCRIPTIONS.get(t.name, d.get("description"))
                 if isinstance(d.get("description"), str):
                     d["description"] = rewrite_text(d["description"])
                     if t.name == "scryfall_search":
                         d["description"] = d["description"].rstrip() + PAPER_SEARCH_NOTE
                     if t.name in DESCRIPTION_NOTES:
                         d["description"] = d["description"].rstrip() + "\n\n" + DESCRIPTION_NOTES[t.name]
+                # A text answer's output schema ({"result": a string}) says nothing the text doesn't.
+                if compact_schema(d.get("outputSchema")) == TEXT_RESULT_SCHEMA:
+                    d.pop("outputSchema")
+                # The title a host shows, as every gateway tool has one: its readable name
+                # (tool_labels), not the raw name (0.7.46 sweep B-6)
+                d["title"] = tool_name(t.name)
                 # Advertise as read-only research tools; none of them writes to Archidekt.
                 d.setdefault("annotations", {}).update({"readOnlyHint": True, "openWorldHint": True})
                 tools.append(d)
@@ -587,6 +768,19 @@ class MysticForgeProxy:
         return name in ALLOWED_TOOLS or name in OWNED_ELSEWHERE
 
     async def call(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        *,
+        owner: str | None = None,
+        internal: bool = False,
+    ) -> types.CallToolResult:
+        try:
+            return await self._call_now(name, arguments, owner=owner, internal=internal)
+        finally:
+            await dbwait.settle()  # a background job's database work waits off the loop
+
+    async def _call_now(
         self,
         name: str,
         arguments: dict[str, Any] | None,
@@ -630,11 +824,9 @@ class MysticForgeProxy:
                     except DeckError as exc:
                         return _deck_refusal(exc)
                     arguments = {**arguments, key: text}  # read here: nothing for the budget below
-        if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
-            refused = self.archidekt_budget(owner)
-            if refused:
-                return _refusal(refused)
+        waited = 0.0
         if owner is not None:
+            waited = await self._wait_turn(owner)
             if self._in_flight.get(owner, 0) >= self.max_calls_per_user:
                 return _busy(self.max_calls_per_user, self._retry_after(owner))
             self._in_flight[owner] = self._in_flight.get(owner, 0) + 1
@@ -645,6 +837,11 @@ class MysticForgeProxy:
             # double-faced or split card by its front face only, as reports already send it.
             arguments = _front_face_arguments(arguments)
         try:
+            # spent once the call has its slot, so one refused busy after its wait spends nothing
+            if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
+                refused = self.archidekt_budget(owner)
+                if refused:
+                    return _refusal(refused)
             if isinstance(arguments, dict):
                 if not self._listed:
                     # Learn which tools take a params object. A flat call has no other way to
@@ -660,7 +857,7 @@ class MysticForgeProxy:
             result = research_refusal(_rewrite_result(await self._forward(name, arguments)))
             if name == "validate_decklist":
                 result = _validation_checks(result, arguments)
-            return result
+            return _waited_note(result, waited)
         finally:
             if owner is not None:
                 left = self._in_flight.get(owner, 1) - 1
@@ -673,6 +870,29 @@ class MysticForgeProxy:
                     starts.remove(started)
                 if not starts:
                     self._started.pop(owner, None)
+
+    async def _wait_turn(self, owner: str) -> float:
+        """Wait up to ``queue_wait`` seconds while ``owner`` runs their share of calls; the seconds
+        waited. ``call`` takes the slot right after, with nothing awaited in between. With
+        MAX_WAITING_CALLS_PER_USER of the member's calls already waiting, no wait (``call`` then
+        says busy)."""
+        start = time.monotonic()
+        if self._in_flight.get(owner, 0) < self.max_calls_per_user:
+            return 0.0
+        if self._waiting.get(owner, 0) >= MAX_WAITING_CALLS_PER_USER:
+            return 0.0
+        end = start + self.queue_wait
+        self._waiting[owner] = self._waiting.get(owner, 0) + 1
+        try:
+            while self._in_flight.get(owner, 0) >= self.max_calls_per_user and time.monotonic() < end:
+                await anyio.sleep(0.05)
+        finally:
+            left = self._waiting.get(owner, 1) - 1
+            if left > 0:
+                self._waiting[owner] = left
+            else:
+                self._waiting.pop(owner, None)
+        return time.monotonic() - start
 
     def _retry_after(self, owner: str) -> int | None:
         """Seconds until the member's oldest running call is stopped at the latest: its deadline,
@@ -703,9 +923,7 @@ class MysticForgeProxy:
         except Exception as exc:
             logger.warning("Mystic Forge call %s failed: %s", name, exc)
             return types.CallToolResult(
-                content=[
-                    types.TextContent(type="text", text="the research service is unavailable right now")
-                ],
+                content=[types.TextContent(type="text", text=outage("unavailable", "The research service"))],
                 isError=True,
             )
 

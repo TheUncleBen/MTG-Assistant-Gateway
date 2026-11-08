@@ -27,6 +27,7 @@ few requests.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import re
@@ -36,10 +37,22 @@ from typing import Any
 
 import httpx
 
+from .. import dbwait
+from ..busy import outage
+from ..config import USER_AGENT
+from ..refusals import sentence
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE = "https://api.scryfall.com"
 COLLECTION_MAX = 75
+
+
+# What a member reads when Scryfall is down: plain words, no exception name or HTTP code
+# (whole-application audit, row 12); the log keeps the detail. The words are busy.OUTAGE's.
+SCRYFALL_UNREACHABLE = outage("unreachable", "Scryfall", again=True)
+SCRYFALL_TIMEOUT = outage("timeout", "Scryfall", again=True)
+SCRYFALL_FAILING = outage("failing", "Scryfall", again=True)
 
 
 class ScryfallError(Exception):
@@ -48,6 +61,18 @@ class ScryfallError(Exception):
     def __init__(self, kind: str, message: str):
         super().__init__(message)
         self.kind = kind
+
+
+def collection_ident(ident: dict[str, str]) -> dict[str, str]:
+    """``ident`` as POST /cards/collection finds it: a name identifier names a split, adventure or
+    two-faced card by its front face, the only name that lookup knows it by ({"name": "Fire"}
+    returns Fire // Ice, {"name": "Fire // Ice"} is not_found; checked 2026-10-28). The card that
+    comes back carries its full name."""
+    name = ident.get("name")
+    if not isinstance(name, str) or "//" not in name:
+        return ident
+    front = re.split(r"\s*//\s*", name, maxsplit=1)[0].strip()
+    return {**ident, "name": front} if front else ident
 
 
 def today() -> str:
@@ -97,6 +122,9 @@ PRINT_FRAMES = ("1993", "1997", "2003", "2015", "future")
 PRINT_BORDERS = ("black", "white", "borderless", "silver", "gold")
 PRINT_ORDERS = {"newest": ("released", "desc"), "oldest": ("released", "asc"), "cheapest": ("usd", "asc")}
 PRINT_PAGES = 20  # 3,500 printings, more than any card has (a basic land has about 1,000)
+PRINTINGS_PER_SEARCH = 20  # cards one search for every printing asks for (printings_of)
+PRINTINGS_PAGES = 60  # pages of it at most: 10,500 printings
+_ORACLE_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def summarize(card: dict[str, Any]) -> dict[str, Any]:
@@ -127,6 +155,9 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
         "image_art": image_uris.get("art_crop"),
         "scryfall_uri": card.get("scryfall_uri"),
         "finishes": [f for f in (card.get("finishes") or []) if isinstance(f, str)],
+        # the printing's prices as Scryfall listed them when it was read (its daily prices): the
+        # Scan page's running value and the printing picker; the tools leave them out
+        "prices": _prices(card),
     }
     legal = card.get("legalities") or {}
     if legal:
@@ -139,6 +170,17 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _prices(card: dict[str, Any]) -> dict[str, str]:
+    """The prices Scryfall gives, only those it has (a string each): usd, usd_foil, usd_etched,
+    eur, eur_foil, tix."""
+    prices = card.get("prices") if isinstance(card.get("prices"), dict) else {}
+    return {
+        k: str(prices[k])
+        for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
+        if isinstance(prices.get(k), str) and prices[k]
+    }
+
+
 def _cn(number: str) -> str:
     """A collector number for Scryfall's ``cn:``: as it is when it is plain letters and digits,
     else in double quotes (numbers such as ``1★``)."""
@@ -148,15 +190,9 @@ def _cn(number: str) -> str:
 def browse_row(card: dict[str, Any]) -> dict[str, Any]:
     """A summary plus what the card search's list view and the printing picker show: prices,
     power, toughness and loyalty, and the printing's frame, border and treatments."""
-    out = summarize(card)
+    out = summarize(card)  # with the printing's prices
     faces = [f for f in card.get("card_faces") or [] if isinstance(f, dict)]
     front = faces[0] if faces else {}
-    prices = card.get("prices") if isinstance(card.get("prices"), dict) else {}
-    out["prices"] = {
-        k: str(prices[k])
-        for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
-        if isinstance(prices.get(k), str) and prices[k]
-    }
     for key in ("power", "toughness", "loyalty"):
         value = card.get(key, front.get(key))
         if isinstance(value, str) and value:
@@ -168,6 +204,11 @@ def browse_row(card: dict[str, Any]) -> dict[str, Any]:
     out["promo"] = bool(card.get("promo"))
     out["digital"] = bool(card.get("digital"))
     out["set_type"] = str(card.get("set_type") or "")
+    # which picture the printing carries (Scryfall's illustration id, on the front face of a
+    # two-faced card): the printing picker's "Different art" chip groups printings by it
+    art = card.get("illustration_id") or front.get("illustration_id")
+    if isinstance(art, str) and art:
+        out["illustration_id"] = art
     rank = card.get("edhrec_rank")
     if isinstance(rank, int) and not isinstance(rank, bool):
         out["edhrec_rank"] = rank
@@ -217,6 +258,8 @@ def slim(card: dict[str, Any]) -> dict[str, Any]:
     legal = card.get("legalities")
     if isinstance(legal, dict) and "commander" in legal:
         out["legalities"] = {"commander": legal["commander"]}
+    # the printing's prices (six short strings at most) for the Scan page's running value
+    out["prices"] = _prices(card)
     return out
 
 
@@ -226,6 +269,29 @@ def _retry_after(value: str | None, default: float = 5.0, cap: float = 120.0) ->
         return min(max(float(value or default), 1.0), cap)
     except ValueError:
         return default
+
+
+def _collection_key(ident: dict[str, Any]) -> str:
+    """The ``cards`` cache key of a /cards/collection identifier (its letter case aside)."""
+    asked = {str(k): str(v).strip().lower() for k, v in collection_ident(ident).items()}
+    return "coll:" + json.dumps(asked, sort_keys=True)
+
+
+def _answers(card: dict[str, Any], ident: dict[str, Any]) -> bool:
+    """Whether ``card`` is the one ``ident`` asks for (its id, its set and number, or its name, a
+    two-part card's front face too, in the set given)."""
+    if ident.get("id"):
+        return str(card.get("id") or "") == str(ident["id"])
+    if ident.get("set") and str(card.get("set") or "").lower() != str(ident["set"]).strip().lower():
+        return False
+    if ident.get("collector_number"):
+        return (
+            str(card.get("collector_number") or "").lower() == str(ident["collector_number"]).strip().lower()
+        )
+    want = re.sub(r"[^a-z0-9]", "", str(ident.get("name") or "").lower())
+    names = [str(card.get("name") or "")] + [str(f.get("name") or "") for f in card.get("card_faces") or []]
+    names.append(names[0].split(" // ")[0])
+    return bool(want) and any(re.sub(r"[^a-z0-9]", "", n.lower()) == want for n in names)
 
 
 class _Cache:
@@ -250,13 +316,19 @@ class _Cache:
                 self._items.pop(k, None)
         self._items[key] = (time.monotonic() + self.ttl, value)
 
+    def clear(self) -> None:
+        self._items.clear()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
 
 class ScryfallClient:
     def __init__(
         self,
         base: str = DEFAULT_BASE,
         *,
-        user_agent: str = "mtg-assistant-gateway/0.1",
+        user_agent: str = USER_AGENT,
         min_interval: float = 0.1,
         lookup_interval: float | None = None,
         timeout: float = 15.0,
@@ -304,11 +376,19 @@ class ScryfallClient:
         n = max(1, self.retry_in())
         return ScryfallError(
             "rate_limited",
-            f"Scryfall asked the gateway to slow down, so it is pausing its Scryfall lookups for {n} "
-            f"second{'' if n == 1 else 's'}. Try again after that.",
+            f"{outage('slow_down', 'Scryfall')} Its lookups wait {n} second{'' if n == 1 else 's'}; "
+            "try again after that.",
         )
 
     async def _request(
+        self, method: str, path: str, *, interval: float | None = None, **kw: Any
+    ) -> httpx.Response:
+        try:
+            return await self._request_now(method, path, interval=interval, **kw)
+        finally:
+            await dbwait.settle()  # a background job's database work waits off the loop
+
+    async def _request_now(
         self, method: str, path: str, *, interval: float | None = None, **kw: Any
     ) -> httpx.Response:
         async with self._lock:
@@ -320,7 +400,9 @@ class ScryfallClient:
             try:
                 resp = await self.http.request(method, f"{self.base}{path}", headers=self.headers, **kw)
             except httpx.HTTPError as exc:
-                raise ScryfallError("unavailable", f"Scryfall unreachable: {exc.__class__.__name__}") from exc
+                logger.warning("Scryfall %s %s failed: %s", method, path, exc.__class__.__name__)
+                words = SCRYFALL_TIMEOUT if isinstance(exc, httpx.TimeoutException) else SCRYFALL_UNREACHABLE
+                raise ScryfallError("unavailable", words) from exc
             finally:
                 self._last = time.monotonic()
                 self.requests += 1
@@ -329,7 +411,8 @@ class ScryfallClient:
             logger.warning("Scryfall 429 on %s; pausing all lookups for %d s", path, self.retry_in())
             raise self._rate_limited()
         if resp.status_code >= 500:
-            raise ScryfallError("unavailable", f"Scryfall returned {resp.status_code}")
+            logger.warning("Scryfall answered %d on %s", resp.status_code, path)
+            raise ScryfallError("unavailable", SCRYFALL_FAILING)
         return resp
 
     @staticmethod
@@ -337,9 +420,9 @@ class ScryfallClient:
         try:
             data = resp.json()
         except ValueError as exc:
-            raise ScryfallError("contract", "Scryfall returned a non-JSON body") from exc
+            raise ScryfallError("contract", "Scryfall returned a non-JSON body.") from exc
         if not isinstance(data, dict):
-            raise ScryfallError("contract", "Scryfall returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall returned an unexpected body.")
         return data
 
     def _card_or_error(self, resp: httpx.Response, what: str) -> dict[str, Any]:
@@ -349,11 +432,15 @@ class ScryfallClient:
         data = self._json(resp)
         if resp.status_code == 404:
             kind = "ambiguous" if data.get("type") == "ambiguous" else "not_found"
-            raise ScryfallError(kind, str(data.get("details") or f"No card found for {what}"))
+            # the gateway's own words for an unknown or unclear name, the same everywhere (B-3)
+            if kind == "ambiguous":
+                raise ScryfallError(kind, f"“{what}” could be any of several cards; give more of its name.")
+            raise ScryfallError(kind, f"No card is called “{what}”.")
         if resp.status_code >= 400 or data.get("object") == "error":
-            raise ScryfallError("unavailable", f"Scryfall returned {resp.status_code} for {what}")
+            logger.warning("Scryfall answered %d for %s", resp.status_code, what)
+            raise ScryfallError("unavailable", SCRYFALL_FAILING)
         if data.get("object") != "card" or not data.get("name"):
-            raise ScryfallError("contract", "Scryfall returned something that is not a card")
+            raise ScryfallError("contract", "Scryfall returned something that is not a card.")
         return data
 
     async def named(self, name: str, *, fuzzy: bool = False, set_code: str | None = None) -> dict[str, Any]:
@@ -390,14 +477,14 @@ class ScryfallClient:
         """GET /cards/{id}/rulings: the card's rulings ({date, text, source} each, oldest first as
         Scryfall lists them). Not cached here; the card viewer keeps them (cardsearch.py)."""
         if not re.fullmatch(r"[0-9a-f-]{36}", card_id or ""):
-            raise ScryfallError("not_found", "No such card id")
+            raise ScryfallError("not_found", "Scryfall has no card with that ID.")
         resp = await self._request("GET", f"/cards/{card_id}/rulings", interval=self.lookup_interval)
         data = self._json(resp)
         if resp.status_code == 404 or data.get("object") == "error":
-            raise ScryfallError("not_found", str(data.get("details") or "No rulings found"))
+            raise ScryfallError("not_found", sentence(data.get("details") or "No rulings were found."))
         rows = data.get("data")
         if data.get("object") != "list" or not isinstance(rows, list):
-            raise ScryfallError("contract", "Scryfall rulings returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall rulings returned an unexpected body.")
         return [
             {
                 "date": str(r.get("published_at") or ""),
@@ -421,7 +508,7 @@ class ScryfallClient:
         data = self._json(resp)
         names = data.get("data")
         if data.get("object") != "catalog" or not isinstance(names, list):
-            raise ScryfallError("contract", "Scryfall autocomplete returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall autocomplete returned an unexpected body.")
         out = [n for n in names if isinstance(n, str)]
         self.names.put(key, out)
         return out
@@ -434,10 +521,10 @@ class ScryfallClient:
         data = self._json(resp)
         names = data.get("data")
         if data.get("object") != "catalog" or not isinstance(names, list):
-            raise ScryfallError("contract", "Scryfall's card-name catalog has an unexpected shape")
+            raise ScryfallError("contract", "Scryfall's card-name catalog has an unexpected shape.")
         out = [n for n in names if isinstance(n, str) and n]
         if len(out) < 1000:
-            raise ScryfallError("contract", f"Scryfall's card-name catalog is too short ({len(out)})")
+            raise ScryfallError("contract", f"Scryfall's card-name catalog is too short ({len(out)}).")
         return out
 
     async def prints(
@@ -466,7 +553,7 @@ class ScryfallClient:
         (Scryfall's ``set:`` and ``cn:``), checked by the caller.
         """
         if order not in PRINT_ORDERS:
-            raise ScryfallError("invalid", "order must be newest, oldest or cheapest")
+            raise ScryfallError("invalid", "order must be newest, oldest or cheapest.")
         terms = " ".join(
             t
             for t in (
@@ -488,6 +575,9 @@ class ScryfallClient:
             "dir": direction,
             "q": f"oracleid:{oracle_id}" + (f" {terms}" if terms else ""),
             "unique": "prints",
+            # a token's or an emblem's printings: Scryfall's search leaves these extras out
+            # otherwise (one card's oracle id only ever matches that card's own printings)
+            "include_extras": "true",
         }
         if page > 1:
             params["page"] = page
@@ -500,9 +590,9 @@ class ScryfallClient:
                 empty: dict[str, Any] = {"cards": [], "has_more": False, "total_cards": 0, "page": page}
                 self.prints_cache.put(key, empty)
                 return empty
-            raise ScryfallError("not_found", str(data.get("details") or "no printings found"))
+            raise ScryfallError("not_found", sentence(data.get("details") or "No printings were found."))
         if data.get("object") != "list" or not isinstance(data.get("data"), list):
-            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body.")
         cards = [browse_row(c) for c in data["data"] if isinstance(c, dict) and c.get("object") == "card"]
         total = data.get("total_cards")
         out = {
@@ -512,6 +602,59 @@ class ScryfallClient:
             "page": page,
         }
         self.prints_cache.put(key, out)
+        return out
+
+    async def printings_of(
+        self, oracle_ids: list[str], *, interval: float | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Every printing of each card in ``oracle_ids`` with its prices, by oracle id: one search
+        for up to PRINTINGS_PER_SEARCH cards (``oracleid:a or oracleid:b ...``, every page of it, at
+        most PRINTINGS_PAGES). For the cheapest printing of a watch by name alone (prices.py), so
+        nothing is cached: today's prices are the point. A card Scryfall finds no printing of is
+        left out."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        ids = sorted({o.strip().lower() for o in oracle_ids if _ORACLE_RE.fullmatch(o.strip().lower())})
+        for i in range(0, len(ids), PRINTINGS_PER_SEARCH):
+            chunk = ids[i : i + PRINTINGS_PER_SEARCH]
+            params: dict[str, Any] = {
+                "q": " or ".join(f"oracleid:{o}" for o in chunk),
+                "unique": "prints",
+                "include_extras": "true",
+                "order": "released",
+                "dir": "desc",
+            }
+            for page in range(1, PRINTINGS_PAGES + 1):
+                if page > 1:
+                    params["page"] = page
+                resp = await self._request("GET", "/cards/search", params=params, interval=interval)
+                data = self._json(resp)
+                if resp.status_code == 404:
+                    break  # none of these cards (or a page past the end)
+                if data.get("object") != "list" or not isinstance(data.get("data"), list):
+                    raise ScryfallError(
+                        "contract",
+                        sentence(data.get("details") or "Scryfall's search answer was not readable."),
+                    )
+                for c in data["data"]:
+                    if not isinstance(c, dict) or c.get("object") != "card":
+                        continue
+                    faces = c.get("card_faces") if isinstance(c.get("card_faces"), list) else []
+                    oid = c.get("oracle_id") or (faces[0].get("oracle_id") if faces else None)
+                    if not isinstance(oid, str):
+                        continue
+                    out.setdefault(oid, []).append(
+                        {
+                            "id": c.get("id"),
+                            "oracle_id": oid,
+                            "name": c.get("name"),
+                            "set": c.get("set"),
+                            "collector_number": c.get("collector_number"),
+                            "finishes": [f for f in c.get("finishes") or [] if isinstance(f, str)],
+                            "prices": c.get("prices") if isinstance(c.get("prices"), dict) else {},
+                        }
+                    )
+                if not data.get("has_more"):
+                    break
         return out
 
     async def search(
@@ -524,7 +667,7 @@ class ScryfallClient:
         second member's identical search and a reload cost no request."""
         q = query.strip()
         if not q:
-            raise ScryfallError("invalid", "nothing to search for")
+            raise ScryfallError("invalid", "Nothing to search for.")
         key = f"{order}|{direction}|{page}|{q}"
         if (hit := self.search_cache.get(key)) is not None:
             return hit
@@ -538,9 +681,11 @@ class ScryfallClient:
                 out: dict[str, Any] = {"cards": [], "has_more": False, "total_cards": 0, "warnings": []}
                 self.search_cache.put(key, out)
                 return out
-            raise ScryfallError("invalid", str(data.get("details") or "Scryfall could not read that search"))
+            raise ScryfallError(
+                "invalid", sentence(data.get("details") or "Scryfall could not read that search.")
+            )
         if data.get("object") != "list" or not isinstance(data.get("data"), list):
-            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body.")
         total = data.get("total_cards")
         warnings = data.get("warnings")
         out = {
@@ -565,7 +710,7 @@ class ScryfallClient:
         data = self._json(resp)
         rows = data.get("data")
         if data.get("object") != "list" or not isinstance(rows, list):
-            raise ScryfallError("contract", "Scryfall's set list has an unexpected shape")
+            raise ScryfallError("contract", "Scryfall's set list has an unexpected shape.")
         out = [
             {
                 "code": str(r["code"]).lower(),
@@ -585,7 +730,7 @@ class ScryfallClient:
     async def catalog(self, name: str) -> list[str]:
         """One of Scryfall's catalogs (``GET /catalog/{name}``, e.g. ``creature-types``); kept a day."""
         if not re.fullmatch(r"[a-z-]{3,40}", name):
-            raise ScryfallError("invalid", "no such catalog")
+            raise ScryfallError("invalid", "No such catalog.")
         key = f"catalog:{name}"
         if (hit := self.catalogs.get(key)) is not None:
             return hit
@@ -593,7 +738,7 @@ class ScryfallClient:
         data = self._json(resp)
         values = data.get("data")
         if data.get("object") != "catalog" or not isinstance(values, list):
-            raise ScryfallError("contract", f"Scryfall's {name} catalog has an unexpected shape")
+            raise ScryfallError("contract", f"Scryfall's {name} catalog has an unexpected shape.")
         out = [v for v in values if isinstance(v, str) and v]
         self.catalogs.put(key, out)
         return out
@@ -617,7 +762,7 @@ class ScryfallClient:
         if resp.status_code == 404 or data.get("object") == "error":
             out: list[str] = []
         elif data.get("object") != "list" or not isinstance(data.get("data"), list):
-            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body.")
         else:
             out = [
                 str(c["name"]) for c in data["data"] if isinstance(c, dict) and isinstance(c.get("name"), str)
@@ -626,25 +771,68 @@ class ScryfallClient:
         return out[:limit]
 
     async def collection(
+        self, identifiers: list[dict[str, str]], *, interval: float | None = None, cached: bool = False
+    ) -> tuple[list[dict[str, Any]], list[dict]]:
+        """Resolve up to 75 identifiers per request. Returns (cards, not_found identifiers), the
+        cards in the identifiers' order. ``interval`` spaces the requests further apart than the
+        batch pacer (the daily price check uses the single-lookup pace: it is in no hurry).
+
+        ``cached`` (the card resolver: resolve_cards, save_scan_session, a card's printings by
+        name): an identifier answered in the last day is answered again from ``cards``, slimmed
+        as ``named`` keeps its cards (prices up to a day old, as there), and only the others are
+        asked, 75 a request. Never for prices or a legality check, which want the card now."""
+        if not cached:
+            return await self._collection(identifiers, interval=interval)
+        keys = [_collection_key(ident) for ident in identifiers]
+        held: dict[int, dict[str, Any]] = {}
+        for n, key in enumerate(keys):
+            if (hit := self.cards.get(key)) is not None:
+                held[n] = hit
+        ask = [n for n in range(len(identifiers)) if n not in held]
+        got: dict[int, dict[str, Any]] = {}
+        missing: list[dict[str, Any]] = []
+        for i in range(0, len(ask), COLLECTION_MAX):
+            part = ask[i : i + COLLECTION_MAX]
+            found, lost = await self._collection([identifiers[n] for n in part], interval=interval)
+            missing += lost
+            # Scryfall answers in the identifiers' order with the ones it did not find left out
+            lost_keys = {_collection_key(m) for m in lost}
+            cards = iter(found)
+            for n in part:
+                if keys[n] in lost_keys:
+                    continue
+                card = next(cards, None)
+                if card is None:
+                    break
+                got[n] = card
+                if _answers(card, identifiers[n]):  # never kept under another card's identifier
+                    self.cards.put(keys[n], slim(card))
+        out = [held.get(n) or got[n] for n in range(len(identifiers)) if n in held or n in got]
+        return out, missing
+
+    async def _collection(
         self, identifiers: list[dict[str, str]], *, interval: float | None = None
     ) -> tuple[list[dict[str, Any]], list[dict]]:
-        """Resolve up to 75 identifiers per request. Returns (cards, not_found identifiers).
-        ``interval`` spaces the requests further apart than the batch pacer (the daily price
-        check uses the single-lookup pace: it is in no hurry)."""
         found: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         for i in range(0, len(identifiers), COLLECTION_MAX):
-            chunk = identifiers[i : i + COLLECTION_MAX]
+            asked = identifiers[i : i + COLLECTION_MAX]
+            # A two-part card goes by its front face (collection_ident); a miss is handed back as
+            # the caller asked for it.
+            chunk = [collection_ident(ident) for ident in asked]
+            sent = {json.dumps(c, sort_keys=True): a for c, a in zip(chunk, asked, strict=True)}
             resp = await self._request(
                 "POST", "/cards/collection", json={"identifiers": chunk}, interval=interval
             )
             data = self._json(resp)
             if data.get("object") != "list" or not isinstance(data.get("data"), list):
-                raise ScryfallError("contract", str(data.get("details") or "unexpected collection reply"))
+                raise ScryfallError(
+                    "contract", sentence(data.get("details") or "Scryfall's card answer was not readable.")
+                )
             for card in data["data"]:
                 if isinstance(card, dict) and card.get("object") == "card":
                     found.append(card)
             for ident in data.get("not_found") or []:
                 if isinstance(ident, dict):
-                    missing.append(ident)
+                    missing.append(sent.get(json.dumps(ident, sort_keys=True), ident))
         return found, missing

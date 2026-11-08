@@ -38,10 +38,9 @@ from mtg_gateway.report_view import (
     report_markdown,
 )
 from mtg_gateway.reports import (
+    FORGE_START_BROKE,
     SOLO_BUSY,
     SOLO_NOT_STARTED,
-    SOLO_ONE_AT_A_TIME,
-    SOLO_OTHERS_WAITING,
     ReportService,
     report_status,
     solo_game_seconds,
@@ -128,6 +127,21 @@ class FakeForge:
 
     def client(self) -> ForgeClient:
         return ForgeClient("http://forge.test", transport=httpx.MockTransport(self.handler))
+
+
+async def _ran(reports: ReportService, sub: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """A report as it stands once its Forge parts were handed to Forge: run answers at once, with
+    them still being handed over in the background (starts_settled)."""
+    out = await reports.run(sub, *args, **kwargs)
+    await reports.starts_settled()
+    return {**out, **reports.get(sub, out["report_id"])}
+
+
+async def _more(reports: ReportService, sub: str, rid: str) -> dict[str, Any]:
+    """Play more games, as the report stands once they were handed to Forge."""
+    await reports.play_more(sub, rid)
+    await reports.starts_settled()
+    return reports.get(sub, rid)
 
 
 DECK_TEXT = "1 Liesa, Forgotten Archangel [Commander]\n1 Sol Ring\n1 Fake Sticker Card\n10 Plains\n1 Plains\n"
@@ -363,8 +377,8 @@ async def test_report_seats_precons_of_the_decks_bracket(tmp_path: Path) -> None
     fake = FakeForge(brackets=BRACKETED)
     reports = ReportService(db, _Decks(edhBracket=3), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
-    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
+    second = await _ran(reports, "alice", "42", games=300, options={"seed": 2})
     assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 3", "Mid 3", "Oldest 3"]
     choice = first["forge"]["opponent_choice"]
     assert choice["bracket"] == 3 and choice["source"] == "archidekt" and choice["rule"] == "bracket"
@@ -388,7 +402,7 @@ async def test_report_seats_precons_of_the_decks_bracket(tmp_path: Path) -> None
     estimated = ReportService(
         db, _Decks(updatedAt="2026-10-05T00:00:00Z"), None, forge=fake2.client(), forge_games=4
     )  # type: ignore[arg-type]
-    out = await estimated.run("alice", "42", games=300, options={"seed": 5})
+    out = await _ran(estimated, "alice", "42", games=300, options={"seed": 5})
     assert out["forge"]["opponent_choice"]["source"] == "estimate"
     assert out["forge"]["opponent_choice"]["bracket"] == out["stats"]["bracket_estimate"]["bracket"] == 2
     assert [d["precon"] for d in fake2.started[0]["decks"][1:]] == ["New 2", "Older 2", "New 3"]
@@ -400,7 +414,7 @@ async def test_report_runs_forge_in_the_background(tmp_path: Path) -> None:
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 7})
     assert out["forge"]["state"] == "running"
     assert fake.started[0]["games"] == 4  # capped for the Pi
     assert fake.started[0]["seed"] == 7 and out["forge"]["seed"] == 7
@@ -435,12 +449,12 @@ async def test_one_unfinished_forge_run_per_member(tmp_path: Path, monkeypatch: 
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert first["forge"]["state"] == "running" and len(fake.started) == 1
     fake.finish(first["forge"]["job_id"], [1])
     assert reports._forge_task is not None
     await asyncio.wait_for(reports._forge_task, timeout=20)
-    third = await reports.run("alice", "42", games=300, options={"seed": 3})
+    third = await _ran(reports, "alice", "42", games=300, options={"seed": 3})
     assert third["forge"]["state"] == "running" and len(fake.started) == 2
     fake.finish(third["forge"]["job_id"], [1])
     await asyncio.wait_for(reports._forge_task, timeout=20)
@@ -453,7 +467,7 @@ async def test_one_unfinished_forge_run_per_member(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(reports_module, "start_run", slow_start)
     together = await asyncio.gather(
         # two different decks: the same deck's concurrent runs already share one report
-        *(reports.run("alice", ref, games=300, options={"seed": 4}) for ref in ("42", "43"))
+        *(_ran(reports, "alice", ref, games=300, options={"seed": 4}) for ref in ("42", "43"))
     )
     # no race past the limit: one plays, the other waits for it
     assert sorted(r["forge"]["state"] for r in together) == ["queued", "running"]
@@ -470,10 +484,10 @@ async def test_a_second_report_queues_behind_the_running_forge_run(tmp_path: Pat
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
-    second = await reports.run("alice", "42", games=300, options={"seed": 2})
-    third = await reports.run("alice", "42", games=300, options={"seed": 3})
-    fourth = await reports.run("alice", "42", games=300, options={"seed": 4})
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
+    second = await _ran(reports, "alice", "42", games=300, options={"seed": 2})
+    third = await _ran(reports, "alice", "42", games=300, options={"seed": 3})
+    fourth = await _ran(reports, "alice", "42", games=300, options={"seed": 4})
     assert first["forge"]["state"] == "running" and len(fake.started) == 1
     assert second["forge"]["state"] == "queued" and second["forge"]["position"] == 1
     assert second["forge"]["waiting_for"] == {
@@ -660,7 +674,9 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "Games finished so far: 0 of 10." in forge_html({"state": "running", "games_requested": 10})
     assert forge_html(None) == ""
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": done})
-    assert "## Forge games (against precons)" in md and "Cards Forge could not play: Fake Sticker Card" in md
+    # one card per line, so a name with a comma in it is never read as two
+    assert "## Forge games (against precons)" in md
+    assert "- Cards Forge could not play:\n  - Fake Sticker Card\n" in md
     assert "Liesa <b>: 2 wins, 50% (95% interval 15% to 85%)." in md and "1 of them stopped at the time" in md
     # a newer run: turns, losses and each game
     newer = {
@@ -694,13 +710,13 @@ async def test_deleting_a_report_cancels_its_unfinished_forge_run(tmp_path: Path
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     reports.delete("alice", first["report_id"])
     await asyncio.gather(*reports._forge_cancels)
     assert fake.cancelled == [first["forge"]["job_id"]]
     # the member's next run starts: the deleted report no longer holds the one-run slot, and its
     # job no longer holds the engine
-    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    second = await _ran(reports, "alice", "42", games=300, options={"seed": 2})
     assert second["forge"]["state"] == "running" and len(fake.started) == 2
     fake.finish(second["forge"]["job_id"], [1])
     await asyncio.wait_for(reports._forge_task, timeout=20)  # type: ignore[arg-type]
@@ -725,7 +741,7 @@ async def test_a_run_whose_report_was_deleted_while_starting_is_cancelled(
 
     monkeypatch.setattr(reports_module, "start_run", start_then_delete)
     with pytest.raises(DeckError):  # the report it would return is gone
-        await reports.run("alice", "42", games=300, options={"seed": 1})
+        await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     await asyncio.gather(*reports._forge_cancels)
     assert len(fake.cancelled) == 1
 
@@ -738,6 +754,11 @@ async def test_forge_health_is_probed_once_and_reports_an_outage() -> None:
     fake.up = False
     client._health = (0.0, True)  # the cached answer has expired
     assert await client.healthy() is False and client._health[1] is False
+    # what a member reads (a report's forge.error): plain words, no exception name (audit row 12)
+    with pytest.raises(ForgeError) as err:
+        await client.health()
+    assert str(err.value) == forge_module.FORGE_UNREACHABLE and "Forge" in str(err.value), str(err.value)
+    assert "ConnectError" not in str(err.value)
 
 
 async def test_pruning_old_reports_cancels_their_unfinished_forge_runs(
@@ -747,11 +768,11 @@ async def test_pruning_old_reports_cancels_their_unfinished_forge_runs(
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     with db.tx() as c:  # make it the oldest report
         c.execute("UPDATE reports SET taken_at = 1 WHERE id = ?", (first["report_id"],))
     monkeypatch.setattr(reports_module, "MAX_REPORTS_PER_USER", 1)
-    await reports.run("alice", "42", games=300, options={"seed": 2})  # prunes the first report
+    await _ran(reports, "alice", "42", games=300, options={"seed": 2})  # prunes the first report
     await asyncio.gather(*reports._forge_cancels)
     assert fake.cancelled == [first["forge"]["job_id"]]
 
@@ -772,7 +793,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     assert ">Queued</span>" in live and "data-forge-live" in live
     assert "Waiting for your earlier Forge run to finish." in live
     assert "Waiting: number 1 in line, behind your report of Liesa. It starts by itself" in live
-    assert "Expected to finish in about 79 minutes (at the measured 235.6 seconds a game)." in live
+    assert "minute" not in live  # counts and the place in line, never a time
     assert "href='/history/reports/rep_ahead'" in live
     assert "href=" not in forge_html(queued)  # an export links nowhere
     md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": queued})
@@ -809,7 +830,7 @@ async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     reports = ReportService(db, _Decks(), _Mf())  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert out["goldfish"]["ok"] and out["goldfish"]["text"] == text and "data" not in out["goldfish"]
     assert "data" not in out["validation"]
     old = {"tool": "goldfish_run", "ok": True, "text": text, "data": {"result": text}}
@@ -884,7 +905,7 @@ async def test_a_sixty_card_report_never_starts_or_queues_forge(tmp_path: Path) 
     reports = ReportService(db, _SixtyCardDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     finished: list[str] = []
     reports.on_finished = lambda sub, rid: finished.append(rid)
-    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert fake.started == [] and out["forge"]["state"] == "skipped"
     assert out["forge"]["reason"] == "not_commander" and "60-card deck" in out["forge"]["note"]
     assert out["engine"] == "preflight_only" and out["engine_label"] == "Preflight only (no rules engine)"
@@ -892,7 +913,7 @@ async def test_a_sixty_card_report_never_starts_or_queues_forge(tmp_path: Path) 
     assert finished == [out["report_id"]]  # the report is finished at once
     # no place taken: a Commander report of the same member starts at once
     commander = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    ran = await commander.run("alice", "42", games=300, options={"seed": 2})
+    ran = await _ran(commander, "alice", "42", games=300, options={"seed": 2})
     assert ran["forge"]["state"] == "running" and len(fake.started) == 1
     assert ran["engine"] == "forge" and ran["status"] == "running"
     commander._forge_task.cancel()
@@ -906,19 +927,19 @@ async def test_a_report_can_leave_forge_out(tmp_path: Path) -> None:
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    quick = await reports.run("alice", "42", games=300, forge=False)
+    quick = await _ran(reports, "alice", "42", games=300, forge=False)
     assert fake.started == [] and quick["forge"]["reason"] == "not_requested"
     assert quick["engine_label"] == "Preflight only (no rules engine)" and quick["status"] == "complete"
     assert "forge" not in quick["settings"]["engines"]
     # the same unchanged deck with Forge asked for: a new report, not the quick one again
-    full = await reports.run("alice", "42", games=300)
+    full = await _ran(reports, "alice", "42", games=300)
     assert full["report_id"] != quick["report_id"] and not full.get("reused")
     assert full["forge"]["state"] == "running" and len(fake.started) == 1
     # and a second quick one reuses that full report (it holds more, nothing less)
-    again = await reports.run("alice", "42", games=300, forge=False)
+    again = await _ran(reports, "alice", "42", games=300, forge=False)
     assert again.get("reused") and again["report_id"] == full["report_id"]
     # simulate=False without forge: Forge off as before
-    none = await reports.run("alice", "42", games=300, simulate=False, options={"seed": 3})
+    none = await _ran(reports, "alice", "42", games=300, simulate=False, options={"seed": 3})
     assert none["forge"]["reason"] == "not_requested" and len(fake.started) == 1
     reports._forge_task.cancel()
 
@@ -957,8 +978,8 @@ async def test_runs_waiting_on_a_busy_forge_ask_again_first_come_first_served(tm
     fake.handler = recording  # type: ignore[method-assign]
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 3600  # this test asks again itself
-    zed = await reports.run("zed", "42", games=300, options={"seed": 1})
-    amy = await reports.run("amy", "42", games=300, options={"seed": 2})
+    zed = await _ran(reports, "zed", "42", games=300, options={"seed": 1})
+    amy = await _ran(reports, "amy", "42", games=300, options={"seed": 2})
     reports._forge_task.cancel()
     for rid, joined in ((zed["report_id"], 2000), (amy["report_id"], 1000)):  # Amy's run joined first
         section = reports.get("zed" if rid == zed["report_id"] else "amy", rid)["forge"]
@@ -991,11 +1012,12 @@ async def test_a_report_made_while_forge_is_busy_never_splits_a_comparison(tmp_p
     hold, full = reports.reserve_pair("alice")  # the press holds its 2 places, then reads the decks
     assert hold is not None and full is None
     other = await reports.pair_deck("alice", "43")
-    solo = await reports.run("alice", "44", simulate=False, forge=True, options={"seed": 7})
+    solo = await _ran(reports, "alice", "44", simulate=False, forge=True, options={"seed": 7})
     assert solo["forge"]["state"] == "skipped", solo["forge"]
     assert solo["forge"]["error"] == reports_module.PAIR_SETTING_UP_SKIP
-    first = await reports.run("alice", "42", simulate=False, forge=True, pair_with=other, pair_hold=hold)
-    second = await reports.run(
+    first = await _ran(reports, "alice", "42", simulate=False, forge=True, pair_with=other, pair_hold=hold)
+    second = await _ran(
+        reports,
         "alice",
         "43",
         simulate=False,
@@ -1010,7 +1032,7 @@ async def test_a_report_made_while_forge_is_busy_never_splits_a_comparison(tmp_p
     assert states() == ["skipped", "queued", "queued"]
     # with no comparison holding places, a busy Forge still lets the report wait its turn
     db._conn.execute("DELETE FROM reports")
-    alone = await reports.run("alice", "44", simulate=False, forge=True, options={"seed": 8})
+    alone = await _ran(reports, "alice", "44", simulate=False, forge=True, options={"seed": 8})
     assert alone["forge"]["state"] == "queued" and alone["forge"]["engine_busy"] is True
     if reports._forge_task:
         reports._forge_task.cancel()
@@ -1025,14 +1047,14 @@ async def test_an_engine_busy_run_waits_and_is_retried(tmp_path: Path) -> None:
     fake = _BusyForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    out = await reports.run("alice", "42", games=300, options={"seed": 9})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 9})
     forge = out["forge"]
     assert forge["state"] == "queued" and forge["engine_busy"] is True and forge["retry_after"] == 1
     assert out["status"] == "queued" and out["forge_status"]["engine_busy"] is True
     assert "start" not in forge
     assert any("asks Forge again" in ln for ln in forge_lines(forge)), forge_lines(forge)
     # a second report of the member waits behind it, not beside it
-    second = await reports.run("alice", "42", games=300, options={"seed": 10})
+    second = await _ran(reports, "alice", "42", games=300, options={"seed": 10})
     assert second["forge"]["state"] == "queued" and second["forge"]["position"] == 2
     for _ in range(100):  # tried again on each round while the engine stays busy
         if fake.refused >= 3:
@@ -1059,10 +1081,10 @@ async def test_an_engine_busy_run_waits_and_is_retried(tmp_path: Path) -> None:
 
 
 def test_forge_games_default_and_win_rate_range() -> None:
-    """Four Forge games a report by default (more on request), each win rate shown with its 95% range."""
+    """Five Forge games a report by default (more on request), each win rate shown with its 95% range."""
     from mtg_gateway.config import Settings
 
-    assert Settings.__dataclass_fields__["forge_games"].default == 4
+    assert Settings.__dataclass_fields__["forge_games"].default == 5
     lines = forge_lines(
         {
             "state": "done",
@@ -1206,7 +1228,7 @@ async def test_forge_reads_its_settings_live_and_its_own_seed(tmp_path: Path) ->
     decks = _Decks()
     decks.live = _Live(forge_games=6, forge_parallel_games=2)  # type: ignore[attr-defined]
     reports = ReportService(db, decks, None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300, options={"seed": 7, "forge_seed": 11})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 7, "forge_seed": 11})
     assert fake.started[0]["games"] == 6 and fake.started[0]["parallel"] == 2
     assert fake.started[0]["seed"] == 11 and out["forge"]["seed"] == 11
     assert out["forge"]["seed_source"] == "request"
@@ -1246,15 +1268,15 @@ async def test_two_decks_meet_the_same_opponents(tmp_path: Path) -> None:
     fake = FakeForge(brackets=BRACKETED)
     reports = ReportService(db, _PairDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    first = await reports.run("alice", "42", simulate=False, forge=True)
+    first = await _ran(reports, "alice", "42", simulate=False, forge=True)
     assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 3", "Mid 3", "Oldest 3"]
-    second = await reports.run(
-        "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
+    second = await _ran(
+        reports, "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
     )
     assert second["forge"]["state"] == "queued"
     assert second["forge"]["shared_with"] == {"report_id": first["report_id"], "deck_name": "Deck 42"}
     page = report_body_html(second)
-    assert f"href='/history/reports/{first['report_id']}'>Open Deck 42's report" in page
+    assert f"href='/history/reports/{first['report_id']}'>Open Deck 42’s report" in page
     fake.finish(first["forge"]["job_id"], [1])
     for _ in range(200):
         if len(fake.started) == 2:
@@ -1270,17 +1292,19 @@ async def test_two_decks_meet_the_same_opponents(tmp_path: Path) -> None:
     fake.finish(now["job_id"], [2])
     await asyncio.wait_for(reports._forge_task, timeout=20)
     # a share is never answered with a reused report
-    again = await reports.run("alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"])
+    again = await _ran(
+        reports, "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
+    )
     assert not again.get("reused") and again["report_id"] != second["report_id"]
     reports._forge_task.cancel()
     with pytest.raises(DeckError) as other:
-        await reports.run("bob", "43", forge=True, same_opponents_as=first["report_id"])
+        await _ran(reports, "bob", "43", forge=True, same_opponents_as=first["report_id"])
     assert other.value.kind == "not_found"
-    quick = await reports.run("alice", "44", simulate=False, forge=False)
+    quick = await _ran(reports, "alice", "44", simulate=False, forge=False)
     with pytest.raises(DeckError, match="no Forge games"):
-        await reports.run("alice", "43", forge=True, same_opponents_as=quick["report_id"])
+        await _ran(reports, "alice", "43", forge=True, same_opponents_as=quick["report_id"])
     with pytest.raises(DeckError, match="same_opponents_as"):
-        await reports.run("alice", "43", forge=True, same_opponents_as=" ")
+        await _ran(reports, "alice", "43", forge=True, same_opponents_as=" ")
 
 
 async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
@@ -1363,9 +1387,15 @@ async def test_a_comparisons_second_deck_plays_beside_the_first_when_forge_has_r
     async def pair(fake: FakeForge) -> tuple[ReportService, dict[str, Any], dict[str, Any]]:
         reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
         reports.forge_interval = 0.05
-        first = await reports.run("alice", "42", games=300, options={"seed": 1}, pair_with=deck)
-        second = await reports.run(
-            "alice", "42", games=300, options={"seed": 2}, deck=deck, same_opponents_as=first["report_id"]
+        first = await _ran(reports, "alice", "42", games=300, options={"seed": 1}, pair_with=deck)
+        second = await _ran(
+            reports,
+            "alice",
+            "42",
+            games=300,
+            options={"seed": 2},
+            deck=deck,
+            same_opponents_as=first["report_id"],
         )
         return reports, first, second
 
@@ -1388,7 +1418,7 @@ async def test_a_comparisons_second_deck_plays_beside_the_first_when_forge_has_r
     assert second["forge"]["state"] == "running" and len(roomy.started) == 2
     assert roomy.started[1]["decks"][1:] == roomy.started[0]["decks"][1:]  # the same table
     # a third report waits until both have ended
-    third = await reports.run("alice", "42", games=300, options={"seed": 3})
+    third = await _ran(reports, "alice", "42", games=300, options={"seed": 3})
     assert third["forge"]["state"] == "queued" and len(roomy.started) == 2
     roomy.finish(first["forge"]["job_id"], [1])
     for _ in range(20):
@@ -1416,9 +1446,9 @@ async def test_a_comparisons_second_deck_plays_beside_the_first_when_forge_has_r
     plain.max_parallel = 2
     reports = ReportService(db, _Decks(), None, forge=plain.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    one = await reports.run("alice", "42", games=300, options={"seed": 4})
-    two = await reports.run(
-        "alice", "42", games=300, options={"seed": 5}, deck=deck, same_opponents_as=one["report_id"]
+    one = await _ran(reports, "alice", "42", games=300, options={"seed": 4})
+    two = await _ran(
+        reports, "alice", "42", games=300, options={"seed": 5}, deck=deck, same_opponents_as=one["report_id"]
     )
     assert two["forge"]["state"] == "queued" and len(plain.started) == 1
     await settle(reports, plain)
@@ -1442,7 +1472,7 @@ async def test_each_forge_game_shows_as_it_finishes(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(
         reports, "_save_forge", lambda rid, s, **kw: saves.append(rid) or real_save(rid, s, **kw)
     )
-    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 7})
     jid, rid = out["forge"]["job_id"], out["report_id"]
     await asyncio.sleep(0.3)
     quiet = len(saves)
@@ -1519,7 +1549,7 @@ async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -
     two = _TwoCopies()
     reports = ReportService(db, _Decks(), None, forge=two.client(resolve=False), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert "engine" not in out["forge"]
     await asyncio.wait_for(reports._forge_task, timeout=20)
     lost = reports.get("alice", out["report_id"])["forge"]
@@ -1529,14 +1559,14 @@ async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -
     two = _TwoCopies(free=(0, 1))
     reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    a = await reports.run("alice", "42", games=300, options={"seed": 2})
+    a = await _ran(reports, "alice", "42", games=300, options={"seed": 2})
     stored = _section(db, a["report_id"])
     assert stored["engine"] == "http://10.0.9.2:8000" and stored["engine_copies"] == 2
     # the copy's internal address is not shown to the member
     assert not {"engine", "engine_copies"} & set(a["forge"])
     assert not {"engine", "engine_copies"} & set(reports.get("alice", a["report_id"])["forge_status"])
     two.free = {"10.0.9.1": 1, "10.0.9.2": 0}  # the second copy is now playing alice's run
-    b = await reports.run("bob", "42", games=300, options={"seed": 3})
+    b = await _ran(reports, "bob", "42", games=300, options={"seed": 3})
     assert _section(db, b["report_id"])["engine"] == "http://10.0.9.1:8000"  # bob's: the other machine
     assert [len(c.started) for c in two.copies.values()] == [1, 1]
     for copy in two.copies.values():
@@ -1556,11 +1586,17 @@ async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -
     reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
     deck = await _Decks().get_any_deck("alice", "42")
-    first = await reports.run("alice", "42", games=300, options={"seed": 4}, pair_with=deck)
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 4}, pair_with=deck)
     first_engine = _section(db, first["report_id"])["engine"]
     two.free[first_engine.split("//")[1].split(":")[0]] = 0
-    second = await reports.run(
-        "alice", "42", games=300, options={"seed": 5}, deck=deck, same_opponents_as=first["report_id"]
+    second = await _ran(
+        reports,
+        "alice",
+        "42",
+        games=300,
+        options={"seed": 5},
+        deck=deck,
+        same_opponents_as=first["report_id"],
     )
     assert second["forge"]["state"] == "running"
     assert _section(db, second["report_id"])["engine"] != first_engine
@@ -1582,9 +1618,9 @@ async def test_a_run_whose_forge_copy_restarted_elsewhere_is_marked_lost(
     two = _TwoCopies(free=(0, 1))
     reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert _section(db, first["report_id"])["engine"] == "http://10.0.9.2:8000"
-    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    second = await _ran(reports, "alice", "42", games=300, options={"seed": 2})
     assert second["forge"]["state"] == "queued"  # waits for alice's first run
 
     # the copy on 10.0.9.2 restarts as 10.0.9.3 (a new container, an empty job list)
@@ -1702,7 +1738,7 @@ async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_pat
     reports.forge_interval = 0.05
     finished: list[str] = []
     reports.on_finished = lambda sub, rid: finished.append(rid)
-    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 7})
     # the games against precons start first, so they don't wait behind the solo test
     precon_job, solo_job = fake.started
     assert solo_job["solo"] == {"opponents": 3, "until_turn": 10, "game_seconds": 54}
@@ -1719,9 +1755,12 @@ async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_pat
     assert reports.get("alice", out["report_id"])["status"] == "running"
     assert reports.forge_only("alice", out["report_id"])["forge_solo"]["state"] == "running"
     assert finished == []
-    # a second report while this one's solo test plays gets none
-    again = await reports.run("alice", "42", games=300, options={"seed": 8})
-    assert again["forge_solo"] == {"state": "skipped", "error": SOLO_ONE_AT_A_TIME, "finished_at": ANY_TIME}
+    # a second report while this one's solo test plays waits its turn (owner decision C7: queued,
+    # never dropped): no engine job yet, first in the member's line of solo tests
+    again = await _ran(reports, "alice", "42", games=300, options={"seed": 8})
+    assert again["forge_solo"]["state"] == "queued" and again["forge_solo"]["waiting"] is True, again
+    assert again["forge_solo"]["position"] == 1 and "job_id" not in again["forge_solo"]
+    assert sum(1 for job in fake.started if "solo" in job) == 1
     fake.jobs[out["forge_solo"]["job_id"]].update(
         state="done", results=[{"game": 1, "winner": 1, "solo": _solo_view(6)}]
     )
@@ -1734,6 +1773,14 @@ async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_pat
     assert solo["state"] == "done" and solo["result"]["median_won_turn"] == 6
     assert full["status"] == "complete" and finished == [out["report_id"]]  # notified once, now
     assert "## Forge solo test (full rules, opponents who do nothing)" in report_markdown(full)
+    # once that one is done, the waiting one starts by itself, with its own deck and seed
+    for _ in range(200):
+        if reports.get("alice", again["report_id"])["forge_solo"]["state"] == "running":
+            break
+        await asyncio.sleep(0.02)
+    assert reports.get("alice", again["report_id"])["forge_solo"]["state"] == "running"
+    solo_jobs = [job for job in fake.started if "solo" in job]
+    assert len(solo_jobs) == 2 and solo_jobs[1]["seed"] == 8, solo_jobs
     newest = reports.newest_forge_solo("alice", "42")
     assert newest == {
         "report_id": out["report_id"],
@@ -1742,11 +1789,12 @@ async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_pat
         "games": 1,
         "median_won_turn": 6,
     }
-    # deleting a report stops its unfinished runs, the solo test's included
-    third = await reports.run("alice", "42", games=300, options={"seed": 9})
-    reports.delete("alice", third["report_id"])
+    # deleting a report stops its unfinished runs, the solo test's included (the one that waited
+    # and now plays)
+    playing = reports.get("alice", again["report_id"])
+    reports.delete("alice", again["report_id"])
     await asyncio.sleep(0.05)
-    assert third["forge_solo"]["job_id"] in fake.cancelled
+    assert playing["forge_solo"]["job_id"] in fake.cancelled
     reports._forge_task.cancel()
 
 
@@ -1755,11 +1803,11 @@ async def test_an_older_forge_gives_no_solo_test(tmp_path: Path) -> None:
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 7})
     assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_TOO_OLD
     assert all("solo" not in job for job in fake.started)
     # a run without Forge, or without a simulation, has no solo test at all
-    quick = await reports.run("alice", "42", games=300, options={"seed": 8}, forge=False)
+    quick = await _ran(reports, "alice", "42", games=300, options={"seed": 8}, forge=False)
     assert quick["forge_solo"] is None
     reports._forge_task.cancel()
 
@@ -1850,12 +1898,12 @@ async def test_a_busy_or_silent_forge_gives_no_solo_test(tmp_path: Path) -> None
         "http://forge.test", transport=_solo_refusing(fake, httpx.Response(429, json={"error": "full"}))
     )
     reports = ReportService(db, _Decks(), None, forge=busy, forge_games=4)  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_BUSY
     reports._forge_task.cancel()
     silent = ForgeClient("http://forge.test", transport=_solo_refusing(fake, None))
     reports = ReportService(db, _Decks(), None, forge=silent, forge_games=4)  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300, options={"seed": 2})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 2})
     assert out["forge_solo"]["state"] == "failed"
     reports._forge_task.cancel()
 
@@ -1866,13 +1914,13 @@ async def test_a_run_again_plays_a_skipped_solo_test(tmp_path: Path) -> None:
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()  # too old for the solo test at first
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    first = await reports.run("alice", "42", games=300)
+    first = await _ran(reports, "alice", "42", games=300)
     assert first["forge_solo"]["state"] == "skipped"
     fake.solo = True
-    again = await reports.run("alice", "42", games=300)
+    again = await _ran(reports, "alice", "42", games=300)
     assert not again.get("reused") and again["forge_solo"]["state"] == "running"
     # one whose solo test plays is reused as before
-    third = await reports.run("alice", "42", games=300)
+    third = await _ran(reports, "alice", "42", games=300)
     assert third.get("reused") and third["report_id"] == again["report_id"]
     reports._forge_task.cancel()
 
@@ -1892,11 +1940,11 @@ async def test_two_reports_at_once_play_one_solo_test(tmp_path: Path) -> None:
 
     reports.forge.pick = slow_pick  # type: ignore[method-assign]
     a, b = await asyncio.gather(
-        reports.run("alice", "42", games=300, options={"seed": 1}),
-        reports.run("alice", "43", games=300, options={"seed": 2}),
+        _ran(reports, "alice", "42", games=300, options={"seed": 1}),
+        _ran(reports, "alice", "43", games=300, options={"seed": 2}),
     )
     states = sorted(x["forge_solo"]["state"] for x in (a, b))
-    assert states == ["running", "skipped"]
+    assert states == ["queued", "running"]  # the second waits for the first (never dropped)
     assert sum(1 for job in fake.started if "solo" in job) == 1
     reports._forge_task.cancel()
 
@@ -1907,12 +1955,13 @@ async def test_a_comparisons_second_deck_plays_its_own_solo_test(tmp_path: Path)
     fake = FakeForge()
     fake.solo = True
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert first["forge_solo"]["state"] == "running"
-    alone = (await reports.run("alice", "42", games=300, options={"seed": 2}, forge=False))["report_id"]
+    alone = (await _ran(reports, "alice", "42", games=300, options={"seed": 2}, forge=False))["report_id"]
     await reports._start_solo("alice", alone, DECK_TEXT, "Liesa", None)
-    assert reports.get("alice", alone)["forge_solo"]["error"] == SOLO_ONE_AT_A_TIME
-    paired = (await reports.run("alice", "42", games=300, options={"seed": 3}, forge=False))["report_id"]
+    waits = reports.get("alice", alone)["forge_solo"]
+    assert waits["state"] == "queued" and waits["waiting"] is True and "job_id" not in waits, waits
+    paired = (await _ran(reports, "alice", "42", games=300, options={"seed": 3}, forge=False))["report_id"]
     await reports._start_solo("alice", paired, DECK_TEXT, "Liesa", None, first["report_id"])
     assert reports.get("alice", paired)["forge_solo"]["state"] == "running"
     reports._forge_task.cancel()
@@ -1927,8 +1976,8 @@ async def test_pruning_or_deleting_mid_start_stops_the_solo_job(
     fake.solo = True
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     monkeypatch.setattr(reports_module, "MAX_REPORTS_PER_USER", 1)
-    first = await reports.run("alice", "42", games=300, options={"seed": 1})
-    await reports.run("alice", "42", games=300, options={"seed": 2})  # prunes the first
+    first = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
+    await _ran(reports, "alice", "42", games=300, options={"seed": 2})  # prunes the first
     await asyncio.sleep(0.05)
     assert first["forge_solo"]["job_id"] in fake.cancelled
 
@@ -1941,7 +1990,7 @@ async def test_pruning_or_deleting_mid_start_stops_the_solo_job(
 
     reports.forge = ForgeClient("http://forge.test", transport=httpx.MockTransport(delete_while_starting))
     with pytest.raises(DeckError):
-        await reports.run("alice", "42", games=300, options={"seed": 3})
+        await _ran(reports, "alice", "42", games=300, options={"seed": 3})
     await asyncio.sleep(0.05)
     solo_ids = [jid for jid, job in fake.jobs.items() if "solo" in fake.started[int(jid, 16)]]
     assert solo_ids[-1] in fake.cancelled
@@ -1955,10 +2004,10 @@ async def test_a_lost_or_never_started_solo_test_ends(tmp_path: Path) -> None:
     fake.solo = True
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     del fake.jobs[out["forge_solo"]["job_id"]]  # Forge restarted: the job is gone
     # and a solo test marked as coming whose start a restart cut off
-    quick = await reports.run("alice", "42", games=300, options={"seed": 2}, forge=False)
+    quick = await _ran(reports, "alice", "42", games=300, options={"seed": 2}, forge=False)
     reports._save_solo(quick["report_id"], {"state": "queued", "started_at": 1})
     reports._ensure_forge_refresher()
     # both are settled by the refresher, in either order: wait for both (waiting for the first
@@ -1977,6 +2026,8 @@ async def test_a_lost_or_never_started_solo_test_ends(tmp_path: Path) -> None:
 
 
 async def test_a_cancelled_request_still_saves_its_solo_test(tmp_path: Path) -> None:
+    """The request answers while the Forge solo test is still being handed over, so its client
+    going away can't stop it: the solo test still starts and is saved."""
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
@@ -1991,19 +2042,12 @@ async def test_a_cancelled_request_still_saves_its_solo_test(tmp_path: Path) -> 
 
     reports._start_solo = slow_start  # type: ignore[method-assign]
     task = asyncio.create_task(reports.run("alice", "42", games=300, options={"seed": 1}))
-    for _ in range(100):
-        await asyncio.sleep(0.01)
-        if any("solo" not in job for job in fake.started):
-            break
-    task.cancel()  # the client went away while the solo test was starting
+    out = await asyncio.wait_for(task, timeout=5)  # answered with the solo test still held at the gate
+    assert out["forge_solo"]["state"] == "queued" and not any("solo" in job for job in fake.started)
+    task.cancel()  # the client went away: nothing of the run depends on it any more
     gate.set()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    for _ in range(100):
-        await asyncio.sleep(0.01)
-        if any("solo" in job for job in fake.started):
-            break
-    await asyncio.sleep(0.05)
+    await reports.starts_settled()
+    assert any("solo" in job for job in fake.started)
     row = db._one("SELECT forge_solo_json FROM reports ORDER BY rowid DESC LIMIT 1")
     assert json.loads(row["forge_solo_json"])["state"] == "running"
     reports._forge_task.cancel()
@@ -2025,7 +2069,7 @@ async def test_a_solo_test_given_up_while_starting_stays_given_up(tmp_path: Path
         return await pick(*args)
 
     reports.forge.pick = slow_pick  # type: ignore[method-assign]
-    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     assert out["forge_solo"]["state"] == "failed" and out["forge_solo"]["error"] == SOLO_NOT_STARTED
     assert not any("solo" in job for job in fake.started)
     reports._forge_task.cancel()
@@ -2039,11 +2083,12 @@ async def test_the_solo_test_starts_even_when_the_precon_start_fails(tmp_path: P
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
 
     async def broken(*args: Any) -> None:
-        raise RuntimeError("bracket lookup broke")
+        raise RuntimeError("the engine's answer broke")
 
-    reports._start_precon_part = broken  # type: ignore[method-assign]
-    with pytest.raises(RuntimeError):
-        await reports.run("alice", "42", games=300, options={"seed": 1})
+    reports._launch_run = broken  # type: ignore[method-assign]
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
+    # the games against precons say in plain words that they did not start; the solo test still did
+    assert out["forge"]["state"] == "failed" and out["forge"]["error"] == FORGE_START_BROKE
     row = db._one("SELECT forge_solo_json FROM reports ORDER BY rowid DESC LIMIT 1")
     assert json.loads(row["forge_solo_json"])["state"] == "running"
     reports._forge_task.cancel()
@@ -2055,7 +2100,7 @@ async def test_deleting_a_members_data_stops_their_forge_jobs(tmp_path: Path) ->
     fake = FakeForge()
     fake.solo = True
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     reports.forget_member("alice")
     db.delete_member_data("alice")
     await asyncio.sleep(0.05)
@@ -2069,10 +2114,12 @@ async def test_a_solo_test_never_goes_ahead_of_another_members_waiting_games(tmp
         db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    await reports.run("bob", "42", games=300, options={"seed": 1}, simulate=False, forge=True)
-    waiting = await reports.run("bob", "42", games=300, options={"seed": 2}, simulate=False, forge=True)
+    await _ran(reports, "bob", "42", games=300, options={"seed": 1}, simulate=False, forge=True)
+    waiting = await _ran(reports, "bob", "42", games=300, options={"seed": 2}, simulate=False, forge=True)
     assert waiting["forge"]["state"] == "queued" and not waiting["forge"].get("job_id")
     fake.solo = True
-    out = await reports.run("alice", "42", games=300, options={"seed": 3})
-    assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_OTHERS_WAITING
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 3})
+    # it waits behind them in the gateway's queue instead of going ahead (or being dropped)
+    assert out["forge_solo"]["state"] == "queued" and out["forge_solo"]["waiting"] is True, out["forge_solo"]
+    assert not any("solo" in job for job in fake.started)
     reports._forge_task.cancel()

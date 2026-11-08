@@ -1,4 +1,4 @@
-/* Choices that follow the account (0.7.29, prefs.py): views, card size, stack orders, the deck
+/* Choices that follow the account (0.7.29, prefs.py): views, card size, the deck
    stats toggles and the dismissed tips are kept on the member's account, so every device shows
    the same. The page hands over the ones its scripts need in <script id="mtg-prefs">, so nothing
    waits for a request; a change is saved with POST /api/v1/prefs.
@@ -17,20 +17,42 @@
     var input = document.querySelector("input[name=csrf]");
     return input ? input.value : "";
   }
-  // Saves go one after another, in the order they were made: two quick changes (L, then S) must
-  // never reach the gateway the other way round and leave the account with the first one. Each
-  // save ends one way or another (an answer cut off or unreadable, no network, or no answer within
-  // SAVE_WAIT_MS), so one bad save never holds up the ones after it.
+  // What is guaranteed (0.7.46 audit C7): once the gateway has stored this page's newest save of a
+  // name, no older save of that name from this page replaces it, whatever order the requests
+  // arrive in. Each save carries this page's id and a number (seq: 1, 2, 3... in the order the
+  // choices were made), and the gateway drops a save of a name from this page numbered no higher
+  // than the last one it stored (prefs.py SaveNumbers; in memory, for each member's newest
+  // SEQ_PER_MEMBER names, so not across its own restart). Saves go one at a time, in order, each after
+  // the one before it ended; only a flush (leaving or hiding the page, below) sends at once, beside
+  // the save on the wire. Not guaranteed: a save that never reaches the gateway (no network, or no
+  // answer within SAVE_WAIT_MS) is lost, not tried again; and between two pages (another tab, or
+  // this page loaded again) the save that reaches the gateway last is the one kept.
   var SAVE_WAIT_MS = 15000;
+  var PAGE = (function () {  // this page's id, new each time it loads
+    try {
+      var a = new Uint32Array(2);
+      window.crypto.getRandomValues(a);
+      return a[0].toString(36) + a[1].toString(36);
+    } catch (e) {
+      return Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36);
+    }
+  })();
+  var seq = 0;
   var queue = Promise.resolve();
-  function send(body) {
+  var waiting = [];  // saves made but not sent yet, in order: {body, seq, sent}
+  function send(body, n) {
     var stop = window.AbortController ? new AbortController() : null;
     var timer = stop ? setTimeout(function () { stop.abort(); }, SAVE_WAIT_MS) : null;
+    var out = { page: PAGE, seq: n };
+    Object.keys(body).forEach(function (part) { out[part] = body[part]; });  // "set", "copy"
+    // keepalive: a save on its way when the member leaves the page (a tap on a link right after
+    // a size change) still reaches the gateway
     return fetch("/api/v1/prefs", {
       method: "POST",
       credentials: "same-origin",
+      keepalive: true,
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-      body: JSON.stringify(body),
+      body: JSON.stringify(out),
       signal: stop ? stop.signal : undefined
     })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -39,9 +61,46 @@
   }
   function post(body) {
     if (!window.fetch) return Promise.resolve(null);
-    queue = queue.then(function () { return send(body); });
+    var item = { body: body, seq: ++seq, sent: false };
+    waiting.push(item);
+    // each save waits for the one before it to end (answered, refused, cut off or timed out), so
+    // one bad save never holds up the ones after it
+    queue = queue.then(function () {
+      var at = waiting.indexOf(item);
+      if (at >= 0) waiting.splice(at, 1);
+      if (item.sent) return null;  // went with a flush (below)
+      item.sent = true;
+      return send(body, item.seq);
+    });
     return queue;
   }
+  // Leaving the page: the saves still waiting would never be sent (scripts stop with the page).
+  // They go now, merged into one body (the last change to a name wins) numbered as the newest of
+  // them, with keepalive, beside the save on the wire if there is one: it isn't cancelled (a
+  // cancel can't recall a request the gateway already has), and if it lands after the flush, the
+  // gateway drops its names the flush saved (older number) and keeps the others. The saves made
+  // after a flush wait for it like any other. Nothing waiting, nothing sent, so flushing twice
+  // (beforeunload for a link, a reload or a closed tab; pagehide; the page going hidden for the
+  // phone, where a page in the background can be thrown away without either of the others) never
+  // sends a save twice.
+  function flush() {
+    var items = waiting.filter(function (item) { return !item.sent; });
+    waiting = [];
+    if (!items.length) return;
+    var merged = {};
+    items.forEach(function (item) {
+      item.sent = true;
+      Object.keys(item.body).forEach(function (part) {  // "set", "copy"
+        if (!merged[part]) merged[part] = {};
+        Object.keys(item.body[part]).forEach(function (name) { merged[part][name] = item.body[part][name]; });
+      });
+    });
+    var going = send(merged, items[items.length - 1].seq);
+    queue = Promise.all([queue, going]).then(function () { return null; });
+  }
+  window.addEventListener("beforeunload", flush);
+  window.addEventListener("pagehide", flush);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flush(); });
   function has(name) { return Object.prototype.hasOwnProperty.call(values, name); }
 
   window.MtgPrefs = {
@@ -58,18 +117,56 @@
   };
 
   // -- card size: the S / M / L switch next to "View as" (theme.card_size_control) and in the
-  // printing picker. It applies at once on <html data-card-size> and follows the account.
+  // printing picker. Each page keeps its own (card.size.<page>, the owner 2026-10-28): the page's
+  // applies at once on <html data-card-size>, the printing picker's on the picker and
+  // <html data-card-size-printings>. It follows the account, with a copy on this device that a
+  // page the account has no size for starts with.
+  var root = document.documentElement;
+  var SIZES = { s: 1, m: 1, l: 1 };
+  function local(page, size) {
+    try {
+      if (size === undefined) return window.localStorage.getItem("mtg.card.size." + page);
+      window.localStorage.setItem("mtg.card.size." + page, size);
+    } catch (e) { /* private window: the account still has it */ }
+    return null;
+  }
+  function showSize(page, size, picker) {
+    var mine = page === "printings";
+    if (mine) {
+      root.setAttribute("data-card-size-printings", size);
+      if (picker) picker.setAttribute("data-card-size", size);
+    } else {
+      root.setAttribute("data-card-size", size);
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-card-size-set]"), function (b) {
+      var own = b.closest("[data-card-size-page]");
+      if (((own && own.getAttribute("data-card-size-page")) === "printings") !== mine) return;
+      b.setAttribute("aria-pressed", b.getAttribute("data-card-size-set") === size ? "true" : "false");
+    });
+  }
   document.addEventListener("click", function (e) {
     var btn = e.target && e.target.closest ? e.target.closest("[data-card-size-set]") : null;
     if (!btn) return;
     var size = btn.getAttribute("data-card-size-set");
-    if (size !== "s" && size !== "m" && size !== "l") return;
-    document.documentElement.setAttribute("data-card-size", size);
-    Array.prototype.forEach.call(document.querySelectorAll("[data-card-size-set]"), function (b) {
-      b.setAttribute("aria-pressed", b.getAttribute("data-card-size-set") === size ? "true" : "false");
-    });
-    window.MtgPrefs.set("card.size", size);
+    if (!SIZES[size]) return;
+    var own = btn.closest("[data-card-size-page]");
+    var page = (own && own.getAttribute("data-card-size-page")) || root.getAttribute("data-card-size-page") || "deck";
+    showSize(page, size, btn.closest(".printpick"));
+    local(page, size);
+    window.MtgPrefs.set("card.size." + page, size);
   });
+  (function () {  // a page the account has no size for: this device's, copied to the account
+    var page = root.getAttribute("data-card-size-page");
+    if (!page || !root.hasAttribute("data-card-size-unset")) return;
+    var size = local(page);
+    if (!SIZES[size]) return;
+    var copy = {};
+    copy["card.size." + page] = size;
+    var apply = function () { showSize(page, size, null); };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply);
+    else apply();
+    post({ copy: copy });
+  })();
 
   // -- the one-time copy of this browser's pre-0.7.29 choices ---------------------------------
   var store;
@@ -87,11 +184,9 @@
   try {
     for (var i = 0; i < store.length; i++) {
       var key = store.key(i);
-      if (key && key.indexOf("mtg-stack-order:") === 0) {
-        var order = JSON.parse(store.getItem(key) || "null");
-        if (Array.isArray(order) && order.length) take(key, "stack:" + key.slice(16), order);
-        else keys.push(key);
-      }
+      // a stack order a device kept before 0.7.29: stacks follow Archidekt's category order
+      // now (0.7.46, owner decision C4), so it is dropped, not copied
+      if (key && key.indexOf("mtg-stack-order:") === 0) keys.push(key);
     }
     if (store.getItem("mtg.edhplay.steps") === "1") take("mtg.edhplay.steps", "edhplay.steps", true);
     if (store.getItem("mtg-scan-intro-seen") === "1") take("mtg-scan-intro-seen", "scan.intro", true);

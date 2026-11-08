@@ -12,9 +12,11 @@ from pathlib import Path
 
 import pytest
 
+from .test_card_search_filters_browser import MORE_SETTLED
 from .test_cardsearch_browser import CATALOG, _chromium
 from .test_deck_menu_browser import PNG
 from .test_suggest_browser import Server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -94,7 +96,7 @@ def test_add_to_deck_buttons_share_a_row_bottom_edge_on_a_computer(server: Serve
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, 1280, exe)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
-        page.wait_for_timeout(600)
+        page.wait_for_function(MORE_SETTLED, timeout=5000)  # the screen's fill has ended
         before = page.evaluate(ADDS_JS)
         assert len(before) % 7  # the last row is part-filled, so Load more adds cards to it
         page.locator("#cs-more [data-more]").click()
@@ -125,7 +127,7 @@ def test_card_search_fills_the_screen_then_waits_for_load_more(server: Server, w
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, width, exe)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
-        page.wait_for_timeout(800)
+        page.wait_for_function(MORE_SETTLED, timeout=5000)  # the screen's fill has ended
         shown = page.locator("#cardgrid .cc").count()
         assert shown > 6  # more than the first page: the screen was filled
         more = page.locator("#cs-more [data-more]")
@@ -134,11 +136,13 @@ def test_card_search_fills_the_screen_then_waits_for_load_more(server: Server, w
         assert page.evaluate("document.querySelector('#cs-more').getBoundingClientRect().top") > 860
         for _ in range(6):
             page.mouse.wheel(0, 5000)
+            # fixed wait: a negative check: each scroll loads nothing within 250 ms
             page.wait_for_timeout(250)
         page.wait_for_load_state("networkidle")
         assert page.locator("#cardgrid .cc").count() == shown  # scrolling never loads
         more.click()
         page.wait_for_function(f"() => document.querySelectorAll('#cardgrid .cc').length === {shown + 6}")
+        # fixed wait: a negative check: one page, nothing more by itself within 600 ms
         page.wait_for_timeout(600)
         assert page.locator("#cardgrid .cc").count() == shown + 6  # one page, nothing more by itself
         assert errors == []
@@ -179,9 +183,11 @@ def test_filter_controls_keep_their_rows(server: Server, width: int) -> None:
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, width, exe)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        page.locator(".sp-open").click()  # a sheet on a phone, folded in place from 600 px
         if width < 600:
-            page.locator(".sp-open").click()
             page.locator("#sp-filters.open").wait_for(timeout=3000)
+        else:
+            page.locator("#p-t").wait_for(state="visible", timeout=3000)
         got = page.evaluate(FILTERS_JS)
         assert got["sw"] <= got["vw"], got
         pills, mode = got["pills"], got["mode"]
@@ -202,5 +208,58 @@ def test_filter_controls_keep_their_rows(server: Server, width: int) -> None:
             assert len({p["t"] for p in pills}) == 2, pills
             assert mode["t"] >= pills[5]["b"] and mode["r"] - mode["l"] >= pills[5]["r"] - pills[0]["l"] - 1
             assert not got["sizeShown"] and got["sheetSize"], got
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [344, 375, 390, 412])
+def test_a_phone_shows_two_cards_a_row_at_the_default_size(server: Server, width: int) -> None:
+    """0.7.46 full review (D, F9): at the default size (M) a phone showed one card a row, each
+    tile taller than the screen. Now S and M give two a row on a narrow phone, as the Binder's
+    grid does (L stays one); the Watch pill is icon-only on those narrow tiles, as at S; nothing
+    scrolls sideways, at 200% text too."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import TEXT_200
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, width, exe)
+        page.goto(f"{server.base}/cards?q=Sol", wait_until="networkidle")
+        page.wait_for_selector("#cardgrid .cc")
+        assert page.evaluate("() => document.documentElement.getAttribute('data-card-size')") == "m"
+        tops = page.evaluate(
+            "() => [...document.querySelectorAll('#cardgrid .cc')].map(e => e.getBoundingClientRect().top)"
+        )
+        assert len(tops) >= 2 and abs(tops[0] - tops[1]) < 1, tops  # side by side
+        tile = page.locator("#cardgrid .cc").first.bounding_box()
+        assert tile and tile["height"] < 600, tile  # two tiles fit a phone screen
+        pill = page.locator("#cardgrid .wbtn").first
+        box = pill.bounding_box()
+        assert box and box["width"] <= 48 and box["height"] >= 44, box  # icon only, 44 px on touch
+        assert pill.get_attribute("aria-label")  # its words stay for a screen reader
+        for zoom in (None, TEXT_200):
+            if zoom:
+                page.evaluate(zoom)
+                redrawn(page)
+            got = page.evaluate(
+                "() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]"
+            )
+            assert got[0] <= got[1], (zoom, got)
+            # the pill stays inside its tile
+            tile = page.locator("#cardgrid .cc").first.bounding_box()
+            box = pill.bounding_box()
+            assert box["x"] >= tile["x"] - 1 and box["x"] + box["width"] <= tile["x"] + tile["width"] + 1
+        # L is one a row
+        page.locator(".sp-open").click()
+        page.locator("#sp-filters.open").wait_for(timeout=3000)
+        # (the sheet's sticky foot covers the size row at this height: press it as a script would)
+        page.locator("#sp-filters [data-card-size-set=l]").first.dispatch_event("click")
+        page.wait_for_function("() => document.documentElement.getAttribute('data-card-size') === 'l'")
+        page.locator("#sp-filters .sp-sheet-head .close").click()
+        tops = page.evaluate(
+            "() => [...document.querySelectorAll('#cardgrid .cc')].map(e => e.getBoundingClientRect().top)"
+        )
+        assert tops[1] > tops[0] + 100, tops
         assert errors == []
         browser.close()

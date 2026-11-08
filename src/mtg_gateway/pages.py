@@ -11,8 +11,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import json
+import logging
 import re
 import secrets
+import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, quote
 
@@ -22,6 +25,8 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import (
     account_hub,
     app_signin,
+    assistants,
+    backup_place,
     link_disclosure,
     masked,
     modes,
@@ -31,22 +36,30 @@ from . import (
     smallpage,
     ui,
 )
+from . import decks as decks_mod
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
-from .clickguard import form_stamp, guarded_form, submitted_too_soon
+from .busy import outage
+from .clickguard import GUARD_DWELL_MS, GUARD_SETTLE_MS, form_stamp, guarded_form, submitted_too_soon
+from .db import SESSION_END_NOTICE
 from .decks import (
+    ADMIN_CLIENT,
     REVIEW_PAGE,
     DeckError,
     commander_row_texts,
     commander_stays_text,
     current_client,
     custom_card_line,
+    detail_word,
+    diff_of,
+    interrupted_outcome,
     row_label,
     row_line,
     tag_change_text,
 )
 from .formatting import DOC_CSS, doc_html
+from .membership import session_holder
 from .proposals_view import PROPOSALS_CSS
 from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
@@ -55,6 +68,8 @@ from .theme import (
     THEME_COOKIE,
     VIEW_COOKIE,
     VIEW_KINDS,
+    card_size_page,
+    display_name,
     icon,
     in_app,
     layout_from_cookie,
@@ -71,6 +86,8 @@ if TYPE_CHECKING:
 
     from .app import AppState
 
+logger = logging.getLogger(__name__)
+
 SESSION_COOKIE = "mtg_session"
 BROWSER_CLIENT_ID = "__browser__"
 
@@ -80,6 +97,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     secure = s.public_url.startswith("https://")
     fresh_cookie = cookie_name("mtg_fresh_login", s)
     session_cookie = cookie_name(SESSION_COOKIE, s)
+    leg_cookie = cookie_name(app_signin.LEG_COOKIE, s)
 
     def page(
         title: str,
@@ -92,10 +110,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         current: str | None = None,
         main_class: str = "",
         heading: bool = True,
+        signin_link: bool = True,
+        form_action: tuple[str, ...] = (),
     ) -> Response:
         return render(
             title,
             body,
+            signin_link=signin_link,
             site=s.server_name,
             status=status,
             signed_in=sub is not None,
@@ -106,6 +127,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sub=sub,
             main_class=main_class,
             heading=heading,
+            form_action=form_action,
         )
 
     def _is_admin(sub: str | None) -> bool:
@@ -125,21 +147,43 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
     def small(
-        title: str, body: str, *, status: int = 200, sub: str | None = None, sid: str | None = None
+        title: str,
+        body: str,
+        *,
+        status: int = 200,
+        sub: str | None = None,
+        sid: str | None = None,
+        signin_link: bool = True,
+        form_action: tuple[str, ...] = (),
     ) -> Response:
-        """One of the small pages (smallpage.py): the panel carries its own title."""
-        return page(title, body, status=status, sub=sub, sid=sid, heading=False, head_extra=smallpage.HEAD)
+        """One of the small pages (smallpage.py): the panel carries its own title. ``signin_link``
+        False leaves the top bar's Sign in out (the app sign-in's last page, which says Signed in).
+        ``form_action``: origins a form's post may be redirected to (the identity provider's)."""
+        return page(
+            title,
+            body,
+            status=status,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            head_extra=smallpage.HEAD,
+            signin_link=signin_link,
+            form_action=form_action,
+        )
 
     def login_failed(exc: LoginError, login_href: str) -> Response:
         """The page for a website sign-in that could not be finished, by the error's kind."""
         body = smallpage.login_error(exc.kind, str(exc), assistant=False, login_href=login_href)
-        return small(smallpage.login_error_title(exc.kind), body, status=exc.status)
+        # the panel's Try again is the way in: no second Sign in in the top bar beside it
+        return small(
+            smallpage.login_error_title(exc.kind),
+            body,
+            status=exc.status,
+            signin_link=exc.kind != "unavailable",
+        )
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
         return csrf_form_ok(s, sid, data)
-
-    def to_login(next_path: str) -> Response:
-        return RedirectResponse(f"/login?next={_safe_next(next_path)}", status_code=302)
 
     # -- sign in / out ------------------------------------------------------
     @server.custom_route("/login", methods=["GET"], include_in_schema=False)
@@ -157,12 +201,44 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The Android app's sign-in, running in the phone's browser (app_signin.py). This
             # browser's own session, if any, is not handed over: the identity provider decides.
             if not app_signin.CHALLENGE.fullmatch(challenge):
-                return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
-            params["app_challenge"] = challenge
+                return small("Sign-in failed", smallpage.signin_failed(login_href(nxt)), status=400)
+            back = q.get("app_return")
+            if back is not None and back not in (app_signin.INTENT_RETURN, app_signin.SCHEME_RETURN):
+                return small("Sign-in failed", smallpage.signin_failed(login_href(nxt)), status=400)
+            # Any app on the phone can open this address: a page first, and only its Continue goes
+            # on to the identity provider (app_continue).
+            token = state.app_signins.start_leg(challenge, nxt, back, fresh)  # type: ignore[attr-defined]
+            resp = small(
+                "Sign in to the app?",
+                app_signin.confirm_body(s.server_name, token),
+                signin_link=False,
+                form_action=(await state.provider.idp_origin(),),
+            )
+            resp.headers["Cache-Control"] = "no-store"
+            resp.headers["Referrer-Policy"] = "no-referrer"
+            resp.set_cookie(
+                leg_cookie,
+                token,
+                max_age=app_signin.LEG_TTL,
+                path="/",
+                httponly=True,
+                secure=secure,
+                samesite="lax",  # a post from another site's page arrives without it
+            )
+            return resp
         else:
             sub, _sid = current(request)
             if sub:
                 return RedirectResponse(nxt, status_code=302)
+            sid = request.cookies.get(session_cookie)
+            if sid and state.db.session_end_reason(sid):
+                # This browser's sign-in ended for a reason it should hear first (an unused or
+                # longest time, the sign-in service, an admin): the page says why, with Sign in.
+                return RedirectResponse(
+                    f"/signed-out?next={quote_next(nxt)}",
+                    status_code=303,
+                    headers={"Cache-Control": "no-store"},
+                )
             if in_app() and q.get("inapp") != "1":
                 # The fresh cookie stays until a sign-in completes (start_session), so backing out
                 # of the browser and coming back here still asks for credentials again.
@@ -172,8 +248,61 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         try:
             url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
         except LoginError as exc:
-            return login_failed(exc, f"/login?next={nxt}")
+            return login_failed(exc, login_href(nxt))
         resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+        if fresh:
+            resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
+
+    @server.custom_route(app_signin.CONTINUE_PATH, methods=["POST"], include_in_schema=False)
+    async def app_continue(request: Request) -> Response:
+        """Continue or Cancel on the page before the identity provider (app_signin.confirm_body).
+        The leg's token must be in both the form and this browser's cookie (SameSite=Lax, so
+        another site's page posting here arrives without it), and works once."""
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        leg = state.app_signins.take_leg(data.get("leg", ""), request.cookies.get(leg_cookie))  # type: ignore[attr-defined]
+        if leg is None or data.get("action") != "continue":
+            resp = small(
+                "Sign-in canceled",
+                app_signin.canceled_body(),
+                status=200 if leg is not None and data.get("action") == "cancel" else 400,
+                signin_link=False,
+            )
+            resp.headers["Cache-Control"] = "no-store"
+            resp.delete_cookie(leg_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+            return resp
+        params = {"next": leg.next_path, "app_challenge": leg.challenge}
+        # when the leg started: a sign-in it asks for must be made after this (auth_time)
+        params["app_started"] = str(int(time.time()))
+        fresh = leg.fresh
+        if leg.app_return == app_signin.INTENT_RETURN:
+            # The app opened a Custom Tab, not an Auth Tab: after a sign-in made during the leg
+            # the callback can send the browser to the intent: link itself (finish_browser_login).
+            params["app_return"] = leg.app_return
+        elif leg.app_return == app_signin.SCHEME_RETURN:
+            # The app's retry, when the verified https Auth Tab can't be used: an Auth Tab on the
+            # app's own scheme (app_signin.py). The identity provider is then asked for a
+            # sign-in of its own, never a silent pass-through: any app can start this leg, and
+            # only a person signing in may finish it. The callback checks auth_time against
+            # when the leg started, so it does not rely on the provider honouring prompt=login.
+            params["app_return"] = leg.app_return
+            fresh = True
+        max_age: int | None = None
+        if fresh:
+            # a sign-in of its own, with max_age=0 as well: only a leg that asked for one can
+            # show it was made during the leg (the return page then opens the app by itself)
+            params["app_fresh"] = "1"
+            max_age = 0
+        try:
+            url = await state.provider.start_idp_login(
+                BROWSER_CLIENT_ID, params, force_login=fresh, max_age=max_age
+            )
+        except LoginError as exc:
+            return login_failed(exc, login_href(leg.next_path))
+        resp = RedirectResponse(url, status_code=303, headers={"Cache-Control": "no-store"})
+        resp.delete_cookie(leg_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         if fresh:
             resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         return resp
@@ -187,7 +316,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return page(
             "Sign out",
             "<div class='card'><p>Sign out of this gateway on this device?</p>"
-            "<p class='muted small'>Unsaved scan drafts on this device are cleared too.</p>"
+            f"<p class='muted small'>{account_hub.DRAFTS_CLEARED}</p>"
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
             "<div class='form-actions'>"
@@ -219,9 +348,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # Not "/": the dashboard needs a session, so it would send the browser straight to sign-in.
         resp = RedirectResponse("/signed-out", status_code=303)
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-        # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": every
-        # gateway page is already Cache-Control: no-store, and clearing the browser's whole HTTP
-        # cache is what made sign-out take seconds in Chrome.
+        # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": clearing
+        # the browser's whole HTTP cache is what made sign-out take seconds in Chrome. Ordinary
+        # pages are "private, no-cache" (owner decision, 0.7.46): asked again before any use, so
+        # after sign-out a kept page can show for a moment until it is asked for again.
         resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
@@ -237,20 +367,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         back = _safe_next(data.get("next"))
+        # static/pages.js sends it with fetch and then redraws the page in place, so the choice adds
+        # no step to the browser's history (Back went to the same page)
+        script = "application/json" in (request.headers.get("accept") or "")
         if not (sub and sid and check_csrf(sid, data)):
+            if script:
+                return JSONResponse({"ok": False}, status_code=403)
             return RedirectResponse(back, status_code=303)
         theme = theme_from_cookie(data.get("theme"))
-        resp = RedirectResponse(back, status_code=303)
+        resp: Response = JSONResponse({"ok": True}) if script else RedirectResponse(back, status_code=303)
         if theme == "system":
             resp.delete_cookie(THEME_COOKIE, path="/")
         else:
+            # readable by the pages' script: a page restored from memory by Back (feedback.js)
+            # checks it against the look it was drawn with
             resp.set_cookie(
                 THEME_COOKIE,
                 theme,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
-                httponly=True,
+                httponly=False,
                 samesite="lax",
             )
         return resp
@@ -265,34 +402,55 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         back = _safe_next(data.get("next"))
+        # static/pages.js sends it with fetch and then redraws the page in place, so the choice adds
+        # no step to the browser's history (Back went to the same page)
+        script = "application/json" in (request.headers.get("accept") or "")
         if not (sub and sid and check_csrf(sid, data)):
+            if script:
+                return JSONResponse({"ok": False}, status_code=403)
             return RedirectResponse(back, status_code=303)
         layout = layout_from_cookie(data.get("layout"))
-        resp = RedirectResponse(back, status_code=303)
+        resp: Response = JSONResponse({"ok": True}) if script else RedirectResponse(back, status_code=303)
         if layout == "auto":
             resp.delete_cookie(LAYOUT_COOKIE, path="/")
         else:
+            # readable by the pages' script: a page restored from memory by Back (feedback.js)
+            # checks it against the look it was drawn with
             resp.set_cookie(
                 LAYOUT_COOKIE,
                 layout,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
-                httponly=True,
+                httponly=False,
                 samesite="lax",
             )
         return resp
 
     @server.custom_route("/signed-out", methods=["GET"], include_in_schema=False)
-    async def signed_out(_request: Request) -> Response:
-        return small(
+    async def signed_out(request: Request) -> Response:
+        """Says why this browser was signed out, when its (ended) session's cookie tells: the
+        cookie outlives its session for that (SESSION_END_NOTICE) and goes here."""
+        nxt = _safe_next(request.query_params.get("next", "/"))
+        if current(request)[0]:
+            # still signed in (an old tab, a bookmark): saying "signed out" would be wrong
+            return RedirectResponse(nxt, status_code=303, headers={"Cache-Control": "no-store"})
+        sid = request.cookies.get(session_cookie)
+        reason = state.db.session_end_reason(sid) if sid else None
+        resp = small(
             "Signed out",
             smallpage.panel(
                 "Signed out",
-                smallpage.p("You are signed out of this gateway."),
-                smallpage.button("Sign in again", "/login?next=/", primary=True),
+                smallpage.p(signed_out_text(reason, state)),
+                smallpage.button("Sign in", login_href(nxt), primary=True),
             ),
+            signin_link=False,  # the page's own Sign in is the one way on
         )
+        resp.headers["Cache-Control"] = "no-store"
+        if reason is not None:
+            # told once: the next Sign in goes to the identity provider as usual
+            resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
 
     @server.custom_route("/data-deleted", methods=["GET"], include_in_schema=False)
     async def data_deleted(_request: Request) -> Response:
@@ -327,7 +485,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         to open (the forms' redirects, the old one-press forms' addresses) is Account details."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/account")
+            return login_redirect_here(request, "/account")
         if request.query_params:
             return await account_details(request)
         resp = page(
@@ -343,13 +501,24 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/account/details", methods=["GET"], include_in_schema=False)
     async def account_details(request: Request) -> Response:
+        """The list (details_html). A notice or a box that belongs to one section (the redirects
+        of 0.7.45, the app's older links) opens that section's page with it."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/account/details")
+            return login_redirect_here(request, DETAILS)
         q = request.query_params
         ok, err = q.get("ok"), q.get("err")
-        # The Notifications and Summary cards show their own notices inside them (where the
-        # redirect lands); every other notice stays at the top of the page.
+        if "disconnect" in q or "disconnect_all" in q:
+            # the Connected apps card's old addresses: its apps are on the Assistants page now
+            return RedirectResponse(
+                assistants.PAGE + ("?disconnect_all=1" if "disconnect_all" in q else ""), status_code=303
+            )
+        section = "profile" if "picture" in q else notice_section(ok, err)
+        if section and DETAIL_PAGES:
+            # the section's own page, with the same query (only the codes it knows are shown)
+            carried = ("ok", "err", "saved", "picture", "connect")
+            keep = "&".join(f"{k}={quote(v, safe='')}" for k, v in q.multi_items() if k in carried)
+            return RedirectResponse(section_href(section, keep, section), status_code=303)
         if ok == "disconnected":
             # the app's registered name, looked up by the id the redirect carries (never the URL's
             # words), and only among the member's own apps (any other id reads as an unnamed app)
@@ -361,23 +530,39 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
             inside = notify.CARD_NOTICES | PROFILE_NOTICES | {"unconfirmed"}
             notice = _notice(None if ok in inside else ok, None if err in notify.CARD_NOTICES else err)
-        # The old one-press forms' addresses open the page with the matching box open (no-JS path
-        # of the red-outline buttons): ?unlink=1, ?disconnect=<client id>, ?disconnect_all=1,
-        # ?delete=1, ?picture=1 (the Archidekt profile picture box).
-        open_box = next(
-            (k for k in ("unlink", "disconnect", "disconnect_all", "delete", "picture") if k in q), None
-        )
-        body = await account_html(
-            state,
-            sub,
-            _csrf(s, sid),
-            ok=ok,
-            err=err,
-            open_box=open_box,
-            open_client=q.get("disconnect"),
-            saved=q.get("saved") or "",
+        # The old one-press forms' addresses open the list with the matching box open (no-JS path
+        # of the rows): ?signout=1, ?unlink=1, ?delete=1 (and ?picture=1 the profile page's box).
+        open_box = next((k for k in ("signout", "unlink", "delete", "picture") if k in q), None)
+        body = await details_html(
+            state, sub, _csrf(s, sid), open_box=open_box, ok=ok, err=err, saved=q.get("saved") or ""
         )
         return account_response(page, notice + body, sub, sid)
+
+    @server.custom_route(DETAILS + "/{section}", methods=["GET"], include_in_schema=False)
+    async def account_section(request: Request) -> Response:
+        """One section's page: the form its row on the list replaces (section_html)."""
+        sub, sid = current(request)
+        section = request.path_params["section"]
+        if section not in SECTIONS:
+            return Response(status_code=404)
+        if not sub:
+            return login_redirect_here(request, section_href(section))
+        q = request.query_params
+        if not DETAIL_PAGES:  # the rows fold open on the list: the list, at that row
+            query = "&".join(f"{k}={quote(v, safe='')}" for k, v in q.multi_items())
+            return RedirectResponse(section_href(section, query), status_code=303)
+        if section in PROFILE_SECTIONS and not state.decks.status(sub)["linked"]:
+            return RedirectResponse(section_href("archidekt"), status_code=303)
+        ok, err = q.get("ok"), q.get("err")
+        from .profile_page import CARD_NOTICES as PROFILE_NOTICES
+
+        inside = notify.CARD_NOTICES | PROFILE_NOTICES | {"unconfirmed"}
+        notice = _notice(None if ok in inside else ok, None if err in notify.CARD_NOTICES else err)
+        open_box = next((k for k in ("unlink", "picture") if k in q), None)
+        body = await section_html(
+            state, sub, _csrf(s, sid), section, ok=ok, err=err, open_box=open_box, saved=q.get("saved") or ""
+        )
+        return account_response(page, notice + f"<div class='acc'>{body}</div>", sub, sid, section=section)
 
     @server.custom_route("/account/avatar", methods=["GET"], include_in_schema=False)
     async def account_avatar(request: Request) -> Response:
@@ -407,12 +592,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     # Account details' forms with no action (Link account, Save approval mode, Forget my choices,
     # the Notifications card) post to the page's own address: the same handler as /account.
+    @server.custom_route(DETAILS + "/{section}", methods=["POST"], include_in_schema=False)
     @server.custom_route("/account/details", methods=["POST"], include_in_schema=False)
     @server.custom_route("/account", methods=["POST"], include_in_schema=False)
     async def account_post(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return to_login("/account")
+            return login_redirect_here(request, "/account")
         # Whatever this form does (link, unlink, ...) is the member's own browser acting.
         current_client.set(BROWSER_CLIENT_ID)
         data = await form(request)
@@ -435,6 +621,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action in ("disconnect", "disconnect_all"):
             client_id = data.get("client_id") if action == "disconnect" else None
             n = state.db.revoke_client_for_user(sub, client_id)
+            # the mode chosen for it goes too, once none of the assistant's apps is connected (all
+            # of them with every app): the member's Disconnect, by either route (R3-03)
+            key = assistants.assistant_key(state.db, client_id) if client_id else None
+            if client_id is None:
+                state.db.forget_assistant(sub, None)
+            elif key and not any(a.key == key for a in assistants.connected(state.db, sub)):
+                state.db.forget_assistant(sub, key)
             # A disconnected app's pending proposals go with it: they stay visible, rejected, and
             # can no longer be applied from the review page.
             closed = state.db.reject_client_proposals(sub, client_id)
@@ -466,7 +659,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # the cap as it is now: the Settings page changes it without a restart (LiveSettings)
             cap = str(state.live.get("approval_mode_max"))
             if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(cap):
-                return RedirectResponse("/account/details?err=mode_invalid", status_code=303)
+                return RedirectResponse(f"{assistants.DEFAULT_PAGE}?err=mode_invalid", status_code=303)
             before = state.decks.mode_of(sub)
             state.db.set_approval_mode(sub, mode)
             state.db.audit(
@@ -475,13 +668,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 client_id=BROWSER_CLIENT_ID,
                 detail={"from": before, "to": mode, "by": "user"},
             )
-            return RedirectResponse(f"/account/details?ok=mode_{mode}", status_code=303)
+            return RedirectResponse(f"{assistants.DEFAULT_PAGE}?ok=mode_{mode}", status_code=303)
         if action == "forget_choices":
             if data.get("confirm") != "yes":
-                return RedirectResponse("/account/details?err=confirm_forget#choices", status_code=303)
+                return RedirectResponse(section_href("choices", "err=confirm_forget"), status_code=303)
             n = prefs.forget(state.db, sub)
             state.db.audit("view_choices_forgotten", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"n": n})
-            resp = RedirectResponse("/account/details?ok=choices_forgotten#choices", status_code=303)
+            resp = RedirectResponse(section_href("choices", "ok=choices_forgotten"), status_code=303)
             for kind in VIEW_KINDS:  # this browser's pre-0.7.29 view cookies, if any are left
                 resp.delete_cookie(VIEW_COOKIE + kind, path="/", secure=secure, httponly=True, samesite="lax")
             return resp
@@ -496,58 +689,253 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 state.membership.avatars.delete(sub)
             resp = RedirectResponse("/data-deleted", status_code=303)
             resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-            resp.headers["Clear-Site-Data"] = '"storage"'  # pages are no-store already (see /logout)
+            resp.headers["Clear-Site-Data"] = '"storage"'  # as /logout
             return resp
         if action == "link":
             login_name = data.get("archidekt_login", "").strip()
             password = data.get("archidekt_password", "")
+
+            async def again(message: str, *, read: bool) -> Response:
+                # The member ticked the box after opening the detail: keep it open, not folded again.
+                body = await section_html(state, sub, _csrf(s, sid), "archidekt", disclosure_read=read)
+                body = _err(message) + f"<div class='acc'>{body}</div>"
+                return account_response(page, body, sub, sid, status=400, section="archidekt")
+
             if data.get("accept_risk") != "1":
-                return account_response(
-                    page,
-                    _err("Tick the box to confirm you have read what linking Archidekt gives this gateway.")
-                    + _account_body(state, sub, _csrf(s, sid)),
-                    sub,
-                    sid,
-                    status=400,
-                )
+                words = "Tick the box to confirm you have read what linking Archidekt gives this gateway."
+                return await again(words, read=False)
             if not login_name or not password:
-                return account_response(
-                    page,
-                    _err("Enter your Archidekt username or email and password.")
-                    + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
-                    sub,
-                    sid,
-                    status=400,
-                )
+                return await again("Enter your Archidekt username or email and password.", read=True)
             try:
                 await state.decks.link(sub, login_name, password)
             except DeckError as exc:
-                # The member ticked the box after opening the detail: keep it open, not folded again.
-                return account_response(
-                    page,
-                    _err(str(exc)) + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
-                    sub,
-                    sid,
-                    status=400,
-                )
+                return await again(str(exc), read=True)
             return RedirectResponse("/account/details?ok=linked", status_code=303)
+        if action in backup_place.ACTIONS:
+            try:
+                code = await backup_place.post(state.decks, sub, action, data)
+            except DeckError as exc:
+                body = await section_html(state, sub, _csrf(s, sid), "backups", profile_error=str(exc))
+                return account_response(
+                    page, f"<div class='acc'>{body}</div>", sub, sid, status=400, section="backups"
+                )
+            return RedirectResponse(section_href("backups", f"ok={code}"), status_code=303)
         done = await notify.account_action(state, sub, action or "", data)
         if done is not None:
-            anchor = "#summary" if action in ("summary_save", "summary_send") else "#notifications"
-            return RedirectResponse(f"/account/details?{done}{anchor}", status_code=303)
+            anchor = "summary" if action in ("summary_save", "summary_send") else "notifications"
+            return RedirectResponse(section_href("notifications", done, anchor), status_code=303)
         return account_response(page, _err("Unknown action."), sub, sid, status=400)
+
+    # -- Account › Assistants: each connected assistant's own approval mode (assistants.py) ------
+    def assistants_page(title: str, body: str, sub: str, sid: str | None) -> Response:
+        return page(
+            title,
+            body,
+            sub=sub,
+            sid=sid,
+            current="/account/details",
+            heading=False,
+            head_extra=ACCOUNT_HEAD + f"<style>{account_hub.HUB_CSS}{assistants.CSS}</style>",
+        )
+
+    def assistants_form_expired(sub: str, sid: str | None, back: str) -> Response:
+        return small(
+            "Form expired",
+            smallpage.form_expired("Reload the page", back, back, nothing="Nothing was changed."),
+            status=403,
+            sub=sub,
+            sid=sid,
+        )
+
+    def disconnect_apps(sub: str, client_ids: list[str] | None) -> None:
+        """Disconnect apps (every one with None), as Account details' Disconnect always did: their
+        tokens revoked and their waiting proposals rejected (still listed)."""
+        for client_id in client_ids if client_ids is not None else [None]:
+            n = state.db.revoke_client_for_user(sub, client_id)
+            closed = state.db.reject_client_proposals(sub, client_id)
+            state.db.audit(
+                "apps_disconnected",
+                sub=sub,
+                client_id=client_id,
+                detail={"tokens": n, "by": "user", "proposals_rejected": len(closed)},
+            )
+            for pid in closed:
+                state.db.audit(
+                    "proposal_rejected",
+                    sub=sub,
+                    client_id=BROWSER_CLIENT_ID,
+                    detail={"proposal_id": pid, "origin": "browser", "reason": "app disconnected"},
+                )
+
+    @server.custom_route(assistants.PAGE, methods=["GET"], include_in_schema=False)
+    async def assistants_list(request: Request) -> Response:
+        sub, sid = current(request)
+        if not sub:
+            return login_redirect_here(request, assistants.PAGE)
+        q = request.query_params
+        notice = ""
+        if q.get("ok") == "disconnected_assistant":
+            # only a name the gateway gives (one of the two checked assistants) is repeated from the
+            # address, never words a link chose
+            name = q.get("name")
+            notice = _ok(
+                f"Disconnected “{name}”." if name in assistants.BRAND_NAMES.values() else "Disconnected."
+            )
+        elif q.get("ok") == "disconnected_all":
+            notice = _ok("Every assistant was disconnected.")
+        csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
+        body = assistants.list_html(
+            state.db,
+            sub,
+            state.decks.mode_of(sub),
+            csrf_in,
+            open_box="disconnect_all" in q,
+            back="account" if q.get("from") == "account" else "details",
+        )
+        return assistants_page("Assistants", notice + body, sub, sid)
+
+    @server.custom_route(assistants.PAGE, methods=["POST"], include_in_schema=False)
+    async def assistants_list_post(request: Request) -> Response:
+        sub, sid = current(request)
+        if not sub:
+            return login_redirect_here(request, assistants.PAGE)
+        current_client.set(BROWSER_CLIENT_ID)
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        if not check_csrf(sid, data):
+            return assistants_form_expired(sub, sid, assistants.PAGE)
+        if data.get("action") != "disconnect_all":
+            return RedirectResponse(assistants.PAGE, status_code=303)
+        disconnect_apps(sub, None)
+        state.db.forget_assistant(sub, None)
+        return RedirectResponse(f"{assistants.PAGE}?ok=disconnected_all", status_code=303)
+
+    @server.custom_route(assistants.DEFAULT_PAGE, methods=["GET"], include_in_schema=False)
+    async def assistants_default(request: Request) -> Response:
+        """Default for new assistants: the approval mode list Account details had (its folds say
+        what each mode does), posting to Account details' own form action."""
+        sub, sid = current(request)
+        if not sub:
+            return login_redirect_here(request, assistants.DEFAULT_PAGE)
+        q = request.query_params
+        ok = q.get("ok") if str(q.get("ok") or "").startswith("mode_") else None
+        notice = _notice(ok, q.get("err") if q.get("err") == "mode_invalid" else None)
+        csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
+        body = (
+            f"<a class='yback' href='{assistants.PAGE}'>{icon('chev')}Assistants</a>"
+            f"<h1>Default for new assistants</h1>{notice}"
+            f"<div class='acc'>{_mode_card(state, sub, csrf_in)}</div>"
+        )
+        return assistants_page("Default for new assistants", body, sub, sid)
+
+    @server.custom_route(assistants.PAGE + "/{slug}", methods=["GET"], include_in_schema=False)
+    async def assistant_page(request: Request) -> Response:
+        sub, sid = current(request)
+        slug = request.path_params["slug"]
+        if not sub:
+            return login_redirect_here(request, f"{assistants.PAGE}/{quote(slug, safe='')}")
+        a = assistants.find(state.db, sub, slug)
+        if a is None:
+            # disconnected, or never this member's: the list says what is connected
+            return RedirectResponse(assistants.PAGE, status_code=303)
+        q = request.query_params
+        default = state.decks.mode_of(sub)
+        cap = str(state.live.get("approval_mode_max"))
+        notice = ""
+        ok = str(q.get("ok") or "")
+        if ok.startswith("mode_") and (ok[5:] in modes.MODES or ok[5:] == "default"):
+            notice = _ok(assistants.saved_text(a, ok[5:], default))
+        elif q.get("err") == "mode_invalid":
+            notice = _err(ERR_MESSAGES["mode_invalid"])
+        confirm = str(q.get("confirm") or "")
+        to_default = confirm == "default"
+        if to_default:
+            confirm = default
+        if confirm not in ("semi", "auto") or modes.rank(confirm) > modes.rank(cap):
+            confirm = ""
+        csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
+        body = assistants.app_html(
+            state,
+            sub,
+            a,
+            default,
+            cap,
+            csrf_in,
+            confirm=confirm,
+            confirm_default=to_default,
+            open_disconnect="disconnect" in q,
+        )
+        state.db.mark_assistant_opened(sub, a.key)  # seen: no longer New, no notice on Home
+        return assistants_page(a.name, notice + body, sub, sid)
+
+    @server.custom_route(assistants.PAGE + "/{slug}", methods=["POST"], include_in_schema=False)
+    async def assistant_post(request: Request) -> Response:
+        sub, sid = current(request)
+        slug = request.path_params["slug"]
+        if not sub:
+            return login_redirect_here(request, f"{assistants.PAGE}/{quote(slug, safe='')}")
+        # Whatever this form does is the member's own browser acting, never an assistant (modes.py)
+        current_client.set(BROWSER_CLIENT_ID)
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        a = assistants.find(state.db, sub, slug)
+        back = a.href if a is not None else assistants.PAGE
+        if not check_csrf(sid, data):
+            return assistants_form_expired(sub, sid, back)
+        if a is None:
+            return RedirectResponse(assistants.PAGE, status_code=303)
+        action = data.get("action")
+        if action == "disconnect":
+            disconnect_apps(sub, a.client_ids)
+            state.db.forget_assistant(sub, a.key)
+            said = quote(a.name if a.brand else "", safe="")
+            return RedirectResponse(
+                f"{assistants.PAGE}?ok=disconnected_assistant&name={said}", status_code=303
+            )
+        if action != "mode":
+            return RedirectResponse(back, status_code=303)
+        choice = data.get("mode", "")
+        cap = str(state.live.get("approval_mode_max"))
+        default = state.decks.mode_of(sub)
+        if choice == "default":
+            after, stored = default, None
+        elif modes.valid_mode(choice) and modes.rank(choice) <= modes.rank(cap):
+            after, stored = choice, choice
+        else:
+            return RedirectResponse(f"{back}?err=mode_invalid", status_code=303)
+        before = state.decks.mode_of(sub, a.client_ids[0])
+        # Loosening asks first, in a box that names the app (its Allow sends confirm=yes);
+        # tightening takes effect at once, for its changes already waiting too.
+        if assistants.loosens(before, after) and data.get("confirm") != "yes":
+            return RedirectResponse(f"{back}?confirm={choice}", status_code=303)
+        state.db.set_assistant_mode(sub, a.key, stored)
+        state.db.audit(
+            "assistant_mode_set",
+            sub=sub,
+            client_id=BROWSER_CLIENT_ID,
+            detail={
+                "assistant": a.name,
+                "from": before,
+                "to": after,
+                "own": stored is not None,
+                "by": "user",
+            },
+        )
+        return RedirectResponse(f"{back}?ok=mode_{choice}", status_code=303)
 
     # -- proposals ----------------------------------------------------------
     @server.custom_route("/proposals", methods=["GET"], include_in_schema=False)
     async def proposals(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
         query = proposals_view.read_query(request.query_params)
         body = proposals_view.list_html(state, sub, _csrf(s, sid), query, notice=notice)
         return page(
-            "Proposals",
+            "Assistant: Proposals",
             ui.split(body),
             sub=sub,
             sid=sid,
@@ -563,7 +951,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         confirm with the order they will run in; Reject rejects them at once (FLEX flow C)."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         raw = await read_limited(request, MAX_FORM)
         if raw is None:
             return page("Too large", "<p>That form was too large.</p>", status=413)
@@ -571,7 +959,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         data = {k: v[0] for k, v in multi.items()}
         action = data.get("action")
         back = _list_back(data.get("back"))
-        if not check_csrf(sid, data) or action not in ("apply", "reject"):
+        if not check_csrf(sid, data) or action not in ("apply", "reject", "rest"):
             nothing = "Nothing was rejected." if action == "reject" else "Nothing was applied."
             if data.get("box") == "1":
                 return JSONResponse({"ok": False, "message": "This form expired. Reload the page."}, 403)
@@ -603,7 +991,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             current_client.set(BROWSER_CLIENT_ID)
             for pid in picks:
                 try:
-                    state.decks.reject(sub, pid, via="browser")
+                    state.decks.reject(sub, pid, via="browser", reason=str(data.get("reason") or ""))
                 except DeckError:
                     continue  # already closed: nothing to do for it
             return RedirectResponse(_with_query(back, "ok=rejected_some"), status_code=303)
@@ -652,7 +1040,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         """The confirm's Apply: the member's one press for the whole selection (batch.py)."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         data = await form(request)
         if isinstance(data, Response):
             return data
@@ -703,12 +1091,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if exc.kind == "pick_one":
                 return _pick_one_page(exc, back, sub, sid)
             code = (
-                "writes_disabled_some"
-                if exc.kind == "writes_disabled" and len(picks) > 1
-                else _err_code(exc.kind)
+                "writes_disabled_some" if exc.kind == "writes_disabled" and len(picks) > 1 else _err_code(exc)
             )
             return RedirectResponse(_with_query(back, f"err={code}"), status_code=303)
-        await state.decks.batches.wait(run["batch_id"], BATCH_WAIT_SECONDS)
+        await state.decks.batches.wait(run["batch_id"], decks_mod.BROWSER_APPLY_WAIT_SECONDS)
         return RedirectResponse(f"/proposals/applied/{run['batch_id']}", status_code=303)
 
     @server.custom_route("/proposals/applied/{bid}", methods=["GET"], include_in_schema=False)
@@ -716,7 +1102,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         bid = request.path_params["bid"]
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         run = state.decks.batches.get(sub, bid)
         if run is None:
             return page(
@@ -762,7 +1148,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         than the apply; then, on the guarded Undo, the restore."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         data = await form(request)
         if isinstance(data, Response):
             return data
@@ -788,7 +1174,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if submitted_too_soon(s.session_secret, f"undo:{sub}:{snapshot_id}", data.get("shown")):
                 return RedirectResponse("/proposals", status_code=303)
             try:
-                done = await state.decks.undo(sub, snapshot_id, seen=data.get("deck_seen") or "")
+                done = await state.decks.undo(
+                    sub, snapshot_id, seen=data.get("deck_seen") or "", applied=applied
+                )
             except DeckError as exc:
                 return page(
                     "Undo",
@@ -804,6 +1192,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     heading=False,
                     head_extra=smallpage.HEAD,
                 )
+            made = state.db.get_proposal(done["proposal_id"], sub) or {}
+            back = undo_back(data.get("back"), str(made.get("deck_id") or ""))
+            if back and done.get("state") == "applied":  # back where the member pressed Undo
+                return RedirectResponse(undone_url(back), status_code=303)
             return RedirectResponse(f"/proposals/{done['proposal_id']}?ok=undone", status_code=303)
         try:
             look = await state.decks.undo_preview(sub, snapshot_id, applied=applied, after_at=after_at)
@@ -823,9 +1215,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 head_extra=smallpage.HEAD,
             )
         stamp = form_stamp(s.session_secret, f"undo:{sub}:{snapshot_id}")
+        back = undo_back(data.get("back"), str(look.get("deck_id") or ""))
         return page(
             "Undo this change?",
-            _undo_body(look, _csrf(s, sid), stamp, applied, after_at),
+            _undo_body(look, _csrf(s, sid), stamp, applied, after_at, back),
             sub=sub,
             sid=sid,
             current="/proposals",
@@ -837,27 +1230,34 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         pid = request.path_params["pid"]
         sub, sid = current(request)
         if not sub:
-            return to_login(f"/proposals/{pid}")
+            return login_redirect_here(request, f"/proposals/{pid}")
         try:
             p = state.decks.describe(sub, pid)
         except DeckError:
             return page(
-                "Not found",
-                "<p>No such proposal for your account.</p>",
+                "Proposal not found",
+                "<p>This proposal could not be found. It may belong to another account, or its link "
+                "may be wrong.</p>"
+                f"<p><a class='btn btn-primary' href='/proposals'>{icon('back')} Back to Assistant</a></p>",
                 status=404,
                 sub=sub,
                 sid=sid,
                 current="/proposals",
             )
         err = request.query_params.get("err")
+        ok = request.query_params.get("ok")
+        if ok == "applying" and p["state"] != "applying":
+            # The press's address after the apply ended (the page's own updates ask for it, and a
+            # reload or Back does): the outcome's notice, never "Applying" over a finished change.
+            ok, err = ("applied", None) if p["state"] == "applied" else (None, err or "failed")
         on_top = _failure_on_top(p, err)
         # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
-        notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
-        if not on_top and request.query_params.get("ok") == "applied" and p.get("applied_text"):
-            # an account action or collection change says what it did, not that a deck matches
+        notice = _err(_page_step(p)) if on_top else _notice(ok, err)
+        if not on_top and ok == "applied" and p.get("applied_text"):
+            # an account action or binder change says what it did, not that a deck matches
             notice = f"<div class='notice ok'>{html.escape('Applied. ' + p['applied_text'])}</div>"
         title = (
-            f"New deck: {p['deck_name']}"
+            f"{_new_what(p)}: {p['deck_name']}"
             if p.get("kind") == "create_deck"
             else f"Proposal for {p['deck_name'] or p['deck_id']}"
         )
@@ -872,19 +1272,41 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         )
         if p["state"] == "replaced":
             p["replaced_by"] = _replacement(state, sub, pid)
+        if getattr(state, "reports", None) is not None:  # simulations of its resulting deck
+            p["sim_reports"] = state.reports.for_proposal(sub, pid)
+            p["can_test"] = getattr(state.reports, "mf", None) is not None
         close = proposals_view.panel_close_href(query)
         full = request.query_params.get("full") == "1"
-        no = f"#{p['board_no']} " if p["state"] == "pending" and p.get("board_no") else ""
+        # a failed one keeps its number while no change waiting on the deck took it (heading_no)
+        live = (
+            state.db.pending_board(sub, str(p["deck_id"]))
+            if p["state"] == "failed" and p.get("board_no") and str(p.get("deck_id") or "").isdigit()
+            else others
+        )
+        number = heading_no(p, live)
+        no = f"#{number} " if number else ""
         where = p.get("deck_name") or "your account"
+        # While it applies, static/applied-live.js asks for this page every 3 s and swaps in the
+        # panel's body (and the list's row) once they change, so the outcome shows without a reload.
+        live = " data-applied-live" if p["state"] == "applying" else ""
         panel = ui.side_panel(
-            proposal_heading(p),
-            notice
-            + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top, others=others)
+            proposal_heading(p, number),
+            f"<div id='proposal-live' aria-live='polite'{live}>"
+            + notice
+            + _proposal_body(
+                p,
+                _csrf(s, sid),
+                stamp,
+                step=not on_top,
+                others=others,
+            )
+            + "</div>"
             + (
                 ""
                 if full
-                else f"<p class='ui-hint panel-only'><a href='/proposals/{quote(pid, safe='')}?full=1'>"
-                "Open as a full page</a></p>"
+                else "<p class='ui-hint panel-only'>"
+                + ui.cap_link("Open as a full page", f"/proposals/{quote(pid, safe='')}?full=1")
+                + "</p>"
             ),
             label=f"Proposal {no}for {where}",
             close_href=close,
@@ -902,10 +1324,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             current="/proposals",
             main_class="ui-wide",
             heading=False,
-            # While a long apply runs in the background the page reloads itself to show progress.
-            # It reloads the plain page, so the "Applying" notice of ?ok=applying goes once it ends.
+            # While a long apply runs in the background the page updates itself (applied-live.js);
+            # without scripts it reloads the plain page, so the "Applying" notice goes once it ends.
             head_extra=(
-                f"<meta http-equiv='refresh' content='5;url=/proposals/{quote(pid, safe='')}'>"
+                "<noscript><meta http-equiv='refresh' "
+                f"content='5;url=/proposals/{quote(pid, safe='')}'></noscript>"
+                f"<script src='{APPLIED_LIVE_SCRIPT}' defer></script>"
                 if p["state"] == "applying"
                 else ""
             )
@@ -920,12 +1344,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         pid = request.path_params["pid"]
         sub, sid = current(request)
         if not sub:
-            return to_login(f"/proposals/{pid}")
+            return login_redirect_here(request, f"/proposals/{pid}")
         data = await form(request)
         if isinstance(data, Response):
             return data
         action = data.get("action")
-        if not check_csrf(sid, data) or action not in ("apply", "reject"):
+        if not check_csrf(sid, data) or action not in ("apply", "reject", "rest"):
             return page(
                 "Proposal",
                 _err("This form expired. Reload the page and try again."),
@@ -939,6 +1363,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(f"/proposals/{pid}", status_code=303)
         current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
         try:
+            if action == "rest":
+                # "Propose the rest" of a change that stopped partway: a new proposal to review
+                made = await state.decks.propose_rest(sub, pid)
+                return RedirectResponse(f"/proposals/{made['proposal_id']}", status_code=303)
             if action == "reject":
                 state.decks.reject(sub, pid, via=REVIEW_PAGE)
             else:
@@ -957,11 +1385,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     # a page drawn before the status field was added sends none: as before
                     shown_status=str(data["seen_status"])[:20] if "seen_status" in data else None,
                     shown_status_at=int(at) if at.isdigit() and len(at) < 16 else None,
+                    # a person is at the page: a short wait, then the progress, which updates itself
+                    wait=decks_mod.BROWSER_APPLY_WAIT_SECONDS,
                 )
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
             # put words of its choosing in the page's error box. Failure details are in the result.
-            code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
+            code = _err_code(exc, proposal_exists=state.db.get_proposal(pid, sub) is not None)
             return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
         if action == "reject":
             ok = "rejected"
@@ -984,18 +1414,54 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return login_failed(exc, "/login")
         nxt = _safe_next(str(session["params"].get("next", "/account")))
         if identity is None:
-            return small("Sign-in canceled", smallpage.signin_canceled(f"/login?next={nxt}"))
+            return small("Sign-in canceled", smallpage.signin_canceled(login_href(nxt)))
         challenge = session["params"].get("app_challenge")
         if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
             # The Android app's sign-in: no session in this browser, a one-time code for the app,
             # handed over at the gateway's own address, where the app's Auth Tab closes by itself.
-            code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
-            return RedirectResponse(
-                f"{app_signin.RETURN_PATH}?code={code}",
-                status_code=303,
-                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+            headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+            back = session["params"].get("app_return")
+            scheme = back == app_signin.SCHEME_RETURN
+            # a sign-in made during this leg, which the leg asked for (prompt=login, max_age=0)
+            fresh_in = session["params"].get("app_fresh") == "1" and app_signin.signed_in_since(
+                identity.raw_claims.get("auth_time"), session["params"].get("app_started")
             )
-        return start_session(identity.sub, nxt, via=None)
+            if scheme and not fresh_in:
+                # Any app can open this leg, and the scheme goes back to whichever did: without
+                # proof of a sign-in made during the leg, no code. The app finishes in a Custom Tab.
+                logger.warning(
+                    "app sign-in on the app's scheme refused: the identity provider's ID token %s",
+                    "has no auth_time" if "auth_time" not in identity.raw_claims else "shows no new sign-in",
+                )
+                return RedirectResponse(app_signin.SCHEME_REFUSED, status_code=303, headers=headers)
+            # Only after a sign-in made during the leg does the return page open the app by itself:
+            # any app can start an https leg too, and a browser still signed in at the provider
+            # passes it straight through, so the page then waits for the member's tap.
+            code = state.app_signins.issue(  # type: ignore[attr-defined]
+                identity.sub, challenge, nxt, fresh=fresh_in, grant=session.get("grant_holder")
+            )
+            if back == app_signin.INTENT_RETURN and fresh_in:
+                # A Custom Tab: Chrome opens an intent: link only from a navigation the person
+                # started, which the return page's script is not, so this redirect ends the one
+                # their own Sign-in press started. The same rule as the page's own try (a sign-in
+                # made during the leg) and the same link, naming only the app's package; the page
+                # with the button is the fallback for a browser that won't open the app.
+                from . import app_page  # imports this module
+
+                fallback = f"{s.public_url.rstrip('/')}{app_signin.RETURN_PATH}?code={code}"
+                return RedirectResponse(
+                    app_signin.intent_url(code, app_page.app_package(), fallback),
+                    status_code=303,
+                    headers=headers,
+                )
+            return RedirectResponse(
+                # the retry's Auth Tab on the app's own scheme (no Digital Asset Links check); else
+                # the gateway's address: the verified https Auth Tab, or the page with the button
+                app_signin.scheme_url(code) if scheme else f"{app_signin.RETURN_PATH}?code={code}",
+                status_code=303,
+                headers=headers,
+            )
+        return start_session(identity.sub, nxt, via=None, grant=session.get("grant_holder"))
 
     @server.custom_route(app_signin.RETURN_PATH, methods=["GET"], include_in_schema=False)
     async def login_app_return(request: Request) -> Response:
@@ -1006,16 +1472,36 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
         code = request.query_params.get("code", "")
         if app_signin.CODE.fullmatch(code):
-            resp = small("Signed in", app_signin.return_body(code, app_page.app_package()))
+            auto = state.app_signins.fresh(code)  # type: ignore[attr-defined]
+            first = state.app_signins.first_view(code)  # type: ignore[attr-defined]
+            if first is not None:
+                # The browser drew the page, so this sign-in did not come back by itself (an Auth
+                # Tab never loads it): the member's activity says so, once per code.
+                reason = "after a new sign-in" if first.fresh else "no new sign-in"
+                state.db.audit("app_signin_tap_page", sub=first.sub, detail={"reason": reason})
+            resp = small(
+                "Signed in",
+                app_signin.return_body(code, app_page.app_package(), auto=auto),
+                signin_link=False,
+            )
         else:
             resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
         resp.headers["Cache-Control"] = "no-store"
         resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
 
-    def start_session(sub: str, nxt: str, *, via: str | None, status: int = 302) -> Response:
+    def start_session(
+        sub: str, nxt: str, *, via: str | None, grant: str | None, status: int = 302
+    ) -> Response:
+        """Sign this browser in as ``sub``, with the provider grant its sign-in left at ``grant``
+        as the session's own (membership.py)."""
         sid = secrets.token_urlsafe(32)
-        state.db.create_browser_session(sid, sub, s.browser_session_ttl)
+        ttl = min(
+            state.live.seconds("browser_session_ttl"), state.db.session_max_age()
+        )  # the Settings page's
+        state.db.create_browser_session(sid, sub, ttl)
+        if grant and state.membership is not None:
+            state.membership.adopt(grant, session_holder(sid))
         state.db.audit("browser_login", sub=sub, detail={"via": via} if via else None)
         resp = RedirectResponse(nxt, status_code=status, headers={"Cache-Control": "no-store"})
         if via is not None:
@@ -1023,7 +1509,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.set_cookie(
             session_cookie,
             sid,
-            max_age=s.browser_session_ttl,
+            max_age=ttl + SESSION_END_NOTICE,  # kept past the session's end to be told why it ended
             path="/",
             httponly=True,
             secure=secure,
@@ -1054,7 +1540,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
             resp.headers["Cache-Control"] = "no-store"
             return resp
-        return start_session(pending.sub, _safe_next(pending.next_path), via="android_app", status=303)
+        return start_session(
+            pending.sub, _safe_next(pending.next_path), via="android_app", grant=pending.grant, status=303
+        )
 
     state.finish_browser_login = finish_browser_login  # type: ignore[attr-defined]
 
@@ -1129,23 +1617,88 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
-    set_card_size(state.db.get_pref(sub, prefs.CARD_SIZE))  # drawn on <html> (theme.render)
+    page = card_size_page(request.url.path)  # each page keeps its own card size
+    set_card_size(prefs.card_sizes(state.db, sub, page), page)  # drawn on <html> (theme.render)
     # this request is the member's own page: its Archidekt reads go first (archidekt.page_turn);
     # set after sync.opened, so the deck sync's check started above does not take that turn
     page_turn.set(True)
     return sub, sid
 
 
-def login_redirect(next_path: str) -> Response:
+def _length(seconds: int) -> str:
+    """A sign-in setting's length in words: "7 days", "12 hours", "30 minutes"."""
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        if (seconds >= size and seconds % size == 0) or unit == "minute":
+            return plural(max(1, round(seconds / size)), unit)
+    raise AssertionError  # the loop ends on minutes
+
+
+def signed_out_text(reason: str | None, state: Any) -> str:
+    """What the signed-out page says, by why the session ended (db.SESSION_END_REASONS)."""
+    if reason == "unused":
+        unused = _length(state.live.seconds("browser_session_ttl"))
+        return f"Your sign-in on this device ended because it wasn't used for {unused}."
+    if reason == "longest":
+        longest = _length(state.db.session_max_age())
+        return (
+            f"Your sign-in on this device reached the longest time a sign-in lasts ({longest}), so it ended."
+        )
+    if reason == "idp":
+        return "The sign-in service asked you to sign in again on this device. Your AI apps stay connected."
+    if reason == "removed":
+        return (
+            "Your account is no longer in the group that may use this gateway, so you were signed out "
+            "on every device and your AI apps were disconnected. If that's a mistake, ask the "
+            "gateway's admin."
+        )
+    if reason == "elsewhere":
+        return "You signed out on all your devices from another device."
+    if reason == "admin":
+        return "An admin of this gateway signed you out on every device."
+    if reason == "disabled":
+        return "An admin turned off your account on this gateway. Ask them to turn it back on."
+    return "You are signed out of this gateway."
+
+
+def quote_next(next_path: str) -> str:
+    """A return address made safe (``_safe_next``) and encoded as one query value: its own ``&``
+    and ``#`` are escaped, so the whole address, query and all, comes back after the sign-in."""
     from urllib.parse import quote
 
-    return RedirectResponse(f"/login?next={quote(_safe_next(next_path), safe='/?=')}", status_code=302)
+    return quote(_safe_next(next_path), safe="/?=")
+
+
+def login_href(next_path: str) -> str:
+    """The sign-in link that comes back to ``next_path``: the one way every page builds it."""
+    return f"/login?next={quote_next(next_path)}"
+
+
+def login_redirect(next_path: str) -> Response:
+    return RedirectResponse(login_href(next_path), status_code=302)
+
+
+def login_redirect_here(request: Request, fallback: str = "/account") -> Response:
+    """Sign in and come back to this very page. A GET keeps its whole address, path and query
+    (a shared thread link, a price alert's ``?open=``, a folder, a filter), so the member lands
+    where the link pointed. A POST cannot be replayed after the sign-in, so it comes back to
+    ``fallback``, the page its form lives on (0.7.46 audit QG-05)."""
+    if request.method in ("GET", "HEAD"):
+        return login_redirect(request_path(request))
+    return login_redirect(fallback)
+
+
+def request_path(request: Request) -> str:
+    """The request's path with its query, as the browser sent it (same-origin, no host)."""
+    query = request.url.query
+    return request.url.path + (f"?{query}" if query else "")
 
 
 def _safe_next(value: str | None) -> str:
+    """Only a relative address on this site: never another host (``//evil``) or a backslash a
+    browser might read as one. A long query (a search's filters) keeps its whole address."""
     if not value or not value.startswith("/") or value.startswith("//") or "\\" in value:
         return "/account"
-    return value[:200]
+    return value[:1000]
 
 
 MAX_FORM = 16_384
@@ -1156,27 +1709,29 @@ OK_MESSAGES = {
     "linked": "Archidekt account linked. Your assistant can now read your decks.",
     "unlinked": "Unlinked. The gateway's copy of the session was deleted.",
     "applied": "Applied. Archidekt now matches this proposal.",
-    "applying": "Applying. This is a large change, so Archidekt is updated a step at a time to stay "
-    "within its limits. You can leave this page; the progress below refreshes by itself.",
+    "applying": "Applying. Archidekt is updated a step at a time to stay within its limits. You can "
+    "leave this page; the progress below updates by itself.",
     "rejected": "Rejected. Nothing was sent to Archidekt.",
     "disconnected": "The app was disconnected.",  # the Account page names the app when it can
     "disconnected_all": "All apps were disconnected.",
     "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
-    "mode_manual": "Saved: your assistant asks you every time.",
-    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
-    "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
-    "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
+    "mode_manual": "Saved as your default: an assistant that follows it asks you every time.",
+    "mode_semi": "Saved as your default: an assistant that follows it applies low-risk changes without "
+    "asking (a small deck or binder edit, or a private copy of a deck) and asks for everything else. "
+    "A change to one of your decks keeps a snapshot you can restore from History; a binder change "
+    "keeps none. Restoring a snapshot does "
     "not put back a deck's folder, tags, cover or custom cards.",
-    "mode_auto": "Saved: your assistant applies changes without asking. Restoring a "
-    "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
-    "itself, making a deck public or unlisted, any edit of a description that has formatting, such as "
+    "mode_auto": "Saved as your default: an assistant that follows it applies changes without asking. "
+    "Restoring a snapshot, a commander or companion change, a new deck, an edit of more rows than "
+    "Full auto applies by itself, making a deck public or unlisted, any edit of a description that "
+    "has formatting, such as "
     "bold text, links or pictures, actions on your Archidekt account, taking custom cards out of a deck "
     "and deleting a deck still wait for you. So does a held change, a change waiting for another "
     "change first, one another app had a hand "
     "in, one that replaces another app's change, or one that another app's waiting change would replace. "
     "When a change waits for "
     "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
-    "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
+    "can restore from History; a binder change keeps none. Restoring a snapshot does not put back "
     "a deck's folder, tags, cover or custom cards.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
@@ -1196,7 +1751,7 @@ ERR_MESSAGES = {
     "not_pending": "This proposal is no longer pending, so nothing was done.",
     "stale": "Not applied: the deck changed on Archidekt, and this change would now do something "
     "different from what you reviewed. Nothing was sent. It is still waiting, marked Needs a look: "
-    "review it again, then apply or reject it, or ask your assistant to amend it.",
+    "it can't be applied as it is. Ask your assistant to update it, or reject it.",
     "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
     "the new version below.",
     "now_held": "This change is held for a reason that came up after you opened this page, so nothing "
@@ -1206,6 +1761,9 @@ ERR_MESSAGES = {
     "none_selected": "Check at least one waiting change first. Nothing was done.",
     "backup_failed": "The backup copy of the deck could not be made on Archidekt, so nothing was "
     "changed. The proposal is still pending; try again once Archidekt answers.",
+    "backup_relink": "The backup copy of the deck could not be made on Archidekt, as Archidekt no "
+    "longer accepts the stored session, so nothing was changed. The proposal is still pending: relink "
+    "under Account details, then apply it again.",
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it under Account details.",
     "forbidden": "Archidekt did not allow this change, so nothing more was changed. The reason is in "
@@ -1248,9 +1806,12 @@ async def limited_form(request: Request, limit: int, **kw: Any) -> Any:
         return None
 
 
-def _err_code(kind: str, *, proposal_exists: bool = False) -> str:
+def _err_code(exc: DeckError, *, proposal_exists: bool = False) -> str:
     """The notice code for a failed apply. ``not_found`` from an apply of a proposal that does exist
     means a card, printing, deck or snapshot was missing on Archidekt, not the proposal itself."""
+    kind = exc.kind
+    if kind == "backup_failed" and exc.extra.get("relink"):
+        return "backup_relink"
     if kind == "not_found" and proposal_exists:
         return "missing"
     return kind if kind in ERR_MESSAGES else "failed"
@@ -1267,93 +1828,427 @@ def _ok(msg: str) -> str:
 # What "Delete my data" deletes, word for word on the Account page's card and on the "Your data
 # was deleted" page (db.py MEMBER_TABLES is the code's list; tests keep the two in step).
 DELETED_LIST = (
-    "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your simulator "
-    "card models, your notification and view choices, your Archidekt link, connected apps and your "
+    "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your card "
+    "models, your push notification and view choices, your Archidekt link, connected assistants and your "
     "sign-in"
 )
 
-# The Account page: connected app rows, the disclosure as a tinted strip, buttons that wrap.
+# Account details (mockup screen 7, 0.7.46): the same grouped list as the Account page, each row
+# opening the form it replaces. The two choices the owner has not answered yet, each one constant:
+DETAILS = "/account/details"
+# each row opens its own small page (False: the row folds its form open on the list itself)
+DETAIL_PAGES = True
+# the four groups' names, in the list's order
+GROUP_NAMES = ("Archidekt", "Assistant", "This gateway", "Your data")
+# The sections with a page of their own (DETAIL_PAGES): the address under /account/details, the
+# page's title, and the row's icon.
+SECTIONS: dict[str, tuple[str, str]] = {
+    "archidekt": ("Archidekt account", "link"),
+    "profile": ("Archidekt profile", "account"),
+    "email": ("Email and alerts on Archidekt", "bell"),
+    "defaults": ("New device defaults", "settings"),
+    "backups": ("Backup folder", "folder"),
+    "notifications": ("Push notifications", "bell"),
+    "choices": ("Your view choices", "grid"),
+}
+# the sections drawn from the member's Archidekt profile (profile_page): only while linked
+PROFILE_SECTIONS = ("profile", "email", "defaults")
+# Where an old list address's notice belongs (the redirects of 0.7.45 and the app's older links):
+# ``?ok=email`` opens Email and alerts, a push notification's ``?ok=notify_saved`` the
+# Push notifications page.
+NOTICE_SECTIONS = {
+    "profile": "profile",
+    "picture": "profile",
+    "unconfirmed": "profile",
+    "email": "email",
+    "defaults": "defaults",
+    "choices_forgotten": "choices",
+    "confirm_forget": "choices",
+}
+
+
+def section_href(section: str, query: str = "", anchor: str = "") -> str:
+    """The address of one section: its page, or (DETAIL_PAGES off) its fold on the list."""
+    q = f"?{query}" if query else ""
+    if DETAIL_PAGES:
+        return f"{DETAILS}/{section}{q}{f'#{anchor}' if anchor else ''}"
+    return f"{DETAILS}{q}#{anchor or section}"
+
+
+def notice_section(ok: str | None, err: str | None) -> str | None:
+    """The section a notice code belongs to, or None for one the list shows itself."""
+    for code in (ok, err):
+        if code in NOTICE_SECTIONS:
+            return NOTICE_SECTIONS[code]
+        if code in notify.CARD_NOTICES:
+            return "notifications"
+    return None
+
+
+# The Account details pages: the list's folds and red row, a section's cards, the disclosure as
+# a tinted strip, buttons that wrap.
 ACCOUNT_CSS = (
     ".yback{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;margin:0 0 -.25rem;"
     "color:var(--orange-text);font-weight:700;text-decoration:none}"
     ".yback svg.i{width:18px;height:18px;transform:rotate(90deg)}"
-    ".acc .apps{list-style:none;margin:.5rem 0;padding:0}"
-    ".acc .apps li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.1rem 1rem;align-items:center;"
-    "padding:.6rem 0;border-top:1px solid var(--border-soft)}"
-    ".acc .apps li:first-child{border-top:0;padding-top:.2rem}"
-    ".acc .apps .nm .ui-app{font-size:1rem;font-weight:700}"
-    ".acc .apps .sub{color:var(--text-muted);font-size:.9rem}"
-    ".acc .apps .btn-cell{grid-column:2;grid-row:1 / span 2}"
+    ".yhub.ydetails{max-width:62rem;margin:0 auto}"
+    # a row that folds open on the list (Your Archidekt lists, What your sign-in shares): its
+    # words start under the row's label
+    ".ydetails .yfold{padding:0 1rem .9rem calc(1.8rem + 20px);font-size:.95rem;line-height:1.4}"
+    ".ydetails .yfold p{margin:.3rem 0}.ydetails .yfold dl.meta{margin:.2rem 0}"
+    # a fold narrow in its own text (under 15em: 200% text in the two-column list) puts each value
+    # under its key, instead of a 26 px value column (batch 10, AB3)
+    ".ydetails .yfold{container-type:inline-size}"
+    "@container (max-width:15em){.ydetails .yfold dl.meta{grid-template-columns:1fr}}"
+    ".ydetails .yfold .ui-caps{margin:.4rem 0}"
+    # a row's label and value wrap between their words, never squeezed under their longest word
+    # (as on the Account page): when both do not fit one line (large text on a phone) the value
+    # and the chevron go to a line of their own, at the right. A word breaks inside only when it is
+    # wider than the whole row (break-word, not anywhere: anywhere let the row squeeze the label
+    # until it broke "Approval mode" inside "mode" at 200% text)
+    ".ydetails .ygrp .yrow,.ydetails .ygrp details.yrow > summary{flex-wrap:wrap;row-gap:.1rem}"
+    ".ydetails .yrow .lbl{overflow-wrap:break-word}"
+    ".ydetails .yrow .val{flex:0 1 auto;margin-left:auto;max-width:100%;min-width:0;overflow-wrap:break-word}"
+    ".ydetails .yme .sub{overflow-wrap:anywhere}"
+    # the one red row: Delete my data…
+    ".ygrp .yrow.ydanger,.ygrp .yrow.ydanger > svg.i{color:var(--danger-text)}"
+    # one column on a phone: the groups in the mockup's order (Archidekt, Assistant, This gateway,
+    # Your data), not column by column
+    "@media (max-width:699.98px){.ydetails .ycols{display:flex;flex-direction:column;align-items:stretch}"
+    ".ydetails .ycol{display:contents}"
+    ".ydetails .ygrp[data-g='1']{order:1}.ydetails .ygrp[data-g='2']{order:2}"
+    ".ydetails .ygrp[data-g='3']{order:3}}"
+    # and the same one column when the list is narrow in its own text (under 44em: 616 px at 14px,
+    # 1232 px at 200%), so each fold keeps room for its words
+    ".ydetails{container-type:inline-size}"
+    "@media (min-width:700px){@container (max-width:44em){"
+    ".ydetails .ycols{display:flex;flex-direction:column;align-items:stretch}"
+    ".ydetails .ycol{display:contents}"
+    ".ydetails .ygrp[data-g='1']{order:1}.ydetails .ygrp[data-g='2']{order:2}"
+    ".ydetails .ygrp[data-g='3']{order:3}}}"
+    # a section's page: one card, as wide as the list's column at most; the list itself as wide
+    # as the Account page (two columns from 700 px)
+    ".acc{max-width:40rem}.acc.acc-list{max-width:62rem}.acc .card{margin-bottom:1rem}"
     ".acc .notice.disclosure{background:var(--blue-tint);border-left-color:var(--blue)}"
     ".acc .ui-actions .btn,.acc .ui-actions button{white-space:normal;max-width:100%;text-align:center}"
     ".acc form.inbox{margin:0}.acc form.inbox p{margin:0 0 .5rem}"
-    "@media (max-width:599.98px){.acc .apps li{grid-template-columns:1fr}.acc .apps .btn-cell{grid-column:1;"
-    "grid-row:auto}.acc .ui-actions .btn,.acc .ui-actions button{flex:1 1 auto}}"
+    "@media (max-width:599.98px){.acc .ui-actions .btn,.acc .ui-actions button{flex:1 1 auto}}"
 )
 ACCOUNT_HEAD = f"<style>{ACCOUNT_CSS}</style><script src='{smallpage.SCRIPT}' defer></script>"
 
 
-async def account_html(
+async def profile_cards(state: Any, sub: str, csrf: str | None, **kw: Any) -> dict[str, str]:
+    """The Archidekt profile sections while Archidekt is linked (profile_page: one read, kept a
+    short while), or none. ``kw`` are profile_page.cards' notices and typed values."""
+    from . import profile_page
+
+    if not state.decks.status(sub)["linked"]:
+        return {}
+    now = await profile_page.profile_or_none(state.decks, sub)
+    return profile_page.cards(now, csrf, stamp=press_stamp(state.settings, sub), **kw)
+
+
+async def section_html(
     state: Any,
     sub: str,
     csrf: str | None,
+    section: str,
     *,
     ok: str | None = None,
     err: str | None = None,
     open_box: str | None = None,
-    open_client: str | None = None,
     saved: str = "",
     profile_error: str = "",
     profile_error_in: str = "",
     profile_values: dict[str, str] | None = None,
+    disclosure_read: bool = False,
 ) -> str:
-    """The Account page's body: the cards, with the Archidekt profile cards read first while
-    Archidekt is linked (profile_page: one read, kept a short while). ``profile_error`` is
-    Archidekt's refusal of a profile press, shown in the card ``profile_error_in``."""
-    from . import profile_page
-
-    html_profile = ""
-    if state.decks.status(sub)["linked"]:
-        now = await profile_page.profile_or_none(state.decks, sub)
-        html_profile = profile_page.account_cards(
-            now,
+    """One section's cards: the form the row replaces. ``open_box`` names the box drawn open
+    (the old one-press addresses: unlink, picture), ``saved`` what a profile save changed,
+    ``profile_error``/``profile_error_in`` Archidekt's refusal and the card it belongs to,
+    ``profile_values`` what was typed, kept in the fields after a refusal."""
+    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+    if section == "archidekt":
+        return _archidekt_card(state, sub, csrf_in, open_box=open_box, disclosure_read=disclosure_read)
+    if section == "backups":
+        return await backup_place.card_html(state.decks, sub, csrf_in, ok=ok, error=profile_error)
+    if section in PROFILE_SECTIONS:
+        cards = await profile_cards(
+            state,
+            sub,
             csrf,
-            stamp=press_stamp(state.settings, sub),
             ok=ok or "",
             saved=saved,
             error=profile_error,
             error_in=profile_error_in,
             values=profile_values,
             open_box=open_box,
+            heading=False,
         )
-    return _account_body(
-        state,
-        sub,
-        csrf,
-        ok=ok,
-        err=err,
-        open_box=open_box,
-        open_client=open_client,
-        profile_html=html_profile,
+        if section == "profile":  # what stays on Archidekt, at the foot of the profile page
+            return cards.get("profile", "") + cards.get("only", "")
+        return cards.get(section, "")
+    if section == "notifications":
+        return notify.account_card_html(state, sub, csrf_in, ok=ok, err=err, heading=False)
+    if section == "choices":
+        return _forget_choices_card(csrf_in)
+    return ""
+
+
+async def details_html(
+    state: Any, sub: str, csrf: str | None, *, open_box: str | None = None, **section_kw: Any
+) -> str:
+    """The list: the member at the top, then the four groups, balanced into two columns on a wide
+    screen as the Account page is. With DETAIL_PAGES off every section folds open under its row
+    (``section_kw`` are the sections' notices)."""
+    info = state.decks.status(sub)
+    user = state.db.get_user(sub) or {}
+    linked = bool(info["linked"])
+    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+    folds: dict[str, str] = {}
+    if not DETAIL_PAGES:
+        for name in SECTIONS:
+            if linked or name not in PROFILE_SECTIONS:
+                folds[name] = await section_html(state, sub, csrf, name, open_box=open_box, **section_kw)
+
+    def row(section: str, value: str = "") -> str:
+        title, ic = SECTIONS[section]
+        if section in folds:
+            return _yfold(title, ic, folds[section], value=value, rid=section)
+        return _yrow(title, ic, href=section_href(section), value=value)
+
+    who = ui.breakable(user.get("email") or user.get("preferred_username") or sub)
+    writes = "on" if info["writes_enabled"] else "off"
+    me = (
+        "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
+        f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
+        f"<span class='sub'>{ui.facts([who, f'Archidekt writes {writes}'], html=True)}</span></span></div>"
+    )
+    archidekt = [
+        row("archidekt", f"{info['archidekt_username']} · linked" if linked else "Not linked"),
+    ]
+    if linked:
+        archidekt += [row("profile"), row("email"), row("defaults"), _lists_fold(sub)]
+    apps = assistants.connected(state.db, sub)
+    n = len(apps)
+    default = state.decks.mode_of(sub)
+    # the default for new assistants (each one can have its own, on the Assistants page), named as
+    # its own page names it, and saying which assistant does not follow it (independent review 2, M4)
+    own = [a for a in apps if a.mode is not None and a.mode != default]
+    differs = (
+        ""
+        if not own
+        else f" · {own[0].name} has its own"
+        if len(own) == 1
+        else f" · {len(own)} assistants have their own"
+    )
+    assistant = [
+        _yrow(
+            "Assistants", "shield", href=assistants.PAGE, value=f"{n} connected" if n else "None connected"
+        ),
+        _yrow(
+            "Default for new assistants",
+            "shield",
+            href=assistants.DEFAULT_PAGE,
+            value=modes.MODE_LABELS.get(default, "") + differs,
+        ),
+    ]
+    if state.summaries is not None:
+        assistant.append(row("notifications", _notifications_value(state, sub)))
+    gateway = [
+        _yfold("What your sign-in shares", "account", _identity_details(user), rid="identity"),
+        _yfold(
+            "Archidekt writes",
+            "edit",
+            _writes_fold(info["writes_enabled"]),
+            value="On" if info["writes_enabled"] else "Off",
+            rid="writes",
+        ),
+        # where the gateway keeps its backup copies on Archidekt: moved or renamed there
+        *([row("backups", state.decks.backup_folder)] if linked else []),
+        # the price alert every card the member watches gets (mockup screen 8): its box on the
+        # watchlist, one press from here
+        _yrow(
+            "Price alert defaults",
+            "tag",
+            href="/watchlist?box=defaults",
+            value=_alert_defaults_value(state, sub),
+        ),
+        row("choices"),
+    ]
+    data = [
+        _yrow(
+            "Sign out on all my devices…",  # it asks first in a box, as its neighbours (L10)
+            "x",
+            href=f"{DETAILS}?signout=1",
+            attrs=ui.box_open_attr("signout"),
+            chev=False,
+        )
+    ]
+    if linked:
+        data.append(
+            _yrow(
+                "Unlink Archidekt…",
+                "link",
+                href=f"{DETAILS}?unlink=1",
+                attrs=ui.box_open_attr("unlink"),
+                chev=False,
+            )
+        )
+    data.append(
+        _yrow(
+            "Delete my data…",
+            "trash",
+            href=f"{DETAILS}?delete=1",
+            attrs=f"id='delete-data' {ui.box_open_attr('delete')}",
+            cls="ydanger",
+            chev=False,
+        )
+    )
+    # Two columns on a wide screen, even (the owner: balanced columns; review 2, L10): Archidekt over
+    # Your data, Assistant over This gateway (the mockup's Archidekt over This gateway stood 9
+    # rows against 6); one under the other on a phone in the mockup's order, Your data (the
+    # actions that ask first) last.
+    cols = [
+        [(0, GROUP_NAMES[0], archidekt, ""), (3, GROUP_NAMES[3], data, "")],
+        [(1, GROUP_NAMES[1], assistant, "apps"), (2, GROUP_NAMES[2], gateway, "")],
+    ]
+    s = state.settings
+    boxes = _signout_box(csrf_in, open=open_box == "signout") + _delete_box(
+        csrf_in, s.backup_keep_days if s.backup_dir is not None else None, open=open_box == "delete"
+    )
+    if linked:
+        boxes += _unlink_box(csrf_in, open=open_box == "unlink")
+    # an old link to a part of the list (#notifications, #profile, …) opens that section's page
+    # (static/pages.js); the list's own folds (#lists, #identity, #writes, #apps) stay
+    parts = {
+        "notifications": "notifications",
+        "summary": "notifications",
+        "profile": "profile",
+        "picture": "profile",
+        "archidekt-only": "profile",
+        "email": "email",
+        "defaults": "defaults",
+        "archidekt": "archidekt",
+        "archidekt-disclosure": "archidekt",
+        "choices": "choices",
+    }
+    pages = {k: section_href(v) for k, v in parts.items()} if DETAIL_PAGES else {}
+    return (
+        "<div class='acc acc-list'>"
+        f"<div class='yhub ydetails' data-section-pages='{html.escape(json.dumps(pages))}'>"
+        + me
+        + "<div class='ycols'>"
+        + "".join(f"<div class='ycol'>{''.join(_ygroup(g) for g in c)}</div>" for c in cols)
+        + f"</div></div>{boxes}</div>"
     )
 
 
-def account_response(page: Any, body: str, sub: str, sid: str | None, *, status: int = 200) -> Response:
-    """The Account page rendered: its own style and scripts (pages.js, profile.js), and a page
-    policy that lets the chosen picture show before it is sent (a blob: address)."""
+def _yrow(
+    label: str, ic: str, *, href: str, value: str = "", attrs: str = "", cls: str = "", chev: bool = True
+) -> str:
+    """A row that opens a page or a box: the icon, the label, its value at the right, and a
+    chevron where it opens a page."""
+    val = f"<span class='val'>{html.escape(value)}</span>" if value else ""
+    ch = f"<span class='ch'>{icon('chev')}</span>" if chev else ""
+    a = f" {attrs}" if attrs else ""
+    c = f" {cls}" if cls else ""
+    return (
+        f"<a class='yrow{c}' href='{html.escape(href)}'{a}>{icon(ic)}"
+        f"<span class='lbl'>{html.escape(label)}</span>{val}{ch}</a>"
+    )
+
+
+def _yfold(label: str, ic: str, body: str, *, value: str = "", rid: str = "") -> str:
+    """A row that folds open in place (as Theme on the Account page): ``body`` under the row."""
+    val = f"<span class='val'>{html.escape(value)}</span>" if value else ""
+    i = f" id='{rid}'" if rid else ""
+    return (
+        f"<details class='yrow'{i}><summary>{icon(ic)}<span class='lbl'>{html.escape(label)}</span>{val}"
+        f"<span class='ch'>{icon('chev')}</span></summary><div class='yfold'>{body}</div></details>"
+    )
+
+
+def _ygroup(g: tuple[int, str, list[str], str]) -> str:
+    gid = f" id='{g[3]}'" if g[3] else ""
+    return (
+        f"<section class='ygrp' data-g='{g[0]}'{gid}><h2>{html.escape(g[1])}</h2>"
+        f"<div class='rows'>{''.join(g[2])}</div></section>"
+    )
+
+
+def _notifications_value(state: Any, sub: str) -> str:
+    """The Push notifications row's value: On, Off, or Not available without a notification server."""
+    n = state.notifier
+    if n is None or not n.enabled:
+        return "Not available"
+    p = notify.prefs(state.db, sub)
+    return "On" if p["ntfy_on"] and bool(p["ntfy_topic"]) else "Off"
+
+
+def _alert_defaults_value(state: Any, sub: str) -> str:
+    """The Price alert defaults row's value, short enough for one line beside its label
+    (independent review 2, L10): "10% drop", "5% move · Below $2.00"; the box says it in full."""
+    from . import prefs, watchlist_page
+
+    alerts = prefs.alert_defaults(state.db, sub)
+    parts = [
+        f"{alerts[k]:g}% {word}"
+        for k, word in (("drop", "drop"), ("rise", "rise"), ("pct", "move"))
+        if alerts.get(k) is not None
+    ]
+    parts += [
+        f"{word} {watchlist_page.money(alerts[k], 'usd')}"
+        for k, word in (("above", "Above"), ("below", "Below"))
+        if alerts.get(k) is not None
+    ]
+    return " · ".join(parts) or "None"
+
+
+def _writes_fold(on: bool) -> str:
+    """Archidekt writes, folded under its row: the label and the same words as the deck page's
+    writes-off texts, with no variable names."""
+    return (
+        f"<p>{ui.label('On', 'green', 'check') if on else ui.label('Off', 'grey', 'x')}</p>"
+        "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are "
+        "off, changes can be reviewed but not applied.</p>"
+    )
+
+
+def account_response(
+    page: Any,
+    body: str,
+    sub: str,
+    sid: str | None,
+    *,
+    status: int = 200,
+    section: str | None = None,
+) -> Response:
+    """An Account details page rendered: the list, or one section's page (its way back is the
+    list). Its own style and scripts (pages.js, profile.js), and a page policy that lets the
+    chosen picture show before it is sent (a blob: address)."""
     from .profile_page import CSS as PROFILE_CSS
 
+    if section:
+        title = SECTIONS[section][0]
+        # back to the list, as a phone's settings go back a level
+        head = (
+            f"<a class='yback' href='{DETAILS}'>{icon('chev')}Account details</a>"
+            f"<h1>{html.escape(title)}</h1>"
+        )
+    else:
+        title = "Account details"
+        head = f"<a class='yback' href='/account'>{icon('chev')}Account</a><h1>Account details</h1>"
     resp = page(
-        "Account details",
-        # back to the Account page, as a phone's settings go back a level
-        f"<a class='yback' href='/account'>{icon('chev')}Account</a><h1>Account details</h1>{body}",
+        title,
+        head + body,
         sub=sub,
         sid=sid,
         status=status,
-        current="/account/details",
+        current=DETAILS,
         heading=False,
-        head_extra=ACCOUNT_HEAD
-        + f"<style>{PROFILE_CSS}</style><script src='/static/profile.js' defer></script>",
+        head_extra=ACCOUNT_HEAD + f"<style>{PROFILE_CSS}{account_hub.HUB_CSS}{assistants.CSS}</style>"
+        "<script src='/static/profile.js' defer></script>",
     )
     resp.headers["Content-Security-Policy"] = ACCOUNT_CSP
     return resp
@@ -1402,95 +2297,69 @@ def actor_html(label: str | None) -> str:
     return f"<span class='badge' title='{html.escape(label)}'>{html.escape(label)}</span>"
 
 
-def _lists_card(sub: str) -> str:
-    """Your Archidekt lists: the five account-wide lists with the counts known so far (each count
-    comes from that tab's last read, account_lists.counts), one press from My lists."""
+def _lists_fold(sub: str) -> str:
+    """Your Archidekt lists, folded under its row: the account-wide lists that shape decks with
+    the counts known so far (each count comes from that tab's last read, account_lists.counts),
+    one press from Binder › Lists (mockup screen 8); the pinned cards keep their own page there."""
     from . import account_lists  # (imports archidekt first: not at the top)
-    from .lists_page import PAGE, TABS
+    from .lists_page import ACCOUNT_TABS, HUB, PAGE, WANTS
 
     counts = account_lists.counts(sub)
     words = {
         "templates": ("category template", "category templates"),
         "default_categories": ("card with default categories", "cards with default categories"),
         "color_tags": ("color tag", "color tags"),
-        "pins": ("pinned card", "pinned cards"),
         "custom_cards": ("custom card", "custom cards"),
+        "collection_tags": ("binder tag", "binder tags"),
     }
     parts = []
-    for t in TABS:
+    for t in ACCOUNT_TABS:
         n = counts.get(t.kind)
         one, many = words[t.kind]
         text = many if n is None else f"{n:,} {one if n == 1 else many}"
-        parts.append(f"<a href='{PAGE}/{t.slug}'>{text}</a>")
-    return (
-        "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
-        f"<p>Lists that follow you into every deck, kept on Archidekt: {', '.join(parts)}.</p>"
-        f"<div class='ui-actions'><a class='btn' href='{PAGE}'>{icon('list')} Open My lists</a></div></div>"
+        parts.append(ui.cap_link(text, f"{PAGE}/{t.slug}"))
+    body = (
+        "<p>Lists that shape every deck, kept on Archidekt:</p>"
+        f"<p class='ui-caps'>{''.join(parts)}</p>"
+        f"<p class='muted'>The cards you pin on Archidekt: "
+        f"{ui.cap_link('Pinned cards', WANTS, icon_name='bookmark')}</p>"
+        f"<div class='ui-actions'><a class='btn' href='{HUB}'>{icon('list')} Open Binder › Lists</a>"
+        "</div>"
+    )
+    return _yfold("Your Archidekt lists", "list", body, rid="lists")
+
+
+def _unlink_box(csrf_in: str, *, open: bool = False) -> str:
+    """Unlink Archidekt: the box behind the list's row and the Archidekt account page's button."""
+    return ui.box(
+        "unlink",
+        "Unlink Archidekt?",
+        f"<form id='unlinkf' class='inbox' method='post' action='/account'>{csrf_in}"
+        "<input type='hidden' name='action' value='unlink'>"
+        "<p>The gateway deletes its copy of your Archidekt session at once. Whether the session "
+        "also stops working on Archidekt's side is not known. Your decks on Archidekt are not "
+        "touched.</p></form>",
+        actions=[
+            ui.box_button("Keep it", cancel=True),
+            ui.box_button("Unlink and delete stored session", kind="danger-solid", form="unlinkf"),
+        ],
+        open=open,
+        close_href=DETAILS,
     )
 
 
-def _account_body(
-    state: Any,
-    sub: str,
-    csrf: str | None,
-    *,
-    disclosure_read: bool = False,
-    ok: str | None = None,
-    err: str | None = None,
-    open_box: str | None = None,
-    open_client: str | None = None,
-    profile_html: str = "",
+def _archidekt_card(
+    state: Any, sub: str, csrf_in: str, *, open_box: str | None = None, disclosure_read: bool = False
 ) -> str:
-    """The Account page's cards in their order. ``open_box`` names the box drawn open (the old
-    one-press forms' addresses: unlink, disconnect, disconnect_all, delete, picture), ``open_client``
-    the app a ?disconnect= address names, ``profile_html`` the Archidekt profile cards
-    (profile_page.account_cards, read before this runs) while Archidekt is linked."""
+    """Archidekt account: while linked, whose account, when, and what linking gives this gateway
+    (folded), with Unlink behind its box; otherwise the Link form under the disclosure.
+    ``disclosure_read`` (the form came back after a failed link the member had already ticked)
+    leaves the disclosure open and unlocked."""
     info = state.decks.status(sub)
-    user = state.db.get_user(sub) or {}
-    who = html.escape(user.get("preferred_username") or user.get("email") or sub)
-    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-    writes = ui.label("On", "green", "check") if info["writes_enabled"] else ui.label("Off", "grey", "x")
-    linked = bool(info["linked"])
-    out = [
-        "<div class='acc'>"
-        "<div class='card'><dl class='meta'>"
-        f"<dt>Signed in as</dt><dd><strong>{who}</strong></dd>"
-        f"<dt>Archidekt writes</dt><dd>{writes}</dd></dl>"
-        # The same words as the deck page's writes-off texts, and no variable names
-        "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are "
-        "off, changes can be reviewed but not applied.</p>"
-        f"{_identity_details(user)}"
-        # Sign out, the assistant skill and the Android app are on the Account page itself
-        f"<form method='post' action='/logout' class='form-actions'>{csrf_in}"
-        "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
-        f"{icon('x')}<span>Sign out on all my devices</span></button></form></div>"
-    ]
-    # One orange button on the page: Save approval mode while Archidekt is linked, Link account
-    # while it is not (as Compare switches its main button by state).
-    out.append(_mode_card(state, sub, csrf_in, primary=linked))
-    out.append(_apps_card(state, sub, csrf_in, open_box=open_box, open_client=open_client))
-    if state.summaries is not None:
-        # the Notifications card, and with ntfy on the Summary card after it
-        out.append(notify.account_card_html(state, sub, csrf_in, ok=ok, err=err))
-    if linked:
+    if info["linked"]:
         expires = _when(info.get("link_expires_at"))
-        unlink_box = ui.box(
-            "unlink",
-            "Unlink Archidekt?",
-            f"<form id='unlinkf' class='inbox' method='post' action='/account'>{csrf_in}"
-            "<input type='hidden' name='action' value='unlink'>"
-            "<p>The gateway deletes its copy of your Archidekt session at once. Whether the session "
-            "also stops working on Archidekt's side is not known. Your decks on Archidekt are not "
-            "touched.</p></form>",
-            actions=[
-                ui.box_button("Cancel", cancel=True),
-                ui.box_button("Unlink and delete stored session", kind="danger-solid", form="unlinkf"),
-            ],
-            open=open_box == "unlink",
-            close_href="/account/details",
-        )
-        out.append(
-            "<div class='card' id='archidekt'><h2>Archidekt</h2>"
+        return (
+            "<div class='card' id='archidekt'>"
             f"<p>Linked to <strong>{html.escape(info['archidekt_username'] or '')}</strong> "
             f"{ui.label('Active', 'green', 'check')}</p>"
             f"<p class='muted small'>Linked {ui.when(info['linked_at'])}. "
@@ -1499,41 +2368,30 @@ def _account_body(
             + "</p>"
             "<div class='ui-actions'>"
             + ui.box_opener(
-                "Unlink and delete stored session", "/account/details?unlink=1", "unlink", kind="danger"
+                "Unlink and delete stored session", f"{DETAILS}?unlink=1", "unlink", kind="danger"
             )
             + "</div>"
             "<p class='muted small'>Unlinking deletes the gateway's copy of the session at once. "
             "Whether the session also stops working on Archidekt's side is not known.</p>"
-            f"{link_disclosure.linked_html(_sweep_on(state))}{unlink_box}</div>"
+            f"{link_disclosure.linked_html(_sweep_on(state))}"
+            f"{_unlink_box(csrf_in, open=open_box == 'unlink')}</div>"
         )
-        out.append(_lists_card(sub))
-        out.append(profile_html)
-    else:
-        out.append(
-            "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"
-            f"{link_disclosure.form_html(_sweep_on(state), read=disclosure_read)}"
-            f"<form method='post' autocomplete='off'>{csrf_in}"
-            "<input type='hidden' name='action' value='link'>"
-            "<label for='l'>Archidekt username or email</label>"
-            "<input id='l' type='text' name='archidekt_login' required autocomplete='username'>"
-            "<label for='p'>Archidekt password</label>"
-            "<input id='p' type='password' name='archidekt_password' required "
-            "autocomplete='current-password'>"
-            # the fold above says what opening it does; static/disclosure.js keeps the box locked
-            # until the detail was opened
-            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
-            f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
-            "<button class='primary'>Link account</button></form></div>"
-        )
-    s = state.settings
-    out.append(_forget_choices_card(csrf_in))
-    out.append(
-        _delete_card(
-            csrf_in, s.backup_keep_days if s.backup_dir is not None else None, open=open_box == "delete"
-        )
+    return (
+        "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"
+        f"{link_disclosure.form_html(_sweep_on(state), read=disclosure_read)}"
+        f"<form method='post' autocomplete='off'>{csrf_in}"
+        "<input type='hidden' name='action' value='link'>"
+        "<label for='l'>Archidekt username or email</label>"
+        "<input id='l' type='text' name='archidekt_login' required autocomplete='username'>"
+        "<label for='p'>Archidekt password</label>"
+        "<input id='p' type='password' name='archidekt_password' required "
+        "autocomplete='current-password'>"
+        # the fold above says what opening it does; static/disclosure.js keeps the box locked
+        # until the detail was opened
+        "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
+        f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
+        "<button class='primary'>Link account</button></form></div>"
     )
-    out.append("</div>")
-    return "".join(out)
 
 
 def _identity_details(user: dict[str, Any]) -> str:
@@ -1546,12 +2404,11 @@ def _identity_details(user: dict[str, Any]) -> str:
         ("Email", user.get("email")),
         ("Groups", ", ".join(groups) if groups else None),
     ]
-    facts = "".join(f"<dt>{k}</dt><dd>{html.escape(str(v))}</dd>" for k, v in rows if v)
+    facts = "".join(f"<dt>{k}</dt><dd>{ui.breakable(str(v))}</dd>" for k, v in rows if v)
     return (
-        "<details class='identity'><summary class='fold-btn'>What your sign-in shares</summary>"
         f"<dl class='meta'>{facts or '<dt>Nothing</dt><dd></dd>'}</dl>"
         "<p class='muted small'>The gateway uses your groups only to check you may use it. "
-        "Your assistant is told your name and nothing else from this list.</p></details>"
+        "Your assistant is told your name and nothing else from this list.</p>"
     )
 
 
@@ -1566,7 +2423,9 @@ NOT_ALLOWED = "<span class='small muted'> (not allowed on this gateway)</span>"
 
 
 def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> str:
-    """The member's approval mode (modes.py): three radio choices, the current one checked,
+    """The member's default approval mode (modes.py), on Assistants › Default for new assistants:
+    every assistant starts with it and follows it until given its own (assistants.py). Three radio
+    choices, the current one checked,
     choices above the gateway's cap shown disabled. A tight list (the owner, 2026-10-22): each choice
     is one row, its name, with what it means in a fold opened by the chevron at the row's end.
     The whole warning (AUTO_WARNING) is in the two auto modes' details, and nowhere else on the
@@ -1598,128 +2457,91 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
         )
     return (
         "<div class='card' id='mode'><h2>Approval mode</h2>"
-        "<p>How much your assistant may change on Archidekt without asking you first. It applies to "
-        "your account only, and to nobody else.</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
+        "<p>How much an assistant may change on Archidekt without asking you first. A newly connected "
+        "assistant starts with this, and every assistant you have not given its own mode follows it. "
+        "It applies to your account only, and to nobody else.</p>"
+        f"<form method='post' action='/account'>{csrf_in}"
+        "<input type='hidden' name='action' value='approval_mode'>"
         f"<div class='mode-list'>{''.join(choices)}</div>"
         f"<button class='{'primary' if primary else 'btn-plain'}'>Save approval mode</button></form></div>"
     )
 
 
-def _apps_card(
-    state: Any, sub: str, csrf_in: str, *, open_box: str | None = None, open_client: str | None = None
-) -> str:
-    """The assistants connected to this account: each row the app's full name (ui.app_chip, no
-    client id in member text) and when it last signed in, with a red-outline Disconnect that asks
-    first in a box; Disconnect all apps the same way."""
-    apps = state.db.user_clients(sub)
-    if not apps:
-        return (
-            "<div class='card' id='apps'><h2>Connected apps</h2><p class='muted'>No assistant is connected "
-            "to your account.</p></div>"
-        )
-    rows, boxes = [], []
-    for n, a in enumerate(apps, 1):
-        name = ui.app_name(a["name"])
-        box_id = f"disc{n}"
-        href = f"/account/details?disconnect={quote(a['client_id'], safe='')}"
-        rows.append(
-            f"<li><span class='nm'>{ui.app_chip(a['name'], unnamed=True, client_id=a['client_id'])}</span>"
-            f"<span class='sub'>Last signed in or refreshed {ui.when(a['last_issued_at'])}</span>"
-            f"<span class='btn-cell'>{ui.box_opener('Disconnect', href, box_id, kind='danger')}</span></li>"
-        )
-        boxes.append(
-            ui.box(
-                box_id,
-                f"Disconnect “{name}”?",
-                f"<form id='{box_id}f' class='inbox' method='post' action='/account'>{csrf_in}"
-                "<input type='hidden' name='action' value='disconnect'>"
-                f"<input type='hidden' name='client_id' value='{html.escape(a['client_id'])}'>"
-                f"<p>“{html.escape(name)}” can no longer use your account. To use it again, connect it again "
-                "and approve it.</p></form>",
-                actions=[
-                    ui.box_button("Cancel", cancel=True),
-                    ui.box_button("Disconnect", kind="danger-solid", form=f"{box_id}f"),
-                ],
-                open=open_box == "disconnect" and open_client == a["client_id"],
-                close_href="/account/details",
-            )
-        )
-    all_box = ui.box(
-        "discall",
-        "Disconnect all apps?",
-        f"<form id='discallf' class='inbox' method='post' action='/account'>{csrf_in}"
-        "<input type='hidden' name='action' value='disconnect_all'>"
-        "<p>Every assistant connected to your account loses access at once. Each one has to be "
-        "connected and approved again.</p></form>",
-        actions=[
-            ui.box_button("Cancel", cancel=True),
-            ui.box_button("Disconnect all apps", kind="danger-solid", form="discallf"),
-        ],
-        open=open_box == "disconnect_all",
-        close_href="/account/details",
-    )
-    return (
-        "<div class='card' id='apps'><h2>Connected apps</h2>"
-        "<p class='muted small'>Disconnect any you don't recognize.</p>"
-        f"<ul class='apps'>{''.join(rows)}</ul>"
-        "<div class='ui-actions'>"
-        + ui.box_opener("Disconnect all apps", "/account/details?disconnect_all=1", "discall", kind="danger")
-        + f"</div>{''.join(boxes)}{all_box}</div>"
-    )
-
-
 def _forget_choices_card(csrf_in: str) -> str:
-    """Once view choices follow the account, signing out no longer resets them; this does."""
+    """Once view choices follow the account, signing out no longer resets them; this does. The
+    button opens the box every action that can't be undone asks in (ui.box: Cancel, then Forget;
+    audit D17); without scripts the box is a plain panel under the card."""
     return (
-        "<div class='card' id='choices'><h2>Your view choices</h2>"
-        "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
+        "<div class='card' id='choices'>"
+        "<p>Your views, card size, stats choices and dismissed tips follow your "
         "account to every device. Light or dark mode stays on each device.</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
-        # the tick on its own 44 px row, the button under it
-        "<div class='ui-checks'><label><input type='checkbox' name='confirm' value='yes' required>"
-        "<span>Yes, forget my view choices on every device</span></label></div>"
-        "<div class='ui-actions'><button>Forget my view choices</button></div></form></div>"
+        "<div class='ui-actions'><button type='button' class='btn-plain' "
+        f"{ui.box_open_attr('forget-choices')}>Forget my view choices…</button></div></div>"
+        + ui.box(
+            "forget-choices",
+            "Forget your view choices?",
+            f"<form id='forgetf' method='post'>{csrf_in}"
+            "<input type='hidden' name='action' value='forget_choices'>"
+            "<input type='hidden' name='confirm' value='yes'>"
+            "<p>Every device goes back to the usual views, card size, stats choices and tips. "
+            "Light or dark mode stays as it is on each device.</p></form>",
+            actions=[
+                ui.box_button("Keep them", cancel=True),
+                ui.box_button("Forget my view choices", kind="danger-solid", form="forgetf"),
+            ],
+            close_href=section_href("choices"),
+        )
     )
 
 
-def _delete_card(csrf_in: str, backup_days: int | None = None, *, open: bool = False) -> str:
-    """Deleting your data is as easy to find as everything else on the page: no hiding it, no
-    guilt-trip wording. A red-outline "Delete my data…" opens the box that holds the tick and the
-    solid red final button (as Admin › Users' Delete data…)."""
+def _signout_box(csrf_in: str, *, open: bool = False) -> str:
+    """Sign out on all my devices asks first (the owner, 2026-10-28: every action that can't be undone
+    asks in a box): the same /logout form the card's button posted, inside the box."""
+    return ui.box(
+        "signout",
+        "Sign out on all my devices?",
+        f"<form id='signoutf' class='inbox' method='post' action='/logout'>{csrf_in}"
+        "<p>Every browser and the Android app where you are signed in to this gateway are signed "
+        "out, this one too. Connected assistants keep working; disconnect them under Assistants.</p>"
+        "</form>",
+        actions=[
+            ui.box_button("Keep them", cancel=True),
+            "<button type='submit' class='danger' form='signoutf' name='everywhere' value='1' "
+            f"data-busy-text='Signing out…'>{icon('x')}Sign out on all my devices</button>",
+        ],
+        open=open,
+        close_href=DETAILS,
+    )
+
+
+def _delete_box(csrf_in: str, backup_days: int | None = None, *, open: bool = False) -> str:
+    """Deleting your data is as easy to find as everything else on the list: no hiding it, no
+    guilt-trip wording. The red row "Delete my data…" opens this box, which says what goes, and
+    holds the tick and the solid red final button (as Admin › Users' Delete data…)."""
     kept = (
         f" Nightly database backups keep a copy until they age out after {backup_days} days."
         if backup_days
         else ""
     )
-    box = ui.box(
+    return ui.box(
         "delete",
         "Delete my data?",
         f"<form id='deletef' class='inbox' method='post' action='/account'>{csrf_in}"
         "<input type='hidden' name='action' value='delete_data'>"
+        f"<p>Delete everything this gateway keeps for your account: {DELETED_LIST}.{kept}</p>"
         "<p>Everything this gateway keeps for your account is deleted and you are signed out. Your "
         "decks on Archidekt are not touched. This can't be undone.</p>"
         "<label class='check'><input type='checkbox' id='delete-tick' name='confirm' value='yes' required>"
         "<span>Yes, delete my data from this gateway</span></label></form>",
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             # static/pages.js keeps it disabled until the tick; without scripts `required` holds the form
             ui.box_button(
                 "Delete my data", kind="danger-solid", form="deletef", attrs="data-enabled-by='delete-tick'"
             ),
         ],
         open=open,
-        close_href="/account/details",
-    )
-    return (
-        "<div class='card' id='delete-data'><h2>Delete my data</h2>"
-        f"<p>Delete everything this gateway keeps for your account: {DELETED_LIST}. Your decks on "
-        f"Archidekt are not touched. This can't be undone.{kept}</p>"
-        "<div class='ui-actions'>"
-        + ui.box_opener(
-            "Delete my data…", "/account/details?delete=1", "delete", kind="danger", icon_name="trash"
-        )
-        + f"</div>{box}</div>"
+        close_href=DETAILS,
     )
 
 
@@ -1730,6 +2552,7 @@ LIST_LABELS = {
     "color_tags": "Color tag",
     "pins": "Pin",
     "custom_cards": "Custom card",
+    "collection_tags": "Binder tag",
 }
 
 
@@ -1858,15 +2681,17 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "add",
                     "Clone",
                     html.escape(str(r.get("name", ""))),
-                    html.escape(f"copy of {r.get('source', '')}, {r.get('cards', 0)} cards, private"),
+                    html.escape(
+                        f"copy of {r.get('source', '')}, {plural(int(r.get('cards') or 0), 'card')}, private"
+                    ),
                 )
             )
         elif kind == "new_deck":
             visibility = "private" if r.get("private") else "PUBLIC"
             what = (
-                f"{r.get('cards', 0)} cards, {visibility}; {r['package']}"
+                f"{plural(int(r.get('cards') or 0), 'card')}, {visibility}; {r['package']}"
                 if r.get("package")
-                else f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"
+                else f"{r.get('format', '')}, {plural(int(r.get('cards') or 0), 'card')}, {visibility}"
             )
             if r.get("folder"):
                 what += f"; in folder “{r['folder']}”"
@@ -1936,8 +2761,8 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                 _li(
                     "chg",
                     "Restore",
-                    html.escape(f"snapshot {r.get('snapshot_id', '')}"),
-                    html.escape(f"taken {r.get('taken', '')}, {_restore_count(r)}"),
+                    html.escape(f"as the deck stood on {r.get('taken', '')}"),
+                    html.escape(_restore_count(r)),
                 )
             )
         else:
@@ -1954,7 +2779,7 @@ def _category_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, i
             _li("chg", "Category", html.escape(ln)) for ln in filter(None, map(str.strip, diff.splitlines()))
         ]
         return "".join(items), len(items)
-    items = [_li("chg", "Category", html.escape(row_line(r))) for r in rows]
+    items = [_li("chg", "Category", html.escape(ln)) for ln in diff_of(rows).splitlines()]
     return "".join(items), len(items)
 
 
@@ -1985,7 +2810,7 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
             items.append(
                 _li(
                     "chg",
-                    str(r.get("field", "")).replace("_", " "),
+                    detail_word(r.get("field")),
                     _was_now(r.get("before", ""), r.get("after", ""))
                     + (
                         f"<br><span class='small'>{html.escape(said[0].upper() + said[1:])}</span>"
@@ -2002,14 +2827,95 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
 # The review page's words for a proposal the re-check (recheck.py) marked Needs a look: the deck
 # changed after it was made and the change no longer fits. The reason follows when known.
 OUT_OF_DATE_PAGE = (
-    "Needs a look: the deck changed after this change was made and it no longer fits, so Apply will "
-    "be refused and nothing will be sent. Ask your assistant to update it, or reject it."
+    "Needs a look: the deck changed after this change was made and it no longer fits, so it can't be "
+    "applied as it is. Ask your assistant to update it, or reject it."
 )
 
 
+# A failure that sent nothing: the reason first (_page_step), then this, by who made the change.
+# A change the member made on the website is made again there; there is no assistant to ask.
 FAILED_PLAIN_STEP = (
-    "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
+    "Nothing was changed on Archidekt. Ask your assistant for a new proposal if you still want these edits."
 )
+FAILED_PLAIN_STEP_OWN = "Nothing was changed on Archidekt. Make the change again if you still want it."
+
+
+def _deck_after_html(p: dict[str, Any]) -> str:
+    """A waiting deck edit's line under its summary: the deck once applied (decks.deck_after_block,
+    what an assistant is told as ``deck_after``): its size, whether it is legal, and its price with
+    the change, from the prices known. A card with no known price is named, not guessed."""
+    after = p.get("deck_after")
+    if not isinstance(after, dict) or p.get("kind") not in (None, "edit"):
+        return ""
+    parts = []
+    n = after.get("card_count")
+    if isinstance(n, int):
+        parts.append(f"{n:,} card{'' if n == 1 else 's'}")
+    if after.get("legal") is True:
+        parts.append("legal")
+    elif after.get("legal") is False:
+        parts.append("not legal")
+    total, change = after.get("price_total"), after.get("price_change")
+    if isinstance(total, int | float):
+        price = f"${float(total):,.2f}"
+        if isinstance(change, int | float) and round(float(change), 2):
+            price += f" ({'up' if change > 0 else 'down'} ${abs(float(change)):,.2f})"
+        elif isinstance(change, int | float):
+            price += " (no change)"
+        parts.append(price)
+    else:
+        parts.append("no price is known for its cards")
+    line = "Once applied: " + ", ".join(parts) + "."
+    unpriced = [str(x) for x in after.get("unpriced_added") or [] if x]
+    if unpriced:
+        named = ", ".join(f"“{x}”" for x in unpriced[:5]) + (
+            f" and {len(unpriced) - 5} more" if len(unpriced) > 5 else ""
+        )
+        line += (
+            f" No price is known for {named}, so {'it is' if len(unpriced) == 1 else 'they are'} not counted."
+        )
+    return f"<p class='ui-why pr-after'>{html.escape(line)}</p>"
+
+
+def _cut_off_step(p: dict[str, Any], result: dict[str, Any], outcome: str) -> str:
+    """An apply cut off before it finished (a restart, a crash, one that ran past six hours):
+    decks.interrupted_outcome says whether any write had begun, or what the deck read back
+    afterwards showed. "Nothing was changed" only when that is known."""
+    again = FAILED_PLAIN_STEP_OWN if _made_by_member(p) else FAILED_PLAIN_STEP
+    if outcome == "all":
+        return (
+            "Applying was cut off before the gateway recorded it, but the deck read again afterwards "
+            "has all of this change, so there is nothing more to do."
+        )
+    if outcome == "none":
+        return "Applying was cut off, and the deck read again afterwards has none of this change. " + again
+    if outcome == "nothing":
+        return "Applying was cut off before anything was sent to Archidekt. " + again
+    if p.get("rest_offered"):
+        found = (
+            "and the deck read again afterwards has part of it"
+            if outcome == "part"
+            else "so part or all of it may be on the deck"
+        )
+        return (
+            f"Applying was cut off while this change was being sent to Archidekt, {found}. Propose "
+            "the rest reads the deck and makes a new proposal of only what is still missing, for you "
+            "to review."
+        )
+    undo = (
+        "; the snapshot taken just before it can be restored from History."
+        if result.get("snapshot_id")
+        else "."
+    )
+    return (
+        "Applying was cut off while this change was being sent to Archidekt, so part or all of it may "
+        f"be there. Check before making it again{undo}"
+    )
+
+
+def _made_by_member(p: dict[str, Any]) -> bool:
+    """Whether the member made this change on the gateway's own pages (or it predates a maker)."""
+    return p.get("created_by_client") in (None, "", BROWSER_CLIENT_ID, ADMIN_CLIENT)
 
 
 def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
@@ -2023,11 +2929,17 @@ def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
     if p.get("state") == "pending":
         result = p.get("result") if isinstance(p.get("result"), dict) else {}
         return (
-            result.get("error") == "rate_limited"
+            (result.get("error") == "rate_limited" or bool(p.get("try_again")))
             and bool(p.get("writes_enabled"))
             and not p.get("out_of_date")
         )
-    return p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
+    return p.get("state") == "failed"
+
+
+# a refusal written for the assistant's call (a field "must be" a list, a non-empty list, a dict)
+_DEVELOPER_WORDS = re.compile(
+    r"\bmust be a (non-empty )?(list|dict|whole number|integer)|non-empty list|\bJSON\b"
+)
 
 
 def _page_step(p: dict[str, Any]) -> str:
@@ -2047,9 +2959,18 @@ def _page_step(p: dict[str, Any]) -> str:
             f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
             "so you can apply it again later."
         )
+    if state == "pending" and p.get("try_again"):
+        # Archidekt didn't answer the last apply, and nothing changed there (decks.TRY_AGAIN_KINDS)
+        return f"{outage('stopped')} The change is waiting again: press Try again."
     if state == "pending":
         retry = (
-            "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made. "
+            "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made"
+            + (
+                ": Archidekt no longer accepts the stored session. Relink under Account details, "
+                "then apply it again. "
+                if result.get("relink")
+                else ". "
+            )
             if result.get("error") == "backup_failed"
             else ""
         )
@@ -2071,26 +2992,61 @@ def _page_step(p: dict[str, Any]) -> str:
     if state == "failed" and result.get("error") == "rate_limited":
         return _rate_limited_step(p, result)
     if state == "failed" and p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
-        return (
-            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
-            "Check it, and delete it from its deck page if you don't want it."
-        )
+        return _made_but(p, result)
     if state == "failed" and p.get("kind") == "lists" and result.get("done"):
         n = int(result["done"])
         return (
             f"{n} of the changes {'was' if n == 1 else 'were'} made on Archidekt before this stopped. "
-            "Check My lists; the entries as they were just before are under Before, below."
+            "Check Binder › Lists; the entries as they were just before are under Before, below."
         )
-    if state == "failed" and result.get("sent_entries"):
-        where = "your collection" if p.get("kind") == "collection" else "the deck"
+    cut_off = interrupted_outcome(result) if state == "failed" else ""
+    if cut_off:
+        return _cut_off_step(p, result, cut_off)
+    if state == "failed" and p.get("rest_offered"):
+        return (
+            "Part of this change reached Archidekt before it stopped. Propose the rest makes a new "
+            "proposal of what is still missing, for you to review."
+        )
+    if state == "failed" and (result.get("sent_entries") or result.get("answer_lost")):
+        kind = p.get("kind")
+        where = (
+            "your binder"
+            if kind == "collection"
+            else "your decks on Archidekt"
+            if kind in ("create_deck", "clone")
+            else "your Archidekt account"
+            if kind in ("lists", "action")
+            else "the deck"
+        )
         undo = (
             "; the snapshot taken just before it can be restored from History."
             if result.get("snapshot_id")
             else "."
         )
+        if not result.get("sent_entries"):
+            # a write went out and Archidekt never answered it (0.7.46 audit PA-3): it may have landed
+            return (
+                "Archidekt stopped answering, so this change may have reached it, in part or in full. "
+                f"Check {where} before making it again{undo}"
+            )
         return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
-        return FAILED_PLAIN_STEP
+        # the reason, in the gateway's words (DeckError messages: no codes), then what is left
+        why = str(result.get("detail") or "").strip()
+        if _DEVELOPER_WORDS.search(why):
+            # a proposal whose own content failed the checks (an empty or malformed change list):
+            # the validator's words are for the assistant, not the member (0.7.46 audit QG-21);
+            # said once, with what is left (final audit N09)
+            return (
+                "This change could not be applied: the proposal is empty or damaged. "
+                "Nothing was changed on Archidekt. Ask your assistant for a new one."
+            )
+        lead = (
+            f"This change could not be applied: {why.rstrip('.')}. "
+            if why
+            else "This change could not be applied. "
+        )
+        return lead + (FAILED_PLAIN_STEP_OWN if _made_by_member(p) else FAILED_PLAIN_STEP)
     if state == "rejected":
         by = {
             "assistant": " by your assistant (its reject_proposal call)",
@@ -2100,27 +3056,49 @@ def _page_step(p: dict[str, Any]) -> str:
             "api": " through the gateway's API",
             "disconnected": " when you disconnected the app that made it",
         }.get(str(p.get("closed_by") or ""), "")
-        return f"This proposal was rejected{by}. Nothing was changed."
+        why = str(p.get("reject_reason") or "").strip()
+        # the member's own words from the card (escaped where the line is drawn, _step_html)
+        said = f" Your reason: “{why}”" if why else ""
+        return f"This proposal was rejected{by}. Nothing was changed.{said}"
     if state == "replaced" and p.get("replace_note"):
         return str(p["replace_note"])  # "Replaced by #5."
     return "This proposal can no longer be applied."
+
+
+def _new_what(p: dict[str, Any]) -> str:
+    """ "New card package" for a proposal that makes one, else "New deck"."""
+    rows = p.get("rows") if isinstance(p.get("rows"), list) else []
+    package = any(isinstance(r, dict) and r.get("kind") == "new_deck" and r.get("package") for r in rows)
+    return "New card package" if package else "New deck"
+
+
+def _made_but(p: dict[str, Any], result: dict[str, Any]) -> str:
+    """A new deck or package made on Archidekt before the apply stopped: what differs, when the
+    check after it said so (the result's detail), and what to do."""
+    what = "card package" if _new_what(p) == "New card package" else "deck"
+    if result.get("error") == "verify_mismatch" and result.get("detail"):
+        return (
+            f"{result['detail']} Check the new {what} on Archidekt, and change it there or delete it from "
+            "its deck page if you don't want it."
+        )
+    return (
+        f"A new {what} was made on Archidekt before this stopped, so it may not match the proposal. "
+        "Check it, and delete it from its deck page if you don't want it."
+    )
 
 
 def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
     """The review page's one message for an apply that stopped because Archidekt asked the gateway
     to wait longer than an apply may: why, how far it got, and to try again later."""
     again = "Try again later: ask your assistant for a new proposal."
-    where = "your collection" if p.get("kind") == "collection" else "the deck"
+    where = "your binder" if p.get("kind") == "collection" else "the deck"
     undo = (
         " The snapshot taken just before it can be restored from History."
         if result.get("snapshot_id") and p.get("kind") != "collection"
         else ""
     )
     if p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
-        got = (
-            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
-            "Check it, and delete it from its deck page if you don't want it."
-        )
+        got = _made_but(p, result)
     elif result.get("sent_entries"):
         sent, of = int(result["sent_entries"]), result.get("of_entries")
         got = (
@@ -2148,8 +3126,8 @@ def _progress_html(p: dict[str, Any]) -> str:
     text = "Applying to Archidekt" + (": " + ", ".join(bits) if bits else "") + "."
     if g.get("waiting_for_archidekt"):
         text += (
-            " Archidekt asked us to slow down, so the gateway is waiting about "
-            f"{int(g['waiting_for_archidekt'])} seconds before carrying on by itself."
+            f" {outage('slow_down')} The gateway waits about "
+            f"{int(g['waiting_for_archidekt'])} seconds, then carries on by itself."
         )
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 
@@ -2158,8 +3136,14 @@ def _risk_words(p: dict[str, Any]) -> str:
     """ "Low: 2 card rows, no commander change": the status word and the one-line reason."""
     key = ui.ALIASES.get(str(p.get("risk")), str(p.get("risk")))
     word = ui.LABELS[key].word if key in ui.RISK_KEYS else str(p.get("risk"))
-    why = str(p.get("risk_reason") or "").strip()
+    why = _risk_reason(p)
     return f"{word}: {why}" if why else word
+
+
+def _risk_reason(p: dict[str, Any]) -> str:
+    """The risk's one-line reason; a closed change's is the one stored when it closed (none for
+    one closed before 0.7.46)."""
+    return str(p.get("risk_reason") or "").strip()
 
 
 def _future(ts: int | None, now: float) -> str:
@@ -2181,7 +3165,7 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
     if p.get("kind") == "create_deck" and p["deck_id"] == "new":
         return "Deck", "Creates a new deck"
     if p.get("kind") == "collection":
-        return "Target", "Your Archidekt collection"
+        return "Target", "Your binder"
     if p.get("kind") == "action" and p["deck_id"] == "account":
         return "Target", "Your Archidekt account"
     if p.get("kind") == "action" and str(p["deck_id"]).startswith("forum:"):
@@ -2189,7 +3173,7 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
         title = html.escape(str(p.get("deck_name") or tid))
         return "Forum thread", f"<a href='/forum/thread/{quote(tid, safe='')}'>{title}</a>"
     if p.get("kind") == "lists":
-        return "Target", "<a href='/lists'>Your Archidekt lists</a>"
+        return "Target", "<a href='/collection/lists'>Your Archidekt lists</a>"
     return (
         "Deck",
         f"<a href='/decks/{quote(str(p['deck_id']), safe='')}'>"
@@ -2206,7 +3190,7 @@ def _before_line(kind: str, e: dict[str, Any]) -> str:
             if e.get(k)
         ]
         return f"{e.get('name', '')}: {', '.join(flags) or 'not in deck or price'}"
-    if kind == "color_tags":
+    if kind in ("color_tags", "collection_tags"):
         return f"{e.get('name', '')}: {e.get('color', '')}"
     if kind == "pins":
         note = f", note “{e['notes']}”" if e.get("notes") else ""
@@ -2233,20 +3217,29 @@ def _lists_before(p: dict[str, Any]) -> str:
     )
 
 
-def proposal_heading(p: dict[str, Any]) -> str:
+def heading_no(p: dict[str, Any], live: list[dict[str, Any]] | None = None) -> int | None:
+    """The board number the panel's heading shows: a waiting change's, as on the list, and a
+    failed one's while no change waiting on the deck (``live``: pending_board) holds it, so the
+    member still sees which one they pressed Apply on and the board never shows a number twice."""
+    no = p.get("board_no")
+    if not no:
+        return None
+    if p.get("state") == "pending":
+        return int(no)
+    if p.get("state") == "failed" and not any(o.get("board_no") == no for o in live or []):
+        return int(no)
+    return None
+
+
+def proposal_heading(p: dict[str, Any], no: int | None = None) -> str:
     """The panel's heading: "#1 +1 Arcane Signet, −1 Counterspell" ("New deck: {name}" for a new
-    deck). The number shows while it waits, as on the list."""
+    deck), with ``no`` (heading_no) when given."""
     if p.get("kind") == "create_deck":
-        return html.escape(f"New deck: {p['deck_name']}")
+        return html.escape(f"{_new_what(p)}: {p['deck_name']}")
     lines = str(p.get("diff") or "").splitlines()
     text = ", ".join(lines[:4]) + (f" (+{len(lines) - 4} more)" if len(lines) > 4 else "")
     text = text[:300] or str(p.get("deck_name") or "Proposal")
-    no = (
-        f"<span class='no'>#{int(p['board_no'])}</span> "
-        if p.get("state") == "pending" and p.get("board_no")
-        else ""
-    )
-    return no + html.escape(text)
+    return (f"<span class='no'>#{int(no)}</span> " if no else "") + html.escape(text)
 
 
 def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str:
@@ -2263,8 +3256,224 @@ def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str
     href = f"/proposals?deck_id={quote(str(p['deck_id']), safe='')}"
     return (
         f"<p class='ui-hint pr-also'>{html.escape(text)} "
-        f"<a href='{href}'>Review all {len(others) + 1}</a></p>"
+        f"{ui.cap_link(f'Review all {len(others) + 1}', href)}</p>"
     )
+
+
+# The confirm box a destructive approval opens from its Apply button (ui.box, static/box.js): the
+# title names the thing in curly quotes, the body says what happens and that it cannot be undone,
+# Keep it first, the one solid red button last; that button submits the review page's guarded form
+# (``form='applyf'``), so the stamp, version, status and CSRF checks are the same as for one press.
+CONFIRM_BOX = "confirm-delete"
+
+
+def _confirm_box(title: str, body: str, keep: str, final: str) -> str:
+    return ui.box(
+        CONFIRM_BOX,
+        title,
+        body,
+        actions=[
+            ui.box_button(keep, cancel=True),
+            ui.box_button(
+                final, kind="danger-solid", name="action", value="apply", form="applyf", icon_name="trash"
+            ),
+        ],
+        cls="dangerbox",
+    )
+
+
+def _delete_deck_box(p: dict[str, Any]) -> str:
+    """Deleting a deck: the deck and its size, the snapshot kept first (no backup copy on Archidekt,
+    whatever the backups setting: decks.DELETE_KEEPS_NO_COPY)."""
+    name = str(p.get("deck_name") or "this deck")
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    size = f" ({plural(int(changes['cards']), 'card')})" if str(changes.get("cards") or "").isdigit() else ""
+    body = (
+        f"<p>This deletes <strong>“{html.escape(name)}”</strong>{size} from your Archidekt account. "
+        "The gateway keeps a snapshot of it under History first and checks that the deck is unchanged "
+        "since this proposal. No copy is made on Archidekt, and a snapshot can't be restored onto a "
+        "deleted deck. <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Delete this deck.</p>"
+    )
+    return _confirm_box(f"Delete “{name}”?", body, "Keep it", "Delete this deck")
+
+
+def _clear_binder_box(p: dict[str, Any]) -> str:
+    """Clearing the whole binder (actions.py clear_collection): how many entries go, the copy kept
+    under History first, and that Archidekt has no undo."""
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    n = int(changes.get("entries") or 0)
+    size = plural(n, "entry", "entries") if n else "every entry"
+    if isinstance(changes.get("cards"), int):
+        size += f" ({plural(int(changes['cards']), 'card')})"
+    body = (
+        f"<p>This removes <strong>{html.escape(size)}</strong> from your binder on Archidekt. The "
+        "gateway keeps a copy of your whole binder under History first: download it as a CSV, or put it "
+        "back with “Restore to my binder”. <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Clear my binder.</p>"
+    )
+    return _confirm_box("Clear your whole binder?", body, "Keep it", "Clear my binder")
+
+
+def _purge_box(p: dict[str, Any]) -> str:
+    """Removing a removed card's row for good (actions.py ``purge_removed``): the card, the deck,
+    and that neither Archidekt nor a snapshot can bring the row back."""
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    card = str(changes.get("name") or "this card")
+    deck = str(p.get("deck_name") or "this deck")
+    body = (
+        f"<p>This deletes the row Archidekt keeps for <strong>“{html.escape(card)}”</strong>, taken out of "
+        f"“{html.escape(deck)}”. The gateway reads the deck again first. The gateway's snapshots don't "
+        "hold these rows. <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Remove for good.</p>"
+    )
+    return _confirm_box(f"Remove “{card}” for good?", body, "Keep it", "Remove for good")
+
+
+def _custom_cards_box(p: dict[str, Any]) -> str:
+    """Taking custom cards out of a deck (modes.custom_cards_risk): each card that ends with
+    fewer copies, by name; a snapshot restore does not put them back."""
+    name = str(p.get("deck_name") or "this deck")
+    fewer = []
+    for r in p.get("rows") or []:
+        try:
+            before, after = int(r.get("before") or 0), int(r.get("after") or 0)
+        except (TypeError, ValueError):
+            continue
+        if after < before:
+            fewer.append((str(r.get("name") or ""), before, after))
+    n = len(fewer) or 1
+
+    def copies(before: int, after: int) -> str:
+        return f" ({before} copies → {after})" if after else ""
+
+    if len(fewer) == 1:
+        card, before, after = fewer[0]
+        what = (
+            f"This takes <strong>“{html.escape(card)}”</strong> out of the deck on Archidekt"
+            f"{copies(before, after)}."
+        )
+    elif fewer:
+        cards = ", ".join(f"<strong>“{html.escape(c)}”</strong>{copies(b, a)}" for c, b, a in fewer)
+        what = f"This takes {n} custom cards out of the deck on Archidekt: {cards}."
+    else:
+        what = "This takes custom cards out of the deck on Archidekt."
+    body = (
+        f"<p>{what} The gateway checks the deck again first and reads it back after. "
+        "<strong>Restoring a snapshot doesn't put custom cards back.</strong> To have one again, add it "
+        "from Binder › Lists › Custom cards.</p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Take them out.</p>"
+    )
+    title = f"Take {plural(n, 'custom card')} out of “{name}”?"
+    return _confirm_box(title, body, "Keep them", "Take them out")
+
+
+def _lists_delete_box(p: dict[str, Any]) -> str:
+    """A list change that deletes (account_lists.DELETES): the entries that go, by name; the
+    proposal's other changes are applied with them."""
+    rows = p.get("rows") or []
+    gone = [str(r.get("text") or "") for r in rows if r.get("destructive")]
+    rest = len(rows) - len(gone)
+    items = "".join(f"<li>{html.escape(t)}</li>" for t in gone)
+    others = (
+        " The other change in this proposal is applied with it."
+        if rest == 1
+        else f" The other {rest} changes in this proposal are applied with it."
+        if rest
+        else ""
+    )
+    body = (
+        f"<p>This deletes from your lists on Archidekt:</p><ul>{items}</ul>"
+        f"<p>The gateway reads the list again first and keeps a copy of the entries it changes from just "
+        f"before, then reads the list back.{others} <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        f"you press Delete {plural(len(gone), 'entry', 'entries')}.</p>"
+    )
+    final = f"Delete {plural(len(gone), 'entry', 'entries')}"
+    return _confirm_box("Delete from your Archidekt lists?", body, "Keep them", final)
+
+
+# Proposals the website can test (owner decision C7): a deck edit (paired against the deck as it is)
+# and a new deck's list.
+TESTABLE_KINDS = frozenset({"edit", "create_deck"})
+# and in every state but one whose apply is under way or did not finish (reports.run_proposal): an
+# applied one as it was applied, a closed one as what it would make of the deck now
+UNTESTABLE_STATES = frozenset({"applying", "failed"})
+TEST_THIS_CHANGE = "Test this change"
+
+
+def _proposal_tests(p: dict[str, Any], csrf: str | None, *, now: float) -> str:
+    """The proposal's test reports, newest first, and a Test this change button (UNTESTABLE_STATES)."""
+    links = [
+        ui.button_link(
+            f"Report, {ui.when_text(x.get('taken_at'), now=now)}", f"/history/reports/{x['report_id']}"
+        )
+        for x in p.get("sim_reports") or []
+    ]
+    if (
+        p.get("state") not in UNTESTABLE_STATES
+        and p.get("can_test")
+        and (p.get("kind") or "edit") in TESTABLE_KINDS
+    ):
+        links.insert(
+            0,
+            f"<form method='post' action='/proposals/{html.escape(str(p['proposal_id']))}/test' "
+            "class='inline'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            "<button type='submit' class='btn btn-plain' data-busy-label='Testing…'>"
+            f"{icon('play')}<span class='label'>{TEST_THIS_CHANGE}</span></button></form>",
+        )
+    return f"<span class='ui-actions'>{''.join(links)}</span>" if links else ""
+
+
+PAIRED_RUNNING = "Testing the change against the deck now. This page shows the result once it is in."
+
+
+def _proposal_paired(p: dict[str, Any]) -> str:
+    """The newest test's paired result (the deck after the change against the deck as it is, game for
+    game): its verdict and one row per number, with a way to the full report."""
+    from .report_view import ab_deltas, ab_verdict
+
+    for x in p.get("sim_reports") or []:
+        block = x.get("paired")
+        if not isinstance(block, dict):
+            if x.get("status") == "running":
+                return f"<p class='ui-sub pr-test' role='status'>{html.escape(PAIRED_RUNNING)}</p>"
+            continue
+        rows = ab_deltas(block)
+        if not block.get("ok") or not rows:
+            continue
+        verdict = ab_verdict(rows)
+        meta = [
+            (
+                str(r["label"]),
+                html.escape(str(r["words"]))
+                # better or worse only when the difference is not within chance
+                + (
+                    {"better": " · Better", "worse": " · Worse"}.get(str(r["way"]), "")
+                    if r["clear"] is not False
+                    else ""
+                )
+                + {True: " · Clear difference", False: " · Could be chance"}.get(r["clear"], ""),
+            )
+            for r in rows
+        ]
+        return (
+            "<section class='pr-test' aria-labelledby='pr-test-h'>"
+            "<h3 class='ui-section' id='pr-test-h'>Against the deck now</h3>"
+            "<p class='ui-sub'>The deck after this change against the deck as it is, game for game under "
+            "the same seeds (solo test).</p>"
+            + (f"<p class='b'>{html.escape(verdict)}</p>" if verdict else "")
+            + ui.meta(meta)
+            + "<p class='ui-actions'>"
+            + ui.button_link("Open the test", f"/history/reports/{x['report_id']}")
+            + "</p></section>"
+        )
+    return ""
 
 
 def _proposal_body(
@@ -2338,10 +3547,9 @@ def _proposal_body(
     ]
     if status == "updated":
         pills.append(ui.status_label("updated", title=str(p.get("status_reason") or "")))
+    # a closed one with nothing to judge it by shows no risk label at all (no lone dash)
     if p.get("risk") and ui.ALIASES.get(str(p["risk"]), str(p["risk"])) in ui.RISK_KEYS:
-        pills.append(ui.risk_label(str(p["risk"]), title=str(p.get("risk_reason") or "")))
-    elif not p.get("risk"):  # closed with nothing to judge it by
-        pills.append(ui.no_risk_label())
+        pills.append(ui.risk_label(str(p["risk"]), title=_risk_reason(p)))
     under = []
     if p.get("risk"):
         under.append(f"<p class='ui-why pr-why'>{html.escape(_risk_words(p))}</p>")
@@ -2394,39 +3602,76 @@ def _proposal_body(
         )
     else:
         meta_rows.append(("Version", str(int(p.get("version") or 1))))
+    tested = _proposal_tests(p, csrf, now=now)
+    if tested:
+        meta_rows.append(("Tests", tested))
+    # Needs a look: said once, in the orange box with its reason, not again as the next step (A21)
+    why_stale = str(p.get("status_reason") or "").strip()
     stale = (
-        f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}</p>"
+        f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}"
+        + (f" Why: {html.escape(why_stale)}" if why_stale else "")
+        + "</p>"
         if pending and p.get("out_of_date")
         else ""
     )
+    step = step and not (stale and _page_step(p).startswith(OUT_OF_DATE_PAGE))
     body = (
         f"<div class='pills'>{''.join(pills)}</div>"
         + "".join(under)
         + (f"<p class='ui-next'>{_step_html(p)}</p>" if step else "")
         + _progress_html(p)
         + ui.meta(meta_rows)
+        + _proposal_paired(p)
         + stale
-        + f"<h3 class='ui-section'>{heading}</h3>"
+        # a failed change will change nothing: what it asked for
+        + f"<h3 class='ui-section'>{'What it asked for' if p.get('state') == 'failed' else heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"
-        f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
+        + _deck_after_html(p)
+        + f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary class='fold-btn'>Plain-text diff</summary>{raw}</details>"
         + _lists_before(p)
         + _also_waiting(p, others)
     )
-    if pending and p["writes_enabled"]:
+    if pending and p["writes_enabled"] and not p.get("out_of_date"):
         # the member-only tier is shared: deleting a deck, deleting from the lists (below) and
-        # taking custom cards out of a deck each say what they do
+        # taking custom cards out of a deck each say what they do, and each asks once more in the
+        # site's one confirm box (_confirm_box) before the solid red button sends it
         destroy = p.get("risk") == "destructive" and p.get("kind") == "action"
+        box = ""
         if p.get("risk") == "destructive" and p.get("kind") == "custom_cards":
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Take custom cards out of the deck?</h3>"
                 "<p class='notice warn'><strong>Restoring a snapshot doesn't put custom cards back.</strong> "
-                "To have one again, add it from My lists › Custom cards.</p>"
+                "To have one again, add it from Binder › Lists › Custom cards.</p>"
                 "<p class='small'>The gateway checks the deck again first and reads it back after. Only "
                 "you can approve this, in every approval mode. Nothing happens until you tap "
                 "Take them out on Archidekt.</p>"
             )
             apply_button = ("apply", "Take them out on Archidekt", "btn-outline-danger")
+            box = _custom_cards_box(p)
+        elif destroy and (p.get("changes") or {}).get("action") == "clear_collection":
+            ask = (
+                "<div class='apply destroy'><h3 class='ui-section'>Clear your whole binder on Archidekt?"
+                "</h3><p class='notice error'><strong>This removes every entry from your binder on "
+                "Archidekt. Archidekt itself has no undo.</strong></p>"
+                "<p class='small'>The gateway first keeps a copy of your whole binder under History, where "
+                "you can download it as a CSV or put it back with Restore to my binder, and checks that "
+                "your binder still has the entries reviewed here. Only you can approve this, in every "
+                "approval mode. Nothing happens until you tap Clear.</p>"
+            )
+            apply_button = ("apply", "Clear my binder on Archidekt", "btn-outline-danger")
+            box = _clear_binder_box(p)
+        elif destroy and (p.get("changes") or {}).get("action") == "purge_removed":
+            ask = (
+                "<div class='apply destroy'><h3 class='ui-section'>Remove this card's row for good?</h3>"
+                "<p class='notice error'><strong>This deletes the row Archidekt keeps for a card taken out "
+                "of the deck. Archidekt itself has no undo.</strong></p>"
+                "<p class='small'>The gateway reads the deck again first and stops if the card is back in "
+                "the deck. Only you can approve this, in every approval mode. Nothing happens until you "
+                "tap Remove for good.</p>"
+            )
+            apply_button = ("apply", "Remove for good on Archidekt", "btn-outline-danger")
+            box = _purge_box(p)
         elif destroy:
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"
@@ -2436,10 +3681,12 @@ def _proposal_body(
                 "keeps a snapshot of it first. Only you can approve this, in every approval mode. "
                 "Nothing happens until you tap Delete.</p>"
             )
-            # a red outline first; static/proposals.js asks once more with the solid red button
-            apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger pr-ask")
+            apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger")
+            box = _delete_deck_box(p)
         elif p.get("kind") == "lists":
             deletes = any(r.get("destructive") for r in p.get("rows") or [])
+            if deletes:
+                box = _lists_delete_box(p)
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to your Archidekt lists?</h3>"
                 "<p>Applying writes these changes to your lists on Archidekt. The gateway reads the list "
@@ -2462,22 +3709,26 @@ def _proposal_body(
             )
             apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-primary")
         else:
-            where = "your collection" if p.get("kind") == "collection" else "your deck"
+            where = "your binder" if p.get("kind") == "collection" else "your deck"
+            # one line and a way to the longer story (0.7.46 audit QG-23): the Guide tells how
+            # the apply checks the deck, keeps a snapshot and reads the result back
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to Archidekt?</h3>"
-                f"<p>Applying writes these changes to {where} on Archidekt. "
-                "The gateway applies the changes, then reads the result back from "
-                "Archidekt. For a change to one of your decks, it first checks that the deck still matches "
-                "this proposal and keeps a snapshot of it from just before the edit. Nothing happens until "
-                "you tap Apply.</p>"
+                f"<p>Apply writes these changes to {where} on Archidekt, with a snapshot kept first so "
+                "Undo can put it back. <a class='tap' href='/guide#how-approve'>How it works</a></p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-primary")
+        if p.get("try_again"):  # Archidekt didn't answer the last apply; nothing changed
+            apply_button = ("apply", "Try again", "primary btn-primary")
         body += (
             ask
             # Apply and Reject stay disabled until the click guard sees the page in use: a
             # connected app must not get its own proposal applied by a double-click on a page it
-            # controls that swaps this window in (clickguard.py).
+            # controls that swaps this window in (clickguard.py). A destructive one's Apply opens
+            # the confirm box, whose red button submits this form (CONFIRM_BOX).
             + guarded_form(
+                form_id="applyf",
+                opens={"apply": CONFIRM_BOX} if box else None,
                 # The version shown; an apply of a proposal amended since is refused
                 hidden={
                     "csrf": csrf or "",
@@ -2494,6 +3745,7 @@ def _proposal_body(
                 extra="<a class='btn btn-plain' href='/proposals'>Not now</a>",
             )
             + "</div>"
+            + box
         )
     elif pending:
         body += (
@@ -2520,10 +3772,24 @@ def _proposal_body(
             f"<input type='hidden' name='after' value='{int(p.get('applied_at') or 0)}'>"
             "<button class='btn-plain'>Undo this change</button></form>"
         )
+    if p.get("rest_offered") and csrf:
+        # a deck change that stopped partway: the gateway proposes what is still missing
+        actions.append(
+            "<form method='post' class='rest'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+            f"<input type='hidden' name='shown' value='{html.escape(shown)}'>"
+            "<input type='hidden' name='action' value='rest'>"
+            "<button class='btn'>Propose the rest</button></form>"
+        )
+    elif p.get("rest_proposal_id"):
+        actions.append(
+            f"<a class='btn btn-plain' href='/proposals/{html.escape(str(p['rest_proposal_id']))}'>"
+            "Open the proposal of the rest</a>"
+        )
     # who rejected it (closed_by, said above) is not a result worth a box of its own
     result = p.get("result")
     if isinstance(result, dict):
-        result = {k: v for k, v in result.items() if k not in ("rejected_by", "client")}
+        result = {k: v for k, v in result.items() if k not in ("rejected_by", "client", "reject_reason")}
     url = result.get("deck_url") if isinstance(result, dict) and result else None
     if url:
         actions.append(
@@ -2574,7 +3840,6 @@ def _pretty(obj: Any) -> str:
 # -- 0.7.29: the waiting changes as a list with checkboxes, applied together (batch.py) ------------
 
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
-BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
 LIST_STYLE = f"<style>{LIST_CSS}</style>"
 # The Undo buttons open their confirm in a box (static/undo-box.js); the "Undo this change?" page
 # stays as the answer without scripts. The Applied page's rows update in place while applying.
@@ -2659,14 +3924,16 @@ def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf:
     )
     return (
         f"<h1>{html.escape(reject_ask(len(picks)))}</h1><p class='muted'>{REJECT_NOTE}</p>"
-        "<form method='post' action='/proposals/select' class='rejectconfirm'>"
+        "<form method='post' action='/proposals/select' class='rejectconfirm' data-draft='reject'>"
         f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
         f"<input type='hidden' name='back' value='{html.escape(back)}'>"
         "<input type='hidden' name='sure' value='1'>"
-        f"{hidden}<p class='actions'>"
+        f"{hidden}<label for='reject-reason'>Reason (optional)"
+        "<textarea id='reject-reason' name='reason' rows='2' maxlength='500' "
+        "placeholder='Your assistant sees this'></textarea></label><p class='actions'>"
+        f"<a class='btn btn-plain' href='{html.escape(back)}'>Keep it</a> "
         f"<button type='submit' name='action' value='reject' class='danger'>"
-        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button> "
-        f"<a class='btn btn-plain' href='{html.escape(back)}'>Cancel</a></p></form>"
+        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button></p></form>"
     )
 
 
@@ -2744,7 +4011,7 @@ def _confirm_body(
             "all.</strong> They run in this order, each checked against the deck just before it is "
             "sent. A snapshot of each deck is kept first, so Undo can put its cards and details back. "
             "Only deck edits, details changes and restores have Undo: account actions (likes, follows, "
-            "comments and the like), collection edits, new decks and copies don't.</p>"
+            "comments and the like), binder edits, new decks and copies don't.</p>"
         )
     for deck in plan["decks"]:
         out.append(f"<h2>{html.escape(deck['deck_name'])}</h2><ol class='order'>")
@@ -2796,6 +4063,7 @@ def _confirm_body(
 
 
 APPLY_BOX_NOTE = "A snapshot is kept first, so Undo can put the cards back."
+APPLY_BOX_GUARD_HINT = "On a phone, tap once to unlock, then tap Apply."
 
 
 def _apply_box_html(
@@ -2850,7 +4118,14 @@ def _apply_box_html(
             f"<input type='hidden' name='{html.escape(k)}' value='{html.escape(v)}'>"
             for k, v in hidden.items()
         )
-        out.append(f"<form id='apply-f' method='post' action='/proposals/apply'>{fields}</form>")
+        # the click guard as on the confirm page (clickguard.py, data-tab): Apply stays locked, but
+        # in the Tab order, until the box has been seen and used; static/proposals.js restarts the
+        # guard's clocks as the box opens and opens the page instead when the guard is missing
+        out.append(
+            f"<form id='apply-f' method='post' action='/proposals/apply' class='guarded' data-tab "
+            f"data-dwell='{GUARD_DWELL_MS}' data-settle='{GUARD_SETTLE_MS}'>{fields}</form>"
+            f"<p class='muted small guard-hint'>{APPLY_BOX_GUARD_HINT}</p>"
+        )
         actions.append(
             ui.box_button(
                 "Apply" if n == 1 else f"Apply {n}",
@@ -2859,6 +4134,7 @@ def _apply_box_html(
                 name="action",
                 value="apply",
                 icon_name="check",
+                attrs="data-guard aria-disabled='true'",
             )
         )
     return ui.box("apply-box", title, "".join(out), actions=actions, close_href=back)
@@ -2921,19 +4197,96 @@ def undo_rows_left(left: int) -> str:
     return "1 more row is not shown." if left == 1 else f"{left} more rows are not shown."
 
 
-def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list[str], after_at: int) -> str:
+# Where an Undo drawn beside the member's own one-click save (undo_box_form's ``back``) returns
+# to once done (independent review 2, M2): the deck page, its Deck settings, or My lists'
+# Templates tab, each with its "Undone." notice. Only these exact addresses; anything else is
+# ignored and the restore's own review page is shown, as before.
+_UNDO_BACK = re.compile(r"/decks/(\d{1,12})(/settings)?|/lists/templates")
+
+
+def undo_back(raw: str | None, deck_id: str | None = None) -> str:
+    """The checked return address of an Undo form, or '' (``deck_id``: a deck address must be the
+    deck the Undo is of)."""
+    m = _UNDO_BACK.fullmatch(raw or "")
+    if m is None or (m.group(1) and deck_id is not None and m.group(1) != str(deck_id)):
+        return ""
+    return m.group(0)
+
+
+def undo_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """What an Undo puts back, one line per card in words (independent review 2, L14): a card that
+    leaves one category for another is "Cultivate: Removal → Ramp", not a -1 and a +1 in tool
+    notation; an add or a removal says so with its copies; a count "Sol Ring: 1 → 2 copies".
+    The deck's own rows (its categories, details) keep their sentences (decks.row_line)."""
+
+    def who(r: dict[str, Any]) -> tuple[str, str, str]:
+        return (str(r.get("name", "")), str(r.get("printing") or ""), str(r.get("zone") or ""))
+
+    def where(r: dict[str, Any]) -> str:
+        return str(r.get("category") or "no category")
+
+    plain = [r for r in rows if r.get("kind") in ("add", "remove") and not r.get("companion_card")]
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for r in plain:
+        groups.setdefault(who(r), []).append(r)
+    out: list[str] = []
+    said: set[tuple[str, str, str]] = set()
+    for r in rows:
+        kind = r.get("kind")
+        if r in plain:
+            key = who(r)
+            if key in said:
+                continue
+            said.add(key)
+            gone = [x for x in groups[key] if x["kind"] == "remove"]
+            back = [x for x in groups[key] if x["kind"] == "add"]
+            name = key[0]
+            if (
+                gone
+                and back
+                and sum(int(x.get("qty") or 0) for x in gone) == sum(int(x.get("qty") or 0) for x in back)
+            ):
+                was = " and ".join(dict.fromkeys(where(x) for x in gone))
+                now = " and ".join(dict.fromkeys(where(x) for x in back))
+                out.append(f"{name}: {was} → {now}")
+                continue
+            for x in gone:
+                out.append(
+                    f"Take out {plural(int(x.get('qty') or 0), 'copy', 'copies')} of {name} from {where(x)}"
+                )
+            for x in back:
+                out.append(
+                    f"Put back {plural(int(x.get('qty') or 0), 'copy', 'copies')} of {name} in {where(x)}"
+                )
+        elif kind == "change" and not r.get("fold") and not r.get("companion_card"):
+            now = plural(int(r.get("after") or 0), "copy", "copies")
+            out.append(f"{r.get('name', '')}: {r.get('before')} → {now}")
+        else:
+            out.append(row_line(r))
+    return out
+
+
+def undone_url(back: str) -> str:
+    return back + "?ok=undone" + ("#categories" if back.endswith("/settings") else "")
+
+
+def _undo_body(
+    look: dict[str, Any], csrf: str | None, shown: str, applied: list[str], after_at: int, back: str = ""
+) -> str:
     """Flow G step 3-4: what Undo puts back, and the one warning when that is more than the apply."""
     out = [f"<div class='card' id='undo-confirm'><h2>{html.escape(look['deck_name'])}</h2>"]
+    leave = html.escape(back or "/proposals")
     if look["nothing"]:
         out.append("<p>The deck already matches how it was before that change. There is nothing to undo.</p>")
-        return "".join(out) + "<p><a class='btn btn-plain' href='/proposals'>Back</a></p></div>"
+        return "".join(out) + f"<p><a class='btn btn-plain' href='{leave}'>Back</a></p></div>"
     if look["warning"]:
         out.append(f"<p class='notice warn'>{html.escape(look['warning'])}</p>")
     out.append("<p>Undo puts the deck back as it was before that change:</p><ul class='results'>")
-    for r in look["rows"][:UNDO_ROWS_SHOWN]:
-        out.append(f"<li>{html.escape(row_line(r))}</li>")
+    lines = undo_lines(look["rows"])
+    for line in lines[:UNDO_ROWS_SHOWN]:
+        out.append(f"<li>{html.escape(line)}</li>")
     out.append("</ul>")
-    left = len(look["rows"]) - UNDO_ROWS_SHOWN
+    left = len(lines) - UNDO_ROWS_SHOWN
     if left > 0:
         out.append(f"<p class='muted'>{undo_rows_left(left)}</p>")
     out.append(
@@ -2945,10 +4298,11 @@ def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list
                 "snapshot": look["snapshot_id"],
                 "applied": ",".join(applied),
                 "after": str(after_at),
+                **({"back": back} if back else {}),
             },
             buttons=[("undo", "Undo: put the deck back", "primary btn-primary")],
             action="/proposals/undo",
-            extra="<a class='btn btn-plain' href='/proposals'>Not now</a>",
+            extra=f"<a class='btn btn-plain' href='{leave}'>Not now</a>",
             tab_reachable=True,
         )
     )

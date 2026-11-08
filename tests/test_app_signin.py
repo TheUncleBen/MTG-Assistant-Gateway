@@ -6,14 +6,15 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 import pytest
 
 from mtg_gateway.app_page import app_package
-from mtg_gateway.app_signin import RETURN_PATH, AppSignins, challenge_of, intent_url
+from mtg_gateway.app_signin import FRESH_SKEW, RETURN_PATH, AppSignins, challenge_of, intent_url
 
 from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
 
@@ -37,13 +38,28 @@ def pair() -> tuple[str, str]:
     return verifier, challenge_of(verifier)
 
 
+async def go_on(browser: httpx.AsyncClient, params: dict[str, str]) -> httpx.Response:
+    """The app's address in the phone's browser shows the page before the identity provider
+    (app_signin.confirm_body); press its Continue. The answer sends the browser to the provider."""
+    page = await browser.get("/login", params=params)
+    assert page.status_code == 200 and "<h1>Sign in to the app?</h1>" in page.text, page.text
+    r = await browser.post("/login", data={"leg": leg_token(page), "action": "continue"})
+    assert r.status_code == 303 and r.headers["location"].startswith("https://idp.test"), r.text
+    return r
+
+
+def leg_token(page: httpx.Response) -> str:
+    m = re.search(r"name='leg' value='([A-Za-z0-9_-]{43})'", page.text)
+    assert m, page.text
+    return m.group(1)
+
+
 async def browser_leg(
     h: Harness, browser: httpx.AsyncClient, challenge: str, next_path: str = "/decks"
 ) -> httpx.Response:
     """The part that runs in the phone's browser: /login with the challenge, the identity provider,
     then /auth/callback, which answers with the page that opens the app."""
-    r = await browser.get("/login", params={"next": next_path, "app_challenge": challenge})
-    assert r.status_code == 302, r.text
+    r = await go_on(browser, {"next": next_path, "app_challenge": challenge})
     cb = urlparse(await h.idp_leg(r))
     back = await browser.get(f"{cb.path}?{cb.query}")
     if back.status_code != 303:
@@ -134,11 +150,10 @@ async def test_bad_challenge_and_fresh_sign_in(harness: Harness) -> None:
         r = await browser.get("/login", params={"next": "/", "app_challenge": "not-a-challenge"})
         assert r.status_code == 400
         _v, challenge = pair()
-        r = await browser.get("/login", params={"next": "/", "app_challenge": challenge, "fresh": "1"})
-        assert r.status_code == 302
+        r = await go_on(browser, {"next": "/", "app_challenge": challenge, "fresh": "1"})
         assert parse_qs(urlparse(r.headers["location"]).query).get("prompt") == ["login"]
-        r = await browser.get("/login", params={"next": "//evil.test", "app_challenge": challenge})
-        assert r.status_code == 302  # next is cleaned when the app finishes (same rule as everywhere)
+        # next is cleaned when the app finishes (same rule as everywhere)
+        await go_on(browser, {"next": "//evil.test", "app_challenge": challenge})
 
 
 async def test_in_app_login_after_sign_out_passes_fresh_on(harness: Harness) -> None:
@@ -219,12 +234,20 @@ async def test_fresh_survives_backing_out_until_a_sign_in_completes(harness: Har
         assert any("mtg_fresh_login=" in v and "Max-Age=0" in v for v in done.headers.get_list("set-cookie"))
 
 
-async def test_return_page_waits_for_a_tap_and_names_the_app(harness: Harness) -> None:
+async def test_return_page_opens_the_app_once_and_keeps_the_button(harness: Harness) -> None:
+    """The last fallback (a browser without Auth Tabs, or an older app): the page tries the app's
+    intent: link once by itself (app-signin.js, once per code), and its button names the app."""
     _v, challenge = pair()
     async with client(harness) as browser:
         page = await browser_leg(harness, browser, challenge)
         assert "Open the MTG Assistant Gateway app" in page.text
-        assert "app-signin.js" not in page.text
+        # after the panel, run once the page has loaded (U1: the small print is drawn first)
+        assert re.search(
+            r"</section></div><script src='/static/app-signin.js\?v=[0-9a-f]{12}' defer></script>", page.text
+        )
+        assert "script-src 'self'" in page.headers["content-security-policy"]
+        js = (await browser.get("/static/app-signin.js")).text
+        assert 'getElementById("app-return")' in js and "sessionStorage" in js
 
 
 async def test_the_callback_returns_through_the_gateways_own_address(harness: Harness) -> None:
@@ -232,7 +255,10 @@ async def test_the_callback_returns_through_the_gateways_own_address(harness: Ha
     (assetlinks.json), so the callback sends the code there instead of drawing the page itself."""
     _v, challenge = pair()
     async with client(harness) as browser:
-        r = await browser.get("/login", params={"next": "/decks", "app_challenge": challenge})
+        r = await go_on(browser, {"next": "/decks", "app_challenge": challenge})
+        # the app's first try: the verified https Auth Tab, which needs no new sign-in at the
+        # identity provider (only the app assetlinks.json names gets this address back)
+        assert "prompt" not in parse_qs(urlparse(r.headers["location"]).query)
         cb = urlparse(await harness.idp_leg(r))
         back = await browser.get(f"{cb.path}?{cb.query}")
         assert back.status_code == 303, back.text
@@ -289,3 +315,376 @@ async def test_assetlinks_vouch_for_the_bundled_app_without_a_setting(
     monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", tmp_path / "nowhere")
     async with running(Harness(make_settings(tmp_path / "b"), idp)) as h, client(h) as web:
         assert (await web.get("/.well-known/assetlinks.json")).json() == []
+
+
+# -- 0.7.46: the retry on the app's own scheme, when Digital Asset Links can't verify the app -------
+async def scheme_leg(h: Harness, browser: httpx.AsyncClient, challenge: str, next_path: str = "/decks"):
+    r = await go_on(browser, {"next": next_path, "app_challenge": challenge, "app_return": "scheme"})
+    return r, await browser.get("{0.path}?{0.query}".format(urlparse(await h.idp_leg(r))))
+
+
+async def test_a_sign_in_started_for_the_apps_scheme_comes_back_by_itself(harness: Harness) -> None:
+    """The app's retry names its own scheme (mtgassistant-signin): the callback ends the browser
+    leg with a redirect there, which the Auth Tab hands to the app that opened it and closes, no
+    tap and no assetlinks.json. The code is the same one-time code, bound to the app's challenge."""
+    verifier, challenge = pair()
+    async with client(harness) as browser, client(harness) as app:
+        start, back = await scheme_leg(harness, browser, challenge)
+        # the identity provider is asked for a sign-in of its own (security note: another app on
+        # the phone could start this leg too, and a silent pass-through must not hand it a session)
+        asked = parse_qs(urlparse(start.headers["location"]).query)
+        assert asked.get("prompt") == ["login"]
+        # and max_age=0, which providers enforce more often than prompt=login
+        assert asked.get("max_age") == ["0"]
+        assert back.status_code == 303, back.text
+        assert back.headers["cache-control"] == "no-store"
+        assert back.headers["referrer-policy"] == "no-referrer"
+        assert "mtg_session=" not in back.headers.get("set-cookie", "")
+        to = urlparse(back.headers["location"])
+        assert (to.scheme, to.netloc, to.path) == ("mtgassistant-signin", "signin", "")
+        (code,) = parse_qs(to.query)["code"]
+        assert re.fullmatch(r"[A-Za-z0-9_-]{43}", code) and to.query == f"code={code}"
+        # without the verifier the code is worth nothing, and it is burnt by the try
+        bad = await app.post("/login/app", data={"code": code, "verifier": pair()[0]}, headers=APP_UA)
+        assert bad.status_code == 400
+
+    verifier, challenge = pair()
+    async with client(harness) as browser, client(harness) as app:
+        _start, back = await scheme_leg(harness, browser, challenge)
+        code = parse_qs(urlparse(back.headers["location"]).query)["code"][0]
+        done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
+        assert done.status_code == 303 and done.headers["location"] == "/decks"
+        assert "mtg_session=" in done.headers["set-cookie"]
+        assert (await app.get("/account/details")).status_code == 200
+
+
+async def test_only_the_apps_scheme_can_be_asked_for(harness: Harness) -> None:
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        for odd in ("https", "evil-app", "SCHEME", ""):
+            r = await browser.get(
+                "/login", params={"next": "/", "app_challenge": challenge, "app_return": odd}
+            )
+            assert r.status_code == 400, odd
+        # and only with the app's challenge: a plain browser sign-in has no code to hand over
+        r = await browser.get("/login", params={"next": "/", "app_return": "scheme"})
+        assert r.status_code == 302 and "app_return" not in r.headers["location"]
+
+
+async def test_a_scheme_leg_needs_a_sign_in_made_after_it_started(harness: Harness, idp: FakeIdP) -> None:
+    """The gateway does not rely on the identity provider honouring prompt=login: the ID token's
+    auth_time must be no older than the leg (a few seconds' clock skew allowed, FRESH_SKEW). Without
+    it the leg ends on the app's scheme with no code at all, and the app finishes in a Custom Tab
+    instead. A sign-in made 30 seconds before the leg started (on the gateway's website, say) is
+    not one made during it."""
+    assert FRESH_SKEW <= 5
+    idp.honours_prompt_login = False  # a provider that passes the browser straight through
+    for auth_time in (None, int(time.time()) - 3600, int(time.time()) - 30):
+        idp.auth_time = auth_time
+        _v, challenge = pair()
+        async with client(harness) as browser:
+            _start, back = await scheme_leg(harness, browser, challenge)
+            assert back.status_code == 303, back.text
+            assert back.headers["location"] == "mtgassistant-signin://signin?error=sign_in_not_fresh"
+            assert back.headers["cache-control"] == "no-store"
+            assert "mtg_session=" not in back.headers.get("set-cookie", "")
+        assert not harness.app.state.gateway.app_signins._codes, auth_time  # no code was made for anyone
+
+    # a sign-in at the provider within the skew counts (clocks differ a little)
+    verifier, challenge = pair()
+    idp.auth_time = int(time.time()) - FRESH_SKEW + 2
+    async with client(harness) as browser, client(harness) as app:
+        _start, back = await scheme_leg(harness, browser, challenge)
+        (code,) = parse_qs(urlparse(back.headers["location"]).query)["code"]
+        done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
+        assert done.status_code == 303 and "mtg_session=" in done.headers["set-cookie"]
+
+
+def _opens_by_itself(page: httpx.Response) -> bool:
+    m = re.search(r"<a class='btn btn-primary' id='app-return'[^>]*>", page.text)
+    assert m, page.text
+    return "data-auto='1'" in m.group(0)
+
+
+async def test_the_return_page_opens_the_app_by_itself_only_after_a_fresh_sign_in(
+    harness: Harness, idp: FakeIdP
+) -> None:
+    """Any app can start a sign-in at /login?app_challenge=... with a plain link: a browser still
+    signed in at the identity provider passes straight through to the return page. So that page
+    opens the app by itself only when the leg asked for a sign-in of its own (prompt=login and
+    max_age=0, after a sign-out) and the ID token shows one made during the leg; otherwise it waits
+    for the tap under its warning, as in 0.7.45."""
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        page = await browser_leg(harness, browser, challenge)  # no fresh sign-in asked for
+        assert not _opens_by_itself(page)
+        assert "If you didn't start this sign-in from the MTG Assistant Gateway app, don't tap" in page.text
+
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        r = await go_on(browser, {"next": "/", "app_challenge": challenge, "fresh": "1"})
+        asked = parse_qs(urlparse(r.headers["location"]).query)
+        assert asked.get("prompt") == ["login"] and asked.get("max_age") == ["0"]
+        cb = urlparse(await harness.idp_leg(r))
+        to = urlparse((await browser.get(f"{cb.path}?{cb.query}")).headers["location"])
+        page = await browser.get(f"{to.path}?{to.query}")
+        assert _opens_by_itself(page)
+        # the flag is the gateway's own, kept with the code: the address carries the code only
+        assert to.query == "code=" + code_from(page)
+
+    # a provider that passed the browser through all the same (an old auth_time): the tap
+    idp.honours_prompt_login = False
+    idp.auth_time = int(time.time()) - 600
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        r = await go_on(browser, {"next": "/", "app_challenge": challenge, "fresh": "1"})
+        cb = urlparse(await harness.idp_leg(r))
+        to = urlparse((await browser.get(f"{cb.path}?{cb.query}")).headers["location"])
+        page = await browser.get(f"{to.path}?{to.query}")
+        assert not _opens_by_itself(page) and code_from(page)
+
+
+async def test_the_https_leg_needs_no_auth_time(harness: Harness, idp: FakeIdP) -> None:
+    """The first try (the verified https Auth Tab, or a Custom Tab) asks for no new sign-in and so
+    checks no auth_time: the address it returns on reaches only the app assetlinks.json names, or
+    the page whose button opens only the app's package."""
+    idp.honours_prompt_login = False
+    idp.auth_time = int(time.time()) - 86400
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        page = await browser_leg(harness, browser, challenge)
+        assert page.status_code == 200 and code_from(page)
+
+
+def test_the_app_can_see_the_browsers_that_offer_auth_tabs() -> None:
+    """Android 11 and later hide other apps from an app unless its manifest asks to see them: without
+    these queries, CustomTabsClient finds no browser, so no Auth Tab is ever opened and every
+    sign-in ends on the page that waits for a tap."""
+    import xml.etree.ElementTree as ET
+
+    ns = "{http://schemas.android.com/apk/res/android}"
+    root = ET.parse(
+        Path(__file__).resolve().parent.parent / "android/app/src/main/AndroidManifest.xml"
+    ).getroot()
+    queries = root.find("queries")
+    assert queries is not None
+    actions = {a.get(f"{ns}name") for a in queries.iter("action")}
+    assert "android.support.customtabs.action.CustomTabsService" in actions
+    assert "android.intent.action.VIEW" in actions
+    # the scheme the Auth Tab returns on is the app's own, held by its main activity
+    filters = root.find("application").find("activity").findall("intent-filter")
+    assert any(
+        d.get(f"{ns}scheme") == "mtgassistant-signin" and d.get(f"{ns}host") == "signin"
+        for f in filters
+        for d in f.iter("data")
+    )
+
+
+# -- 0.7.46 review F1/F2: the Custom Tab leg comes back by itself after a fresh sign-in ---------
+async def custom_tab_leg(
+    h: Harness, browser: httpx.AsyncClient, challenge: str, *, fresh: bool
+) -> httpx.Response:
+    """The app's Custom Tab leg (no Auth Tab browser on the phone): it says so with
+    app_return=intent; the answer is the callback's redirect."""
+    params = {"next": "/decks", "app_challenge": challenge, "app_return": "intent"}
+    if fresh:
+        params["fresh"] = "1"
+    r = await go_on(browser, params)
+    cb = urlparse(await h.idp_leg(r))
+    return await browser.get(f"{cb.path}?{cb.query}")
+
+
+async def test_fresh_custom_tab_leg_redirects_to_intent_with_fallback(harness: Harness, idp: FakeIdP) -> None:
+    """In a Custom Tab, Chrome opens an intent: link only from a navigation the person started, so
+    the return page's script can't open the app by itself (review F1). After a sign-in made during
+    the leg (the same proof that let the page open the app by itself, security review A-02), the
+    callback itself redirects to the intent: link: the redirect ends the navigation the person's
+    own Sign-in press started. It still names only the app's package, and its fallback is the
+    page with the button, for a browser that won't open the app."""
+    verifier, challenge = pair()
+    async with client(harness) as browser, client(harness) as app:
+        back = await custom_tab_leg(harness, browser, challenge, fresh=True)
+        assert back.status_code == 303, back.text
+        assert back.headers["cache-control"] == "no-store"
+        assert back.headers["referrer-policy"] == "no-referrer"
+        assert "mtg_session=" not in back.headers.get("set-cookie", "")
+        to = back.headers["location"]
+        m = re.fullmatch(
+            r"intent://signin\?code=([A-Za-z0-9_-]{43})#Intent;scheme=mtgassistant-signin;"
+            r"package=local\.mtgassistantgateway\.app;S\.browser_fallback_url=([^;]+);end",
+            to,
+        )
+        assert m, to
+        code = m.group(1)
+        assert m.group(2) == quote(f"{GATEWAY}{RETURN_PATH}?code={code}", safe="")
+        # the fallback is today's page, which still tries the app once by itself (a fresh code)
+        page = await browser.get(f"{RETURN_PATH}?code={code}")
+        assert _opens_by_itself(page) and code_from(page) == code
+        done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
+        assert done.status_code == 303 and "mtg_session=" in done.headers["set-cookie"]
+
+    # no sign-in during the leg (a browser still signed in at the provider): the page and its tap
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        back = await custom_tab_leg(harness, browser, challenge, fresh=False)
+        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
+        page = await browser.get(back.headers["location"])
+        assert not _opens_by_itself(page)
+
+    # a fresh sign-in asked for, but the provider passed the browser through (an old auth_time)
+    idp.honours_prompt_login = False
+    idp.auth_time = int(time.time()) - 600
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        back = await custom_tab_leg(harness, browser, challenge, fresh=True)
+        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
+
+
+async def test_the_auth_tab_leg_still_returns_on_the_gateways_address(harness: Harness) -> None:
+    """The https Auth Tab closes on RETURN_PATH: a fresh leg that did not say it runs in a Custom
+    Tab must still end there, or the Auth Tab would never see its address."""
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        r = await go_on(browser, {"next": "/", "app_challenge": challenge, "fresh": "1"})
+        cb = urlparse(await harness.idp_leg(r))
+        back = await browser.get(f"{cb.path}?{cb.query}")
+        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
+        # the Custom Tab leg asks for no new sign-in of its own (only fresh does)
+        r = await go_on(browser, {"next": "/", "app_challenge": challenge, "app_return": "intent"})
+        assert "prompt" not in parse_qs(urlparse(r.headers["location"]).query)
+        # an unknown return is still refused, before the provider
+        r = await browser.get(
+            "/login", params={"next": "/", "app_challenge": challenge, "app_return": "Intent"}
+        )
+        assert r.status_code == 400
+
+
+def test_the_app_names_its_custom_tab_and_says_when_android_lost_the_sign_in() -> None:
+    """The app's side (Kotlin, compiled and unit-tested in CI, not here): its Custom Tab leg asks for
+    the intent return, and when Android closed the app while the browser was open (the sign-in it
+    ran is gone, review F3) a failed Auth Tab check says so instead of doing nothing."""
+    android = Path(__file__).resolve().parent.parent / "android/app/src/main"
+    main = (android / "kotlin/local/mtgassistantgateway/app/MainActivity.kt").read_text()
+    assert "BrowserSignIn.startUrl(origin, next, challenge, fresh, customTab = true)" in main
+    branch = main.split(
+        "AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT ->", 1
+    )[1]
+    branch = branch.split("else -> Unit", 1)[0]
+    assert "if (started == null)" in branch and "R.string.sign_in_interrupted" in branch
+    strings = (android / "res/values/strings.xml").read_text()
+    m = re.search(r'<string name="sign_in_interrupted">([^<]+)</string>', strings)
+    assert m and m.group(1) == (
+        "Android closed the app while you were signing in, so that sign-in was lost. Sign in again."
+    )
+
+
+async def test_return_page_render_is_recorded(harness: Harness) -> None:
+    """When the browser shows the page with the button (no Auth Tab, or the browser refused to open
+    the app), the member's activity says so once, so the owner can tell which way the phone
+    signs in (review F2). An Auth Tab never loads the page, so a sign-in without this row came
+    back by itself."""
+    db = harness.app.state.gateway.db
+
+    def shown() -> list[tuple[str, str]]:
+        with db._lock:
+            return db._conn.execute(
+                "SELECT sub, detail_json FROM audit_log WHERE event = 'app_signin_tap_page'"
+            ).fetchall()
+
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        page = await browser_leg(harness, browser, challenge)
+        code = code_from(page)
+        await browser.get(f"{RETURN_PATH}?code={code}")  # a reload: still one row
+        rows = shown()
+        assert len(rows) == 1, rows
+        sub, detail = rows[0]
+        assert sub and json.loads(detail) == {"reason": "no new sign-in"}
+        assert (await browser.get(f"{RETURN_PATH}?code={'a' * 43}")).status_code == 200
+        assert len(shown()) == 1  # an unknown code names no member
+    from mtg_gateway.companion import event_label
+
+    assert event_label("app_signin_tap_page") == "App sign-in showed the “Open the app” page in the browser"
+
+
+# -- 0.7.46 security review A-04: a page before the identity provider on the app's leg -----------
+async def test_the_apps_address_shows_a_page_and_goes_to_the_provider_only_on_continue(
+    harness: Harness,
+) -> None:
+    """Any app on the phone can open /login?app_challenge=...: the browser then went straight to
+    the identity provider's real sign-in page, and a person who typed their password there handed
+    that app the result. Now the address shows a page first, naming this gateway; only its
+    Continue, posted with a one-use token this browser alone holds in a cookie, goes on."""
+    _v, challenge = pair()
+    for back in (None, "intent", "scheme"):
+        params = {"next": "/decks", "app_challenge": challenge, **({"app_return": back} if back else {})}
+        async with client(harness) as browser:
+            page = await browser.get("/login", params=params)
+            assert page.status_code == 200, back
+            assert "location" not in page.headers
+            assert page.headers["cache-control"] == "no-store"
+            name = harness.app.state.gateway.settings.server_name
+            assert f"An app asked to sign in to “{name}”." in page.text
+            assert "Continue only if you just pressed <b>Sign in</b> in the MTG Assistant" in page.text
+            assert "value='continue'" in page.text and "value='cancel'" in page.text
+            # Continue's answer is a redirect to the provider, which the page's form-action allows
+            assert "form-action 'self' https://idp.test" in page.headers["content-security-policy"]
+            token = leg_token(page)
+            # a link (a GET) never goes on, however often it is opened
+            again = await browser.get("/login", params=params)
+            assert again.status_code == 200 and "location" not in again.headers
+            assert logins_started(harness) == 0, back  # no sign-in at the provider was begun
+        # another site's page posting the form: no cookie (SameSite=Lax), refused, nothing started
+        async with client(harness) as other:
+            r = await other.post("/login", data={"leg": token, "action": "continue"})
+            assert r.status_code == 400 and "location" not in r.headers
+            assert "Sign-in canceled" in r.text
+
+
+async def test_continue_works_once_and_cancel_ends_the_leg(harness: Harness) -> None:
+    _v, challenge = pair()
+    params = {"next": "/decks", "app_challenge": challenge}
+    async with client(harness) as browser:
+        token = leg_token(await browser.get("/login", params=params))
+        # the right cookie with a token it doesn't hold: refused
+        r = await browser.post("/login", data={"leg": "x" * 43, "action": "continue"})
+        assert r.status_code == 400 and "location" not in r.headers
+        token = leg_token(await browser.get("/login", params=params))
+        ok = await browser.post("/login", data={"leg": token, "action": "continue"})
+        assert ok.status_code == 303 and ok.headers["location"].startswith("https://idp.test")
+        assert ok.headers["cache-control"] == "no-store"
+        # the same page's Continue again (Back, a double press): nothing more
+        browser.cookies.set("__Host-mtg_app_leg", token, domain=urlparse(GATEWAY).hostname)
+        twice = await browser.post("/login", data={"leg": token, "action": "continue"})
+        assert twice.status_code == 400 and "location" not in twice.headers
+
+        token = leg_token(await browser.get("/login", params=params))
+        no = await browser.post("/login", data={"leg": token, "action": "cancel"})
+        assert no.status_code == 200 and "location" not in no.headers
+        assert "<h1>Sign-in canceled</h1>" in no.text and "Nothing was signed in." in no.text
+        # Cancel spends the leg: its Continue no longer goes on
+        browser.cookies.set("__Host-mtg_app_leg", token, domain=urlparse(GATEWAY).hostname)
+        late = await browser.post("/login", data={"leg": token, "action": "continue"})
+        assert late.status_code == 400 and "location" not in late.headers
+
+
+def logins_started(h: Harness) -> int:
+    db = h.app.state.gateway.db
+    with db._lock:
+        return db._conn.execute("SELECT COUNT(*) FROM login_sessions").fetchone()[0]
+
+
+def test_legs_expire_and_are_bounded() -> None:
+    now = [0.0]
+    legs = AppSignins(clock=lambda: now[0], leg_ttl=600)
+    token = legs.start_leg("c" * 43, "/", None, False)
+    assert legs.take_leg(token, None) is None  # no cookie: not this browser
+    assert legs.take_leg(token, "y" * 43) is None
+    now[0] = 601
+    assert legs.take_leg(token, token) is None
+    token = legs.start_leg("c" * 43, "/", "scheme", True)
+    leg = legs.take_leg(token, token)
+    assert leg is not None and leg.app_return == "scheme" and leg.fresh
+    for _ in range(600):
+        legs.start_leg("c" * 43, "/", None, False)
+    assert len(legs._legs) <= 500

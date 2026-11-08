@@ -9,9 +9,12 @@ from contextlib import contextmanager
 
 import pytest
 
+from mtg_gateway import theme as site_theme
+
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_suggest_browser import server as _server
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -151,13 +154,14 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         seen = {}
         for width in (1000, 800, 760, 720, 705, 683, 673, 640, 600):
             page.set_viewport_size({"width": width, "height": 700})
-            page.wait_for_timeout(50)
+            redrawn(page)
             seen[width] = page.evaluate(GEOMETRY)
         page.set_viewport_size({"width": 599, "height": 700})
-        page.wait_for_timeout(50)
+        redrawn(page)
         phone = page.evaluate(GEOMETRY)
+    full = 4 + len(site_theme.rail_extra())  # a bar wide enough lists the rail's pages instead of More ▾
     for width, g in seen.items():
-        assert g["links"] == 5, (width, g)
+        assert g["links"] == (full if width >= 1000 else 5), (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
         assert g["last"] + 8 <= g["avatar"], (width, g)  # the last link ends before the account button
     assert phone["links"] == 0, phone  # the phone layout: links move to the tab bar
@@ -188,8 +192,9 @@ HOME_PLACE = """() => {
 )
 def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     """Home sits left of Decks in the top bar and the phone tab bar and above Decks in the rail,
-    never under More. Navigation round 2: the phone bar and the rail carry the four places (the
-    rail adds Alerts) and end with More, which holds Find and Your cards."""
+    never under More. Navigation round 2: the phone bar carries the four places and ends with
+    More, which holds Find, Your cards and Community; the rail (0.7.46 redesign, screen 1) carries
+    the four places, More's pages and Alerts, with no More."""
     width, height, touch, app = {
         "desktop": (1280, 800, False, False),
         "phone": (390, 844, True, False),
@@ -211,19 +216,30 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     assert got["home"] and got["decks"], got
     assert not got["homeInMore"], got
     assert got["doc"] == got["win"], got  # no sideways scroll
-    if where.startswith("fold"):  # the rail: Home above Decks, the places, Alerts, then More
+    if where.startswith("fold"):  # the rail: Home above Decks, the places, More's pages, Alerts
         assert got["home"]["bottom"] <= got["decks"]["y"] + 1, got
         assert abs(got["home"]["x"] - got["decks"]["x"]) < 1, got
-        assert got["tabs"] == ["/", "/decks", "/collection", "/proposals", "/notifications"], got
-        assert got["moreShown"], got
+        # More's pages sit on the rail in order of use, Forum last of them, then Alerts (0.7.46)
+        assert got["tabs"] == [
+            "/",
+            "/decks",
+            "/collection",
+            "/proposals",
+            "/scan",
+            "/precons",
+            "/history/models",
+            "/forum",
+            "/notifications",
+        ], got
+        assert not got["moreShown"], got  # nothing is left for More
         assert got["tabsBottom"] <= got["height"], got  # every tab on screen without scrolling the rail
     else:  # a row: Home left of Decks
         assert got["home"]["x"] < got["decks"]["x"], got
         assert abs(got["home"]["y"] - got["decks"]["y"]) < 1, got
     if where.startswith("phone"):  # the bar: the four places and More
         assert got["tabs"] == ["/", "/decks", "/collection", "/proposals"], got
-    if where != "desktop":
-        more = ["/search", "/precons", "/scan", "/watchlist", "/lists"]
+        # Watchlist is in Binder and My lists under Account; Forum is in More's Community group (C8)
+        more = ["/search", "/precons", "/scan", "/history/models", "/forum"]
         assert got["moreShown"] and got["moreItems"] == more, got
 
 
@@ -360,8 +376,12 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                         if g["links"] and g["contrast"] < 4.5:
                             problems.append(f"contrast {where}")
                         # a mouse from 600 px shows the four places and More ▾ (navigation
-                        # round 2); at the normal size on one row in the 50 px bar, as before
-                        want = 5
+                        # round 2), or, where the bar is wide enough for them, the rail's pages
+                        # instead of More ▾ (0.7.46 redesign, screen 1: from 1000 px at the
+                        # normal size, never at 200% text); at the normal size on one row in
+                        # the 50 px bar, as before
+                        full = 4 + len(site_theme.rail_extra())
+                        want = full if zoom == "none" and width >= 1000 else 5
                         if not touch and width >= 600 and g["links"] != want:
                             problems.append(f"links {where}")
                         if (
@@ -532,13 +552,17 @@ BRAND_AND_SEARCH = """() => {
   const word = document.querySelector('.topbar .brand .word');
   const search = document.querySelector('.topbar .topsearch');
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-  return {cut: word.scrollWidth > word.clientWidth + 1, search: search.getBoundingClientRect().width / rem};
+  // the brand's word gave way: moved out of the brand's line, whole (final polish AC6), or cut
+  const gone = word.getBoundingClientRect().top >= word.parentElement.getBoundingClientRect().bottom - 0.5;
+  return {gave: gone || word.scrollWidth > word.clientWidth + 1, cut: word.scrollWidth > word.clientWidth + 1,
+    search: search.getBoundingClientRect().width / rem};
 }"""
 
 
 def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromium, server: Server) -> None:
     """The order the one-row bar gives up room in: the search box's growth past its 20rem, then
-    the brand's word (an ellipsis), then the search box down to 9rem; the links never."""
+    the brand's word (whole, out of its line: final polish AC6), then the search box down to 9rem;
+    the links never; the word is never cut short."""
     sid = _admin(server)
     settings = server.app.state.gateway.settings
     short_name = settings.server_name
@@ -569,8 +593,10 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromi
                     # the box grows into the room the four places leave (up to 40rem), so a
                     # long name takes from that growth first; below its own 20rem the name gives
                     # way before the box does
-                    if b["search"] < 9 - 0.05 or (b["search"] < min(full, 20) - 0.05 and not b["cut"]):
+                    if b["search"] < 9 - 0.05 or (b["search"] < min(full, 20) - 0.05 and not b["gave"]):
                         problems.append(f"@{width}px {zoom}: search box shrank first: {b}, full {full}")
+                    if b["cut"]:
+                        problems.append(f"@{width}px {zoom}: the name is cut short: {b}")
             full_1280 = measure(short_name, 1280, "none")["search"]
             at_1280 = measure(LONG_NAME, 1280, "none")
         finally:
@@ -746,11 +772,15 @@ APP_BAR = """() => {
     nav: q('.topbar nav.site').getClientRects().length > 0,
     navStart: box('.topbar nav.site').left, navEnd: box('.topbar nav.site').right,
     leftGap: parseFloat(cs('.topbar .left').columnGap), margin: parseFloat(cs('.topbar .brand').marginRight),
-    full: word.scrollWidth, cut: word.scrollWidth > word.clientWidth + 1};
+    full: word.scrollWidth, cut: word.scrollWidth > word.clientWidth + 1,
+    gone: box('.topbar .brand .word').top >= box('.topbar .brand').bottom - 0.5,
+    // where the word starts on the brand's line: after the mark and the brand's gap (a word that
+    // moved out of the line starts the next one instead)
+    lineStart: box('.topbar .brand .mark').right + parseFloat(cs('.topbar .brand').columnGap)};
 }"""
 
 
-@pytest.mark.parametrize("width", [344, 360, 412, 884])
+@pytest.mark.parametrize("width", [344, 360, 412, 600, 700, 884])
 def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int) -> None:
     sid = server.sign_in()
     settings = server.app.state.gateway.settings
@@ -774,26 +804,34 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
         finally:
             object.__setattr__(settings, "server_name", short_name)
     for name, got in seen.items():
-        assert got["app"] and got["shown"] != "none", (name, got)
+        # on a phone the app shows only the brand's mark, as the website does (0.7.46: the name
+        # was cut short beside it); its name from 600 px
+        assert got["app"] and (got["shown"] == "none") == (width < 600), (name, got)
         # the brand gets the room the old way
         assert got["left"] == "flex" and got["pad"] == "0px", (name, got)
         assert got["doc"] == got["win"], (name, got)
         assert got["leftEnd"] <= got["rightStart"] - got["gap"] + 0.5, (name, got)
+        if width < 600:
+            continue
         # where the brand's room ends: the left side's end (the places are in the tab bar or the
         # rail, so the bar has no links, navigation round 2)
         assert not got["nav"], (name, got)
         end = got["leftEnd"] - got["margin"]
         assert got["brandEnd"] <= end + 0.5, (name, got)  # a whole name may end sooner
-        assert got["cut"] == (got["full"] > end - got["wordStart"] + 0.5), (name, got)
-        if got["cut"]:
-            assert abs(got["wordEnd"] - end) <= 0.5, (name, got)
+        # the name shows whole or not at all, never cut short (final polish AC6: "MTG …" looked
+        # broken): where its whole width has no room, it moves out of the brand's line
+        assert not got["cut"], (name, got)
+        assert got["gone"] == (got["full"] > end - got["lineStart"] + 0.5), (name, got)
+        if not got["gone"]:
+            assert got["wordEnd"] <= end + 0.5, (name, got)
     # at 884 px the brand has about 400 px, about as wide as the long name itself (418 px in Inter,
-    # 374 px in serif), so whether it is cut there depends on the font; the check above covers it
-    if width < 800:
-        assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
+    # 374 px in serif), so whether it shows there depends on the font; the check above covers it
+    if 600 <= width < 800:
+        assert seen[LONG_NAME]["gone"], seen[LONG_NAME]
 
 
-# The Account page on a phone with 200% text, scripts on and off (the bottom tab bar at 344
+# Account details and its Archidekt account page (0.7.46: the link form and its disclosure are
+# on their own page) on a phone with 200% text, scripts on and off (the bottom tab bar at 344
 # and 360 px; 320 px too): nothing reaches past the window. The causes found
 # were the link disclosure's "/decks/{deck_id}" (shown open without scripts) and the
 # "Notifications" heading at 320 px; both now break instead.
@@ -809,17 +847,19 @@ def test_the_account_page_fits_a_phone_at_200_percent_text(chromium, server: Ser
                 )
                 ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
                 page = ctx.new_page()
-                _open(page, f"{server.base}/account/details")
-                _zoom(page, zoom)
-                _settle(page)
-                got = page.evaluate(
-                    "() => ({doc: document.documentElement.scrollWidth,"
-                    " win: document.documentElement.clientWidth,"
-                    " tabbar: document.querySelector('.tabbar').getBoundingClientRect().right,"
-                    " disclosure: !!document.querySelector('#archidekt-disclosure')})"
-                )
-                if got["doc"] > got["win"] or got["tabbar"] > got["win"] + 0.5 or not got["disclosure"]:
-                    problems.append(f"@{width}px {zoom}: {got}")
+                for path in ("/account/details", "/account/details/archidekt"):
+                    _open(page, f"{server.base}{path}")
+                    _zoom(page, zoom)
+                    _settle(page)
+                    got = page.evaluate(
+                        "() => ({doc: document.documentElement.scrollWidth,"
+                        " win: document.documentElement.clientWidth,"
+                        " tabbar: document.querySelector('.tabbar').getBoundingClientRect().right,"
+                        " disclosure: !!document.querySelector('#archidekt-disclosure')})"
+                    )
+                    wide = got["doc"] > got["win"] or got["tabbar"] > got["win"] + 0.5
+                    if wide or (path.endswith("archidekt") and not got["disclosure"]):
+                        problems.append(f"{path} @{width}px {zoom}: {got}")
                 ctx.close()
     assert problems == [], "\n".join(problems)
 
@@ -869,7 +909,8 @@ def test_the_search_boxs_magnifier_sits_clear_of_its_text(
                 m = page.evaluate(SEARCH_ICON)
                 if m is None:
                     problems.append(f"@{width}px {path} scripts={script}: no search box")
-                elif not m["clear"] or m["wrapped"] != script or m["height"] != (44 if touch else 36):
+                # 44 px with a mouse too (0.7.46: every control is a 44 px target on every pointer)
+                elif not m["clear"] or m["wrapped"] != script or m["height"] != 44:
                     problems.append(f"@{width}px {path} scripts={script}: {m}")
             ctx.close()
     assert problems == [], "\n".join(problems)
@@ -943,4 +984,4 @@ def test_the_search_box_starts_from_20rem_whatever_the_fonts(chromium, server: S
         finally:
             object.__setattr__(settings, "server_name", short_name)
     # at 1100 px the brand's word has the room to give: the box keeps its 20rem
-    assert all(b["search"] >= 20 - 0.05 and b["cut"] for _css, b in seen), seen
+    assert all(b["search"] >= 20 - 0.05 and b["gave"] and not b["cut"] for _css, b in seen), seen

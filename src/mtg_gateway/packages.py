@@ -9,12 +9,14 @@ it read, with only the asked-for fields changed, as the site does)."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, Deck, format_label
 from .deck_stats import _SINGLETON_FORMATS, colour_letter
 
 KEYWORDS_MAX = 200
+PAGE_ROWS = 50  # Archidekt's Packages listing: rows a page
 BUDGETS = {None: "any", 1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}
 FIELDS = ("keywords", "budget", "intended_formats")
 # Add package: where the package's cards go (the site's choices: keep the package's own
@@ -31,7 +33,7 @@ def _err(text: str) -> Exception:
 def _format_id(name: Any) -> int:
     key = str(name or "").strip().lower().replace(" ", "")
     if key not in FORMAT_IDS:
-        raise _err(f"intended_formats takes format names: {', '.join(sorted(FORMAT_IDS))}")
+        raise _err(f"intended_formats takes format names: {', '.join(sorted(FORMAT_IDS))}.")
     return FORMAT_IDS[key]
 
 
@@ -39,10 +41,10 @@ def parse(raw: Any, *, partial: bool = False) -> dict[str, Any]:
     """A package's settings, checked: ``keywords`` (required unless ``partial``), ``budget`` (1 to
     4, or None for any) and ``intended_formats`` (format names). Returned in Archidekt's names."""
     if not isinstance(raw, dict) or (partial and not raw):
-        raise _err("package must be an object with any of: " + ", ".join(FIELDS))
+        raise _err("package must be an object with any of: " + ", ".join(FIELDS) + ".")
     unknown = sorted(str(k) for k in raw if k not in FIELDS)
     if unknown:
-        raise _err(f"unknown package fields: {', '.join(unknown)}; use {', '.join(FIELDS)}")
+        raise _err(f"Unknown package fields: {', '.join(unknown)}; use {', '.join(FIELDS)}.")
     out: dict[str, Any] = {}
     if "keywords" in raw or not partial:
         words = raw.get("keywords")
@@ -50,20 +52,20 @@ def parse(raw: Any, *, partial: bool = False) -> dict[str, Any]:
         if not words or len(words) > KEYWORDS_MAX:
             raise _err(
                 f"A package needs keywords, 1 to {KEYWORDS_MAX} characters (for example: shocklands, "
-                "fetchlands)"
+                "fetchlands)."
             )
         out["keywords"] = words
     if "budget" in raw:
         b = raw["budget"]
         if b is not None and (isinstance(b, bool) or b not in (1, 2, 3, 4)):
-            raise _err("budget is 1 to 4 ($ to $$$$), or null for any")
+            raise _err("budget is 1 to 4 ($ to $$$$), or null for any.")
         out["budget"] = b
     elif not partial:
         out["budget"] = None
     if "intended_formats" in raw:
         names = raw["intended_formats"] or []
         if not isinstance(names, list) or len(names) > len(FORMAT_NAMES):
-            raise _err("intended_formats is a list of format names")
+            raise _err("intended_formats is a list of format names.")
         ids: list[int] = []
         for n in names:
             fid = _format_id(n)
@@ -83,7 +85,7 @@ def block_of(deck: Deck) -> dict[str, Any] | None:
 
 def text(block: dict[str, Any]) -> str:
     """'keywords “…”, budget $$, for Commander, Modern' in the review's words."""
-    formats = [format_label(FORMAT_NAMES.get(f)) for f in block.get("intendedFormats") or []]
+    formats = [format_label(FORMAT_NAMES[f]) for f in format_ids(block.get("intendedFormats"))]
     return (
         f"keywords “{block.get('keywords') or ''}”, budget {BUDGETS.get(block.get('budget'), 'any')}, "
         f"for {', '.join(formats) or 'any format'}"
@@ -100,11 +102,82 @@ def changed(block: dict[str, Any], wanted: dict[str, Any]) -> dict[str, Any] | N
     return new
 
 
-def same(block: dict[str, Any] | None, want: dict[str, Any]) -> bool:
-    """Whether a re-read block has the settings sent."""
-    return block is not None and all(
-        block.get(k) == want.get(k) for k in ("keywords", "budget", "intendedFormats")
+def _keywords(v: Any) -> str:
+    """Keywords as compared: spacing (around commas too) and letter case left out."""
+    return re.sub(r"\s*,\s*", ",", " ".join(str(v or "").split())).casefold()
+
+
+def _budget(v: Any) -> Any:
+    """A budget as compared: none (None, 0 or empty), a number, or "$$" written as its count."""
+    if v is None or isinstance(v, bool):
+        return v
+    s = str(v).strip()
+    if s in ("", "0"):
+        return None
+    if set(s) == {"$"}:
+        return len(s)
+    return int(s) if s.isdigit() else s
+
+
+def _saved_format(f: Any) -> Any:
+    """One saved format as compared: its id, from a number, a number written as text, a format's
+    name ("commander", any case) or an object carrying one (``{"id": 3}``, ``{"name": ...}``);
+    anything else as its text, so it still counts as a difference and never stops the check."""
+    if isinstance(f, dict):
+        f = f.get("id", f.get("format", f.get("value", f.get("name"))))
+    if isinstance(f, bool) or f is None:
+        return str(f)
+    s = str(f).strip()
+    if s.isdigit():
+        return int(s)
+    return FORMAT_IDS.get(s.casefold().replace(" ", ""), s)
+
+
+def format_ids(v: Any) -> list[int]:
+    """The known format ids of a saved block's ``intendedFormats``, in its order, however
+    Archidekt wrote them (ids, numbers as text, names, objects); anything else is left out."""
+    out: list[int] = []
+    for f in v if isinstance(v, list) else []:
+        fid = _saved_format(f)
+        if isinstance(fid, int) and fid in FORMAT_NAMES and fid not in out:
+            out.append(fid)
+    return out
+
+
+def _formats(v: Any) -> set[Any]:
+    """Format ids as compared: in any order, a number written as text the same number, and a
+    format saved as an object or by its name the same id (review F5)."""
+    return {_saved_format(f) for f in (v if isinstance(v, list) else [])}
+
+
+def _format_names(ids: set[Any]) -> str:
+    names = sorted(
+        format_label(FORMAT_NAMES.get(f)) if isinstance(f, int) and f in FORMAT_NAMES else str(f) for f in ids
     )
+    return ", ".join(names) or "any format"
+
+
+def differences(block: dict[str, Any] | None, want: dict[str, Any]) -> list[str]:
+    """What a re-read block has other than the settings sent, in plain words ("budget $$
+    (asked for $$$)"); empty when it matches. Spacing and letter case of the keywords, the order
+    of the formats and how the budget is written do not count."""
+    if block is None:
+        return ["no package settings on the deck"]
+    out = []
+    if _keywords(block.get("keywords")) != _keywords(want.get("keywords")):
+        out.append(f"keywords “{block.get('keywords') or ''}” (asked for “{want.get('keywords') or ''}”)")
+    got_b, want_b = _budget(block.get("budget")), _budget(want.get("budget"))
+    if got_b != want_b:
+        out.append(f"budget {BUDGETS.get(got_b, got_b)} (asked for {BUDGETS.get(want_b, want_b)})")
+    got_f, want_f = _formats(block.get("intendedFormats")), _formats(want.get("intendedFormats"))
+    if got_f != want_f:
+        out.append(f"formats {_format_names(got_f)} (asked for {_format_names(want_f)})")
+    return out
+
+
+def same(block: dict[str, Any] | None, want: dict[str, Any]) -> bool:
+    """Whether a re-read block has the settings sent (see ``differences``)."""
+    return not differences(block, want)
 
 
 def adds(
@@ -128,7 +201,7 @@ def adds(
     if package.id == deck.id:
         raise _err("A package can't be added to itself.")
     if categories not in CATEGORY_CHOICES:
-        raise _err(f"categories must be one of: {', '.join(CATEGORY_CHOICES)}")
+        raise _err(f"categories must be one of: {', '.join(CATEGORY_CHOICES)}.")
     one_each = (deck.format or "") in _SINGLETON_FORMATS if singleton is None else bool(singleton)
     have = {c.name.casefold() for c in deck.cards}
     commanders = [c for c in deck.cards if deck.is_commander(c)]
@@ -235,11 +308,11 @@ async def listing(
     imported first, filtered by name, one intended format and a budget. ``{rows, more}``; each row
     has id, name, owner, url, private, size, settings and imports."""
     if whose not in WHOSE:
-        raise _err(f"whose is one of: {', '.join(WHOSE)}")
+        raise _err(f"whose is one of: {', '.join(WHOSE)}.")
     if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 100:
-        raise _err("page must be a number from 1 to 100")
+        raise _err("page must be a number from 1 to 100.")
     if budget is not None and (isinstance(budget, bool) or budget not in (1, 2, 3, 4)):
-        raise _err("budget is 1 to 4 ($ to $$$$), or null for any")
+        raise _err("budget is 1 to 4 ($ to $$$$), or null for any.")
     name = " ".join(str(name_contains or "").split())[:100]
     fmt = None if not intended_format else _format_id(intended_format)
     import time
@@ -270,6 +343,9 @@ async def listing(
     rows = []
     for r in body["results"]:
         if not isinstance(r, dict) or not str(r.get("id") or "").isdigit():
+            continue
+        # Archidekt's name filter matches keywords too; name_contains means the name
+        if name and name.casefold() not in " ".join(str(r.get("name") or "").split()).casefold():
             continue
         # asked for by username: the account's id decides, as for the deck list
         if whose == "mine" and not _owned_by(r.get("owner"), owner or "", link.get("archidekt_user_id")):

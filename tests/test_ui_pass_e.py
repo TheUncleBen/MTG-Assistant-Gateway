@@ -48,26 +48,23 @@ def _card(page: str, card_id: str) -> str:
 
 
 async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack: Stack) -> None:
-    page = (await member.http.get("/account/details")).text
-    prof = _card(page, "profile")
+    prof = _card((await member.http.get("/account/details/profile")).text, "profile")
     assert "A JPEG or PNG up to 1 MB." in prof and "Only you can change it" not in prof
+    page = (await member.http.get("/account/details/email")).text
     mail = _card(page, "email")
     # the inverted switch reads the right way round: on means notifications
-    assert (
-        "Archidekt notifications</label>" in mail
-        and esc("Shows Archidekt's notifications in the bell.") in mail
-    )
+    assert "Archidekt alerts</label>" in mail and esc("Shows Archidekt's alerts in the bell.") in mail
     assert "Turn off" not in mail and "Turns off" not in mail
     # on means notifications: the switch is checked exactly when Archidekt's "no notifications" is off
     off = bool(stack.ark.account.profile("alice")["accountSettings"].get("noArchidektNotifications"))
     checked = "id='pr-site_notifications' type='checkbox' name='on' value='1' checked" in mail
     assert checked is (not off)
-    defaults = _card(page, "defaults")
+    defaults = _card((await member.http.get("/account/details/defaults")).text, "defaults")
     assert "The deck page shows prices from these two shops, first one first." in defaults
     assert "Two shops, in order." not in defaults
     assert ">EDH bracket</option>" in defaults and "EDH Bracket Info" not in defaults
     notes = (await member.http.get("/notifications")).text
-    assert "Your notifications from Archidekt." in notes and "bell holds" not in notes
+    assert "Alerts from this gateway and from Archidekt." in notes and "bell holds" not in notes
     lists = (await member.http.get("/lists/custom")).text
     assert "Cards you made on Archidekt." in lists and "made up" not in lists
     # the card viewer's note on a custom card (static/cardview.js): no claim about price lists
@@ -77,13 +74,13 @@ async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack:
 
 
 async def test_the_account_switches_and_the_price_sources_row(member: Browser) -> None:
-    page = (await member.http.get("/account/details")).text
+    page = (await member.http.get("/account/details/email")).text
     mail = _card(page, "email")
     # each switch names itself for a reader only: the row's bold label is the one shown
     assert "<span class='sr-only'>Other members can contact me</span>" in mail
     assert "sw-text" not in page
     assert mail.count("class='ui-row sw'") == 4
-    defaults = _card(page, "defaults")
+    defaults = _card((await member.http.get("/account/details/defaults")).text, "defaults")
     two = re.search(r"<div class='ui-row two'>.*?</div></div>", defaults, re.S).group(0)
     assert "Price sources" in two and "aria-label='First price source'" in two
     assert "aria-label='Second price source'" in two
@@ -136,9 +133,11 @@ async def test_a_threads_reply_count_agrees_with_the_section_table(member: Brows
 async def test_phone_rows_keep_the_date_on_the_one_second_line(member: Browser) -> None:
     page = (await member.http.get(SECTION)).text
     row = re.search(r"<a class='tr' href='/forum/thread/700002'.*?</a>", page, re.S).group(0)
-    # owner · replies · date, the date inline (its separator inside the phone-only span)
+    # owner · replies · date as facts (the dots drawn between them), the date a phone-only fact
     assert re.search(
-        r"<span class='sub'><span>amy · \d+ repl\w+<span class='sm-only fm-when'> · <time[^>]*>", row
+        r"<span class='sub'><span class='ui-dots-w'><span class='tx ui-dots balanced'><span>amy</span>"
+        r"<span>\d+ repl\w+</span><span class='sm-only fm-when'><time[^>]*>",
+        row,
     ), row
     assert ".fm-when{display:block}" not in page
 
@@ -146,7 +145,7 @@ async def test_phone_rows_keep_the_date_on_the_one_second_line(member: Browser) 
 async def test_the_new_package_box_matches_new_deck(member: Browser) -> None:
     page = (await member.http.get("/decks")).text
     box = re.search(r"<div[^>]*id='newpkg'.*?</form>", page, re.S).group(0)
-    assert "placeholder='e.g. Golgari staples'" in box
+    assert "placeholder='Golgari staples'" in box
     assert "aria-live='polite'>0/120</span>" in box and "0 / 120" not in box
     assert "data-count='np-name-c'" not in box  # counted by newpackage.js alone, as New deck's name
     assert ".dx-box .body .dx-two + .dx-two{margin-top:.75rem}" in page
@@ -197,10 +196,22 @@ async def test_the_package_panels_budget_sits_in_the_controls_column(member: Bro
 
 
 async def test_every_tab_has_its_count_on_a_first_visit(member: Browser) -> None:
+    """Since 0.7.46 (audit SH-03, My lists draws at once) a first visit draws the open tab's count
+    and the tab bar asks the others after the page is there (data-counts, static/lists.js): that
+    answer has a number for every tab's link. Pinned cards is the fifth tab again since the Binder
+    redesign (Binder › Lists), at its own address /collection/wants (the answer's "wants")."""
     account_lists.forget_counts("user-1")
-    page = (await member.http.get("/lists/pins")).text
-    tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", page).group(0)
-    assert tabs.count("<span class='n'>") == 5, tabs
+    page = (await member.http.get("/lists/templates")).text
+    tabs = re.search(r"<nav class='hubseg adm-nav lp-tabs'.*?</nav>", page).group(0)
+    assert tabs.count("<span class='n'>") == 1 and "data-counts='/lists/api/counts'" in tabs, tabs
+    links = re.findall(r"<a href='/(?:lists|collection)/([a-z]+)'", tabs)
+    got = (await member.http.get("/lists/api/counts")).json()
+    assert links == ["templates", "defaults", "tags", "wants", "custom", "btags"], links
+    assert set(links) <= set(got["counts"]), (links, got)
+    assert all(isinstance(got["counts"][k], int) for k in links), got
+    again = (await member.http.get("/lists/templates")).text
+    tabs = re.search(r"<nav class='hubseg adm-nav lp-tabs'.*?</nav>", again).group(0)
+    assert tabs.count("<span class='n'>") == 6, tabs
 
 
 async def test_the_scripts_carry_the_icons_their_buttons_ask_for(member: Browser) -> None:

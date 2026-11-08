@@ -17,6 +17,8 @@ import re
 import httpx
 import pytest
 
+from mtg_gateway import account_lists, lists_page
+
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import _chromium, _page
 from .test_deck_custom_cards import _custom
@@ -25,6 +27,7 @@ from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_ui_pass_c_browser import _close_menu, _items, _seed, _targets
+from .waits import expect, frame, redrawn, settled
 
 SIZES = [(344, "dark"), (390, "light"), (1280, "dark"), (1280, "light")]
 # the one list date (ui.when_text / MtgText.rel): "just now", "40 min ago", "2 h ago", "3 days ago",
@@ -246,7 +249,8 @@ def test_the_deck_pages_custom_card_viewer_and_a_failed_picture(
         page.keyboard.press("Enter")
         view = page.locator(".cardview.open")
         view.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        expect(view.locator(".pane .ph .nm")).to_have_text("Old Ranger")
+        settled(page)
         tile = view.locator(".pane .ph")
         assert tile.locator(".nm").inner_text() == "Old Ranger"
         assert tile.locator(".ty").inner_text() == "Creature — Human Advisor"
@@ -284,25 +288,36 @@ def test_the_deck_pages_custom_card_viewer_and_a_failed_picture(
 
 
 @pytest.mark.parametrize("width,theme", [(344, "light"), (390, "dark"), (1280, "light")])
-def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) -> None:
+def test_my_lists_tabs_are_whole_on_a_phone_and_one_row_on_a_computer(
+    server: Server, width: int, theme: str
+) -> None:
     from playwright.sync_api import sync_playwright
 
     sid = _link(server)
     exe = _chromium()
+    account_lists.forget_counts("user-1")
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
-        page.wait_for_timeout(300)
         tabs = page.locator(".lp-tabs a")
-        assert tabs.count() == 5
-        tops = [_rect(tabs.nth(i))["t"] for i in range(5)]
-        heights = [_rect(tabs.nth(i))["h"] for i in range(5)]
+        # six lists: Pinned cards is a tab again (at /collection/wants) since the Binder redesign,
+        # and Binder tags joined them in 0.7.46 (lists_page.TABS)
+        assert tabs.count() == len(lists_page.TABS) == 6
+        # a first visit draws the open tab's count; the other five arrive after the page has drawn
+        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 6")
+        tops = [_rect(tabs.nth(i))["t"] for i in range(6)]
+        heights = [_rect(tabs.nth(i))["h"] for i in range(6)]
         if width < 600:
-            # one row that scrolls sideways, every tab the same height, the current one in view
-            assert len(set(round(t) for t in tops)) == 1, tops
+            # rows of whole tabs (a tab that doesn't fit takes the next row, final polish P-9): every
+            # tab inside the switch, none cut off at a scrolled edge, every tab the same height
             nav = _rect(page.locator(".lp-tabs"))
-            cur = _rect(page.locator(".lp-tabs a[aria-current]"))
-            assert cur["l"] >= nav["l"] - 1 and cur["r"] <= nav["r"] + 1, (cur, nav)
+            for i in range(6):
+                tab = _rect(tabs.nth(i))
+                assert tab["l"] >= nav["l"] - 1 and tab["r"] <= nav["r"] + 1, (i, tab, nav)
+            assert page.evaluate(
+                "() => { const n = document.querySelector('.lp-tabs');"
+                " return n.scrollWidth <= n.clientWidth + 1; }"
+            )
             assert page.locator(".lp-tabs a[aria-current]").inner_text().startswith("Custom cards")
             sizes = _targets(page, ".lp-tabs a")
             assert min(sizes) >= 43.5, sizes
@@ -327,11 +342,11 @@ def test_the_color_tag_sheet_never_covers_its_field(server: Server, width: int, 
         box = _open_from_deck_menu(page, "Add a package…", "package")
         btn = box.locator("#dx-ptag-btn")
         btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(200)
+        frame(page)
         btn.click()
         sheet = page.locator(".msel-list.sheet")
         sheet.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        settled(page)  # the sheet slid in
         b, s = _rect(btn), _rect(sheet)
         label = _rect(box.locator("label[for='dx-ptag']"))
         assert b["b"] <= s["t"], (b, s)  # the field sits above the sheet
@@ -376,7 +391,7 @@ def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, them
     it means in the fold. "Apply low-risk changes without asking" (Semi-auto) wrapped to two rows
     on a folded Fold (344px) and on a phone (390px); it is one row at every size now: tighter
     gutters, the list to the card's edges on a phone, the name a little smaller there. Full auto's
-    old name ("Apply deck and collection changes without asking", 48 characters) could not fit a
+    old name ("Apply deck and binder changes without asking", 48 characters) could not fit a
     phone, so the owner renamed it "Apply changes without asking" everywhere (2026-10-24)."""
     from playwright.sync_api import sync_playwright
 
@@ -384,9 +399,10 @@ def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, them
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        page.goto(f"{server.base}/account/details#mode", wait_until="networkidle")
+        # the list is on Account > Assistants > Default for new assistants
+        page.goto(f"{server.base}/account/assistants/default", wait_until="networkidle")
         page.locator("#mode .mode-opt .mode-pick").first.wait_for(state="visible")
-        page.wait_for_timeout(200)
+        settled(page)
         rows = page.evaluate(MODE_LINES)
         assert len(rows) == 3, rows
         assert [r["label"] for r in rows] == [
@@ -406,7 +422,7 @@ def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, them
         assert page.evaluate(CONTRAST, "#mode .mode-pick > span, #mode .mode-body") == []
         # at 200% text the names may wrap, but nothing may overflow sideways
         page.evaluate("() => { document.documentElement.style.fontSize = '28px'; }")
-        page.wait_for_timeout(200)
+        redrawn(page)
         assert page.evaluate(MEASURE) == []
         browser.close()
     assert errors == []

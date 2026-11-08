@@ -25,7 +25,7 @@ real device yet.
 - [1. Getting the app](#1-getting-the-app)
   - [Updates](#updates)
   - [Adding the app to a gateway](#adding-the-app-to-a-gateway)
-  - [Notifications](#notifications)
+  - [Push notifications](#push-notifications)
 - [2. Using it](#2-using-it)
 - [3. Scanning with the phone camera](#3-scanning-with-the-phone-camera)
 - [4. Foldables and large screens](#4-foldables-and-large-screens)
@@ -62,7 +62,7 @@ download button. Then:
    updates ([Updates](#updates) below). Other phones have no such switch.
 3. Open the downloaded `mtg-assistant-gateway.apk`. Android asks you to allow installs from
    that browser once. Allow it and tap **Install**.
-4. Play Protect may warn that the developer is unknown or unverified, because
+4. Play Protect may warn that the app comes from an unknown developer, because
    the app is signed by whoever runs your gateway, not by an app store; the
    exact wording varies by phone and Android version. It may also offer to
    scan the app first: scanning it or not are both fine. Only continue if you got
@@ -112,7 +112,9 @@ From Android 12, after that first permission, Android may install later
 updates without asking again, because the app is updating itself
 (`PackageInstaller.SessionParams.setRequireUserAction`). Android still makes
 that call: on some phones and versions it asks every time, and the app shows
-its confirmation when it does. **Later** hides the bar until the next check.
+its confirmation when it does. **Later** hides the bar, and the app does not
+offer that version again on its own for three days; **Check for app updates**
+on the Account page still offers it.
 
 What it sends: one request to your own gateway, with the sign-in the app
 already holds, and the download from the same gateway. Nothing goes to GitHub
@@ -180,28 +182,44 @@ For operators whose image has no app, or who build their own:
 Requirements: Android 10 or later. A camera is optional; without one the app
 still works, it just can't scan.
 
-### Notifications
+### Push notifications
 
-From 0.7.30 the app shows the member's notifications itself. There is no
+From 0.7.30 the app shows the member's push notifications itself. There is no
 Google push service and no separate notification app. On the Account page in
-the app, the member ticks **Send me notifications** and presses **Save
-notifications**. The page then starts **Get notifications on this phone**
+the app, the member ticks **Send me push notifications** and presses **Save push notifications**. The page then starts **Get push notifications on this phone**
 by itself (the button stays on the card while this phone isn't connected).
 That asks Android to allow
-notifications (Android 13 and later ask; older versions allow them by
+push notifications (Android 13 and later ask; older versions allow them by
 default) and, once, to let the app run in the background. When the gateway
 has no notification server set up, the card says that the app can't get
-notifications. Once this phone is connected, the app runs
+push notifications. Once this phone is connected, the app runs
 a foreground service that holds one connection to the gateway's own address
 (`/app/notifications/stream`). Android shows its quiet **Always connected**
 notification while the service runs, as it does for every foreground
 service. The app is built to start the service again after the phone
 restarts, after an app update and whenever the app is opened (tested on an
 emulator; a real-phone check is still to come). It stops when the gateway says the
-phone's key is no longer valid or notifications are off, and when the app is
+phone's key is no longer valid or push notifications are off, and when the app is
 set up for another gateway. A connection that fails is tried again after 5
 seconds, then after longer waits up to 5 minutes, and at once when the
-phone's network comes back.
+phone's network comes back. The next try is also set as an Android alarm, so
+it happens while the phone is in deep sleep too, and a connection that has
+sent nothing for 90 seconds is dropped and tried again in the same way. The
+app keeps the phone awake for at most 30 seconds for each try.
+
+**Samsung phones.** Samsung's own battery saving can put an app to sleep
+even when Android lets it run in the background. On a Samsung Galaxy phone,
+open **Settings > Battery > Background usage limits** (on older One UI
+versions, **Settings > Device care > Battery > Background usage limits**) and
+add MTG Assistant Gateway to **Never sleeping apps**. Make sure it is not in
+**Sleeping apps** or **Deep sleeping apps**. The Push notifications card on
+the Account page says this too.
+
+The same connection brings new Archidekt alerts (comments, replies,
+follows) from 0.7.46, while **A new alert on Archidekt** is ticked on the
+card: the gateway looks for them only for members whose phone is connected
+now or was in the last 12 hours. Nothing in the app changed for this; a
+pressed alert opens its deck, forum thread or profile in the app.
 
 **Push test on an emulator.** The `Android push test` workflow
 (`.github/workflows/android-push-test.yml`) runs `android/scripts/push-test.sh`
@@ -211,7 +229,7 @@ deck replaced and withdrawn, swiping the app away from Recents, dismissing
 the ongoing notification, Doze, an app update, a reboot, a message missed
 while offline, a force stop (`am force-stop`, the nearest adb step to
 Android's Stop button) and opening the app again, and the gateway switching
-notifications off. Passing on an emulator with a stand-in gateway does not
+push notifications off. Passing on an emulator with a stand-in gateway does not
 show that a real phone behaves the same. The test also takes launcher screenshots at phone and Fold
 widths. The debug build it tests trusts a certificate made for that run
 only; a release build never does. A 24 hour battery test needs a real phone.
@@ -240,9 +258,26 @@ else your gateway serves. A few things are native:
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
   down the left edge with the same places (Home, Decks, Binder, Assistant),
-  Alerts and More, which opens beside the rail. The rules track the live
+  then Scan, Precons, Card models and Forum, and Alerts at its foot; the rail
+  has no More, since every page is on it. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
+- **Pull to refresh.** On a page that shows a list (Home, Decks, a deck page,
+  Binder, Binder › Lists and each of its lists, Proposals, History, Reports,
+  Alerts, Precons, Card search, the Forum and its sections, a member's profile), pulling down from
+  the very top shows an orange disc under the top bar; letting go past the
+  threshold loads the page again and reads it from Archidekt instead of the
+  copy the gateway keeps for a while. On a deck page a pull always reads the
+  deck from Archidekt (a pull within three seconds of the last read shows that
+  read). The app tells the gateway it was a pull with its own `X-MTG-Pull`
+  header; the reads still wait their turn in the gateway's shared Archidekt
+  pacer and count against your own Archidekt limit. A pull loads the page's
+  address again, so a page shown after sending a form never sends the form
+  twice. It is not offered on forms, a forum thread (it has the reply box), the
+  deck editor or the scanner, and a touch that starts inside an open box, a
+  menu, or a part of the page that scrolls on its own never pulls the page;
+  nor does any touch while a box on the page holds words you typed and haven't
+  sent, so a pull never throws them away.
 - **Back** goes back a page; on the first page it leaves the app.
 - **Links to your gateway** from other apps open in the app: share a gateway
   link to it from the browser's share sheet, or, when the operator built the
@@ -267,27 +302,54 @@ else your gateway serves. A few things are native:
 - **Sign-in** happens in your phone's browser, shown over the app (a Custom
   Tab), not in the app's own web view: that is where passkeys, your password
   manager's autofill (Bitwarden and the like) and "Sign in with ..." buttons
-  work, exactly as they do on the website. When you are done there, the
-  browser closes and you are back in the app, signed in (where the browser
-  offers an Auth Tab, as Chrome does; otherwise tap **Open the MTG Assistant
-  Gateway app** on the last page). The browser itself stays signed out of the
-  gateway.
+  work, exactly as they do on the website. The browser first shows a page
+  from your gateway: *An app asked to sign in to “your gateway's name”.*
+  Press **Continue** only if you just pressed Sign in in this app (any app
+  on the phone can open that page, and the one that did gets the sign-in);
+  **Cancel** ends it. When you are done at the sign-in service, the
+  browser closes and you are back in the app, signed in. That needs a browser
+  with Auth Tabs, such as Chrome: the app uses your default browser when it
+  has them, else Chrome when it came with the phone (as a system app), and
+  never any other app that says it has them, so on a phone whose default is
+  Samsung Internet the sign-in opens in Chrome if the phone came with it.
+  With neither, the sign-in opens in your default browser as before, and its
+  last page has a button: tap **Open the MTG Assistant Gateway app** there.
+  Right after you signed in during that sign-in (after **Sign out**, say),
+  the gateway sends the browser straight to the app instead, so you don't see
+  that page where the browser allows it. Account › This app › **Sign-in**
+  says which of the two your phone does, and My activity lists each time the
+  page was shown. If the browser is already signed in to the sign-in service,
+  you may not be asked anything after **Continue**. Only when the browser can't confirm the app
+  belongs to the gateway does the app try once more in a way where the sign-in
+  service asks you to sign in (your passkey, say). The browser itself stays
+  signed out of the gateway.
   Whether a passkey or autofill works is up to your browser and password
   manager: if it works on the website in that browser, it works here. If you
   would rather sign in inside the app, the sign-in page has a link for that;
   passkeys and autofill may not work there. With a gateway older than this
   app version, sign-in runs inside the app as before.
 - **Staying signed in.** The app's sign-in is a browser session like the
-  website's, so it ends the same way: when the browser session runs out,
-  when you use **Sign out on all my devices** on the `/logout` page, on your
-  next tap after the owner removes you from the gateway's group (the
-  gateway checks with the sign-in service every few seconds), and once
-  after the owner upgrades the gateway to 0.6.1. If the sign-in service
-  can't be reached, pages say so and ask you to try again later.
+  website's, so it ends the same way: after a week unused (each use keeps it
+  going, up to 30 days after you signed in; the owner sets both on the
+  gateway's Settings page, under **Sign-in**),
+  when you use **Sign out on all my devices** on the `/logout` page, within a
+  minute after the owner removes you from the gateway's group (the gateway
+  checks with the sign-in service as you use it), and once
+  after the owner upgrades the gateway to 0.6.1, and when the sign-in
+  service asks for a new sign-in on this phone (your other devices and AI
+  apps stay signed in). The page you land on says which of these it was,
+  with Sign in. If the sign-in service can't be reached, pages say so and
+  ask you to try again later.
 - **Downloads** (CSV export, the skill zip) land in your Downloads folder. If
   your sign-in has ended in the meantime, the app says so instead of saving a
   sign-in page; reload, sign in and download again.
 - **File pickers** (photo and CSV import) open for the gateway's pages only.
+  Where a page takes several files, you can pick several. A HEIC or HEIF photo
+  (what Samsung's camera saves when **High efficiency pictures** is on) reaches
+  the page as a JPEG, so the scanner can read it, and a JPEG over 4,096 px on
+  its long side (a 50 or 200 MP photo) reaches it as a smaller JPEG of about
+  4,000 px, upright, so the page never has to open a picture of hundreds of
+  megabytes.
 - **The /scan page's own camera** works inside the app: the app asks for camera
   permission once, and grants it to the gateway's pages only.
 - **Look and theme.** The app's own screens (setup, error, menu) use the pages'
@@ -321,10 +383,14 @@ The gateway's `/scan` page already reads cards from a photo (see
 [SCANNING.md](SCANNING.md)). The app's camera screen just takes a better photo
 than a browser can, then hands it to that page, which keeps running underneath:
 
-1. Menu, **Scan with the app's camera**, or the **Phone camera** button the scan
-   page shows when it runs inside the app. The app opens `/scan` if you aren't
-   on it.
-2. Fill the dashed card outline with the card. Controls, each shown only when
+1. On the scan page, the orange shutter or the viewfinder (inside the app they
+   open the phone camera, and the page doesn't start a camera of its own), or
+   the menu's **Scan with the app's camera**. The app opens `/scan` if you
+   aren't on it. The page's **Auto** switch opens the phone camera with Auto
+   already on (step 4).
+2. Fill the dashed card outline with the card: that holds the phone about
+   15 cm (6 in) from it, as on the website, where a phone's main lens still
+   focuses. Controls, each shown only when
    the camera reports it (the app uses CameraX, Google's camera library, and
    asks it what the camera can do):
    - **Torch** on/off (the button reads *Torch: On* or *Torch: Off*).
@@ -345,12 +411,20 @@ than a browser can, then hands it to that page, which keeps running underneath:
    name begins with is added to the list without a tap and shown over the
    viewfinder with **Undo**; the same card is not added again while it stays in
    view; a shaky read is kept for a tap on the page (*Not sure*); a read with no
-   match goes to the page's unidentified list. Each shot is taken as soon as the
+   match goes to the page's unidentified list. When the page finds no card
+   outline in four shots in a row, it reads the dashed box anyway and keeps
+   what it found for a tap (*Not sure*), never adding it on its own. Each shot is taken as soon as the
    page has finished with the previous one. **Done** closes the camera; the
    list tab shows what was added, or the camera tab shows a read that waits.
+5. When a shot finds no card and shooting has stopped, **Save this photo**
+   keeps that photo, exactly as the page got it, in the phone's
+   Pictures › MTG Gateway (no permission to give). Send it to whoever runs
+   your gateway: it carries a note of where the dashed box was, whether the
+   camera reported focus, and what the shot came to, so they can see why the
+   card wasn't found.
 
 The photo never leaves the phone except as the page's normal lookups to your
-gateway: it's decoded in the page, which sends what its own camera would send,
+gateway (and a photo you save yourself): it's decoded in the page, which sends what its own camera would send,
 the text it read plus the small art fingerprint that tells printings apart.
 
 ## 4. Foldables and large screens
@@ -379,13 +453,13 @@ The app talks only to pages and endpoints the gateway already serves:
 | Used for | Endpoint |
 |---|---|
 | Checking the address at setup | `GET /healthz` (expects JSON with `"status": "ok"`) |
-| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `GET /login/app-return` (where the browser hands the one-time code back) and `POST /login/app` with the code ([section 13](#13-privacy-and-security-notes)) |
+| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser; in the browser, the page whose Continue, `POST /login`, goes on to the sign-in service), then `GET /login/app-return` (where the browser hands the one-time code back) and `POST /login/app` with the code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
-| Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
+| Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`, and `noOutlineFrame` where the page has it) and its `scan:*` events; the page calls the app's `openCamera` and, from 0.7.46, `openCameraAuto` |
 | Sign-in return and App Links | `GET /.well-known/assetlinks.json`: the gateway vouches for the app it ships (its package ID and signing certificate), with no setting |
 | Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
 | Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |
-| Notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Notifications](#notifications)) |
+| Push notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Push notifications](#push-notifications)) |
 
 The pages work with any gateway version; the phone-camera hand-off needs a scan
 page that has those hooks (the edge-detection scan page with continuous mode,
@@ -605,7 +679,7 @@ programme, so check those pages before relying on any of it:
   needs identity verification. Google Play's own registration fee is the same
   amount.
 - **Power users.** Google says an "advanced flow", launched August 2026, lets a
-  user choose to install apps from unverified developers after a one-time setup.
+  user choose to install apps from developers who are not registered after a one-time setup.
 - **Registration** ties a package name to the SHA-256 fingerprint of its signing
   key. If several developers use the same package name with different keys,
   Google allocates the name by install counts.
@@ -687,13 +761,13 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
   the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
   only to notice the connection coming back while a page has failed to load.
-  For notifications it asks for `POST_NOTIFICATIONS` (to show your messages;
-  Android 13 and later ask you when you get notifications on this phone),
+  For push notifications it asks for `POST_NOTIFICATIONS` (to show your messages;
+  Android 13 and later ask you when you get push notifications on this phone),
   `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_SPECIAL_USE` (the service that
   keeps the connection to the gateway open while the app is closed),
   `RECEIVE_BOOT_COMPLETED` (to start that service again after the phone
   restarts), `WAKE_LOCK` (to keep the phone awake for a moment while a message
-  is shown) and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (to ask you once to let
+  is shown, and for at most 30 seconds while it connects again) and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (to ask you once to let
   the app run in the background, so battery saving doesn't cut the
   connection); all but `POST_NOTIFICATIONS` are granted at install.
   The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
@@ -706,20 +780,49 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
 - **Signing in through the browser** follows the usual pattern for native
   apps (RFC 8252, with a PKCE-style check). The app makes a random secret for
   each sign-in, keeps it on the phone, and sends only its SHA-256 with the
-  browser's `/login`. After the sign-in service, the gateway sets no cookie in
-  the browser; it keeps a one-time code for two minutes and sends the browser
-  to `/login/app-return?code=...` on the gateway's own address. Where the
-  browser has an Auth Tab, the app opened the sign-in in one, and the Auth Tab
-  hands that address back to the app and closes, but only to an app the
-  gateway vouches for at `/.well-known/assetlinks.json`: the package ID and
-  the signing certificate of the app the gateway ships, as its build recorded
-  them next to the APK. Any other browser shows a page whose button opens the
-  app through an `intent:` link naming the app's package ID, so Android hands
-  it only to the installed app with that ID; that relies on the browser
-  honouring the package in `intent:` links, which Chrome does (other browsers
-  not checked), so the button waits for your tap and names the app. The
-  one-time code is in that address, so a reverse proxy that logs full
-  addresses (many do by default) may keep it in its access log;
+  browser's `/login`. That address does not go to the sign-in service by
+  itself: any app on the phone can open it, so it shows a page naming the
+  gateway, and only its **Continue** goes on. Continue posts a one-use token
+  that only this browser holds in a cookie (`SameSite=Lax`, ten minutes), so
+  neither a link nor another site's page can press it for you; **Cancel**
+  spends the token. After the sign-in service, the gateway sets no cookie in
+  the browser and keeps a one-time code for two minutes, and sends the browser
+  to `/login/app-return?code=...` on its own address. Where a browser on the
+  phone has Auth Tabs, the app opened the sign-in in one that returns on that
+  address: the browser hands it back, and closes, only to the app the
+  gateway's `/.well-known/assetlinks.json` names (Digital Asset Links), so no
+  other app gets the code. Only if the browser reports that it could not
+  confirm the app (or the gateway's address has a port, which an Auth Tab can't
+  return on) does the app try again with an Auth Tab on its own scheme, which
+  gets `mtgassistant-signin://signin?code=...` back with no such check. Any
+  app could open that kind of Auth Tab at the gateway's `/login` with a secret
+  of its own, so for these sign-ins the gateway asks the sign-in service to
+  make you sign in (`prompt=login` and `max_age=0`), and does not take its
+  word for it: the sign-in service's ID token must say you signed in after
+  that try started (`auth_time`, with 5 seconds allowed for clocks that
+  differ, so the two machines' clocks must agree). If it doesn't,
+  or the sign-in service sends no `auth_time`, the gateway makes no code and
+  the app finishes in a Custom Tab instead.
+  In a Custom Tab, `/login/app-return?code=...` is a page whose button opens the app
+  through an `intent:` link naming the app's package ID, so Android
+  hands it only to the installed app with that ID. Any app can open the
+  gateway's `/login` with a secret of its own in a plain browser tab, and a
+  browser still signed in to the sign-in service passes straight through, so
+  the page follows the link once by itself (where the browser allows) only
+  when that sign-in asked for a new sign-in (`prompt=login`, `max_age=0`,
+  after a sign-out on the device) and the ID token shows one made during it;
+  otherwise it waits for your tap under its warning. Chrome opens an
+  `intent:` link only from a navigation a person started, which the page's
+  script is not, so when the app says it opened a Custom Tab
+  (`app_return=intent`) and such a sign-in was made, `/auth/callback`
+  redirects to the same link itself (the end of the navigation your Sign-in
+  press started), with the page as its `browser_fallback_url`. That gives no
+  app anything the scheme leg above doesn't already give under the same
+  proof. The link
+  relies on the browser honouring the package in `intent:` links, which
+  Chrome does (other browsers not checked). The one-time code is in these
+  addresses, so a reverse proxy that logs full addresses (many do by default)
+  may keep `/login/app-return`'s in its access log;
   the gateway's own log never records it, and it is useless there: it works
   only with the app's secret, once, within two minutes.
   The app then posts the code with its secret to `/login/app`, and only then
@@ -746,7 +849,7 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   that page falls back to the redirect that directly follows a gateway
   `/login`. The sign-in service's pages stay in the app only during a
   sign-in; any further site it redirects to opens in the browser. On the page
-  where you approve or deny connecting an AI application, Approve continues
+  where you approve or deny connecting an AI application, Approve and sign in continues
   in the app only to that sign-in service, and Deny, which goes back to the
   application's own site, always opens in the browser. A page from another
   site that slips in without the app being asked (the redirect after a form)

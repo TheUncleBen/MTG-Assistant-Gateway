@@ -13,6 +13,7 @@ from .test_history_page import store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -59,7 +60,7 @@ def test_the_more_sheet_stays_inside_a_344px_window_at_200_percent(server: Serve
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
             page.locator(".tabbar details.more > summary").click()
-            page.wait_for_timeout(150)
+            redrawn(page)
             problems += [f"{path}: {x}" for x in page.evaluate(CHECK)]
         browser.close()
     assert problems == [], "\n".join(problems)

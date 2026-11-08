@@ -25,7 +25,10 @@ unchanged, and the example variables file, into which you copy your own values.
    Copy into it every value your old file sets: the lines marked `REQUIRED`, and any optional
    line you changed. To list the lines your old file sets, run
    `grep -v -e '^#' -e '=$' -e '^$' mtg.env.old`, or read through it. A variable the new file
-   doesn't list any more has no effect: leave it out. The comments in the new file explain every
+   doesn't list any more has no effect: leave it out. From 0.7.45 or older, that list also shows
+   three sign-in lines the older example files set for you: `MTG_ACCESS_TOKEN_TTL=3600`,
+   `MTG_REFRESH_TOKEN_TTL=2592000` and `MTG_BROWSER_SESSION_TTL=7200`. Leave them out unless you
+   changed them on purpose (see [Coming from an older version](#coming-from-an-older-version)). The comments in the new file explain every
    line, so this is also the moment to see what is new.
 2. **Secrets.** Do [DEPLOY.md step 4](DEPLOY.md#4-docker-secrets-once) again. It only adds a
    secret that is missing, and the commands there skip any secret you already have (in
@@ -121,6 +124,11 @@ unreachable for a short while; signed-in assistants keep working.
 
 ## Going back to an older version
 
+**To 0.7.45 or older, from 0.7.46 or newer:** if your stack sets `MTG_BROWSER_SESSION_TTL`, set it
+to `86400` or less, or remove the line, before you go back: 0.7.45 and older refuse to start with
+more than `86400` (one day) there. The Settings page's **Sign-in** rows are 0.7.46's own; an older
+version doesn't use them, and its stack values (or its defaults) apply.
+
 **To 0.7.37 or newer:** change `MTG_TAG` to that version and update the stack with that
 version's stack file and example file (each version's files are on its branch,
 `release/X.Y.Z`, see [VERSIONS.md](VERSIONS.md)). If a newer version had upgraded the database,
@@ -182,9 +190,9 @@ upgrade, stop the gateway as above, and with the same `sudo -u '#1000' sh -c '..
 The update steps above bring every stack, variable and secret change up to now. A few changes
 reach past the stack, so if your old version is older than the one named, also:
 
-- **0.7.29 or older:** members' notifications come in the gateway's Android app, not the ntfy
-  app. Each member who wants them ticks **Send me notifications** on their Account page in the
-  app and presses **Save notifications**. Members on an app older than 0.7.12 install the new app
+- **0.7.29 or older:** members' push notifications come in the gateway's Android app, not the ntfy
+  app. Each member who wants them ticks **Send me push notifications** on their Account page in the
+  app and presses **Save push notifications**. Members on an app older than 0.7.12 install the new app
   from the gateway's Install page (uninstalling the old one first). If you ran an ntfy server of
   your own for the gateway, you can stop it, and revoke the old token there.
 - **0.7.32 or older:** the gateway sends at most 30 Archidekt requests a minute by default
@@ -202,6 +210,39 @@ reach past the stack, so if your old version is older than the one named, also:
   `MTG_WATCHLISTS_ENABLED=false`. Forge follows `FORGE_REPLICAS` alone (`0` = off), with Compose
   too: if you had turned Forge off with `COMPOSE_PROFILES`, set `FORGE_REPLICAS=0`, or it comes
   back on.
+- **0.7.45 or older:** the older example files set `MTG_ACCESS_TOKEN_TTL=3600`,
+  `MTG_REFRESH_TOKEN_TTL=2592000` and `MTG_BROWSER_SESSION_TTL=7200`, so your old variables
+  probably have them although you never changed them. Leave all three out of your new file
+  unless you set them on purpose. `MTG_BROWSER_SESSION_TTL` is now how long a sign-in lasts
+  unused, so `7200` keeps sign-ins to 2 hours unused (`604800` is a week). A value in either of
+  the other two locks its row on the Settings page.
+- **0.7.45 or older:** delete the `MTG_REAUTH_INTERVAL` line from your variables; it does nothing
+  now. Assistants connect again when the Settings page's **Assistant refresh** time (30 days by
+  default) has passed since they signed in, not after a week. To keep a week, set that row to 7 days.
+- **0.7.45 or older:** the data folder (`MTG_DATA_DIR`) grows by about 55 MB: once a day the
+  gateway downloads Scryfall's printings file and keeps a copy of it,
+  `scryfall-printings.sqlite`, for when Scryfall can't be reached. While a new copy is built the
+  copy's files take up to about 172 MB in all for a short while (the download, the new copy and
+  the old one).
+  If you restrict the gateway's outbound traffic, also allow `data.scryfall.io`, where Scryfall
+  serves that file. Not wanted? Turn off **Keep a local copy of card printings** on the Settings
+  page (General): the copy is deleted at once and nothing more is downloaded
+  ([SCANNING.md](SCANNING.md#operator-notes)).
+- **0.7.45 or older:** a few steps for your members, which you may want to pass on:
+  - **Update the Android app** from inside the app (it offers the update) after the gateway
+    update. Auto opening the phone's camera already scanning, pull to refresh, push notifications
+    that come back after the phone's deep sleep, picking several files, HEIC photos and saving a
+    photo the scanner couldn't read need the 0.7.46 app.
+  - **Samsung phones:** add MTG Assistant Gateway to **Never sleeping apps** (Settings › Battery ›
+    Background usage limits), or Samsung's battery saving can stop push notifications. The Push
+    notifications page under Account details says this too.
+  - **ChatGPT:** paste the instructions block from the gateway's ChatGPT setup page again, over
+    the old one.
+  - **Scripts that call the gateway's tools:** the seven account-action tools
+    `propose_deck_social`, `propose_comment`, `propose_create_folder`, `propose_collaborator`,
+    `propose_deck_help`, `propose_report` and `propose_contest_entry` are now one tool,
+    `propose_account_action`; a script that calls the old names must switch. Assistants pick up
+    the new tool by themselves.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.
@@ -235,7 +276,7 @@ themselves: the 21 settings `MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`
 `MTG_ARCHIDEKT_BACKUP_COPIES`, `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_SNAPSHOTS_PER_DECK`,
 `MTG_FORGE_PARALLEL_GAMES` and the 15 `MTG_SCAN_*` settings, and also `MTG_ANDROID_PACKAGE`,
 `MTG_ANDROID_ASSETLINKS`, `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and
-`FORGE_OOM_SCORE_ADJ`. The Compose file passes `MTG_ARCHIDEKT_BASE` too. Before 0.7.32 the guides
+`FORGE_OOM_SCORE_ADJ`. The Compose file of that version passed `MTG_ARCHIDEKT_BASE` too. Before 0.7.32 the guides
 said to add a line under `environment:` in the stack file for these.
 
 1. When you make your own edits again in the new file (the update steps above), **don't copy a
@@ -300,7 +341,7 @@ said to add a line under `environment:` in the stack file for these.
 #### Swarm or Portainer stack
 
 0.7.30 brings its own notification server (ntfy) into the stack, and the
-gateway's Android app gets the members' notifications from it through the
+gateway's Android app gets the members' push notifications from it through the
 gateway's own address.
 
 1. **Before you update the stack**, create the `mtg_ntfy_token` secret
@@ -331,13 +372,13 @@ gateway's own address.
    Settings page; delete it for the new default of 4.
 4. Update the stack with the new file, as in the 0.7.29 steps below (your
    old `mtg_ntfy_token` lines, if you had them, are already in it).
-5. Tell the members: notifications now come in the gateway's own Android
+5. Tell the members: push notifications now come in the gateway's own Android
    app, not the ntfy app, and members need app 0.7.30 to get them. Each
    member who wants them opens their Account page in the app, ticks **Send
-   me notifications** and presses **Save notifications**, which also connects
-   that phone (**Get notifications on this phone** stays on the card while
+   me push notifications** and presses **Save push notifications**, which also connects
+   that phone (**Get push notifications on this phone** stays on the card while
    a phone isn't connected). Their old subscriptions in the ntfy
-   app stop getting messages and can be deleted. There are no notifications
+   app stop getting messages and can be deleted. There are no push notifications
    on iPhone.
 6. **Members on an app older than 0.7.12 must update the app:** in those
    apps, sign-in no longer starts by itself. They install the new app from the
@@ -359,8 +400,8 @@ an ntfy server you ran for the gateway can go, with its proxy host.
 If Forge is on, the new file pulls Forge image `2.0.15-mag3`. Then follow
 the 0.7.29 steps below, but skip the
 `mtg_ntfy_token` edits: the new file already has those lines.
-Notifications now come in the gateway's Android app (members tick **Send
-me notifications** and press **Save notifications** on their Account page in the app), not the
+Push notifications now come in the gateway's Android app (members tick **Send
+me push notifications** and press **Save push notifications** on their Account page in the app), not the
 ntfy app, and members need app 0.7.30 to get them. **Members on an app older than 0.7.12 must
 update the app.**
 

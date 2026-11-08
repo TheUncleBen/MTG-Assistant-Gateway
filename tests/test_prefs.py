@@ -226,7 +226,7 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
         for name, value in (("view.deck", "grid"), ("card.size", "l"), ("stack:42:type", ["Land"])):
             db.set_pref(SUB, name, value)
         db.set_pref(SUB, "track.a.something", True)  # not a view choice: stays
-        page = html.unescape((await b.http.get("/account/details")).text)
+        page = html.unescape((await b.http.get("/account/details/choices")).text)
         assert "Forget my view choices" in page and "Light or dark mode stays on each device." in page
         csrf = await b.csrf("/account/details")
         r = await b.http.post("/account", data={"csrf": csrf, "action": "forget_choices"})
@@ -252,5 +252,300 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
         done = html.unescape((await b.http.get(where)).text)
         assert "Every page starts with its usual view again, on all your devices." in done
         assert [e for e in db.audit_recent(20, sub=SUB) if e["event"] == "view_choices_forgotten"]
+    finally:
+        await b.aclose()
+
+
+async def test_each_page_keeps_its_own_card_size(stack: Stack) -> None:
+    """The owner, 2026-10-28: one card size for every page meant a change in the printings dialog resized
+    the deck page. Each page keeps its own (card.size.<page>), M until chosen, or the one size
+    chosen before for every page, so nobody's choice is lost."""
+    b = await linked(stack)
+    try:
+        db = stack.h.db
+        assert set(prefs.CARD_SIZE_PAGES) >= {
+            "deck", "printings", "search", "watchlist", "goldfish", "scan", "collection", "editor", "decks"
+        }  # fmt: skip
+        r = await api(
+            b, "POST", "/api/v1/prefs", {"set": {"card.size.deck": "s", "card.size.printings": "l"}}
+        )
+        assert r.json()["saved"] == ["card.size.deck", "card.size.printings"], r.text
+        r = await api(b, "POST", "/api/v1/prefs", {"set": {"card.size.nowhere": "s", "card.size.deck": "xl"}})
+        assert r.json()["refused"] == ["card.size.nowhere", "card.size.deck"]
+        page = (await b.http.get("/decks/42")).text
+        assert "data-card-size=s data-card-size-page=deck data-card-size-printings=l class='preload'>" in page
+        # a page with no choice of its own: M, or the size chosen once for every page before
+        page = (await b.http.get("/cards", params={"q": "sol"})).text
+        assert (
+            "data-card-size=m data-card-size-page=search data-card-size-unset data-card-size-printings=l "
+            "class='preload'>" in page
+        )
+        db.set_pref(SUB, "card.size", "l")
+        page = (await b.http.get("/cards", params={"q": "sol"})).text
+        assert "data-card-size=l data-card-size-page=search data-card-size-printings=l class='preload'>" in (
+            page
+        )
+        assert "data-card-size=s data-card-size-page=deck" in (await b.http.get("/decks/42")).text
+        assert "data-card-size-page=editor" in (await b.http.get("/decks/42/edit")).text
+        assert "data-card-size-page=collection" in (await b.http.get("/collection")).text
+        assert "data-card-size-page=decks" in (await b.http.get("/decks")).text
+        # Forget my view choices forgets each page's
+        prefs.forget(db, SUB)
+        assert db.get_pref(SUB, "card.size.deck") is None and db.get_pref(SUB, "card.size.printings") is None
+    finally:
+        await b.aclose()
+
+
+def test_the_scan_intro_is_seen_or_dismissed() -> None:
+    """The scan intro is open on the first visit and folded after it ("seen"); Got it hides it
+    (True). Nothing else is kept for it."""
+    assert prefs.valid(prefs.SCAN_INTRO, "seen") and prefs.valid(prefs.SCAN_INTRO, True)
+    for bad in ("yes", "Seen", False, 1, None):
+        assert not prefs.valid(prefs.SCAN_INTRO, bad), bad
+    assert not prefs.valid(prefs.EDHPLAY_STEPS, "seen")
+
+
+def test_card_searchs_filters_are_open_or_closed() -> None:
+    """Card search keeps whether its filter groups sit open or folded on a Fold or desktop
+    (mockup screen 5): "open" or "closed", nothing else."""
+    assert prefs.valid(prefs.CARDS_FILTERS, "open") and prefs.valid(prefs.CARDS_FILTERS, "closed")
+    for bad in ("Open", True, 1, None, ""):
+        assert not prefs.valid(prefs.CARDS_FILTERS, bad), bad
+
+
+async def test_the_sort_picked_on_a_list_is_the_sort_the_next_visit_opens_with(stack: Stack) -> None:
+    """QOL-12 (0.7.46 audit QG-11): My decks, the Binder and a profile open sorted as they were
+    left, on every device; "Forget my view choices" clears it too."""
+    b = await linked(stack)
+    try:
+        db = stack.h.db
+        # My decks: Name picked, then opened plain
+        await b.http.get("/decks", params={"order": "name"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "name"}
+        page = (await b.http.get("/decks")).text
+        assert "<option value='name' selected>" in page
+        # the list's own ask without an order follows it, and the pick of the default is a pick
+        await b.http.get("/decks", params={"order": "updated"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "updated"}
+        # the Binder (with a card in it, so its sort is on the page): Set release, oldest first
+        r = await api(b, "POST", "/collection/api/add", {"items": [{"name": "Sol Ring"}]})
+        assert r.status_code == 200, r.text
+        await b.http.get("/collection", params={"sort": "edition", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.collection") == {"sort": "edition", "dir": "asc"}
+        page = (await b.http.get("/collection")).text
+        assert "<option value='edition' selected>" in page and "name='dir' value='asc'" in page
+        rows = await b.http.get("/collection/api/rows")  # the list's own ask follows it too
+        assert rows.status_code == 200 and rows.json()["ok"]
+        # a profile: Views, with a direction
+        await b.http.get("/users/alice", params={"order": "-viewCount", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.profile") == {"sort": "-viewCount", "dir": "asc"}
+        page = (await b.http.get("/users/alice")).text
+        assert "<option value='-viewCount' selected>" in page and "<option value='asc' selected>" in page
+        # an unknown sort in a link is ignored and nothing is remembered from it
+        await b.http.get("/decks", params={"order": "evil"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "updated"}
+        # a link from elsewhere shows its sort but does not remember it
+        await b.http.get("/decks", params={"order": "name"}, headers={"Sec-Fetch-Site": "cross-site"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "updated"}
+        # Forget my view choices clears the sorts with the views
+        csrf = await b.csrf("/account/details")
+        r = await b.http.post("/account", data={"csrf": csrf, "action": "forget_choices", "confirm": "yes"})
+        assert r.status_code == 303
+        assert db.get_pref(SUB, "sort.decks") is None and db.get_pref(SUB, "sort.collection") is None
+        assert db.get_pref(SUB, "sort.profile") is None
+        page = (await b.http.get("/decks")).text
+        assert "<option value='updated' selected>" in page
+    finally:
+        await b.aclose()
+
+
+async def test_an_older_save_from_a_page_that_arrives_after_a_newer_one_is_ignored(stack: Stack) -> None:
+    """0.7.46 audit C7: static/prefs.js numbers a page's saves (``page``, ``seq``). A save the
+    gateway gets after a newer one from the same page (a slow request, or one the page cancelled
+    after it reached the gateway) is dropped for each name the newer one saved, and kept for the
+    others. Another page's save and a save without a number still go as they come."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        db = stack.h.db
+
+        async def post(body: dict) -> dict:
+            r = await api(b, "POST", "/api/v1/prefs", body, csrf=csrf)
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        got = await post({"page": "p1", "seq": 3, "set": {"card.size.deck": "s"}})
+        assert got["saved"] == ["card.size.deck"] and got["superseded"] == []
+        # seq 2 arrives late: its card size is older than the one kept; its view is news
+        got = await post({"page": "p1", "seq": 2, "set": {"card.size.deck": "l", "view.deck": "grid"}})
+        assert got["saved"] == ["view.deck"] and got["superseded"] == ["card.size.deck"], got
+        assert db.get_pref(SUB, "card.size.deck") == "s" and db.get_pref(SUB, "view.deck") == "grid"
+        got = await post({"page": "p1", "seq": 3, "set": {"card.size.deck": "m"}})  # the same one again
+        assert got["superseded"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "s"
+        # a forget (null) is a save like any other
+        got = await post({"page": "p1", "seq": 1, "set": {"card.size.deck": None}})
+        assert got["superseded"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "s"
+        # a newer one from the page goes
+        got = await post({"page": "p1", "seq": 4, "set": {"card.size.deck": "m"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "m"
+        # another page (another tab, or the page loaded again) counts from 1
+        got = await post({"page": "p2", "seq": 1, "set": {"card.size.deck": "l"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "l"
+        # a save without a number (an older page's script) still goes
+        got = await post({"set": {"card.size.deck": "s"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "s"
+        # a refused value keeps no number: the older valid one after it still goes
+        got = await post({"page": "p3", "seq": 9, "set": {"card.size.deck": "xl"}})
+        assert got["refused"] == ["card.size.deck"]
+        got = await post({"page": "p3", "seq": 8, "set": {"card.size.deck": "m"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "m"
+        # one save with a name in both its copy and its set is one save of it, not two rivals
+        got = await post(
+            {"page": "p5", "seq": 1, "copy": {"edhplay.steps": True}, "set": {"edhplay.steps": None}}
+        )
+        assert got["saved"] == ["edhplay.steps", "edhplay.steps"] and got["superseded"] == [], got
+        assert db.get_pref(SUB, "edhplay.steps") is None
+        # the copy from a device keeps the order too
+        got = await post({"page": "p4", "seq": 2, "set": {"scan.intro": "seen"}})
+        got = await post({"page": "p4", "seq": 1, "copy": {"scan.intro": True}})
+        assert db.get_pref(SUB, "scan.intro") == "seen"
+        # a number that isn't one is refused whole
+        for bad in (
+            {"page": "p1", "seq": "4"},
+            {"page": "p1", "seq": True},
+            {"page": "p1", "seq": 0},
+            {"page": "p1"},
+            {"seq": 5},
+            {"page": "x" * 65, "seq": 5},
+            {"page": 7, "seq": 5},
+        ):
+            r = await api(b, "POST", "/api/v1/prefs", {**bad, "set": {"card.size.deck": "s"}}, csrf=csrf)
+            assert r.status_code == 400, (bad, r.text)
+        assert db.get_pref(SUB, "card.size.deck") == "m"
+    finally:
+        await b.aclose()
+
+
+async def test_a_page_id_or_a_choice_with_a_trailing_newline_is_refused(stack: Stack) -> None:
+    """0.7.46 audit (099f600a): the page id and the choices' words are checked whole: "abc\\n"
+    is not "abc" (a ``$`` alone also matches before a last newline)."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        r = await api(
+            b, "POST", "/api/v1/prefs", {"page": "abc\n", "seq": 1, "set": {"view.deck": "grid"}}, csrf=csrf
+        )
+        assert r.status_code == 400, r.text
+        assert stack.h.db.get_pref(SUB, "view.deck") is None
+        bad = {"view.deck": "grid\n", "stack:42:category\n": None, "sort.decks": {"sort": "name\n"}}
+        r = await api(b, "POST", "/api/v1/prefs", {"set": bad}, csrf=csrf)
+        assert r.status_code == 200 and sorted(r.json()["refused"]) == sorted(bad), r.text
+        r = await api(
+            b, "POST", "/api/v1/prefs", {"page": "abc", "seq": 1, "set": {"view.deck": "grid"}}, csrf=csrf
+        )
+        assert r.json()["saved"] == ["view.deck"], r.text
+    finally:
+        await b.aclose()
+
+
+AMY = {
+    "sub": "user-2",
+    "email": "amy@example.test",
+    "name": "Amy",
+    "preferred_username": "amy",
+    "groups": ["mtg-users"],
+}
+
+
+async def test_one_members_many_saves_never_push_out_another_members_numbers(stack: Stack) -> None:
+    """0.7.46 audit (099f600a): the save numbers are kept per member, with a small cap each
+    (prefs.SEQ_PER_MEMBER). Amy saving 25,000 names (more than the one shared store of 20,000
+    held before) pushes out only her own oldest numbers: Alice's survives, so Alice's late older
+    save is still dropped."""
+    from .test_decks_and_proxy import Browser
+
+    a = await linked(stack)
+    h = stack.h
+    alice = dict(h.idp.user)
+    try:
+        csrf_a = await a.csrf("/collection")
+        r = await api(
+            a, "POST", "/api/v1/prefs", {"page": "pa", "seq": 2, "set": {"view.deck": "grid"}}, csrf=csrf_a
+        )
+        assert r.json()["saved"] == ["view.deck"], r.text
+        h.idp.user = AMY
+        b = Browser(h)
+        try:
+            await b.login()
+            csrf_b = await b.csrf("/account/details")
+            names = [f"stack:{i}:category" for i in range(25_000)]
+            for n, at in enumerate(range(0, len(names), 400), start=1):
+                body = {"page": "pb", "seq": n, "set": dict.fromkeys(names[at : at + 400])}
+                r = await api(b, "POST", "/api/v1/prefs", body, csrf=csrf_b)
+                assert r.status_code == 200 and not r.json()["superseded"], r.text[:300]
+            # her own: the newest are remembered, her oldest pushed out (her cap, not anyone's)
+            r = await api(
+                b, "POST", "/api/v1/prefs", {"page": "pb", "seq": 1, "set": {names[-1]: None}}, csrf=csrf_b
+            )
+            assert r.json()["superseded"] == [names[-1]], r.text
+            r = await api(
+                b, "POST", "/api/v1/prefs", {"page": "pb", "seq": 1, "set": {names[0]: None}}, csrf=csrf_b
+            )
+            assert r.json()["saved"] == [names[0]], r.text
+        finally:
+            await b.aclose()
+        # Alice's older save, late: still dropped
+        r = await api(
+            a, "POST", "/api/v1/prefs", {"page": "pa", "seq": 1, "set": {"view.deck": "list"}}, csrf=csrf_a
+        )
+        assert r.json()["superseded"] == ["view.deck"], r.text
+        assert h.db.get_pref(SUB, "view.deck") == "grid"
+    finally:
+        h.idp.user = alice
+        await a.aclose()
+
+
+def test_the_save_numbers_keep_a_small_cap_per_member_and_drop_the_least_recent_member() -> None:
+    """The store behind it: each member keeps at most ``per_member`` names (their own oldest go);
+    past ``members`` members, a new member's first save pushes out the member who saved least
+    recently, never a part of anyone's numbers."""
+    nums = prefs.SaveNumbers(per_member=3, members=2)
+    for i in range(5):
+        nums.keep("a", f"n{i}", "p", i + 1)
+    assert [nums.get("a", f"n{i}") for i in range(5)] == [None, None, ("p", 3), ("p", 4), ("p", 5)]
+    nums.keep("b", "x", "q", 1)
+    nums.keep("a", "n5", "p", 6)  # a saved more recently than b
+    nums.keep("c", "y", "r", 1)  # a third member: b, the least recent, goes whole
+    assert nums.get("b", "x") is None and nums.get("c", "y") == ("r", 1)
+    assert [nums.get("a", f"n{i}") for i in (3, 4, 5)] == [("p", 4), ("p", 5), ("p", 6)]
+    assert nums.size() <= 3 * 2
+    assert prefs.SEQ_PER_MEMBER * prefs.SEQ_MEMBERS <= 200_000
+
+
+async def test_the_sort_picked_on_card_search_deck_search_and_precons_is_remembered(stack: Stack) -> None:
+    """Audit F-10 (eccfa3d9): card search, deck search and the precons remember their sort as the
+    other lists do (QOL-12): the next visit opens with it, an unknown one is ignored, and Forget
+    my view choices clears them."""
+    b = await linked(stack)
+    try:
+        db = stack.h.db
+        await b.http.get("/cards", params={"q": "sol", "order": "released", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.cards") == {"sort": "released", "dir": "asc"}
+        page = (await b.http.get("/cards", params={"q": "sol"})).text
+        assert "<option value='released' selected>" in page and "<option value='asc' selected>" in page
+        await b.http.get("/search", params={"order": "-size"})
+        assert db.get_pref(SUB, "sort.search") == {"sort": "-size", "dir": "auto"}
+        page = (await b.http.get("/search")).text
+        assert "<option value='-size' selected>" in page
+        await b.http.get("/precons", params={"sort": "name", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.precons") == {"sort": "name", "dir": "asc"}
+        page = (await b.http.get("/precons")).text
+        assert "<option value='name' selected>" in page and "<option value='asc' selected>" in page
+        await b.http.get("/cards", params={"q": "sol", "order": "evil"})
+        assert db.get_pref(SUB, "sort.cards") == {"sort": "released", "dir": "asc"}
+        csrf = await b.csrf("/account/details")
+        r = await b.http.post("/account", data={"csrf": csrf, "action": "forget_choices", "confirm": "yes"})
+        assert r.status_code == 303, r.text
+        assert all(db.get_pref(SUB, f"sort.{kind}") is None for kind in ("cards", "search", "precons"))
     finally:
         await b.aclose()

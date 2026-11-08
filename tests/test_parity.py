@@ -36,7 +36,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
     try:
         csrf = await b.csrf()
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-card-size=m>" in page.text
+        assert "<html lang='en' data-card-size=m " in page.text
         assert "class='tabbar'" in page.text and "class='icon-btn acct' href='/account'" in page.text
         # Theme lives on the Account page (Look), as a form posting to /theme
         hub = await b.http.get("/account", headers=NAV)
@@ -45,7 +45,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         assert r.status_code == 303 and r.headers["location"] == "/decks"
         assert "mtg_theme=light" in r.headers["set-cookie"]
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-theme=light data-card-size=m>" in page.text
+        assert "<html lang='en' data-theme=light data-card-size=m " in page.text
         # an unknown theme falls back to system (cookie cleared), an off-site next is ignored
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "neon", "next": "https://evil.test/"})
         assert r.status_code == 303 and r.headers["location"] == "/account"
@@ -97,11 +97,11 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         # the deck page: text, stacks and grid views; grouping and sorting; the local filter
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "class='banner'" in deck.text and "Quick add" in deck.text and "Clone deck" in deck.text
+        assert "class='banner'" in deck.text and "id='quick'" in deck.text and "Clone deck" in deck.text
         # Archidekt's own playtester in its own tab; the simulation (the same run as
         # run_deck_report) is one click; the compare view is under More
         assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in deck.text
-        assert "Run full test" in deck.text
+        assert "Run test" in deck.text
         assert "href='/decks/42/compare'" in deck.text and "Run deck report" not in deck.text
         assert "/decks/42/settings" in deck.text and "Deck stats" in deck.text
         assert "cards.scryfall.io" in deck.headers["content-security-policy"]
@@ -169,7 +169,7 @@ async def test_new_deck_settings_and_clone_forms(stack: Stack) -> None:
                 "unlisted": "",
             },
         )
-        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=saved#ds-main", r.text
         page = await b.http.get(r.headers["location"], headers=NAV)
         assert "Now with a primer." in page.text and "Saved to Archidekt" in page.text
         # recorded as an applied proposal, with its snapshot, so History can undo it
@@ -512,7 +512,7 @@ async def test_settings_for_a_deck_without_a_format_keep_it_unset(stack: Stack) 
                 "unlisted": "",
             },
         )
-        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=saved#ds-main", r.text
         assert ark.decks[42]["deckFormat"] is None
         assert rich_text(ark.decks[42]["description"]) == "Only the description changes."
     finally:
@@ -557,6 +557,26 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
     assert [e["modifications"]["label"] for e in sent] == [",#656565"], sent
     row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
     assert row["label"] == ",#656565"
+
+
+async def test_a_color_tag_given_by_name_gets_the_members_own_color(stack: Stack) -> None:
+    """Review F13: a tag given by its name alone ("Cut") went on grey, though the member's own
+    "Cut" on My lists is red. The name is looked up in the member's color tags first (any case);
+    a name they don't have stays grey, and a color given with it is kept as given."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.account.tags["alice"] = [{"id": 1, "name": "Cut", "color": "#ff4d4f"}]
+
+    async def propose(change: dict) -> dict:
+        args = {"deck_id": "42", "changes": [change]}
+        return structured(await call(h, token, "propose_deck_changes", args))
+
+    p = await propose({"action": "set_label", "name": "Sol Ring", "label": "cut"})
+    assert p["ok"] and "Sol Ring: color tag no tag -> Cut (#ff4d4f)" in p["diff"], p
+    p = await propose({"action": "set_label", "name": "Cultivate", "label": "Maybe"})
+    assert p["ok"] and "color tag no tag -> Maybe (#656565)" in p["diff"], p
+    p = await propose({"action": "set_label", "name": "Command Tower", "label": "Cut", "color": "#000000"})
+    assert p["ok"] and "color tag no tag -> Cut (#000000)" in p["diff"], p
 
 
 async def test_every_modify_sends_the_colour_tag_as_the_site_does(stack: Stack) -> None:
@@ -754,15 +774,15 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
         return structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
 
     bad = await propose({"deck_format": "modern", "edh_bracket": 2})
-    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+    assert not bad["ok"] and "Only a Commander deck has a bracket" in bad["message"], bad
     p = await propose({"deck_format": "modern"})
     assert p["ok"], p
-    assert "bracket: 3 -> none" in p["diff"], p["diff"]
+    assert "Commander bracket: 3 → none" in p["diff"], p["diff"]
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a
     assert ark.decks[42]["deckFormat"] == 2 and ark.decks[42]["edhBracket"] is None
     bad = await propose({"edh_bracket": 4})  # the deck is Modern now
-    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+    assert not bad["ok"] and "Only a Commander deck has a bracket" in bad["message"], bad
 
     # the settings form: a bracket left picked is dropped for another format, kept for Commander
     b = await _linked_browser(stack)
@@ -806,8 +826,8 @@ async def test_a_snapshot_of_a_non_commander_deck_with_a_bracket_restores(stack:
     assert a["ok"] and a["snapshot_id"], a
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"], r
-    assert 'name: "New" -> "Sample Commander Deck"' in r["diff"], r["diff"]
-    assert "bracket: 2 -> none" in r["diff"], r["diff"]
+    assert "Deck name: “New” → “Sample Commander Deck”" in r["diff"], r["diff"]
+    assert "Commander bracket: 2 → none" in r["diff"], r["diff"]
     done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["result"]["verified"] is True, done
     assert ark.decks[42]["name"] == "Sample Commander Deck" and ark.decks[42]["deckFormat"] == 2

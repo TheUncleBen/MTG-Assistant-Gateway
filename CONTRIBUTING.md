@@ -94,6 +94,11 @@ docs. Please keep it that way:
   node names and placeholder usernames. Recorded API responses get their
   owner fields replaced (see
   [tests/fixtures/live/README.md](tests/fixtures/live/README.md)).
+  `tests/test_repo_privacy.py` checks every tracked file: URLs name only
+  public services or reserved example hosts. The maintainers also run it
+  before every push with `MTG_PRIVATE_VALUES_FILE` naming a file kept outside
+  the repository (and outside GitHub) that lists the owner's deck ids and
+  names; without that file the test runs its generic checks only.
 - **Nothing site-specific in code.** Anything that differs between
   deployments is an environment variable or a Docker secret, with a sensible
   default, and is documented in the environment reference.

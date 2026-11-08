@@ -1,0 +1,228 @@
+Subject: scryfall_search shows 20 cards a page, each in its newest paper printing
+
+Found in the assistant tool review of the live gateway (2026-10-28):
+
+- A verbose search returned all 73 results (about 37 KB) with no way to ask
+  for fewer. scryfall_search now takes limit (default 20, at most 175) and
+  page counts pages of that many, read across Scryfall's own 175-card pages.
+  The first line says which cards are shown ("Showing 21-40.") and how to get
+  the next; a page past the end says how many pages there are.
+- Its cards came in Scryfall's default printing (Siege-Gang Lieutenant as
+  The List, PLST), while scryfall_named shows the newest printing out on
+  paper. A search now uses the same policy through Scryfall's prefer:newest
+  with game:paper (unless the query names a game). printing picks another:
+  scryfall (Scryfall's own choice), cheapest (prefer:usd-low) or oldest; a
+  prefer: term in the query wins. The query is put in parentheses so an "or"
+  in it keeps the added terms on the whole query. A line says which
+  printings are shown.
+
+tests/test_search_limit_and_printing.py.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 has none of these. Needs
+patches 0001-0015 applied first.
+diff --git a/server.py b/server.py
+index 5f249e3..e692600 100644
+--- a/server.py
++++ b/server.py
+@@ -537,6 +537,13 @@ def _scryfall_error(e: Exception) -> str:
+ # ── Scryfall Input Models ────────────────────────────────────────────────────
+ 
+ 
++class SearchPrinting(str, Enum):
++    NEWEST_PAPER = "newest_paper"
++    SCRYFALL = "scryfall"
++    CHEAPEST = "cheapest"
++    OLDEST = "oldest"
++
++
+ class ScryfallSearchOrder(str, Enum):
+     NAME = "name"
+     SET = "set"
+@@ -570,8 +577,15 @@ class SearchInput(BaseModel):
+         ),
+         min_length=1, max_length=500,
+     )
+-    page: int = Field(default=1, ge=1, le=100)
++    page: int = Field(default=1, ge=1, le=100, description="Page of `limit` cards (1 is the first).")
++    limit: int = Field(default=20, ge=1, le=175, description="Cards per page (default 20, at most 175).")
+     order: ScryfallSearchOrder = Field(default=ScryfallSearchOrder.NAME)
++    printing: SearchPrinting = Field(
++        default=SearchPrinting.NEWEST_PAPER,
++        description=("Which printing of each card is shown: 'newest_paper' (default: the newest "
++                     "printing out on paper, as scryfall_named shows), 'scryfall' "
++                     "(Scryfall's own choice), 'cheapest' (lowest USD price) or 'oldest'. A "
++                     "prefer: term in the query wins."))
+     verbose: bool = Field(default=False, description="Include set, price, legality, keywords, and Scryfall link.")
+ 
+ 
+@@ -660,24 +674,81 @@ class CardTextInput(BaseModel):
+ # ── Scryfall Tools ───────────────────────────────────────────────────────────
+ 
+ 
++_SCRYFALL_PAGE = 175          # cards per page of Scryfall's /cards/search
++_PREFER_TERM = re.compile(r"(?<![\w])-?prefer:", re.IGNORECASE)
++_GAME_TERM = re.compile(r"(?<![\w])-?game[:=]", re.IGNORECASE)
++_PRINTING_WORDS = {
++    SearchPrinting.NEWEST_PAPER: "the newest out on paper, as scryfall_named shows",
++    SearchPrinting.SCRYFALL: "Scryfall's own choice",
++    SearchPrinting.CHEAPEST: "the cheapest in USD",
++    SearchPrinting.OLDEST: "the oldest",
++}
++
++
++def _search_query(query: str, printing: SearchPrinting) -> str:
++    """The query with the printing policy added as Scryfall's prefer: (and, for the newest
++    printing out on paper, game:paper unless the query names a game). The query is put in
++    parentheses so an "or" in it does not split the added terms off."""
++    if printing == SearchPrinting.SCRYFALL or _PREFER_TERM.search(query):
++        return query
++    extra = {SearchPrinting.CHEAPEST: "prefer:usd-low", SearchPrinting.OLDEST: "prefer:oldest"}.get(
++        printing, "prefer:newest" if _GAME_TERM.search(query) else "game:paper prefer:newest")
++    return f"({query}) {extra}"
++
++
+ @mcp.tool(name="scryfall_search")
+ async def scryfall_search(params: SearchInput) -> str:
+     """Search for Magic: The Gathering cards using Scryfall's full query syntax.
+ 
+     Supports color identity (id<=), oracle text (o:), type (t:), set (set:),
+-    keywords (kw:), mana cost, and boolean operators. Returns up to 175 cards per page.
++    keywords (kw:), mana cost, and boolean operators. Shows `limit` cards a page
++    (default 20); page takes the next. Each card is shown in its newest printing
++    out on paper (as scryfall_named), unless `printing` asks for another.
+     """
++    start = (params.page - 1) * params.limit
++    first = start // _SCRYFALL_PAGE + 1
++    skip = start % _SCRYFALL_PAGE
++    query = _search_query(params.query, params.printing)
+     try:
+-        data = await _scryfall_get(
+-            "/cards/search",
+-            params={"q": params.query, "page": params.page, "order": params.order.value},
+-        )
+-        cards = data.get("data", [])
+-        total = data.get("total_cards", len(cards))
+-        has_more = data.get("has_more", False)
+-        return _format_card_list(cards, total, has_more, verbose=params.verbose)
++        cards: list[dict] = []
++        total = 0
++        sf_page = first
++        while True:
++            data = await _scryfall_get(
++                "/cards/search",
++                params={"q": query, "page": sf_page, "order": params.order.value},
++            )
++            got = [c for c in data.get("data", []) if isinstance(c, dict)]
++            total = data.get("total_cards", total or len(got))
++            cards.extend(got[skip:] if sf_page == first else got)
++            if len(cards) >= params.limit or not data.get("has_more"):
++                break
++            sf_page += 1
++        cards = cards[: params.limit]
+     except Exception as e:
+-        return _scryfall_error(e)
++        if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 422 and start >= _SCRYFALL_PAGE:
++            cards, total = [], -1
++        else:
++            return _scryfall_error(e)
++    pages = max(1, -(-max(total, 0) // params.limit))
++    if not cards:
++        if total == -1 or start > 0:
++            known = f"Found {total} card(s). " if total >= 0 else ""
++            return (f"{known}Page {params.page} is past the last "
++                    f"({pages} page{'s' if pages != 1 else ''} of {params.limit}).").strip()
++        return f"Found {total} card(s)."
++    shown = f"Showing {start + 1}-{start + len(cards)}."
++    parts = [f"Found {total} card(s). {shown}"]
++    if start + len(cards) < total:
++        parts.append(f"(More: page={params.page + 1} for the next {params.limit}, or refine the query.)")
++    parts.append(f"Printings: {_PRINTING_WORDS[params.printing]}"
++                 + (" (the query's own prefer: term)." if _PREFER_TERM.search(params.query) else "."))
++    parts.append("")
++    for i, card in enumerate(cards, start + 1):
++        parts.append(f"--- {i} ---")
++        parts.append(_format_card(card, verbose=params.verbose))
++        parts.append("")
++    return "\n".join(parts)
+ 
+ 
+ async def _named_printing(card: dict, set_code: Optional[str]) -> str:
+diff --git a/tests/test_search_limit_and_printing.py b/tests/test_search_limit_and_printing.py
+new file mode 100644
+index 0000000..bf53873
+--- /dev/null
++++ b/tests/test_search_limit_and_printing.py
+@@ -0,0 +1,73 @@
++"""scryfall_search shows `limit` cards a page (default 20) and says how to get
++the next, and shows each card in the printing scryfall_named would: the newest
++printing out on paper, unless another policy is asked for."""
++import pytest
++
++import server
++
++
++def _card(i: int) -> dict:
++    return {"object": "card", "name": f"Card {i:03d}", "set": "abc", "collector_number": str(i),
++            "type_line": "Creature", "mana_cost": "{1}", "oracle_text": "", "rarity": "common"}
++
++
++ALL = [_card(i) for i in range(1, 231)]   # 230 cards: two Scryfall pages of 175
++
++
++@pytest.fixture
++def scryfall(monkeypatch):
++    calls = []
++
++    async def get(endpoint, params=None):
++        calls.append((endpoint, dict(params or {})))
++        assert endpoint == "/cards/search"
++        page = int(params.get("page", 1))
++        chunk = ALL[(page - 1) * 175: page * 175]
++        return {"object": "list", "total_cards": len(ALL), "has_more": page * 175 < len(ALL),
++                "data": chunk}
++
++    monkeypatch.setattr(server, "_scryfall_get", get)
++    return calls
++
++
++async def test_search_shows_twenty_by_default_and_says_how_to_get_more(scryfall):
++    out = await server.scryfall_search(server.SearchInput(query="t:creature"))
++    assert out.startswith("Found 230 card(s). Showing 1-20.")
++    assert "Card 020" in out and "Card 021" not in out
++    assert "page=2 for the next 20" in out
++
++
++async def test_a_later_page_of_the_limit_reads_across_scryfalls_pages(scryfall):
++    out = await server.scryfall_search(server.SearchInput(query="t:creature", limit=50, page=4))
++    assert out.startswith("Found 230 card(s). Showing 151-200.")
++    assert "Card 151" in out and "Card 200" in out and "Card 201" not in out
++    assert [c[1]["page"] for c in scryfall] == [1, 2]
++    last = await server.scryfall_search(server.SearchInput(query="t:creature", limit=50, page=5))
++    assert last.startswith("Found 230 card(s). Showing 201-230.") and "page=6" not in last
++
++
++async def test_a_page_past_the_end_says_so(scryfall):
++    out = await server.scryfall_search(server.SearchInput(query="t:creature", page=20))
++    assert out.startswith("Found 230 card(s). Page 20 is past the last (12 pages of 20).")
++
++
++async def test_search_shows_the_newest_paper_printing_as_scryfall_named_does(scryfall):
++    await server.scryfall_search(server.SearchInput(query="t:goblin id<=r"))
++    assert scryfall[0][1]["q"] == "(t:goblin id<=r) game:paper prefer:newest"
++    out = await server.scryfall_search(server.SearchInput(query="t:goblin"))
++    assert "Printings: the newest out on paper, as scryfall_named shows" in out
++
++
++async def test_another_printing_policy_or_the_querys_own_prefer_is_kept(scryfall):
++    await server.scryfall_search(server.SearchInput(query="t:goblin", printing="scryfall"))
++    await server.scryfall_search(server.SearchInput(query="t:goblin", printing="cheapest"))
++    await server.scryfall_search(server.SearchInput(query="t:goblin", printing="oldest"))
++    await server.scryfall_search(server.SearchInput(query="t:goblin prefer:promo"))
++    await server.scryfall_search(server.SearchInput(query="t:goblin game:arena"))
++    assert [c[1]["q"] for c in scryfall] == [
++        "t:goblin",
++        "(t:goblin) prefer:usd-low",
++        "(t:goblin) prefer:oldest",
++        "t:goblin prefer:promo",
++        "(t:goblin game:arena) prefer:newest",
++    ]

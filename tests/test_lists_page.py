@@ -1,5 +1,6 @@
-"""The My lists page (/lists, lists_page.py): five tabs over the member's account-wide Archidekt
-lists, each change the member's own press through a plain form (works without scripts), a delete
+"""The My lists page (/lists, lists_page.py): four tabs over the member's account-wide
+Archidekt lists under Account, and Binder's Wants page (/collection/wants) over the pinned
+cards; each change the member's own press through a plain form (works without scripts), a delete
 asking first with a box, Archidekt's refusal shown in the box, the custom card's picture through
 its own route, and the links to the page from the More menu and the Account page."""
 
@@ -14,7 +15,7 @@ import pytest
 
 from mtg_gateway import account_lists
 
-from .conftest import Stack, stack_with
+from .conftest import Stack, aged_stamp, stack_with
 from .test_account_lists import _picture
 from .test_approval_modes import SHIPPED
 from .test_decks_and_proxy import Browser, linked_user
@@ -68,52 +69,65 @@ async def member(stack: Stack):
         await b.aclose()
 
 
+def _page_of(tab: str) -> str:
+    """A tab's page: the pins are Binder's Wants page (decision C8), the rest are under /lists."""
+    return "/collection/wants" if tab == "pins" else f"/lists/{tab}"
+
+
 async def _post(b: Browser, tab: str, **data):
-    data.setdefault("csrf", await b.csrf(f"/lists/{tab}"))
+    data.setdefault("csrf", await b.csrf(_page_of(tab)))
     return await b.http.post(f"/lists/{tab}", data=data)
 
 
+def _where(r: httpx.Response) -> str:
+    """The redirect's address without the notice's Undo token (test_undo_list_edits.py)."""
+    return re.sub(r"&undo=[A-Za-z0-9_-]+$", "", r.headers["location"])
+
+
 def _notice(page: str) -> str:
-    m = re.search(r"<div class='notice ok' role='status'>([^<]*)</div>", page)
-    return m.group(1) if m else ""
+    # the notice's words (an Undo button may follow them inside the notice, test_undo_list_edits.py)
+    m = re.search(r"<div class='notice ok' role='status'>([^<]*)", page)
+    return m.group(1).strip() if m else ""
 
 
 # -- the tabs ------------------------------------------------------------------------------------------
 
 
-async def test_lists_opens_on_the_first_tab(member: Browser) -> None:
+async def test_lists_opens_on_the_hub(member: Browser) -> None:
     r = await member.http.get("/lists")
-    assert r.status_code == 302 and r.headers["location"] == "/lists/templates"
+    assert r.status_code == 302 and _where(r) == "/collection/lists"
     r = await member.http.get("/lists/nothing")
-    assert r.status_code == 302 and r.headers["location"] == "/lists/templates"
+    assert r.status_code == 302 and _where(r) == "/collection/lists"
 
 
 async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
     want = {
         "templates": ("Category templates", ["Ramp", "Commander"], "New template"),
-        "defaults": ("Default categories", ["Sol Ring"], "Search by card name"),
+        "defaults": ("Default categories", ["Sol Ring"], "Search by name"),
         "tags": ("Color tags", ["Cut"], "New color tag"),
         "pins": ("Pinned cards", ["Sol Ring"], "Remove all…"),
         "custom": ("Custom cards", ["Grizzled Mentor"], "New custom card"),
     }
     for slug, (label, names, extra) in want.items():
-        page = (await member.http.get(f"/lists/{slug}")).text
-        assert f"<a href='/lists/{slug}' aria-current='page'>{label}" in page, slug
-        assert "<title>My lists" in page and extra in page, slug
+        page = (await member.http.get(_page_of(slug))).text
+        # every list is one of Binder's Lists: the switch lights Lists, the tab names the list
+        assert "<a href='/collection/lists' aria-current=page>Lists</a>" in page, slug
+        assert f"<a href='{_page_of(slug)}' aria-current='page'>{label}" in page, slug
+        assert f"<title>Binder: {label}" in page and extra in page, slug
         for n in names:
             assert f"data-name='{n}'" in page and f"aria-label='Menu for {n}'" in page, (slug, n)
         # every row's menu is a plain drop-down of links without scripts, its delete in red
         assert "<details class='dd rowmenu lp-dd'>" in page, slug
         assert "static/lists.js" in page or "lists.js" in page, slug
         assert "kept under History" in page, slug
-    page = (await member.http.get("/lists/pins")).text
-    assert "1 / 150" in page and "for Meren" in page and "9 / 256" in page
+    page = (await member.http.get("/collection/wants")).text
+    assert "1\u00a0/\u00a0150" in page and "for Meren" in page and "9\u00a0/\u00a0256" in page
     assert "class='danger' data-box='pin-rm'" in page
     page = (await member.http.get("/lists/templates")).text
     assert "class='danger' data-box='tpl-del'" in page
     # the tabs carry the counts read so far (one Archidekt read per tab view)
     assert "Category templates<span class='n'>2</span>" in page
-    assert "Pinned cards<span class='n'>1</span>" in page
+    assert "Custom cards<span class='n'>1</span>" in page and "Pinned cards<span class='n'>1</span>" in page
 
 
 async def test_an_unlinked_member_is_sent_to_link(stack: Stack) -> None:
@@ -142,13 +156,13 @@ async def test_a_signed_out_browser_is_sent_to_login(stack: Stack) -> None:
 async def test_templates_create_edit_and_delete_through_the_forms(member: Browser, stack: Stack) -> None:
     ark = stack.ark
     r = await _post(member, "templates", action="create", name="Draw", in_deck="1", in_price="1")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/templates?ok=template_created", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/templates?ok=template_created", r.text
     assert [t["name"] for t in ark.account.templates[WHO]] == ["Ramp", "Commander", "Draw"]
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Template created on Archidekt and read back."
 
     r = await _post(member, "templates", action="edit", was_name="Draw", name="Card draw", in_deck="1")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/templates?ok=template_saved"
+    assert r.status_code == 303 and _where(r) == "/lists/templates?ok=template_saved"
     t = ark.account.templates[WHO][2]
     assert t["name"] == "Card draw" and t["includedInPrice"] is False
 
@@ -163,7 +177,7 @@ async def test_templates_create_edit_and_delete_through_the_forms(member: Browse
     # the box's own form carries confirmed=1: applied by the member's press (a destructive change)
     r = await _post(member, "templates", action="delete", was_name="Card draw", confirmed="1")
     assert r.status_code == 303, r.text
-    assert r.headers["location"] == "/lists/templates?ok=template_deleted&n=Card+draw"
+    assert _where(r) == "/lists/templates?ok=template_deleted&n=Card+draw"
     assert [t["name"] for t in ark.account.templates[WHO]] == ["Ramp", "Commander"]
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Deleted “Card draw” on Archidekt."
@@ -206,7 +220,7 @@ async def test_default_categories_set_and_clear(member: Browser, stack: Stack) -
             "main": "Commander",
         },
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/defaults?ok=defaults_saved&n=Sol+Ring"
+    assert r.status_code == 303 and _where(r) == "/lists/defaults?ok=defaults_saved&n=Sol+Ring"
     assert ark.account.defaults[WHO][9003] == ["Commander", "Ramp"]  # the main one first
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Default categories for “Sol Ring” saved on Archidekt and read back."
@@ -216,11 +230,11 @@ async def test_default_categories_set_and_clear(member: Browser, stack: Stack) -
     assert r.status_code == 400 and "Tick at least one category" in r.text
 
     r = await _post(member, "defaults", action="clear", card="Sol Ring")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/defaults?clear=9003"
+    assert r.status_code == 303 and _where(r) == "/lists/defaults?clear=9003"
     page = (await member.http.get(r.headers["location"])).text
     assert "Clear the default categories of “Sol Ring”?" in page
     r = await _post(member, "defaults", action="clear", card="Sol Ring", confirmed="1")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/defaults?ok=defaults_cleared"
+    assert r.status_code == 303 and _where(r) == "/lists/defaults?ok=defaults_cleared"
     assert ark.account.defaults[WHO][9003] == []
     page = (await member.http.get("/lists/defaults")).text
     assert "No cards with default categories yet." in page
@@ -244,7 +258,7 @@ async def test_default_categories_load_more_answers_rows(member: Browser, stack:
 async def test_color_tags_create_recolor_and_delete(member: Browser, stack: Stack) -> None:
     ark = stack.ark
     r = await _post(member, "tags", action="create", name="Keep", color="#1ebb6c")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/tags?ok=tag_created"
+    assert r.status_code == 303 and _where(r) == "/lists/tags?ok=tag_created"
     assert ark.account.tags[WHO][1] == {
         "id": ark.account.tags[WHO][1]["id"],
         "name": "Keep",
@@ -253,14 +267,14 @@ async def test_color_tags_create_recolor_and_delete(member: Browser, stack: Stac
     page = (await member.http.get("/lists/tags?edit=21")).text
     assert "Rename or recolor “Cut”" in page and "value='#ff4d4f'" in page
     r = await _post(member, "tags", action="edit", was_name="Cut", name="Cut it", color="#aa0000")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/tags?ok=tag_saved"
+    assert r.status_code == 303 and _where(r) == "/lists/tags?ok=tag_saved"
     assert ark.account.tags[WHO][0]["name"] == "Cut it" and ark.account.tags[WHO][0]["color"] == "#aa0000"
     r = await _post(member, "tags", action="delete", was_name="Cut it")
-    assert r.headers["location"] == "/lists/tags?delete=21"
+    assert _where(r) == "/lists/tags?delete=21"
     page = (await member.http.get(r.headers["location"])).text
     assert "Delete the tag “Cut it”?" in page
     r = await _post(member, "tags", action="delete", was_name="Cut it", confirmed="1")
-    assert r.headers["location"] == "/lists/tags?ok=tag_deleted&n=Cut+it"
+    assert _where(r) == "/lists/tags?ok=tag_deleted&n=Cut+it"
     assert [t["name"] for t in ark.account.tags[WHO]] == ["Keep"]
 
 
@@ -270,13 +284,13 @@ async def test_color_tags_create_recolor_and_delete(member: Browser, stack: Stac
 async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> None:
     ark = stack.ark
     r = await _post(member, "pins", action="edit", pin_id="31", quantity="2")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/pins?ok=pin_saved"
+    assert r.status_code == 303 and _where(r) == "/collection/wants?ok=pin_saved"
     assert ark.account.pins[WHO][0]["quantity"] == 2
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Saved on Archidekt." and "<b class='n' aria-live='polite'>2</b>" in page
 
     # the note, saved on leaving the field with scripts: the same form, answered as JSON
-    csrf = await member.csrf("/lists/pins")
+    csrf = await member.csrf("/collection/wants")
     r = await member.http.post(
         "/lists/pins",
         data={"csrf": csrf, "action": "edit", "pin_id": "31", "notes": "Trade for it"},
@@ -293,14 +307,14 @@ async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> N
 
     # below one copy: the stepper's press asks first, as Remove pin does
     r = await _post(member, "pins", action="edit", pin_id="31", quantity="0")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/pins?remove=31"
+    assert r.status_code == 303 and _where(r) == "/collection/wants?remove=31"
     page = (await member.http.get(r.headers["location"])).text
     assert "Remove the pin on “Sol Ring”?" in page and "data-open" in page
     assert ark.account.pins[WHO]
     r = await _post(member, "pins", action="unpin", pin_id="31", confirmed="1")
-    assert r.headers["location"] == "/lists/pins?ok=pin_removed"
+    assert _where(r) == "/collection/wants?ok=pin_removed"
     assert ark.account.pins[WHO] == []
-    page = (await member.http.get("/lists/pins")).text
+    page = (await member.http.get("/collection/wants")).text
     assert "No pinned cards yet." in page and "Remove all…" not in page
 
 
@@ -309,18 +323,19 @@ async def test_remove_all_pins_asks_then_removes_every_pin(member: Browser, stac
     ark.account.pins[WHO].append(
         {"id": 32, "card": ark.account._card(9007), "notes": "", "modifier": "Foil", "quantity": 1}
     )
-    page = (await member.http.get("/lists/pins")).text
-    assert "2 / 150" in page and "Foil" in page
+    page = (await member.http.get("/collection/wants")).text
+    assert "2\u00a0/\u00a0150" in page and "Foil" in page
     assert (
-        "<a class='btn btn-outline-danger' href='/lists/pins?remove_all=1' data-box-open='pin-all'>" in page
+        "<a class='btn btn-outline-danger' href='/collection/wants?remove_all=1' data-box-open='pin-all'>"
+        in page
     )
     r = await _post(member, "pins", action="remove_all")
-    assert r.headers["location"] == "/lists/pins?remove_all=1"
+    assert _where(r) == "/collection/wants?remove_all=1"
     page = (await member.http.get(r.headers["location"])).text
     assert "Remove all 2 pinned cards?" in page and ">Remove all 2</button>" in page
     assert "class='danger' form='pin-all-f'" in page
     r = await _post(member, "pins", action="remove_all", confirmed="1")
-    assert r.headers["location"] == "/lists/pins?ok=pins_removed"
+    assert _where(r) == "/collection/wants?ok=pins_removed"
     assert ark.account.pins[WHO] == []
 
 
@@ -342,7 +357,7 @@ async def test_custom_cards_create_edit_and_a_delete_that_needs_the_tick(
         set_code="CST",
         collector_number="002",
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/custom?ok=card_created", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/custom?ok=card_created", r.text
     made = ark.account.customs[WHO][1]
     assert made["frontName"] == "Rift of Echoes" and made["frontManaCost"] == "{1}{U}" and made["cmc"] == 2
     assert made["hasBack"] is False and made["backName"] is None
@@ -367,7 +382,7 @@ async def test_custom_cards_create_edit_and_a_delete_that_needs_the_tick(
         b_n="Mentor Unbound",
         b_t="Creature",
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/custom?ok=card_saved", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/custom?ok=card_saved", r.text
     c = ark.account.customs[WHO][0]
     assert c["frontPower"] == "3" and c["hasBack"] is True and c["backName"] == "Mentor Unbound"
     page = (await member.http.get("/lists/custom")).text
@@ -384,7 +399,7 @@ async def test_custom_cards_create_edit_and_a_delete_that_needs_the_tick(
     r = await _post(
         member, "custom", action="delete", was_name="Rift of Echoes", confirmed="1", understood="1"
     )
-    assert r.headers["location"] == "/lists/custom?ok=card_deleted&n=Rift+of+Echoes"
+    assert _where(r) == "/lists/custom?ok=card_deleted&n=Rift+of+Echoes"
     assert [c["frontName"] for c in ark.account.customs[WHO]] == ["Grizzled Mentor"]
 
 
@@ -406,7 +421,7 @@ async def test_the_picture_goes_through_its_own_route(member: Browser, stack: St
         data={"csrf": csrf, "name": "Grizzled Mentor", "face": "front", "crop": "100,0,600,840"},
         files={"picture": ("mentor.jpg", _picture("JPEG"), "image/jpeg")},
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/custom?ok=picture_saved", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/custom?ok=picture_saved", r.text
     who, body, _d = ark.account.uploads[-1]
     assert who == WHO and body.startswith(b"\x89PNG")
     assert ark.account.customs[WHO][0]["frontImageUrl"].startswith("https://")
@@ -444,32 +459,33 @@ async def test_the_picture_goes_through_its_own_route(member: Browser, stack: St
 # -- the links to the page ---------------------------------------------------------------------------
 
 
-async def test_the_more_menu_and_the_account_page_link_to_my_lists(member: Browser, stack: Stack) -> None:
+async def test_the_account_page_links_to_the_lists_and_more_does_not(member: Browser, stack: Stack) -> None:
     page = (await member.http.get("/reports")).text
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # More's Your cards group, after Watchlist (watchlists are on by default)
-    assert labels[-3:] == ["Scan", "Watchlist", "My lists"]
-    assert "<a href='/lists'>" in menu
-    # the phone's More sheet and the rail list the same pages
-    assert page.count("href='/lists'") >= 2
+    # the lists live in Binder (mockup screen 8): More's Your cards group has Scan and Card models
+    assert labels[-3:] == ["Scan", "Card models", "Forum"]
+    assert "href='/lists'" not in page and "href='/collection/lists'" not in nav
+    hub = (await member.http.get("/account")).text
+    assert "<a class='yrow' href='/collection/lists'>" in hub and ">Lists</span>" in hub
 
     # the Account page's panel, with the counts of the tabs read so far
     account_lists.forget_counts("user-1")  # as before any tab was opened
     acc = (await member.http.get("/account/details")).text
-    assert "<h2>Your Archidekt lists</h2>" in acc
-    assert "Lists that follow you into every deck, kept on Archidekt:" in acc
-    assert "<a href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
-    assert "<a class='btn' href='/lists'>" in acc and "Open My lists</a>" in acc
-    for slug in ("templates", "defaults", "tags", "pins", "custom"):
+    assert "<span class='lbl'>Your Archidekt lists</span>" in acc  # a row that folds open
+    assert "Lists that shape every deck, kept on Archidekt:" in acc
+    assert "<a class='ui-cap' href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
+    assert "<a class='btn' href='/collection/lists'>" in acc and "Open Binder › Lists</a>" in acc
+    for slug in ("templates", "defaults", "tags", "custom"):
         await member.http.get(f"/lists/{slug}")
+    await member.http.get("/collection/wants")
     acc = (await member.http.get("/account/details")).text
-    assert "<a href='/lists/templates'>2 category templates</a>" in acc
-    assert "<a href='/lists/defaults'>1 card with default categories</a>" in acc
-    assert "<a href='/lists/tags'>1 color tag</a>" in acc
-    assert "<a href='/lists/pins'>1 pinned card</a>" in acc
-    assert "<a href='/lists/custom'>1 custom card</a>" in acc
+    assert "<a class='ui-cap' href='/lists/templates'>2 category templates</a>" in acc
+    assert "<a class='ui-cap' href='/lists/defaults'>1 card with default categories</a>" in acc
+    assert "<a class='ui-cap' href='/lists/tags'>1 color tag</a>" in acc
+    assert "href='/lists/pins'" not in acc and "href='/collection/wants'" in acc  # pins are Binder's Wants
+    assert "<a class='ui-cap' href='/lists/custom'>1 custom card</a>" in acc
     assert account_lists.counts("user-1")["templates"] == 2
 
 
@@ -513,7 +529,7 @@ async def test_a_custom_card_is_added_to_a_deck_from_its_row(member: Browser, st
         category="Ramp",
     )
     assert r.status_code == 303, r.text
-    assert r.headers["location"] == "/lists/custom?ok=card_added&n=Grizzled+Mentor"
+    assert _where(r) == "/lists/custom?ok=card_added&n=Grizzled+Mentor"
     rows = ark.decks[42]["customCards"]
     assert len(rows) == 1 and rows[0]["quantity"] == 2 and rows[0]["categories"] == ["Ramp"]
     assert rows[0]["card"]["id"] == 41
@@ -536,6 +552,56 @@ async def test_a_custom_card_is_added_to_a_deck_from_its_row(member: Browser, st
     )
     assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
     assert not ark.decks[42]["customCards"]
+
+
+async def test_a_template_added_to_a_deck_is_added_at_once_with_undo(member: Browser, stack: Stack) -> None:
+    """Review F6 (T-192): My lists › a template › Add to a deck… sent the member to a waiting
+    proposal, and the deck did not get the category. The member's own press is the approval, as
+    Deck settings › Add template… and a custom card's Add to deck… are: the category is made at
+    once, back on My lists with a notice and Undo (its own snapshot, so Undo puts back this add
+    only). A Premier template still asks first, on its review page, and the box says so."""
+    ark = stack.ark
+    ark.account.templates[WHO].append(
+        {"id": 13, "name": "Card draw", "includedInDeck": True, "includedInPrice": False, "isPremier": False}
+    )
+    r = await _post(member, "templates", action="add_to_deck", was_name="Card draw", deck="42")
+    assert r.status_code == 303, r.text
+    where = r.headers["location"]
+    assert where.startswith("/lists/templates?"), where
+    made = next(c for c in ark.decks[42]["categories"] if c["name"] == "Card draw")
+    assert made["includedInPrice"] is False
+    page = (await member.http.get(where)).text
+    assert _notice(page) == "Added the category “Card draw” to the deck on Archidekt and read back."
+    m = re.search(
+        r"<form method='post' action='/proposals/undo' class='undo' data-undo-box>(.*?)</form>", page
+    )
+    assert m and ">Undo</button>" in m.group(1), page
+    listed = (await member.http.get("/api/v1/proposals")).json()["proposals"]
+    assert listed[0]["kind"] == "categories" and listed[0]["state"] == "applied"
+    # Undo shows what it puts back: only this category goes
+    fields = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", m.group(1)))
+    assert fields["back"] == "/lists/templates"
+    r = await member.http.post("/proposals/undo", data=fields)
+    assert r.status_code == 200 and "Card draw" in r.text, r.text
+    # Undo comes back to the Templates tab with its notice, and makes no backup copy on
+    # Archidekt, as the add it undoes made none (independent review 2, M2 and L12)
+    confirm = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.text))
+    confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
+    decks_before = set(ark.decks)
+    r = await member.http.post("/proposals/undo", data=confirm)
+    assert r.status_code == 303 and _where(r) == "/lists/templates?ok=undone", r.text
+    assert set(ark.decks) == decks_before
+    assert "Card draw" not in [c["name"] for c in ark.decks[42]["categories"]]
+    page = (await member.http.get(r.headers["location"])).text
+    assert _notice(page) == "Undone. The deck is back as it was before that change."
+    # a Premier template asks first: its review page
+    ark.account.templates[WHO].append(
+        {"id": 14, "name": "Legends", "includedInDeck": True, "includedInPrice": True, "isPremier": True}
+    )
+    r = await _post(member, "templates", action="add_to_deck", was_name="Legends", deck="42")
+    assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
+    page = (await member.http.get("/lists/templates?add=13")).text
+    assert "A Premier or Not in deck template opens on its review page first" in page  # the box says so
 
 
 async def test_custom_cards_rows_and_the_edit_box_show_the_cards_picture(
@@ -608,6 +674,8 @@ async def test_the_tab_counts_never_open_the_shared_breaker(
         ark.calls.clear()
         r = await member.http.get("/lists/templates")
         assert r.status_code == 200  # the page still draws
+        counts = await member.http.get("/lists/api/counts")  # what static/lists.js asks after it
+        assert counts.status_code == 200 and counts.json()["ok"] is True
         failing_by_view.append(
             ["pins" if "pins" in p else "colorTags" for _m, p in ark.calls if "pins" in p or "colorTags" in p]
         )
@@ -621,3 +689,40 @@ async def test_the_tab_counts_never_open_the_shared_breaker(
     counts = account_lists.counts("user-1")
     assert "color_tags" not in counts and "pins" not in counts and "templates" in counts
     account_lists.forget_counts("user-1")
+
+
+async def test_my_lists_draws_with_one_read_and_fills_the_other_counts_after(
+    member: Browser, stack: Stack
+) -> None:
+    """0.7.46 audit SH-03: a first visit to the lists read every list one after another before
+    drawing (40 s at 8 s Archidekt latency). It now reads the open tab only; the tab bar asks for
+    the other counts once the page is there."""
+    account_lists.forget_counts("user-1")
+    stack.ark.calls.clear()
+    page = await member.http.get("/lists/templates")
+    assert page.status_code == 200
+    reads = [p for m, p in stack.ark.calls if m == "GET"]
+    assert len(reads) <= 1, reads
+    assert "data-counts='/lists/api/counts'" in page.text
+    assert "Category templates<span class='n'>2</span>" in page.text
+    assert "Custom cards<span class='n'>" not in page.text  # not read yet
+    got = (await member.http.get("/lists/api/counts")).json()
+    assert got["ok"] is True and got["counts"]["templates"] == 2 and got["counts"]["custom"] == 1
+    assert got["counts"]["pins"] == got["counts"]["wants"] == 1  # the Pinned cards tab, by both names
+    again = await member.http.get("/lists/templates")
+    assert "Custom cards<span class='n'>1</span>" in again.text and "data-counts" not in again.text
+    js = (await member.http.get("/static/lists.js")).text
+    assert "data-counts" in js
+
+
+async def test_the_hub_has_a_name_box_that_narrows_the_lists(member: Browser) -> None:
+    """A name box above the hub's rows narrows them as you type (static/lists.js), and on submit
+    without scripts (0.7.46 audit QG-25)."""
+    page = (await member.http.get("/collection/lists")).text
+    assert (
+        "role='search' method='get' action='/collection/lists'" in page and "placeholder='List name'" in page
+    )
+    assert page.count("class='yrow' href='/collection/lists/") >= 1 or "data-q='category templates'" in page
+    assert "data-q='category templates'" in page and "data-q='pinned cards'" in page
+    narrowed = (await member.http.get("/collection/lists?q=pinned")).text
+    assert "data-q='pinned cards'" in narrowed and "data-q='category templates'" not in narrowed

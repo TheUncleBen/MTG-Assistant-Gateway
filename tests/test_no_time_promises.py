@@ -14,7 +14,12 @@ PROMISE = re.compile(
     r"|again in a few minutes|within a minute or two|reload (?:this page |the page )?in a (?:minute|moment)"
     r"|wait a few minutes and try|wait a (?:minute|moment)(?:[,.(]| and| \()|for a few minutes\."
     r"|waits a few minutes|refills over a few minutes|try again in [{0-9]|within a few (?:seconds|minutes)"
-    r"|in about (?:a |[0-9])|straight away",
+    r"|in about (?:a |[0-9{])|straight away"
+    # built forms: a helper's "about {minutes} minutes", an estimate joined on ("; done in {left}"),
+    # and a fixed bound ("takes up to a minute")
+    r"|about \{\w+\} minute|(?:starts|done|finish(?:es)?) in \{|up to a (?:minute|few)"
+    # any "in a minute" or "within a minute", whatever the verb before it ("Refresh in a minute")
+    r"|\bin a (?:minute|moment)\b|within a minute\b",
     re.IGNORECASE,
 )
 # a message split over several source lines ("...try again in a " "few minutes.") is one string
@@ -27,11 +32,17 @@ NOT_A_MESSAGE = {
     ("IDP-AUTHENTIK.md", "picture appears within a few seconds of the member's next page"),
     ("ANDROID.md", "if that happens again within a few seconds the app unloads the page"),
     ("TROUBLESHOOTING.md", "A change shows up within a few seconds of the member's next page"),
+    ("TROUBLESHOOTING.md", "More than 30 sign-ins started from one address in a minute"),  # a rate
     ("SKILL.md", "All three tasks `Running` within about a minute"),  # operator deploy check
     ("decks.py", "the call would only be refused: queue it straight away"),  # comment
     ("oidc.py", "any answer is tried once more straight away"),  # docstring
     ("deck.js", "opens EDHPlay straight away, as a plain link"),  # comment
+    ("deck.js", "read once more in a moment, then draw that"),  # comment
+    # what Authentik itself does when first set up (operator doc)
+    ("IDP-AUTHENTIK.md", "Authentik creates them from its default blueprints within a minute"),
     ("OPERATIONS.md", "The person can sign in again straight away"),  # what the operator's button does
+    # Scryfall's own Retry-After, a wait the gateway knows (scan/service.py)
+    ("service.py", "Keep the resolved cards and resolve the deferred names again in about"),
 }
 
 
@@ -58,6 +69,25 @@ def test_a_message_split_over_lines_is_still_caught() -> None:
     """The sweep reads a string literal split over source lines as the one message it is."""
     text = 'x = (\n    "Try the rest again in a "\n    "few minutes with a new proposal."\n)\n'
     assert PROMISE.search(SPLIT.sub("", text)) and not PROMISE.search(text.replace("\n", " "))
+
+
+def test_built_and_bounded_time_texts_are_caught() -> None:
+    """An estimate built from a number ("in about {minutes}", a helper's "about {n} minutes", a part
+    joined on as "; done in {left}") or a fixed bound ("takes up to a minute") is a promise too."""
+    for text in (
+        'out.append(f"Expected to finish in about {minutes} minute{s}.")',
+        'return f"about {minutes} minute{s}"',
+        'return f"{done} of {total} games played" + (f"; done in {left}" if left else "")',
+        'return f"Waiting" + (f"; starts in {when}" if when else "")',
+        '"The solo test takes up to a minute; the result page opens when it is done."',
+        # a widget's detail line (the Binder's Value while it was worked out)
+        'detail="Reading your whole binder to work out its value. Refresh in a minute to see it."',
+        '"check again with proposal_status in a minute."',
+        '"Archidekt is busy. Look again in a moment."',
+        '"The list is ready within a minute."',
+    ):
+        assert PROMISE.search(text), text
+    assert not PROMISE.search('return f"{done} of {total} games played"')
 
 
 def test_no_doc_or_app_text_promises_a_time() -> None:

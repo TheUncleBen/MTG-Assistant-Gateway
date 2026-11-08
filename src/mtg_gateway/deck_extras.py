@@ -26,10 +26,10 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import account_lists, actions, packages, registration, ui
 from .archidekt import FORMAT_NAMES, Deck, DeckCard, format_label
-from .busy import busy_response
+from .busy import busy_json_response, busy_response
 from .deckpage import deck_title, folder_options_html
 from .decks import DeckError, current_client, split_label
-from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect, read_limited
+from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect_here, read_limited
 from .theme import esc, icon
 
 EXTRA_BOXES = (
@@ -137,7 +137,7 @@ def field(
     attrs: str = "",
 ) -> str:
     extra = (f" maxlength='{limit}'" if limit else "") + (" required" if required else "")
-    ph = f" placeholder='{esc(placeholder)}'" if placeholder else ""
+    ph = ui.hint_attrs(placeholder)
     return (
         f"<div class='field'><label for='{esc(fid)}'>{esc(label)}</label>"
         f"<input id='{esc(fid)}' type='text' name='{esc(name)}' value='{esc(value)}' autocomplete='off'"
@@ -213,7 +213,8 @@ def help_box_html(
         else ""
     )
     body = (
-        f"<form id='dx-help-f' method='post' action='/decks/{did}/help' class='stack' novalidate>"
+        f"<form id='dx-help-f' method='post' action='/decks/{did}/help' class='stack' novalidate "
+        f"data-draft='help:{did}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='help_action' value='{'edit' if listed else 'post'}'>"
         f"<p class='muted small'>{esc(HELP_INTRO)}</p>"
@@ -261,7 +262,7 @@ def delist_box_html(deck: Deck, csrf: str, *, open: bool = False, error: str = "
         "Take the request off the board?",
         body,
         actions=[
-            ui.box_button("Keep it listed", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Delist", kind="danger-solid", form="dx-delist-f", icon_name="x"),
         ],
         open=open,
@@ -306,7 +307,7 @@ def report_box_html(
     fid = "dx-rc" if card else "dx-rm"
     body = (
         f"<form id='{box_id}-f' method='post' action='/decks/{did}/report-to-archidekt' class='stack' "
-        "novalidate>"
+        f"novalidate data-draft='{box_id}:{did}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='report_kind' value='{'card' if card else 'deck'}'>"
         + (f"<input type='hidden' name='card' value='{esc(name)}'>" if card else "")
@@ -354,7 +355,8 @@ def report_comment_box_html(
     v = values or {}
     who = v.get("who", "")
     body = (
-        f"<form id='reportcomment-f' method='post' action='{esc(action)}' class='stack' novalidate>"
+        f"<form id='reportcomment-f' method='post' action='{esc(action)}' class='stack' novalidate "
+        f"data-draft='reportcomment:{esc(action)}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<input type='hidden' name='report_kind' value='comment'>"
         f"<input type='hidden' name='comment_id' value='{esc(v.get('comment_id', ''))}'>"
@@ -419,8 +421,8 @@ def pdf_box_html(
         + "</div><div class='dx-two'>"
         + field(
             "dx-pd",
-            "dci_number",
-            "DCI number",
+            "dci_id",
+            "DCI ID",
             v.get("dci_number", ""),
             placeholder="Digits only",
             limit=registration.DCI_MAX,
@@ -535,7 +537,7 @@ def package_box_html(
         f"<div class='ui-chips' role='group' aria-label='Which packages'>{chips}</div>"
         "<div class='dx-pkf'>"
         "<div class='field'><label for='dx-pkq'>Package name</label>"
-        "<input id='dx-pkq' type='search' placeholder='Package name' autocomplete='off' maxlength='100'>"
+        "<input id='dx-pkq' type='search' placeholder='Name' autocomplete='off' maxlength='100'>"
         "</div>"
         "<div class='field'><label for='dx-pkfmt'>Intended format</label><span class='sel'>"
         f"<select id='dx-pkfmt'>{fmt_opts}</select></span></div>"
@@ -550,9 +552,9 @@ def package_box_html(
         + field(
             "dx-pk",
             "package",
-            "Package link or id",
+            "Package link or ID",
             v.get("package", ""),
-            placeholder="https://archidekt.com/decks/…",
+            placeholder="Link or ID",
             required=True,
         )
         + "<div class='dx-two'>"
@@ -611,13 +613,13 @@ def lock_box_html(
         sentence = (
             f"None of this card's categories ({esc(', '.join(cats)) or 'none'}) is one of your category "
             "templates, so there is nothing to lock. Make a template first on "
-            "<a href='/lists/templates'>My lists</a>."
+            "<a href='/lists/templates'>Category templates</a> (Binder › Lists)."
         )
     else:
         sentence = (
             f"From now on, when you add “<span data-lock-card>{esc(name)}</span>” to any deck, it goes into "
-            f"<b data-cats>{esc(', '.join(kept))}</b> (its categories in this deck). Saved to My lists › "
-            "Default categories."
+            f"<b data-cats>{esc(', '.join(kept))}</b> (its categories in this deck). Saved to "
+            "Binder › Lists › Default categories."
         )
     left_line = (
         f"<p class='muted small' data-left>Left out, not a template: {esc(', '.join(left))}.</p>"
@@ -662,23 +664,24 @@ def contest_box_html(
     v = values or {}
     summary = v.get("summary", "")
     body = (
-        f"<form id='dx-contest-f' method='post' action='/decks/{did}/contest' class='stack' novalidate>"
+        f"<form id='dx-contest-f' method='post' action='/decks/{did}/contest' class='stack' novalidate "
+        f"data-draft='contest:{did}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<input type='hidden' name='entry_action' value='enter'>"
         + field(
             "dx-ec",
             "contest",
-            "Contest link or id",
+            "Contest link or ID",
             v.get("contest", ""),
-            placeholder="https://archidekt.com/contest/discussion/…",
+            placeholder="https://archidekt.com/contest/discussion/…|Contest link|Link",
             required=True,
         )
         + "<div class='field'><label for='dx-es'>Summary of the deck (required)</label>"
         f"<textarea id='dx-es' name='summary' rows='4' maxlength='{actions.CONTEST_SUMMARY_MAX}' "
         f"data-count='dx-es-c' required>{esc(summary)}</textarea>"
         "<div class='dx-under'><span class='muted small'>Shown on the contest page.</span>"
-        f"<span class='muted small' id='dx-es-c' data-counter>{len(summary)} / "
-        f"{actions.CONTEST_SUMMARY_MAX}</span></div></div>"
+        f"<span class='muted small' id='dx-es-c' data-counter>"
+        f"{ui.counted(len(summary), actions.CONTEST_SUMMARY_MAX)}</span></div></div>"
         + ui.notice(
             f"<b>Archidekt replaces the deck's description with this summary.</b> {esc(CONTEST_WARN)}",
             "warn",
@@ -719,9 +722,9 @@ def withdraw_box_html(
         + field(
             "dx-wc",
             "contest",
-            "Contest link or id",
+            "Contest link or ID",
             v.get("contest", ""),
-            placeholder="https://archidekt.com/contest/discussion/…",
+            placeholder="https://archidekt.com/contest/discussion/…|Contest link|Link",
             required=True,
         )
         + f"<p>{esc(WITHDRAW_TEXT)}</p>"
@@ -734,7 +737,7 @@ def withdraw_box_html(
         f"Withdraw “{deck_title(deck)}” from a contest?",
         body,
         actions=[
-            ui.box_button("Keep my entry", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Withdraw", kind="danger-solid", form="dx-withdraw-f", icon_name="x"),
         ],
         open=open,
@@ -865,13 +868,13 @@ def new_package_box_html(
         f"<p class='muted small'>{esc(NEW_PACKAGE_INTRO)}</p>"
         "<div class='dx-two'>"
         "<div class='field'><label for='np-name'>Name (required)</label>"
-        f"<input id='np-name' type='text' name='name' value='{esc(name)}' placeholder='e.g. Golgari staples' "
+        f"<input id='np-name' type='text' name='name' value='{esc(name)}' placeholder='Golgari staples' "
         "required maxlength='120' autocomplete='off'>"  # counted by static/newpackage.js, as New deck's name
         "<div class='dx-under'><span></span>"
         f"<span class='muted small' id='np-name-c' aria-live='polite'>{len(name)}/120</span></div></div>"
         "<div class='field'><label for='np-kw'>Keywords (required)</label>"
         f"<input id='np-kw' type='text' name='keywords' value='{esc(v.get('keywords', ''))}' "
-        f"placeholder='shocklands, fetchlands' required maxlength='{packages.KEYWORDS_MAX}' "
+        f"placeholder='e.g. shocklands' required maxlength='{packages.KEYWORDS_MAX}' "
         "autocomplete='off'><div class='dx-under'><span class='muted small'>Words people search packages "
         "by, separated by commas.</span></div></div></div>"
         + "<div class='dx-two'><div class='field'><span class='lbl' id='np-bl'>Budget</span>"
@@ -944,7 +947,7 @@ CSS = """
 .dx-box .body .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .dx-box .body .field input[type=text],.dx-box .body .field select,.dx-box .body .field textarea{width:100%}
 .dx-box .body textarea{min-height:5rem;font-family:inherit;font-size:.95rem;line-height:1.4}
-.dx-box .body .dx-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));
+.dx-box .body .dx-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));
   gap:.5rem .75rem}
 .dx-box .body .dx-two .field + .field{margin-top:0}
 .dx-box .body .dx-two + .dx-two{margin-top:.75rem}  /* a row's help line clear of the next row's labels */
@@ -1053,7 +1056,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def member(request: Request, deck_id: str) -> tuple[str, str | None, dict[str, str]] | Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         data = await form(request, limit=64_000)
         if not check_csrf(sid, data):
             return expired(request, sub, sid)
@@ -1069,7 +1072,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 deck_id = request.path_params["deck_id"]
                 sub, sid = browser_session(state, request)
                 if not sub:
-                    return login_redirect(f"/decks/{deck_id}/{name}")
+                    return login_redirect_here(request, f"/decks/{deck_id}/{name}")
                 values: dict[str, str] = {}
                 templates = None
                 color_tags = None
@@ -1118,7 +1121,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/report-to-archidekt")
+            return login_redirect_here(request, f"/decks/{deck_id}/report-to-archidekt")
         card = (request.query_params.get("card") or "")[:200]
         return await h.deck_page_response(
             request, sub, sid, deck_id, box="reportcard" if card else "report", box_values={"card": card}
@@ -1192,6 +1195,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, sid, data = got
         keys = ("first_name", "last_name", "dci_number", "event", "location", "date", "deck_name", "designer")
         details = {k: data.get(k, "") for k in keys}
+        if data.get("dci_id") is not None:  # a page opened before the update sends dci_number
+            details["dci_number"] = data["dci_id"]
         sort = data.get("sort") or "alpha"
         values = {**details, "sort": sort}
         try:
@@ -1232,7 +1237,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             ref = values["package"].strip()
             if not ref:
-                raise DeckError("invalid", "Pick one of your packages, or paste a package link or id.")
+                raise DeckError("invalid", "Pick one of your packages, or paste a package link or ID.")
             cat = values["categories"] if values["categories"] in packages.CATEGORY_CHOICES else "package"
             p = await decks.propose_package(
                 sub,
@@ -1305,7 +1310,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 raise DeckError(
                     "invalid",
                     f"None of this card's categories ({', '.join(hit.categories) or 'none'}) is one of your "
-                    "category templates, so there is nothing to lock. Make a template first on My lists.",
+                    "category templates, so there is nothing to lock. Make a template first under "
+                    "Binder › Lists.",
                 )
             out = await account_lists.hand_change(
                 decks, sub, "default_categories", {"op": "set", "card": hit.name, "categories": kept}
@@ -1334,7 +1340,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             got = await account_lists.read(decks, sub, "templates")
         except DeckError as exc:
-            return JSONResponse(
+            # Archidekt busy or unreachable: 429 or 503 with Retry-After, as the pages answer
+            return busy_json_response(exc) or JSONResponse(
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         return JSONResponse({"ok": True, "templates": got["items"]}, headers={"Cache-Control": "no-store"})
@@ -1351,7 +1358,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             got = await account_lists.read(decks, sub, "color_tags")
         except DeckError as exc:
-            return JSONResponse(
+            # Archidekt busy or unreachable: 429 or 503 with Retry-After, as the pages answer
+            return busy_json_response(exc) or JSONResponse(
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         tags = [{"name": t["name"], "color": t["color"]} for t in got["items"] if t["name"]]
@@ -1388,7 +1396,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 page=page,
             )
         except DeckError as exc:
-            return JSONResponse(
+            # Archidekt busy or unreachable: 429 or 503 with Retry-After, as the pages answer
+            return busy_json_response(exc) or JSONResponse(
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         rows = [
@@ -1409,9 +1418,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
 def package_formats(block: dict[str, Any]) -> str:
     """A package's intended formats as 'Commander, Modern' ("" when any)."""
-    return ", ".join(
-        format_label(FORMAT_NAMES.get(f)) for f in block.get("intendedFormats") or [] if f in FORMAT_NAMES
-    )
+    return ", ".join(format_label(FORMAT_NAMES[f]) for f in packages.format_ids(block.get("intendedFormats")))
 
 
 def package_line(owner: str, size: Any, block: dict[str, Any]) -> str:

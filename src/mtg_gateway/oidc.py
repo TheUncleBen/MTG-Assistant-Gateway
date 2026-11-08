@@ -202,7 +202,13 @@ class OIDCClient:
         return self._jwks
 
     async def authorization_url(
-        self, *, state: str, nonce: str, code_challenge: str, prompt: str | None = None
+        self,
+        *,
+        state: str,
+        nonce: str,
+        code_challenge: str,
+        prompt: str | None = None,
+        max_age: int | None = None,
     ) -> str:
         meta = await self.metadata()
         params = {
@@ -217,9 +223,14 @@ class OIDCClient:
         }
         if prompt:
             params["prompt"] = prompt
+        if max_age is not None:
+            params["max_age"] = str(int(max_age))
         return f"{meta['authorization_endpoint']}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, code_verifier: str, nonce: str) -> Identity:
+        from . import dbwait
+
+        await dbwait.before_side_effect()  # uses the one-time code up at the provider
         meta = await self.metadata()
         form = {
             "grant_type": "authorization_code",
@@ -312,6 +323,9 @@ class OIDCClient:
         """Use the provider refresh token. None when the provider refuses it (HTTP 400/401: the
         user was deactivated or deleted, or the grant was revoked); IdPUnavailable when the
         answer is unknown."""
+        from . import dbwait
+
+        await dbwait.before_side_effect()  # the provider may rotate the refresh token
         try:
             meta = await self.metadata()
         except OIDCError as exc:

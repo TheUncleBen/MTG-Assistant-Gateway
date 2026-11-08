@@ -105,7 +105,12 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
-    lint { abortOnError = false }
+    // A lint error fails the build (CI's android-check runs lintPlainDebug on every pull request
+    // that changes android/); warnings are reported, not fatal.
+    lint {
+        abortOnError = true
+        textReport = true // build/reports/lint-results-<variant>.txt, which CI prints when lint fails
+    }
 }
 
 dependencies {
@@ -115,6 +120,7 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0") // pull to refresh over the page (PullRefresh)
     implementation("androidx.window:window:1.5.1") // fold posture
     implementation("androidx.window:window-java:1.5.1") // ...with a callback API, no coroutines in app code
     testImplementation("junit:junit:4.13.2")

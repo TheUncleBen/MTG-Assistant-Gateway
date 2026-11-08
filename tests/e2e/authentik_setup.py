@@ -108,7 +108,7 @@ def wait_for_blueprints(ak: AK) -> None:
                 f"Authentik did not apply its default blueprints within {READY_TIMEOUT}s: {pending} "
                 f"({note}); is the authentik-worker service running?"
             )
-        time.sleep(3)
+        time.sleep(3)  # fixed wait: poll interval of a loop with a deadline
 
 
 class AK:
@@ -153,7 +153,7 @@ def wait_ready(base: str, verify: bool | str, timeout: int = 600) -> None:
                 return
         except httpx.HTTPError:
             pass
-        time.sleep(3)
+        time.sleep(3)  # fixed wait: poll interval of a loop with a deadline
     raise SystemExit("Authentik did not become ready")
 
 
@@ -169,7 +169,7 @@ def main() -> None:
             ak.get("/core/users/me/")
             break
         except httpx.HTTPStatusError:
-            time.sleep(3)
+            time.sleep(3)  # fixed wait: poll interval of a loop with a deadline
     else:
         raise SystemExit("bootstrap API token never became valid")
 
@@ -193,7 +193,7 @@ def main() -> None:
                 return res[0]
             if res:
                 last = f"{len(res)} results"
-            time.sleep(3)
+            time.sleep(3)  # fixed wait: poll interval of a loop with a deadline
         raise SystemExit(
             f"{path} {params} did not appear within {READY_TIMEOUT}s ({last}); "
             "Authentik's default blueprints are not applied, is the worker running?"
@@ -364,7 +364,7 @@ def set_password_and_verify(ak: AK, base: str, verify: bool | str, pk: int, user
                 print(f"warning: {username}: Authentik accepted the password only on attempt {attempt}")
             return attempt
         print(f"warning: {username}: Authentik refused the password just set (attempt {attempt}); retrying")
-        time.sleep(3)
+        time.sleep(3)  # fixed wait: pause before retrying a password Authentik refused (bounded attempts)
     raise SystemExit(f"{username}: Authentik kept refusing the password set through its API")
 
 

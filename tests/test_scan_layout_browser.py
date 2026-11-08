@@ -1,5 +1,5 @@
 """The Scan page in headless Chromium, in a browser and as inside the Android app (its user agent
-and its window.MtgNative, which adds the "Phone camera" button): one column at the form width,
+and its window.MtgNative, which makes the shutter open the phone camera): one column at the form width,
 the options row and the capture bar each one row, the capture button a circle in the middle, the
 site's icons and no emoji, one orange button, 44 px targets on touch, and the row menus of the
 list and of the saved scans. Needs no OCR assets, unlike test_scan_browser.py. Skipped without a
@@ -14,7 +14,9 @@ import pytest
 
 from .test_cardsearch_browser import _chromium
 from .test_cardview_browser import PNG
+from .test_editor_browser import _link
 from .test_suggest_browser import Server, server  # noqa: F401
+from .waits import redrawn
 
 pytest.importorskip("playwright")
 
@@ -159,10 +161,9 @@ def test_one_column_one_row_bars_and_a_round_centred_capture_button(
             # the page keeps the standard's form column, not a width of its own
             assert _style(page.locator("main.wrap"), "maxWidth") == "728px"
             assert _style(page.locator(".cam-panel"), "display") == "flex"
-            # the app's phone camera button closes the options row; a browser has none
-            assert page.locator("#phone-camera").count() == (1 if app else 0)
-            if app:
-                assert page.locator(".scan-opts > :last-child").get_attribute("id") == "phone-camera"
+            # Auto closes the options row; in the app the shutter and the viewfinder are the phone camera
+            assert page.locator(".scan-opts > :last-child").get_attribute("id") == "auto-switch"
+            assert page.locator("#open-phone-camera").count() == (1 if app else 0)
             # the × sits inside the Set box, and the hint is its tooltip
             box, clear = (
                 page.locator(".setbox").bounding_box(),
@@ -248,9 +249,9 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         assert _menu_items(page) == [
             "Open card",
             "Add to deck…",
-            "Add to collection",
+            "Add to binder",
             "Watch this card",
-            "Change printing…",
+            "Printings…",
             "One fewer",
             "One more",
             "Copy name",
@@ -266,7 +267,7 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         page.evaluate("() => document.body.removeAttribute('data-watchlist')")  # watchlists off
         rows.first.locator(".name > span").first.click(button="right")
         expect(menu).to_be_visible()
-        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to collection", "Change printing…"]
+        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to binder", "Printings…"]
         page.evaluate("() => document.body.setAttribute('data-watchlist', '')")
         page.keyboard.press("Escape")
         expect(menu).to_have_count(0)
@@ -301,20 +302,34 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         page.keyboard.press("Shift+F10")
         expect(menu).to_be_visible()
         assert menu.locator(".head").inner_text() == "Cultivate"
-        assert "Change printing…" not in _menu_items(page)  # no printing without a match
+        assert "Printings…" not in _menu_items(page)  # no printing without a match
         page.keyboard.press("Escape")
-        # Change printing… opens the printing picker
+        # Printings… opens the printing picker
         rows.first.locator(".kebab").click()
-        menu.get_by_role("menuitem", name="Change printing…").click()
+        menu.get_by_role("menuitem", name="Printings…").click()
         expect(page.locator("#picker .sheet[role=dialog]")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#picker")).to_have_count(0)
-        # Remove takes the row off the list
+        # Remove takes the row off the list at once; the toast offers Undo (QOL-01, re-audit
+        # QG-24), which puts the row back where it was, with its copies
         rows.nth(1).locator(".kebab").click()
         menu.get_by_role("menuitem", name="Remove").click()
         expect(rows).to_have_count(1)
         expect(page.locator("#list-badge")).to_have_text("3")
         assert page.evaluate("() => window.__scan.state.items.map((i) => i.name)") == ["Sol Ring"]
+        toast = page.locator(".toast.cards-toast")
+        expect(toast).to_contain_text("Removed Cultivate.")
+        undo = toast.locator("button", has_text="Undo")
+        box = undo.bounding_box()
+        assert box and (box["height"] >= 44 or not touch), box
+        undo.click()
+        expect(rows).to_have_count(2)
+        expect(page.locator("#list-badge")).to_have_text("4")
+        assert page.evaluate("() => window.__scan.state.items.map((i) => [i.name, i.quantity])") == [
+            ["Sol Ring", 3],
+            ["Cultivate", 1],
+        ]
+        expect(page.locator(".toast.cards-toast")).to_contain_text("Cultivate is back in the list.")
         assert errors == []
         browser.close()
 
@@ -334,7 +349,6 @@ def test_a_press_and_hold_opens_the_cards_menu_and_leaves_nothing_stuck(server: 
         x, y = box["x"] + 20, box["y"] + box["height"] / 2
         cdp = page.context.new_cdp_session(page)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.wait_for_timeout(700)
         row.evaluate(
             """(r) => { const dt = new DataTransfer();
                  const ev = new DragEvent("dragstart", {bubbles: true, cancelable: true, dataTransfer: dt});
@@ -497,5 +511,375 @@ def test_the_card_size_switch_sizes_the_list_pictures_and_the_picker_tiles(
             "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         assert over <= 0
+        assert errors == []
+        browser.close()
+
+
+def test_photo_always_chooses_a_picture(server: Server) -> None:  # noqa: F811
+    """Photo is "choose a picture" on every platform: no capture attribute, which made Chrome on
+    Android open the camera while the app's file chooser opened the gallery."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), 390, False, "light")
+        file = page.locator("#photo-file")
+        assert file.get_attribute("accept") == "image/*"
+        assert file.get_attribute("capture") is None
+        assert errors == []
+        browser.close()
+
+
+def test_the_intro_folds_after_the_first_visit_and_how_it_works_is_a_button(server: Server) -> None:  # noqa: F811
+    """The intro is open on the first visit only; after that it is folded to its title, so the
+    camera starts on a phone's first screen. "How it works" is a button (not a blue link) that
+    opens it, and Got it still hides it for good."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        for scheme in ("light", "dark"):
+            _intro_round(p, exe, server, sid, scheme)
+
+
+def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> None:  # noqa: F811
+    server.db.delete_pref("user-1", "scan.intro")
+    browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    ctx = browser.new_context(
+        viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme=scheme
+    )
+    ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+    page = ctx.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+
+    def visit() -> None:
+        page.goto(f"{server.base}/scan")
+        page.wait_for_function("() => window.__scan && window.__scan.showTab")
+
+    visit()
+    assert page.locator("#intro").evaluate("e => e.open") is True
+    for _ in range(50):  # the save goes out after the page acts
+        if server.db.get_pref("user-1", "scan.intro") == "seen":
+            break
+        page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
+    assert server.db.get_pref("user-1", "scan.intro") == "seen"
+    # The second visit: folded to its title, and the camera view starts above 450 px.
+    visit()
+    assert page.locator("#intro").count() == 1
+    assert page.locator("#intro").evaluate("e => e.open") is False
+    top = page.locator("#camera").bounding_box()["y"]
+    assert top < 450, top
+    # How it works: a capsule button in the text colour that opens the intro.
+    how = page.locator("#how-it-works")
+    assert how.evaluate("e => e.tagName") == "BUTTON"
+    link = page.evaluate(
+        "() => { const a = document.createElement('a'); a.href = '#'; document.body.append(a);"
+        " const c = getComputedStyle(a).color; a.remove(); return c; }"
+    )
+    assert _style(how, "color") != link
+    assert _style(how, "color") == _style(page.locator("main h1").first, "color")
+    box = how.bounding_box()
+    assert box["height"] >= 43.5 and box["width"] >= 43.5, box
+    how.click()
+    assert page.locator("#intro").evaluate("e => e.open") is True
+    # Got it hides it on every later visit.
+    page.locator("#intro button:has-text('Got it')").click()
+    assert page.locator("#intro").count() == 0
+    for _ in range(50):
+        if server.db.get_pref("user-1", "scan.intro") is True:
+            break
+        page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
+    visit()
+    assert page.locator("#intro").count() == 0
+    how.click()
+    assert page.locator("#intro").evaluate("e => e.open") is True
+    assert errors == [], errors
+    browser.close()
+
+
+@pytest.mark.parametrize("width", [344, 390, 840])
+def test_at_200_percent_text_the_hint_leaves_the_name_box_clear(server: Server, width: int) -> None:  # noqa: F811
+    """With text at twice its size the "Hold the phone about 15 cm…" hint stays readable and off the dashed
+    name box (it covered it, inside the viewfinder)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
+        page.evaluate("() => { document.documentElement.style.fontSize = '32px'; }")
+        page.evaluate("() => window.__scan.showTab('camera')")
+        hint = page.get_by_text(
+            "Hold the phone about 15 cm (6 in) from the card, the card in the frame and its name in the "
+            "dashed box"
+        )
+        assert hint.is_visible()
+        h, box = hint.bounding_box(), page.locator("#camera .guide .title").bounding_box()
+        apart = (
+            h["y"] + h["height"] <= box["y"]
+            or box["y"] + box["height"] <= h["y"]
+            or h["x"] + h["width"] <= box["x"]
+            or box["x"] + box["width"] <= h["x"]
+        )
+        assert apart, (h, box)
+        # and wraps inside the window (the site's own tab bar is another matter, outside the page)
+        assert h["x"] >= 0 and h["x"] + h["width"] <= width, h
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("app", [False, True], ids=["browser", "app"])
+def test_type_puts_the_cursor_in_the_name_field(server: Server, app: bool) -> None:  # noqa: F811
+    """ "Type the card name instead" under the viewfinder, and the Type tab itself, both move focus
+    into the name field, so the phone keyboard opens at once and nothing needs a second tap."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), 390, app, "light")
+        page.locator(".controls button[title='Type the card name instead']").click()
+        page.locator("#type-input").wait_for()
+        assert page.evaluate("() => document.activeElement && document.activeElement.id") == "type-input"
+        page.locator("[role=tab][data-tab=camera]").click()
+        page.locator("#shutter").wait_for()
+        page.locator("[role=tab][data-tab=type]").click()
+        page.locator("#type-input").wait_for()
+        assert page.evaluate("() => document.activeElement && document.activeElement.id") == "type-input"
+        # a reload that lands on the Type tab does not grab the keyboard on its own
+        page.reload()
+        page.wait_for_function("() => window.__scan && window.__scan.showTab")
+        if page.locator("#type-input").count():
+            assert page.evaluate("() => document.activeElement && document.activeElement.id") != "type-input"
+        assert errors == []
+        browser.close()
+
+
+def test_save_to_binder_offers_undo_that_takes_the_copies_out_again(server: Server) -> None:  # noqa: F811
+    """Save to binder puts the matched cards in the Binder and says so with Undo; Undo removes
+    the entry it made (final audit, Scan: undo where something changes)."""
+    from playwright.sync_api import expect, sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, _link(server), 390, False, "light")
+        page.evaluate(ITEMS)
+        page.get_by_role("button", name="Save to binder").click()
+        note = page.locator("#list-msg .notice.ok")
+        expect(note).to_contain_text("Saved 1 card (2 copies) to your binder", timeout=10_000)
+        rows = server.ark.collections.get("alice", {})
+        assert len(rows) == 1 and next(iter(rows.values()))["quantity"] == 2, rows
+        undo = note.get_by_role("button", name="Undo")
+        assert undo.count() == 1
+        undo.click()
+        expect(page.locator("#list-msg .notice.ok")).to_contain_text(
+            "Taken out of your binder again", timeout=10_000
+        )
+        assert server.ark.collections.get("alice", {}) == {}
+        assert errors == []
+        browser.close()
+
+
+CARD_2 = CARD.replace("Sol Ring", "Arcane Signet").replace("sol-ring", "arcane-signet").replace("472", "331")
+TWO_ITEMS = (
+    "() => { const s = window.__scan; s.state.items = ["
+    "  {quantity: 2, name: 'Sol Ring', status: 'exact', note: '', card: " + CARD + "},"
+    "  {quantity: 1, name: 'Arcane Signet', status: 'exact', note: '', card: " + CARD_2 + "}];"
+    " s.showTab('list'); }"
+)
+
+
+def test_a_failed_undo_retries_only_the_rows_still_in_the_binder(server: Server) -> None:  # noqa: F811
+    """Undo after a save of two cards, where the second row's undo fails once (the audit's N6): the
+    retry sends only that row again. Before, it ran every row again, so a row already out of the
+    binder was asked for twice (an error) and a reduced one lost its copies a second time."""
+    from playwright.sync_api import expect, sync_playwright
+
+    exe = _chromium()
+    calls: list[str] = []
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, _link(server), 390, False, "light")
+        page.evaluate(TWO_ITEMS)
+        page.get_by_role("button", name="Save to binder").click()
+        note = page.locator("#list-msg .notice.ok")
+        expect(note).to_contain_text("Saved 2 cards (3 copies) to your binder", timeout=10_000)
+        rows = server.ark.collections.get("alice", {})
+        assert len(rows) == 2, rows
+        signet = next(rid for rid, r in rows.items() if r["card"]["oracleCard"]["name"] == "Arcane Signet")
+        failures = {"left": 1}
+
+        def on_rows(route):  # the Arcane Signet row's first undo fails, as a busy gateway would
+            calls.append(route.request.method + " " + route.request.url.split("/rows/")[1].split("?")[0])
+            if route.request.url.split("/rows/")[1].split("?")[0] == str(signet) and failures["left"]:
+                failures["left"] -= 1
+                route.fulfill(
+                    status=503,
+                    content_type="application/json",
+                    body='{"ok": false, "error": "busy", "message": "Archidekt is busy"}',
+                )
+                return
+            route.continue_()
+
+        page.route(re.compile(r"/collection/api/rows/"), on_rows)
+        undo = page.locator("#list-msg").get_by_role("button", name="Undo")
+        undo.click()
+        # the note says what came out and that Undo takes out the rest (audit N13)
+        expect(page.locator("#list-msg .notice.error")).to_contain_text(
+            "Took 2 of 3 copies out of your binder; the rest could not be taken out", timeout=10_000
+        )
+        # the whole note, as sentences: why() ends with a full stop, so "Press Undo again" does not run
+        # on from the reason (audit P3: "...is busy Press Undo again...")
+        words = page.locator("#list-msg .notice.error").evaluate(
+            "e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim()"
+        )
+        assert words == (
+            "Took 2 of 3 copies out of your binder; the rest could not be taken out: Archidekt is busy. "
+            "Press Undo again for the rest."
+        ), words
+        assert len(server.ark.collections.get("alice", {})) == 1  # Sol Ring is out, the Signet stays
+        # Undo stays on the page, in the notice that says what went wrong, for another go
+        assert undo.count() == 1 and undo.is_enabled() and undo.is_visible()
+        undo.click()
+        expect(page.locator("#list-msg .notice.ok")).to_contain_text(
+            "Taken out of your binder again", timeout=10_000
+        )
+        assert server.ark.collections.get("alice", {}) == {}
+        # two rows the first time, then the one that failed
+        assert len(calls) == 3 and calls[2].endswith(str(signet)) and calls.count(calls[2]) == 2, calls
+        assert errors == []
+        browser.close()
+
+
+# the intro's own parts and the controls near it: any two that share a point on the page
+INTRO_OVERLAPS = """() => {
+  const sel = '#intro summary, #intro summary h2, #intro .list-actions button, #how-it-works,'
+    + ' .hubseg.tabs button';
+  const els = [...document.querySelectorAll(sel)].filter(e => e.getClientRects().length);
+  const out = [];
+  for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) {
+    if (els[i].contains(els[j]) || els[j].contains(els[i])) continue;
+    const a = els[i].getBoundingClientRect(), b = els[j].getBoundingClientRect();
+    const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    if (w > 0 && h > 0) {
+      out.push([els[i].textContent.trim(), els[j].textContent.trim(), Math.round(w), Math.round(h)]);
+    }
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("zoom", ["none", "text"])
+@pytest.mark.parametrize("width", [360, 412])
+def test_the_folded_intro_has_no_boxes_and_got_it_never_meets_how_it_works(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """Audit A5: at 360 px with 200% text the folded intro's "Got it" still had a rectangle (Chromium
+    keeps a closed details' last layout) that fell over "How it works" at the page's foot, 183×17.
+    Folded, the intro's content has no boxes at all; open, Got it is a 44 px button that meets
+    nothing, and nothing scrolls sideways either way."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import TEXT_200
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
+        if zoom == "text":
+            page.evaluate(TEXT_200)
+            redrawn(page)
+        page.locator("#how-it-works").click()  # open, whatever the visit
+        got_it = page.locator("#intro .list-actions button", has_text="Got it")
+        assert page.locator("#intro").evaluate("e => e.open") is True
+        box = got_it.bounding_box()
+        assert box and box["height"] >= 44, box
+        assert box["x"] >= 0 and box["x"] + box["width"] <= width, box
+        assert page.evaluate(INTRO_OVERLAPS) == []
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        page.locator("#intro summary").click()  # fold it
+        assert page.locator("#intro").evaluate("e => e.open") is False
+        assert got_it.evaluate("e => e.getClientRects().length") == 0
+        assert got_it.evaluate("e => e.checkVisibility()") is False
+        assert page.evaluate(INTRO_OVERLAPS) == [], (width, zoom)
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        page.locator("#intro summary").click()  # and open again: the button is back
+        assert got_it.bounding_box()["height"] >= 44 and page.evaluate(INTRO_OVERLAPS) == []
+        assert errors == []
+        browser.close()
+
+
+# the switch's four tabs: each tab's box, the rectangle of its name and of the List badge
+TAB_RECTS = """() => {
+  const seg = document.querySelector('.scan .tabs');
+  const rd = (r) => ({l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height});
+  const tabs = [...seg.querySelectorAll('[role=tab]')].map((b) => {
+    const text = [...b.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+    const rg = document.createRange(); rg.selectNodeContents(text);
+    const badge = b.querySelector('.badge');
+    return {name: text.textContent.trim(), box: rd(b.getBoundingClientRect()),
+            words: rd(rg.getBoundingClientRect()), lines: rg.getClientRects().length,
+            badge: badge ? rd(badge.getBoundingClientRect()) : null,
+            chosen: b.getAttribute('aria-selected') === 'true'};
+  });
+  return {tabs, seg: rd(seg.getBoundingClientRect()), over: seg.scrollWidth > seg.clientWidth + 1,
+          start: seg.classList.contains('more-start'), end: seg.classList.contains('more-end'),
+          page: document.documentElement.scrollWidth};
+}"""
+
+
+def _inside(inner: dict, outer: dict) -> bool:
+    return inner["l"] >= outer["l"] - 1 and inner["r"] <= outer["r"] + 1
+
+
+def _apart(a: dict, b: dict) -> bool:
+    """Two rectangles that share no point (half a pixel of rounding allowed)."""
+    gap = 0.5
+    sideways = a["r"] <= b["l"] + gap or b["r"] <= a["l"] + gap
+    return sideways or a["b"] <= b["t"] + gap or b["b"] <= a["t"] + gap
+
+
+@pytest.mark.parametrize("zoom", ["none", "root"])
+@pytest.mark.parametrize("width", [360, 412])
+def test_the_tabs_keep_their_names_whole_and_apart_at_200_percent_text(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """Re-check S3: at 200% text on a phone the four tabs shared the width (79 px each at 360),
+    "Camera" and "Sessions" ran over their neighbours and the List badge sat on "Sessions". A tab
+    is never narrower than its name: each name sits on one line inside its own tab, the badge
+    beside it, no name over another tab; four that don't fit scroll the switch (a faded edge
+    says so, the chosen tab in view), never the page; every tab is a 44 px target."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
+        if zoom == "root":
+            page.evaluate("() => { document.documentElement.style.fontSize = '200%'; }")
+            redrawn(page)
+        got = page.evaluate(TAB_RECTS)
+        tabs = got["tabs"]
+        assert [t["name"] for t in tabs] == ["Camera", "Type", "List", "Sessions"]
+        for t in tabs:
+            assert t["box"]["w"] >= 44 and t["box"]["h"] >= 44, t
+            assert t["lines"] == 1 and _inside(t["words"], t["box"]), t
+            if t["badge"]:
+                assert _inside(t["badge"], t["box"]) and _apart(t["badge"], t["words"]), t
+        for i, a in enumerate(tabs):
+            for j, b in enumerate(tabs):
+                if i != j:
+                    assert _apart(a["words"], b["box"]), (a, b)
+                    if a["badge"]:
+                        assert _apart(a["badge"], b["box"]), (a, b)
+        assert got["page"] <= width, got
+        if got["over"]:
+            assert got["start"] or got["end"], got  # the edge says the switch scrolls
+            chosen = next(t for t in tabs if t["chosen"])
+            assert _inside(chosen["box"], got["seg"]), (chosen, got["seg"])
+        else:
+            assert not got["start"] and not got["end"], got
         assert errors == []
         browser.close()

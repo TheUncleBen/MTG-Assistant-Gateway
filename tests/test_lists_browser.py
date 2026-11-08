@@ -17,13 +17,16 @@ from .test_lists_page import _seed
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import LIFT_WATCH, expect, lifted, quiet
 
 TEXT = (
     ".lp .ui-table .t, .lp .ui-table .s, .lp .ui-table .sm-only, .lp .list-head, .lp .ui-sub, .lp .btn, "
     ".lp-tabs a, .lp-chip, .ctxmenu [role=menuitem], .mtgbox h2, .mtgbox p, .mtgbox label, "
     ".mtgbox .acts button, .lp-under span"
 )
-TABS = ["templates", "defaults", "tags", "pins", "custom"]
+TABS = ["templates", "defaults", "tags", "custom"]
+# the lists under Account, and the pins as Binder's Wants page (decision C8)
+PAGES = [f"/lists/{slug}" for slug in TABS] + ["/collection/wants"]
 
 
 @pytest.fixture
@@ -54,8 +57,8 @@ def test_every_tab_fits_and_its_menu_opens_three_ways(server: Server, width: int
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        for slug in TABS:
-            page.goto(f"{server.base}/lists/{slug}", wait_until="networkidle")
+        for slug in PAGES:
+            page.goto(f"{server.base}{slug}", wait_until="networkidle")
             assert page.evaluate(MEASURE) == [], slug
             assert page.evaluate(CONTRAST, TEXT) == [], slug
             sizes = _targets(page, ".lp .ui-table .kebab, .lp-step button, .lp .list-head .btn, .lp-tabs a")
@@ -77,17 +80,21 @@ def test_every_tab_fits_and_its_menu_opens_three_ways(server: Server, width: int
         assert page.evaluate(MEASURE) == []
         page.keyboard.press("Escape")
         assert menu.count() == 0
-        page.wait_for_timeout(500)
+        quiet(page)
         row.click(button="right")
         assert page.locator(".ctxmenu").is_visible()
         page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
         if width < 900:
+            page.evaluate(LIFT_WATCH)
             page.evaluate(HOLD, ".lp .ui-table .tr[data-row] .title")
-            page.wait_for_timeout(900)
+            expect(page.locator(".ctxmenu")).to_be_visible()  # the hold opened the menu
+            lifted(page)  # and the finger lifted (HOLD, 600 ms)
             assert page.locator(".ctxmenu").is_visible()
             page.keyboard.press("Escape")
-            page.wait_for_timeout(500)
+            expect(page.locator(".ctxmenu")).to_have_count(0)
+            quiet(page)
         # Delete… fills the box from the row and ends on the solid red button
         row.locator(".kebab").click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Delete…").click()
@@ -115,10 +122,12 @@ def test_the_page_holds_together_on_a_phone_at_200_percent_text(server: Server, 
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
-        for slug in TABS:
-            page.goto(f"{server.base}/lists/{slug}", wait_until="networkidle")
+        for slug in PAGES:
+            page.goto(f"{server.base}{slug}", wait_until="networkidle")
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
             assert page.evaluate(MEASURE) == [], slug
+        page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
+        page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         page.locator("[data-box-open='cc-box']").click()
         page.locator("#cc-box").wait_for(state="visible")
         assert page.evaluate(MEASURE) == []
@@ -136,7 +145,7 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366, "light", exe)
         # pins: one more copy, then a note saved on leaving the field
-        page.goto(f"{server.base}/lists/pins", wait_until="networkidle")
+        page.goto(f"{server.base}/collection/wants", wait_until="networkidle")
         row = page.locator(".lp .ui-table .tr[data-row]").first
         row.locator(".lp-step button[aria-label='One more']").click()
         page.locator(".toast").wait_for(state="visible")
@@ -144,9 +153,12 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
         assert ark.pins["alice"][0]["quantity"] == 2 and row.locator(".lp-step .n").inner_text() == "2"
         note = row.locator("textarea")
         note.fill("Trade for it")
-        assert row.locator("[data-counter]").inner_text() == "12 / 256"
-        page.locator("body").click(position={"x": 5, "y": 5})
-        page.wait_for_timeout(400)
+        assert row.locator("[data-counter]").inner_text() == "12\u00a0/\u00a0256"
+        # leaving the field saves the note (lists.js posts action=edit): wait for that answer
+        with page.expect_response(
+            lambda r: r.request.method == "POST" and "action=edit" in (r.request.post_data or "")
+        ):
+            page.locator("body").click(position={"x": 5, "y": 5})
         assert ark.pins["alice"][0]["notes"] == "Trade for it"
         # below one copy asks first; the box removes the pin
         row.locator(".lp-step button[aria-label='One fewer']").click()
@@ -213,7 +225,7 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
         assert box.locator("[data-face=b]").get_attribute("aria-selected") == "true"
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
-        page.wait_for_timeout(500)
+        quiet(page)
         page.locator(".lp .ui-table .tr[data-row] .kebab").first.click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Edit…").click()
         box.wait_for(state="visible")
@@ -238,7 +250,7 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
         assert box.locator(".lp-crop[data-crop=f]").inner_text().strip() == "Picture set"
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
-        page.wait_for_timeout(500)
+        quiet(page)
         # the delete box: the tick unlocks the solid red button
         page.locator(".lp .ui-table .tr[data-row] .kebab").first.click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Delete…").click()

@@ -38,7 +38,10 @@ NOT_TOOLS = {
     "archidekt_login",
     "archidekt_password",
     "apply_needs_user",
+    "apply_if_allowed",
     "price_total",
+    "price_change",
+    "price_note",
     "price_source_1",
     "price_source_2",
     "watchlist_url",
@@ -93,7 +96,11 @@ def test_claude_skill_frontmatter_fits_upload_limits() -> None:
 def test_chatgpt_block_fits_custom_instructions() -> None:
     text = CHATGPT.read_text(encoding="utf-8")
     block = text.split("```text\n", 1)[1].split("```", 1)[0]
-    assert len(block) <= 4000  # paid-plan custom instructions take 5,000 characters (reported)
+    # 5% under 4,000, room for new lines (paid-plan custom instructions take 5,000, reported;
+    # 0.7.46 sweep B-5)
+    assert len(block) <= 3800
+    # plain words: what to tell the member about the check after an apply
+    assert "Report whether the check matched" in block and "Report verified" not in block
 
 
 def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
@@ -125,18 +132,22 @@ def test_every_guide_says_to_finish_the_review_before_proposing() -> None:
     assert "Finish your review before proposing: one proposal with every change, and amend_proposal" in told
 
 
-def test_every_guide_says_what_approved_go_on_means() -> None:
-    """A card's "Approved, go on" reads like the user saying they applied it, and the guides said to
-    call get_proposal then, which draws the proposal card a second time. Each guide now says to
-    carry on from the outcome the card passed in and to read the proposal only when that is unclear."""
+def test_no_guide_mentions_a_message_posted_as_the_user() -> None:
+    """Owner decision 0.7.46: the cards no longer post "Approved, go on" as the user's message. The
+    guides say the outcome comes with the user's next message, to carry on from it and to read the
+    proposal only when that is unclear; none still mentions the posted message."""
     from mtg_gateway.app import server_instructions
+    from mtg_gateway.guide import add_guide_routes
 
     skill = " ".join((SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").split())
-    assert 'posts "Approved, go on" as the user\'s message: carry on from the outcome you were told' in skill
     block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
-    assert 'On "Approved, go on" or their word, use the outcome given; get_proposal only if unclear.' in block
     told = server_instructions("https://gateway.example.com")
-    assert "carry on from that outcome, and call get_proposal only when it is unclear" in told
+    guide = Path(add_guide_routes.__code__.co_filename).read_text(encoding="utf-8")
+    for text in (skill, block, told, guide):
+        assert "go on" not in text.replace("goes on", "")
+    assert "Carry on from the outcome you were told" in skill
+    assert "After a card press, use the outcome given; proposal_status only if unclear." in block
+    assert "Carry on from that outcome, and call proposal_status only when it is unclear" in told
 
 
 def test_no_doc_still_names_the_cards_0_7_33_took_away() -> None:
@@ -150,3 +161,78 @@ def test_no_doc_still_names_the_cards_0_7_33_took_away() -> None:
     files = [*(ROOT / "docs").glob("*.md"), *(ROOT / "plugin").rglob("*.md"), ROOT / "README.md"]
     found = [f"{p.relative_to(ROOT)}: {m.group(0)}" for p in files for m in stale.finditer(p.read_text())]
     assert not found, found
+
+
+def test_the_android_guide_says_confirm_for_the_browsers_app_check() -> None:
+    text = " ".join((ROOT / "docs" / "ANDROID.md").read_text(encoding="utf-8").split())
+    assert "could not confirm the app" in text and "could not verify the app" not in text
+
+
+def test_removal_from_the_group_is_told_without_a_time_promise() -> None:
+    for name in ("CHANGELOG.md", "docs/IDP-AUTHENTIK.md"):
+        text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
+        assert "loses access within a minute" not in text and "within a minute it revokes" not in text, name
+        assert "asked again in the background" in text, name
+    # a page being read and an assistant's read or proposal never wait for the provider; changes,
+    # applies and admin pages do, so a removed member is refused on the next one (owner decision
+    # 11-01, "Only changes and admin wait"; tests/test_live_membership.py)
+    text = " ".join((ROOT / "docs/IDP-AUTHENTIK.md").read_text(encoding="utf-8").split())
+    assert "(changes, applies and admin pages wait for the answer)" in text
+    assert "assistant requests wait for the answer" not in text
+    for name in ("docs/ARCHITECTURE.md", "docs/DEPLOY.md", "docs/OPERATIONS.md"):
+        other = " ".join((ROOT / name).read_text(encoding="utf-8").split())
+        assert "assistant requests wait for the answer" not in other, name
+        assert "read only" in other and "apply_proposal" in other, name
+    assert "60 seconds" not in text
+
+
+def test_chatgpt_block_uses_the_glossary_and_names_the_newer_answers() -> None:
+    """Independent review of 0.7.46: the ChatGPT block still said "SIMULATION", "colour" and "user
+    approves", and never named deck_after, plan_first or propose_account_action, which Claude's skill
+    explains. The block uses the approved words and gives each a short line."""
+    block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1].split("```", 1)[0]
+    assert "SIMULATION" not in block and "\nTEST\n" in block
+    assert "colour" not in block and "color identity" in block
+    assert "approves" not in block
+    assert "deck_after" in block and "unpriced_added" in block
+    assert "plan_first" in block
+    assert "propose_account_action" in block and "propose_delete_deck" in block
+    assert len(block) <= 3800
+
+
+async def test_no_guide_describes_the_cards_as_they_were_before_0_7_46(tmp_path: Path, idp: FakeIdP) -> None:
+    """Approved decision C3 (0.7.46 review): no card posts a message in the user's name, a pick
+    reaches the assistant with the user's next message, and since one waiting change per deck per
+    app check_deck_changes suggests no amend: a plan joins the app's waiting change (adds_to). After
+    an amend, the newest card shows the new version and older ones shrink to a line; apply_proposal
+    draws no card."""
+    from mtg_gateway.guide import add_guide_routes
+
+    def flat(p: Path) -> str:
+        return " ".join(p.read_text(encoding="utf-8").split())
+
+    skill = flat(SKILL_DIR / "SKILL.md")
+    connect, arch = flat(ROOT / "docs" / "CONNECT.md"), flat(ROOT / "docs" / "ARCHITECTURE.md")
+    guide = " ".join(Path(add_guide_routes.__code__.co_filename).read_text(encoding="utf-8").split())
+    caps = flat(ROOT / "docs" / "CAPABILITIES.md")
+    # a pick is read with the next message, not posted as one
+    for name, text in (("SKILL.md", skill), ("CONNECT.md", connect), ("guide.py", guide)):
+        assert "plain text message" not in text and "as text and it carries on" not in text, name
+    assert "reaches you as plain text naming the pick, with the user's next message" in skill
+    assert "reads with your next message" in connect and "which it reads with your next" in guide
+    # the check suggests fix, already_waiting or propose (adds_to), never amend
+    assert "when it suggests `amend`" not in skill and "`amend.changes`" not in skill
+    assert "`adds_to` names it: one propose call adds your plan to it" in skill
+    rows = CATALOGUE.read_text(encoding="utf-8").splitlines()
+    row = next(line for line in rows if line.startswith("| `check_deck_changes`"))
+    assert "`amend` (" not in row and "`adds_to`" in row and "no Archidekt call" not in row
+    assert "whether to amend one of its own instead" not in caps and "Archidekt not asked" not in caps
+    # the card after an amend
+    assert "after an amend, the new card shows the new version and the older cards for it shrink" in skill
+    assert "`apply_proposal`) names it" not in arch and "`apply_proposal` draws none" in arch
+    # the tool's own description says the same
+    async with running(Harness(make_settings(tmp_path), idp)) as h:
+        token = (await h.tokens_for(await h.register()))["access_token"]
+        tools = {t["name"]: t for t in sse_json(await h.mcp(token, "tools/list"))["result"]["tools"]}
+    check = tools["check_deck_changes"]["description"]
+    assert "amend (amend:" not in check and "adds_to" in check and "Archidekt is not asked" not in check

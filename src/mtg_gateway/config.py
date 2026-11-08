@@ -20,8 +20,12 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 
+from . import __version__
 from .modes import MODE_LABELS
 from .oidc import TOKEN_AUTH_METHODS, validate_groups_claim
+
+# Sent to Archidekt and Scryfall, as each asks: who calls, which version, and where to read about it
+USER_AGENT = f"mtg-assistant-gateway/{__version__} (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
 
 
 class ConfigError(Exception):
@@ -87,12 +91,35 @@ def _ntfy_url_env(name: str) -> str | None:
     return raw
 
 
+# The spellings an on/off variable may have (any case). Anything else stops start-up: a typo such
+# as MTG_WRITES_ENABLED=ture used to start the gateway with that feature off (0.7.46 audit PA-16).
+BOOL_TRUE = ("1", "true", "yes", "on")
+BOOL_FALSE = ("0", "false", "no", "off")
+# the on/off variables a stack may set (each read with _bool_env)
+BOOL_ENV = (
+    "MTG_ALLOW_ANY_IDP_USER",
+    "MTG_APPLY_IN_CHAT",
+    "MTG_ARCHIDEKT_BACKUPS",
+    "MTG_CIMD_ENABLED",
+    "MTG_SCAN_ART_ENABLED",
+    "MTG_UPDATE_CHECK",
+    "MTG_WATCHLISTS_ENABLED",
+    "MTG_WRITES_ENABLED",
+)
+
+
 def _bool_env(name: str, default: bool) -> bool:
-    """1/true/yes (any case) is True, anything else False; unset or empty is ``default``."""
+    """true/false, 1/0, yes/no or on/off (any case); unset or empty is ``default``. Anything else
+    stops start-up with the variable's name."""
     raw = _env(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
-    return raw.strip().lower() in ("1", "true", "yes")
+    value = raw.strip().lower()
+    if value in BOOL_TRUE:
+        return True
+    if value in BOOL_FALSE:
+        return False
+    raise ConfigError(f"{name} must be true or false (or 1/0, yes/no, on/off), not {raw.strip()!r}")
 
 
 def _groups_claim_env(name: str, default: str) -> str:
@@ -135,6 +162,19 @@ def _sync_minutes_env(name: str) -> int:
     if value != 0 and not 30 <= value <= 24 * 60:
         raise ConfigError(f"{name} must be 0 (off), or between 30 and 1440")
     return value
+
+
+def _text_env(name: str, key: str) -> str:
+    """A text setting the Settings page manages, set in the stack: the page's own rules (spaces
+    tidied, its length limit); empty = the code default."""
+    spec = MANAGED_SETTINGS[key]
+    raw = _env(name)
+    if raw is None:
+        return spec.default
+    try:
+        return spec.parse(raw)
+    except SettingError as exc:
+        raise ConfigError(f"{name} {exc.message}") from exc
 
 
 def _float_env(name: str, default: float, *, lo: float, hi: float, seconds: bool = False) -> float:
@@ -181,9 +221,9 @@ class Settings:
     # The Forge simulation service (docker/forge/); unset, reports run the goldfish only.
     forge_url: str | None = None
     # Games per Forge run: four-player Commander games are slow on a Pi, so runs stay short.
-    forge_games: int = 4
+    forge_games: int = 5
     # Forge games a report asks to play at the same time (1 to 16); the Forge service plays as many as
-    # its machine has places for. The default asks for as many as a report has games by default.
+    # its machine has places for. The default is the most the older Forge image plays at once.
     forge_parallel_games: int = 4
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
@@ -197,6 +237,9 @@ class Settings:
     # Look up the newest release on GitHub twice a day and tell admins when it is newer than this
     # gateway (update_check.py). Notice only: nothing is downloaded or changed.
     update_check: bool = True
+    # The daily local copy of Scryfall's printings (scan/bulk.py), used only when Scryfall can't
+    # answer: an admin Settings row ("Keep a local copy of card printings"), no stack variable.
+    printings_copy: bool = True
     # Approval modes (modes.py): the mode of a member who has not chosen one on their Account
     # page, the highest mode members may choose (auto = no cap), and how many review rows an
     # edit may have and still count as low risk in semi mode.
@@ -220,12 +263,11 @@ class Settings:
     # A second folder every database backup is also copied to (another disk or a network share).
     backup_copy_dir: Path | None = None
     archidekt_backup_folder: str = "MTG Gateway Backups"
-    archidekt_user_agent: str = (
-        "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
-    )
-    # Gentle on Archidekt (docs/DEPLOY.md "Archidekt request limits"): every request, whoever
-    # asks, waits at least archidekt_min_interval after the previous one, and no more than
-    # archidekt_max_per_minute go out in any 60 seconds.
+    archidekt_user_agent: str = USER_AGENT
+    # Gentle on Archidekt: every request, whoever asks, starts at least archidekt_min_interval
+    # after the previous one started, at most two are out at once, and no more than
+    # archidekt_max_per_minute start in any 60 seconds, a sixth of them kept for members' pages
+    # (archidekt.Pacer).
     archidekt_min_interval: float = 1.0
     archidekt_max_per_minute: int = 30
     # GETs that time out or get a 5xx are retried this many times, after a random wait of up to
@@ -257,10 +299,14 @@ class Settings:
     scan_art_max_galleries: int = 500
     scan_art_gallery_idle_days: int = 180
     proposal_ttl: int = 24 * 3600
-    browser_session_ttl: int = 2 * 3600
+    # How long a browser or Android app sign-in lasts unused; use renews it, up to
+    # browser_session_max_age (30 days by default) after the sign-in (app.SessionRenewalMiddleware).
+    # The four sign-in times are rows of the Settings page ("Sign-in"), read per sign-in and per
+    # token through LiveSettings.seconds; the longest time has no stack variable.
+    browser_session_ttl: int = 7 * 24 * 3600
+    browser_session_max_age: int = 30 * 24 * 3600
     access_token_ttl: int = 3600
     refresh_token_ttl: int = 30 * 24 * 3600
-    reauth_interval: int = 7 * 24 * 3600
     membership_check_ttl: int = 5
     oidc_previous_issuers: list[str] = field(default_factory=list)
     auth_code_ttl: int = 300
@@ -284,8 +330,8 @@ class Settings:
     # decks one member may watch, how many days of daily prices are kept, and the hour (UTC) the
     # daily price check and the members' summaries run. Nothing is fetched while nobody watches.
     watchlists_enabled: bool = True
-    watch_max_cards: int = 200
-    watch_max_decks: int = 10
+    watch_max_cards: int = 5000
+    watch_max_decks: int = 100
     price_history_days: int = 365
     price_hour_utc: int = 6
     # Optional notifications through an ntfy server (notify.py): its address and an access token
@@ -390,7 +436,7 @@ def load_settings() -> Settings:
     # application binding missed in Authentik opens the gateway to every IdP user). An empty
     # group must be an explicit choice.
     required_group = (_env("MTG_REQUIRED_GROUP", "") or "").strip() or None
-    allow_any = (_env("MTG_ALLOW_ANY_IDP_USER", "false") or "false").strip().lower() in ("1", "true", "yes")
+    allow_any = _bool_env("MTG_ALLOW_ANY_IDP_USER", False)
     if required_group is None and not allow_any:
         raise ConfigError(
             "MTG_REQUIRED_GROUP is empty: set it to the identity provider group whose members may "
@@ -402,7 +448,7 @@ def load_settings() -> Settings:
     if trusted is not None:
         kwargs["trusted_proxies"] = trusted
 
-    return Settings(
+    settings = Settings(
         public_url=public_url,
         oidc_issuer=oidc_issuer,
         oidc_client_id=_env("MTG_OIDC_CLIENT_ID", required=True) or "",
@@ -437,14 +483,13 @@ def load_settings() -> Settings:
         ],
         apply_in_chat=_bool_env("MTG_APPLY_IN_CHAT", True),
         update_check=_bool_env("MTG_UPDATE_CHECK", True),
-        browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 2 * 3600, lo=300, hi=86400),
+        browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 7 * 24 * 3600, lo=300, hi=30 * 24 * 3600),
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", True),
         deck_sync_minutes=_sync_minutes_env("MTG_DECK_SYNC_MINUTES"),
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),
         archidekt_backups=_bool_env("MTG_ARCHIDEKT_BACKUPS", True),
         access_token_ttl=_int_env("MTG_ACCESS_TOKEN_TTL", 3600, lo=60, hi=86400),
         refresh_token_ttl=_int_env("MTG_REFRESH_TOKEN_TTL", 30 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
-        reauth_interval=_int_env("MTG_REAUTH_INTERVAL", 7 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
         membership_check_ttl=_int_env("MTG_MEMBERSHIP_CHECK_TTL", 5, lo=0, hi=60),
         authentik_api_token=sweep_token,
         authentik_api_token_problem=sweep_problem,
@@ -454,6 +499,7 @@ def load_settings() -> Settings:
         ntfy_url=_ntfy_url_env("MTG_NTFY_URL"),
         ntfy_token=ntfy_token,
         scan_art_enabled=_bool_env("MTG_SCAN_ART_ENABLED", True),
+        server_name=_text_env("MTG_SERVER_NAME", "server_name"),
         # set = a value other than blanks; a blank (or only spaces) leaves it to the page
         env_set=frozenset(
             key
@@ -462,6 +508,92 @@ def load_settings() -> Settings:
         ),
         **kwargs,
     )
+    _warn_retired(settings)
+    return settings
+
+
+# Every variable an earlier release read and this one does not (from the releases' code; the
+# update notes in docs/UPGRADING.md and the CHANGELOG say where each went). One left in a stack
+# with a value is warned about at start (0.7.46 audit PA-10): most tuning settings are on the
+# admin Settings page now, and a stack value for one of them does nothing.
+RETIRED_ENV = (
+    "MTG_ALLOWED_HOSTS",
+    "MTG_ANDROID_ASSETLINKS",
+    "MTG_ANDROID_PACKAGE",
+    "MTG_APPLY_MIN_AGE_SECONDS",
+    "MTG_APPLY_VIA_MCP",
+    "MTG_APPROVAL_MODE_DEFAULT",
+    "MTG_APPROVAL_MODE_MAX",
+    "MTG_APP_DIR",
+    "MTG_ARCHIDEKT_BACKOFF_BASE",
+    "MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT",
+    "MTG_ARCHIDEKT_BACKUP_COPIES",
+    "MTG_ARCHIDEKT_BACKUP_FOLDER",
+    "MTG_ARCHIDEKT_CACHE_SECONDS",
+    "MTG_ARCHIDEKT_CALLS_PER_10_MIN",
+    "MTG_ARCHIDEKT_CARD_CACHE_SECONDS",
+    "MTG_ARCHIDEKT_MAX_PER_MINUTE",
+    "MTG_ARCHIDEKT_MIN_INTERVAL",
+    "MTG_ARCHIDEKT_RETRIES",
+    "MTG_AUTHENTIK_API_URL",
+    "MTG_AUTO_APPLY_MAX_ROWS",
+    "MTG_AUTO_BIG_EDIT_ROWS",
+    "MTG_BACKUP_HOUR_UTC",
+    "MTG_BACKUP_KEEP_DAYS",
+    "MTG_CHATGPT_NAME",
+    "MTG_FORGE_GAMES",
+    "MTG_FORGE_PARALLEL_GAMES",
+    "MTG_LISTEN_HOST",
+    "MTG_LISTEN_PORT",
+    "MTG_LOG_LEVEL",
+    "MTG_PLUGIN_DIR",
+    "MTG_PRICE_HISTORY_DAYS",
+    "MTG_PRICE_HOUR_UTC",
+    "MTG_PROPOSAL_EXPIRY_DAYS",
+    "MTG_SCAN_AMBIGUITY_MARGIN",
+    "MTG_SCAN_ART_GALLERY_IDLE_DAYS",
+    "MTG_SCAN_ART_IMAGES_PER_HOUR",
+    "MTG_SCAN_ART_IMAGE_INTERVAL",
+    "MTG_SCAN_ART_MAX_DISTANCE",
+    "MTG_SCAN_ART_MAX_GALLERIES",
+    "MTG_SCAN_ART_MAX_PRINTINGS",
+    "MTG_SCAN_ART_MIN_MARGIN",
+    "MTG_SCAN_AUTO_ADD_CONFIDENCE",
+    "MTG_SCAN_FOIL_STAR_INK_RATIO",
+    "MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY",
+    "MTG_SCAN_FUZZY_MIN_SIMILARITY",
+    "MTG_SCAN_GLARE_RATIO",
+    "MTG_SCAN_MIN_OCR_CONFIDENCE",
+    "MTG_SCRYFALL_LOOKUP_INTERVAL",
+    "MTG_SNAPSHOTS_PER_DECK",
+    "MTG_WATCH_MAX_CARDS",
+    "MTG_WATCH_MAX_DECKS",
+)
+
+
+def _warn_retired(settings: Settings) -> None:
+    """A WARNING at start for each removed variable that still has a value: the deployment looks as
+    it did, but the setting no longer does anything (security review 3, R3-01)."""
+    log = logging.getLogger(__name__)
+    for name in RETIRED_ENV:
+        if (os.environ.get(name) or "").strip():
+            log.warning(
+                "%s is set but no longer used: the gateway ignores it. Most settings like it are on "
+                "the admin Settings page now; set it there if you need it, then delete %s from your "
+                "variables (docs/UPGRADING.md lists where each one went).",
+                name,
+                name,
+            )
+    if (os.environ.get("MTG_REAUTH_INTERVAL") or "").strip():
+        days = settings.refresh_token_ttl / 86400
+        logging.getLogger(__name__).warning(
+            "MTG_REAUTH_INTERVAL is set but no longer used (removed in 0.7.46): an assistant now has "
+            "to sign in again after the Assistant refresh time instead, %s days from this stack "
+            "unless the admin Settings page's Assistant refresh row says otherwise. To keep a "
+            "shorter time, set that row or MTG_REFRESH_TOKEN_TTL (seconds), then delete "
+            "MTG_REAUTH_INTERVAL.",
+            f"{days:g}",
+        )
 
 
 # -- settings the server owner manages on the admin Settings page (0.7.29) ------------------
@@ -498,6 +630,10 @@ class SettingSpec:
     labels: tuple[str, ...] = ()
     # True when the gateway reads it only when it starts (the page says it applies after a restart)
     restart: bool = False
+    # Seconds in one ``unit`` when the Settings field it sets counts seconds (the sign-in times):
+    # the page and LiveSettings.get count in the unit, the Settings field and LiveSettings.seconds
+    # in seconds. 1: the same number.
+    scale: int = 1
 
     def parse(self, raw: Any) -> Any:
         """The value ``raw`` (from a form: text; or already typed) as this setting's type, within
@@ -637,14 +773,14 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         _spec("backup_hour_utc", "int", 3, "backups", "B", lo=0, hi=23, restart=True),
         _spec("backup_keep_days", "int", 14, "backups", "B", lo=1, hi=3650, restart=True),
         # simulation
-        _spec("forge_games", "int", 4, "simulation", "C", lo=1, hi=50),
+        _spec("forge_games", "int", 5, "simulation", "C", lo=1, hi=50),
         _spec("forge_parallel_games", "int", 4, "simulation", "C", lo=1, hi=16),
         # watchlists and prices
         _spec(
             "watchlists_enabled", "bool", True, "watchlists", "B", restart=True, env="MTG_WATCHLISTS_ENABLED"
         ),
-        _spec("watch_max_cards", "int", 200, "watchlists", "B", lo=0, hi=200),
-        _spec("watch_max_decks", "int", 10, "watchlists", "B", lo=0, hi=10),
+        _spec("watch_max_cards", "int", 5000, "watchlists", "B", lo=0, hi=5000),
+        _spec("watch_max_decks", "int", 100, "watchlists", "B", lo=0, hi=100),
         _spec(
             "price_history_days",
             "int",
@@ -665,9 +801,40 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             "B",
             max_len=100,
             restart=True,
+            env="MTG_SERVER_NAME",
         ),
         _spec("update_check", "bool", True, "general", "B", restart=True, env="MTG_UPDATE_CHECK"),
+        # off deletes the copy at once and stops the daily download (scan/bulk.py); no stack variable
+        _spec("printings_copy", "bool", True, "general", "B"),
         _spec("log_level", "choice", "INFO", "general", "B", choices=_LOG_LEVELS, restart=True),
+        # sign-in times (read per sign-in and per token: no restart). The stack ranges stay as they
+        # were (load_settings); the page's sit inside them, in days and hours.
+        _spec(
+            "browser_session_ttl",
+            "int",
+            7,
+            "signin",
+            "B",
+            lo=1,
+            hi=30,
+            scale=86400,
+            env="MTG_BROWSER_SESSION_TTL",
+        ),
+        _spec("browser_session_max_age", "int", 30, "signin", "B", lo=1, hi=365, scale=86400),
+        _spec(
+            "access_token_ttl", "int", 1, "signin", "B", lo=1, hi=24, scale=3600, env="MTG_ACCESS_TOKEN_TTL"
+        ),
+        _spec(
+            "refresh_token_ttl",
+            "int",
+            30,
+            "signin",
+            "B",
+            lo=1,
+            hi=365,
+            scale=86400,
+            env="MTG_REFRESH_TOKEN_TTL",
+        ),
         # Archidekt and Scryfall pacing
         _spec(
             "archidekt_calls_per_10_min",
@@ -892,6 +1059,10 @@ _UNITS = {
     "backup_keep_days": "days",
     "price_history_days": "days",
     "scan_art_gallery_idle_days": "days",
+    "browser_session_ttl": "days",
+    "browser_session_max_age": "days",
+    "access_token_ttl": "hours",
+    "refresh_token_ttl": "days",
     "archidekt_min_interval": "seconds",
     "archidekt_backoff_base": "seconds",
     "archidekt_cache_seconds": "seconds",
@@ -904,6 +1075,10 @@ MANAGED_SETTINGS = {k: replace(s, unit=_UNITS[k]) if k in _UNITS else s for k, s
 
 def _deployment_value(settings: Settings, spec: SettingSpec) -> Any:
     value = getattr(settings, spec.key)
+    if spec.scale != 1:
+        # a stack value counts seconds; the page counts in the unit (7200 seconds: 0.08 days)
+        days = value / spec.scale
+        return int(days) if float(days).is_integer() else round(days, 2)
     return value
 
 
@@ -925,7 +1100,7 @@ def with_stored(settings: Settings, db: Any) -> Settings:
         except SettingError:
             logger.warning("stored setting %s is out of bounds; the default applies", key)
             continue
-        changes[key] = value
+        changes[key] = value * spec.scale
     return replace(settings, **changes) if changes else settings
 
 
@@ -983,6 +1158,14 @@ class LiveSettings:
             # a stored value the current bounds refuse (bounds tightened in a later version)
             logger.warning("stored setting %s is out of bounds; the default applies", key)
             return None
+
+    def seconds(self, key: str) -> int:
+        """A sign-in time (a setting with a ``scale``) in seconds, as it is now: the stack's own
+        number of seconds when it set one."""
+        spec = self.spec(key)
+        if key in self.settings.env_set:
+            return int(getattr(self.settings, key))
+        return int(self.get(key) * spec.scale)
 
     def get(self, key: str) -> Any:
         spec = self.spec(key)

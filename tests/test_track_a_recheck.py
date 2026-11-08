@@ -13,7 +13,7 @@ from .conftest import Stack
 from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import call, linked_user, structured
 from .test_round4_data import _app_token
-from .track_a_helpers import card_code, press_approve
+from .track_a_helpers import account_call, card_code, card_read, press_approve
 
 SUB = "user-1"
 FOREST = [{"action": "set_quantity", "card_name": "Forest", "quantity": 14}]
@@ -21,7 +21,12 @@ FOREST = [{"action": "set_quantity", "card_name": "Forest", "quantity": 14}]
 
 async def _propose(h, token: str, changes: list | None = None, deck: str = "42") -> dict:
     p = structured(
-        await call(h, token, "propose_deck_changes", {"deck_id": deck, "changes": changes or FOREST})
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": deck, "changes": changes or FOREST, "separate": True},
+        )
     )
     assert p["ok"] and p["state"] == "pending", p
     return p
@@ -219,7 +224,7 @@ async def test_a_note_changed_by_another_app_is_never_applied_by_an_assistant(st
         p["proposal_id"],
         SUB,
         expect_version=1,
-        changes=p["changes"],
+        changes=h.db.get_proposal(p["proposal_id"], SUB)["changes"],
         rows=p["rows"],
         diff_text=p["diff"],
         by_client="another-app",
@@ -263,7 +268,7 @@ async def test_the_card_draws_buttons_only_in_the_app_that_made_the_note(stack: 
     claude, _ = await _app_token(h, "Claude")
     big = [{"action": "add", "card_name": f"Card {i}"} for i in range(21)]  # waits even in auto
     p = structured(await call(h, chatgpt, "propose_deck_changes", {"deck_id": "42", "changes": big}))
-    mine = await call(h, chatgpt, "get_proposal", {"proposal_id": p["proposal_id"]})
+    mine = await card_read(h, chatgpt, p["proposal_id"])
     assert (mine.get("_meta") or {}).get(APPROVAL_META_KEY) and not structured(mine).get("card_other_app")
     theirs = await call(h, claude, "get_proposal", {"proposal_id": p["proposal_id"]})
     assert not (theirs.get("_meta") or {}).get(APPROVAL_META_KEY)
@@ -281,7 +286,7 @@ async def test_a_card_of_an_earlier_version_is_refused_as_replaced(stack: Stack)
         p["proposal_id"],
         SUB,
         expect_version=1,
-        changes=p["changes"],
+        changes=h.db.get_proposal(p["proposal_id"], SUB)["changes"],  # as stored (card_name)
         rows=p["rows"],
         diff_text=p["diff"],
         by_client=h.db.get_proposal(p["proposal_id"], SUB)["created_by_client"],
@@ -298,20 +303,21 @@ async def test_a_card_of_an_earlier_version_is_refused_as_replaced(stack: Stack)
     assert (await press_approve(h, token, p["proposal_id"]))["state"] == "applied"
 
 
-async def test_asking_the_assistant_to_apply_a_note_that_needs_a_press_answers_with_the_card(
+async def test_asking_the_assistant_to_apply_a_note_that_needs_a_press_answers_plainly(
     stack: Stack,
 ) -> None:
-    """apply_proposal of a change the member must approve used to answer only with a link. Now its
-    answer is the proposal, with the card's code."""
+    """apply_proposal of a change the member must approve answered with the card drawn again
+    (0.7.29). Since 0.7.46 apply_proposal draws no card (owner decision C3): its answer is a plain
+    refusal, not a failed tool, naming the proposal and where the member approves it."""
     h = stack.h
     token = await linked_user(stack)
     big = [{"action": "add", "card_name": f"Card {i}"} for i in range(21)]
     p = await _propose(h, token, big)
     res = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
     out = structured(res)
-    assert out["ok"] is False and out["error"] == "browser_required"
-    assert out["proposal_id"] == p["proposal_id"] and out["state"] == "pending" and out["rows"]
-    assert (res.get("_meta") or {}).get(APPROVAL_META_KEY)
+    assert out["ok"] is False and out["error"] == "browser_required" and res.get("isError") is False
+    assert out["proposal_id"] == p["proposal_id"] and out["review_url"]
+    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY)
 
 
 async def test_social_actions_are_approved_on_the_card_and_never_by_the_assistant(stack: Stack) -> None:
@@ -320,7 +326,9 @@ async def test_social_actions_are_approved_on_the_card_and_never_by_the_assistan
     h, ark = stack.h, stack.ark
     ark.private.discard(43)  # amy's deck is public: someone else's deck to like
     token = await linked_user(stack)
-    like = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
+    like = structured(
+        await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    )
     assert like["ok"], like
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": like["proposal_id"]}))
     assert out["error"] == "browser_required" and "proposal card" in out["message"] and ark.votes == {}

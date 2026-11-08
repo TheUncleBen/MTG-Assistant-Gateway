@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.archidekt import parse_deck
+from mtg_gateway.decks import PAGE_DECK_RELOAD
 from mtg_gateway.export_formats import EDHPLAY_SIDEBOARD_MAX, EDHPLAY_URL, to_edhplay
 
 from .fake_archidekt import FakeArchidekt
@@ -539,6 +540,13 @@ def _deck_reads(server: Server) -> int:
     return sum(1 for method, path in server.ark.calls if method == "GET" and "/decks/42/" in path)
 
 
+def _age(server: Server, seconds: float) -> None:
+    """The deck page's kept reads made ``seconds`` earlier: since 0.7.46 (owner decision C1) a
+    Reload within decks.PAGE_DECK_RELOAD of the last read shows that read as it is."""
+    decks = server.app.state.gateway.decks
+    decks._page_decks = {k: (t - seconds, d) for k, (t, d) in decks._page_decks.items()}
+
+
 def test_the_list_comes_from_its_own_address_with_the_deck_pages_access(server: Server) -> None:
     """GET /decks/{id}/edhplay.json: signed in, the deck as the deck page reads it (the read the
     page just made, so no new Archidekt request), never stored by the browser; signed out, 401;
@@ -565,7 +573,11 @@ def test_the_list_comes_from_its_own_address_with_the_deck_pages_access(server: 
     }
     assert _deck_reads(server) == reads  # the page's own read, kept a short while
     server.ark.add_side_row(42, "Cultivate", quantity=17, category="Sideboard")
-    h.get("/decks/42", headers={"Cache-Control": "max-age=0"})  # the browser's Reload reads again
+    # the browser's Reload half a minute on: the copy on show, read again behind the page
+    _age(server, PAGE_DECK_RELOAD + 1)
+    again = h.get("/decks/42", headers={"Cache-Control": "max-age=0"})
+    assert "data-check='/decks/42/check'" in again.text and "data-reload='1'" in again.text
+    assert h.get("/decks/42/check").json() == {"changed": True, "failed": False}
     d = h.get("/decks/42/edhplay.json").json()
     assert d["left_count"] == 2 and d["left_out"] == "2 Cultivate" and "15 Cultivate" in d["list"]
     assert d["companion"] is False and d["no_commander"] is False
@@ -605,6 +617,7 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
         assert page.evaluate("() => document.activeElement.textContent") == GO
         _shot(page, f"edhplay-loading-{width}-{scheme}")
         go.click(force=True)  # not ready: nothing opens, nothing is copied, the box stays
+        # fixed wait: a negative check: the press before the list is ready opens nothing within 300 ms
         page.wait_for_timeout(300)
         assert opened == [] and len(page.context.pages) == 1 and page.locator(".edhplay-dialog").count() == 1
         held.pop().continue_()
@@ -619,7 +632,7 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
         err = dialog.locator(".notice.error")
         err.wait_for()
         assert err.get_attribute("role") == "alert"
-        assert err.locator("span").inner_text() == "The deck list couldn't be loaded: no connection."
+        assert err.locator("span").inner_text() == "No connection; the deck list could not be loaded."
         assert go.get_attribute("aria-disabled") == "true" and go.get_attribute("aria-busy") is None
         assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
         box = dialog.locator(".pickbox").bounding_box()
@@ -651,12 +664,14 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
         dialog.locator(".notice.error").wait_for()
         assert (
             dialog.locator(".notice.error span").inner_text()
-            == "You're signed out. Reload the page to sign in."
+            == "You're signed out, so the deck list could not be loaded."
         )
+        assert dialog.locator(".notice.error a", has_text="Sign in").count() == 1
         assert errors == []
         browser.close()
 
 
+@pytest.mark.deck_check_live  # its Reload loads the change through the /check answer
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
 def test_the_box_says_what_to_set_on_edhplay(server: Server, width: int, scheme: str) -> None:
     """EDHPlay's import never sets a companion, and with no commander marked it sets none: the
@@ -680,8 +695,13 @@ def test_the_box_says_what_to_set_on_edhplay(server: Server, width: int, scheme:
             row["categories"] = cats or ["Uncategorized"]
         server.ark.add_side_row(42, "Yavimaya Elder", quantity=1, category="Sideboard")
         server.ark.decks[42]["cards"][-1]["companion"] = True
-        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        # a Reload half a minute on shows the copy on show, reads the deck behind it and, as it
+        # changed, loads the page again (static/feedback.js)
+        _age(server, PAGE_DECK_RELOAD + 1)
         page.reload(wait_until="networkidle")
+        page.locator("[data-card='Yavimaya Elder']").first.wait_for(state="attached")
+        page.wait_for_load_state("networkidle")
+        assert page.locator("[data-check]").count() == 0
         dialog = _open_dialog(page)
         page.wait_for_function("() => !document.querySelector('.edhplay-dialog .acts a[aria-busy]')")
         assert dialog.locator(lines).all_inner_texts() == [
@@ -744,7 +764,8 @@ def test_the_box_shows_only_the_approved_messages(server: Server, width: int, sc
         dialog = _open_dialog(page, ready=False)
         err = dialog.locator(".notice.error")
         err.wait_for()
-        assert err.locator("span").inner_text() == "You're signed out. Reload the page to sign in."
+        assert err.locator("span").inner_text() == "You're signed out, so the deck list could not be loaded."
+        assert err.locator("a", has_text="Sign in").get_attribute("href") == "/login?next=%2Fdecks%2F42"
         assert (
             err.locator("button").count() == 0 and dialog.locator("button", has_text="Try again").count() == 0
         )
@@ -752,10 +773,10 @@ def test_the_box_shows_only_the_approved_messages(server: Server, width: int, sc
             "() => document.activeElement.getAttribute('aria-label') || document.activeElement.textContent"
         )
         cycle = []
-        for _ in range(3):
+        for _ in range(4):  # the Sign in link is in the loop, before the button it cannot help
             page.keyboard.press("Tab")
             cycle.append(page.evaluate(focus))
-        assert cycle == ["Close", "How to import", GO]
+        assert cycle == ["Close", "How to import", "Sign in", GO]
         assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
         _shot(page, f"q69-edhplay-signed-out-{width}-{scheme}")
         assert errors == []

@@ -16,7 +16,7 @@ ROOT = 1
 
 
 def _info(*folders: tuple[int, str, int, bool], backup: set[int] = frozenset()) -> dict:  # type: ignore[assignment]
-    out = [{"id": ROOT, "name": "Top level (no folder)", "depth": 0, "parent": None, "private": False}]
+    out = [{"id": ROOT, "name": "No folder", "depth": 0, "parent": None, "private": False}]
     depth = {ROOT: 0}
     for fid, name, parent, private in folders:
         depth[fid] = depth[parent] + 1
@@ -103,7 +103,7 @@ def test_the_filter_searches_every_deck_and_says_where_each_one_is() -> None:
 
 def test_the_backup_folder_and_everything_in_it_never_shows() -> None:
     assert [f["name"] for f in fv.visible_folders(INFO)] == [
-        "Top level (no folder)",
+        "No folder",
         "commander",
         "Precons",
         "Brews",
@@ -207,7 +207,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
         assert "MTG Gateway Backups" not in top and "folder-field" not in top
         assert "data-new-folder" in top and "Precon in a folder" not in top
         inside = (await b.http.get("/decks?folder=502", headers=NAV)).text
-        assert re.search(r"<li><a href='/decks\?folder=501'>Commander</a></li>", inside)
+        assert re.search(r"<li><a class='ui-cap' href='/decks\?folder=501'>Commander</a></li>", inside)
         assert "Precon in a folder" in inside and "Sample Commander Deck" not in inside
         assert "<input type='hidden' name='folder' value='502'>" in inside
         found = (await b.http.get("/decks?folder=502&q=sample", headers=NAV)).text  # every folder
@@ -289,7 +289,7 @@ async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) ->
     sub = "user-1"  # the signed-in member (conftest)
     with pytest.raises(DeckError) as exc:
         await decks.move_deck(sub, "42", 503)
-    assert str(exc.value) == "No folder is called 'MTG Gateway Backups'. Your folders: Commander"
+    assert str(exc.value) == "No folder is called “MTG Gateway Backups”. Your folders: Commander."
     assert (await decks.move_deck(sub, "46", 503))["changed"] is False
 
 
@@ -317,7 +317,7 @@ async def test_a_folder_cannot_be_named_like_the_backup_folder(stack: Stack) -> 
         ):
             r = await b.http.post("/folders", data={"csrf": csrf, **data})
             assert r.status_code == 400, (data, r.text[:300])
-            words = f"'{data['name']}' is the name of the gateway's backup folder. Pick another name."
+            words = f"“{data['name']}” is the name of the gateway's backup folder. Pick another name."
             assert words in r.text or html.escape(words) in r.text, (data, r.text[:300])
         assert all(m == "GET" for m, _p in ark.calls[calls:]), ark.calls[calls:]
         # other capitals below the top level are another folder to the gateway, so allowed

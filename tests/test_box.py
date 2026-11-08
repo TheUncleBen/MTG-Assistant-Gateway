@@ -100,8 +100,15 @@ def test_the_box_look_is_rounder_and_softer_than_the_panels_in_both_themes() -> 
         "@media (prefers-reduced-motion:reduce){\n  .mtgbox-scrim,.mtgbox-scrim > .mtgbox{transition:none}"
         in css
     )
-    # the header: the title and a 44 px round ×, on every box
-    assert ".mtgbox .bh{display:flex;align-items:center" in css
+    # the header: the title and a 44 px round × at its top right, on every box; the title's first
+    # line leaves the ×'s room and a second line takes the whole width (a long name moves down
+    # whole instead of breaking beside the ×)
+    assert re.search(r"\.mtgbox \.bh\{--th:1\.25rem;[^}]*position:relative;\s*min-height:44px", css)
+    centred = (
+        ".mtgbox .bh > .bx{position:absolute;top:max(0px, calc(var(--tp) + .65 * var(--th) - 22px));right:0}"
+    )
+    assert centred in css
+    assert '.mtgbox .bh h2::before{content:"";float:right;width:calc(44px + .5rem);height:1.3em}' in css
     assert re.search(
         r"\.mtgbox \.bx,\.mtgbox a\.bx\{[^}]*width:44px;\s*height:44px;min-height:44px;min-width:44px", css
     )
@@ -202,7 +209,7 @@ def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> Non
         == f"<span class='ui-app'>{claude}<span class='nm'>Claude</span></span>"
     )
     assert ui.app_chip("ChatGPT", client_id="https://chatgpt.com/oauth/c.json").startswith(
-        "<span class='ui-app'><img class='logo on-light' src='/static/logos/"
+        "<span class='ui-app'><span class='logo-box'><img class='logo on-light' src='/static/logos/"
     )
     assert ui.app_chip("Codex").endswith("<span class='nm'>Codex</span></span>")
     # any other app keeps the gateway's own neutral icon; never initials
@@ -217,7 +224,8 @@ def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> Non
     assert ui.app_name(None) == "Unnamed app" and ui.app_name(" Claude ") == "Claude"
     for none in (None, "", "  "):
         out = ui.app_chip(none)
-        assert "class='ui-app none' title='No app'" in out and "—" in out
+        # nothing shown (a bare dash read as a stray mark: polish C2); a screen reader hears why
+        assert out == "<span class='ui-app none'><span class='sr-only'>No app</span></span>"
     # the neutral icon is the gateway's own stroke, not a company's mark
     assert "app" in theme.ICONS and "<path" in theme.ICONS["app"] and "fill='#" not in theme.ICONS["app"]
     assert ".ui-app svg.i{width:16px;height:16px" in theme.UI_CSS and ".ui-app i{" not in theme.UI_CSS
@@ -264,17 +272,22 @@ def test_the_card_size_control_stays_in_list_views_and_sizes_their_thumbnails() 
 
 def test_the_card_size_control_helper_is_shared_and_takes_the_toolbars_class() -> None:
     assert ui.card_size_control is theme.card_size_control
-    theme.set_card_size("l")
+    theme.set_card_size("l", "search")
     out = ui.card_size_control(cls="g size cardsize")
     assert out.startswith(
-        "<div class='g size cardsize'><span class='lbl' aria-hidden='true'>Card size</span>"
+        "<div class='g size cardsize' data-card-size-page='search'>"
+        "<span class='lbl' aria-hidden='true'>Card size</span>"
     )
     assert "<span class='sizeseg' role='group' aria-label='Card size'>" in out
     assert (
         "data-card-size-set='l' aria-pressed='true'" in out
         and "data-card-size-set='m' aria-pressed='false'" in out
     )
-    assert theme.card_size_control().startswith("<div class='field cardsize'>")
+    assert theme.card_size_control().startswith("<div class='field cardsize' data-card-size-page=")
+    # each page its own: the search page's L leaves the deck page at M
+    theme.set_card_size({"card.size.search": "l"}, "deck")
+    assert "data-card-size-set='m' aria-pressed='true'" in theme.card_size_control()
+    assert theme.current_card_size("search") == "l"
     theme.set_card_size("m")
 
 
@@ -291,8 +304,10 @@ def test_page_head_takes_the_pages_actions_and_load_more_is_a_real_link() -> Non
     more = ui.load_more("/collection?page=2", shown=25, total=112)
     assert more == (
         "<div class='loadmore'><a class='btn btn-plain' href='/collection?page=2' rel='next' data-load-more>"
-        "Load more</a><p class='muted'>25 of 112</p></div>"
+        "Load more</a><p class='muted'>25 of 112</p></div><script src='/static/loadmore.js' defer></script>"
     )
+    # the button's script (static/loadmore.js, audit F-4: a page loaded again on an entry with
+    # pages added presses its Load more again) comes with the button, not with "all shown"
     assert (
         ui.load_more("/x", done="That is every card.")
         == "<div class='loadmore'><p class='muted'>That is every card.</p></div>"
@@ -308,3 +323,47 @@ def test_no_script_relies_on_has_in_a_selector() -> None:
     static = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "static"
     for js in sorted(static.glob("*.js")):
         assert ":has(" not in js.read_text(encoding="utf-8"), js.name
+
+
+def _functions(text: str) -> list[str]:
+    return re.split(r"\n(?=(?:async )?def )", text)
+
+
+def test_every_destructive_box_says_keep_it_or_keep_them_not_cancel() -> None:
+    """Audit F-8 (eccfa3d9): the safe button of a destructive box said "Cancel" in half the boxes
+    and "Keep it" in the other half. The standard is the review page's confirm box and the
+    guide's word (modes.CATEGORY_WORDS["keep"]): "Keep it", or "Keep them" for several things.
+    Every box with a solid red button, in the pages and in the scripts' confirms, uses it. The
+    Binder's card details box is an edit box with a red Remove beside its Save: its Cancel stays."""
+    root = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway"
+    wrong: list[str] = []
+    for path in sorted(root.glob("*.py")):
+        for fn in _functions(path.read_text()):
+            if "col-details" in fn:
+                continue
+            for danger in re.finditer(r"box_button\([^)]*kind=.danger.", fn):
+                before = fn[: danger.start()]
+                cancels = re.findall(r"box_button\(\s*\"([^\"]+)\"[^)]*cancel=True", before)
+                if cancels and not cancels[-1].startswith("Keep "):
+                    wrong.append(f"{path.name}: {cancels[-1]!r} beside {danger.group(0)[:60]}")
+    for path in sorted((root / "static").glob("*.js")):
+        text = path.read_text()
+        for m in re.finditer(r"confirm\(\{", text):
+            depth, i = 0, m.end() - 1
+            while i < len(text):
+                depth += {"{": 1, "}": -1}.get(text[i], 0)
+                if depth == 0:
+                    break
+                i += 1
+            block = text[m.start() : i + 1]
+            if "danger: true" not in block:
+                continue
+            # the wording on the confirm's own cancel line, or, where that is a variable (admin.js
+            # picks it per action), every cancel wording the script holds
+            line = re.search(r"cancel: (.*?)(?:, [a-z]+:|\n)", block)
+            words = re.findall(r"\"([^\"]+)\"", line.group(1)) if line else []
+            if not words:
+                words = re.findall(r"cancel: \"([^\"]+)\"", text)
+            if not words or not all(w.startswith("Keep ") for w in words):
+                wrong.append(f"{path.name}: {words or 'no cancel wording'} in {block[:50]!r}")
+    assert wrong == [], "\n".join(wrong)

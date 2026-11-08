@@ -20,6 +20,7 @@ from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
+from .waits import LIFT_WATCH, expect, lifted, quiet, settled
 
 TEXT = (
     ".ctxmenu [role=menuitem], .ctxmenu .head, .mtgbox h2, .mtgbox p, .mtgbox label, .mtgbox .acts button, "
@@ -27,12 +28,12 @@ TEXT = (
     ".ds .ds-pkg .help, .ds .ds-pkg .lab, .ds .budget label, .ds .fmts label"
 )
 WORDS = " ".join(["word"] * 12)
+# the deck menu's Community group (mockup screen 2): Deck help…, one Contests… item (its box
+# offers entering and withdrawing), Report deck…. Add a package… is in the toolbar's ⋮ and
+# the Registration PDF a row of the Export box's Files pane (_open_from_deck_menu).
 DECK_ITEMS = [
-    "Add a package…",
-    "Registration PDF…",
-    "Request deck help…",
-    "Enter in a contest…",
-    "Withdraw from a contest…",
+    "Deck help…",
+    "Contests…",
     "Report deck…",
 ]
 
@@ -115,8 +116,17 @@ def _menu_items(page) -> list[str]:
 
 def _close_menu(page) -> None:
     page.keyboard.press("Escape")
-    page.wait_for_timeout(300)
+    expect(page.locator(".ctxmenu")).to_have_count(0)
+    quiet(page)
     assert page.locator(".ctxmenu").count() == 0
+
+
+def _pick_card_item(page, text: str) -> None:
+    """Presses a card menu item; on a phone the More group is folded first (screen 3)."""
+    item = page.locator(".ctxmenu [role=menuitem]", has_text=text)
+    if not item.is_visible():
+        page.locator(".ctxmenu button.ghead.fold").click()
+    item.click()
 
 
 def _close_box(page) -> None:
@@ -125,11 +135,31 @@ def _close_box(page) -> None:
 
 
 def _open_from_deck_menu(page, text: str, box_id: str):
-    page.locator(".banner .deckmenu").click()
-    page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
+    """Opens a deck box the way the page offers it (mockup screen 2): Add a package… from the
+    toolbar's ⋮, the Registration PDF from the Export box's Files pane, a contest entry or
+    withdrawal from the Contests… box, the rest from the banner's ⋮."""
+    if text == "Add a package…":
+        if page.locator(".toolbar .addpkg").is_visible():  # wider than a phone: the button
+            page.locator(".toolbar .addpkg").click()
+        else:
+            page.locator(".toolbar .toolmore").click()
+            page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
+    elif text == "Registration PDF…":
+        page.locator(".banner .deckmenu").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Export…").click()
+        page.locator("#export [role=tab][data-tab='exp-files']").click()
+        page.locator("#export .regpdf").click()
+    elif text in ("Enter in a contest…", "Withdraw from a contest…"):
+        page.locator(".banner .deckmenu").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Contests…").click()
+        row = "Enter this deck in a contest…" if text.startswith("Enter") else text
+        page.locator(".mtgbox .sharerow", has_text=row).click()
+    else:
+        page.locator(".banner .deckmenu").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
     box = page.locator(f"#{box_id}")
     box.wait_for(state="visible")
-    page.wait_for_timeout(300)  # the box's open transition (a slight scale) ends before measuring
+    settled(page)  # the box's open transition (a slight scale) ends before measuring
     return box
 
 
@@ -157,13 +187,17 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
         assert "Report deck…" in _menu_items(page)
         _close_menu(page)
         if width < 900:
+            page.evaluate(LIFT_WATCH)
             page.evaluate(HOLD, ".banner h1")
-            page.wait_for_timeout(900)
-            assert "Request deck help…" in _menu_items(page)
+            expect(page.locator(".ctxmenu")).to_have_count(1)  # the hold opened the menu
+            lifted(page)  # and the finger lifted (HOLD, 600 ms)
+            assert "Deck help…" in _menu_items(page)
             _close_menu(page)
-        # each box opens from the menu, fits and reads
+        # on a phone the toolbar's ⋮ holds Add a package… (screen 5); the Export box holds the PDF
+        assert page.locator(".toolbar .toolmore").is_visible() == (width < 600)
+        # each box opens from where the page offers it, fits and reads
         for text, box_id, needs in (
-            ("Request deck help…", "help", "Post the request"),
+            ("Deck help…", "help", "Post the request"),
             ("Registration PDF…", "pdf", "Make the PDF"),
             ("Add a package…", "package", "Review the cards"),
             ("Enter in a contest…", "contest", "Review the entry"),
@@ -180,19 +214,19 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
             if width < 900:
                 assert min(_targets(page, f"#{box_id} .acts button, #{box_id} input[type=text]")) >= 43.5
             _close_box(page)
-        # the card menu: Lock personal categories and Report card…
+        # the card menu: Lock categories and Report card…
         card = page.locator(".deckview .row[data-card='Sol Ring']").first
         card.scroll_into_view_if_needed()
         card.click(button="right")
         items = _menu_items(page)
-        assert "Lock personal categories" in items and "Report card…" in items, items
-        page.locator(".ctxmenu [role=menuitem]", has_text="Lock personal categories").click()
+        assert "Lock categories" in items and "Report card…" in items, items
+        _pick_card_item(page, "Lock categories")
         lock = page.locator("#lock")
         lock.wait_for(state="visible")
         lock.locator("[data-sentence] b").wait_for(state="visible")
         # on a phone the card menu went back over its own history entry when it closed; that
         # popstate lands a moment later and must not close the box it opened
-        page.wait_for_timeout(700)
+        quiet(page)  # the card menu's Back over its history entry has landed
         assert lock.is_visible() and page.locator(".mtgbox-scrim").count() == 1
         assert (
             "it goes into Ramp" in lock.inner_text()
@@ -202,10 +236,10 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
         _close_box(page)
         card.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Report card…").click()
+        _pick_card_item(page, "Report card…")
         rc = page.locator("#reportcard")
         rc.wait_for(state="visible")
-        page.wait_for_timeout(700)
+        quiet(page)  # the card menu's Back over its history entry has landed
         assert rc.is_visible() and page.locator(".mtgbox-scrim").count() == 1
         assert "Report “Sol Ring” to Archidekt's moderators" in rc.locator("h2").inner_text()
         assert rc.locator("input[name=card]").input_value() == "Sol Ring"
@@ -231,14 +265,14 @@ def test_the_deck_menu_and_a_box_hold_together_on_a_phone_at_200_percent_text(
         page.locator(".banner .deckmenu").click()
         page.locator(".ctxmenu").wait_for(state="visible")
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-        page.wait_for_timeout(50)
+        settled(page)
         assert page.evaluate(MEASURE) == []
-        assert "Request deck help…" in _menu_items(page)
+        assert "Deck help…" in _menu_items(page)
         _close_menu(page)
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-        _open_from_deck_menu(page, "Request deck help…", "help")
+        _open_from_deck_menu(page, "Deck help…", "help")
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-        page.wait_for_timeout(50)
+        settled(page)
         assert page.evaluate(MEASURE) == []
         _close_box(page)
         browser.close()
@@ -257,7 +291,7 @@ def test_the_boxes_work_in_place_or_land_on_the_review_page(server: Server) -> N
         # the lock: applied in place, said in a toast
         card = page.locator(".deckview .row[data-card='Sol Ring']").first
         card.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Lock personal categories").click()
+        _pick_card_item(page, "Lock categories")
         lock = page.locator("#lock")
         lock.locator("[data-sentence] b").wait_for(state="visible")
         lock.locator(".acts button", has_text="Lock").click()
@@ -276,7 +310,7 @@ def test_the_boxes_work_in_place_or_land_on_the_review_page(server: Server) -> N
         assert ark.account.pdfs[0]["event"] == "FNM"
         _close_box(page)
         # help: the page's own check, then the review page
-        help_box = _open_from_deck_menu(page, "Request deck help…", "help")
+        help_box = _open_from_deck_menu(page, "Deck help…", "help")
         help_box.locator(".acts button", has_text="Post the request").click()
         assert "Each box needs 10 to 200 words." in help_box.locator(".boxnote").inner_text()
         help_box.locator("textarea[name=goals]").fill(WORDS)
@@ -300,7 +334,7 @@ def test_the_boxes_work_in_place_or_land_on_the_review_page(server: Server) -> N
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         card = page.locator(".deckview .row[data-card='Sol Ring']").first
         card.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Report card…").click()
+        _pick_card_item(page, "Report card…")
         rc = page.locator("#reportcard")
         rc.locator(".acts button", has_text="Send report").click()
         assert "Say what is wrong first." in rc.locator(".boxnote").inner_text()
@@ -413,12 +447,15 @@ def test_new_package_on_my_decks_and_add_to_a_deck_on_my_lists(
         # the themed control shows the first deck once the list is read, not a blank
         assert tpl.locator(".msel-btn").inner_text().strip() == "Fetches"  # the package made above
         sel.select_option(label="Sample Commander Deck")
-        page.wait_for_timeout(100)
+        expect(tpl.locator(".msel-btn")).to_have_text("Sample Commander Deck")
         assert tpl.locator(".msel-btn").inner_text().strip() == "Sample Commander Deck"
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
         tpl.locator(".acts button", has_text="Add category").click()
-        page.wait_for_url("**/proposals/**")
-        assert not [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
+        # the member's own press adds a plain template at once (review B F6): back on My lists with
+        # a notice and Undo; a Premier or Not in deck template would open its review page instead
+        page.wait_for_url("**/lists/templates?**")
+        assert [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
+        assert page.locator("form.undo button", has_text="Undo").count() == 1
         browser.close()
     assert errors == []
 
@@ -504,7 +541,7 @@ def test_the_add_a_package_box_has_chips_filters_and_a_load_more_button(
         assert box.locator("input[name=package]").input_value() == "901"
         if width < 900:
             page.evaluate(TEXT_200)
-            page.wait_for_timeout(100)
+            settled(page)
             assert page.evaluate(MEASURE) == []
         browser.close()
     assert errors == []
@@ -520,7 +557,7 @@ def test_my_decks_and_packages_mark_package_tiles_and_add_one_to_a_deck(
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        # My Decks lists the decks only (the owner, 2026-10-25): the package waits under Packages
+        # My Decks lists the decks only (Sam, 2026-10-25): the package waits under Packages
         page.goto(f"{server.base}/decks", wait_until="networkidle")
         tile = page.locator("li.deck[data-deck-id='50']")
         page.locator("li.deck[data-deck-id='50'][data-package='1']").wait_for(state="hidden")
@@ -545,8 +582,10 @@ def test_my_decks_and_packages_mark_package_tiles_and_add_one_to_a_deck(
         assert "Add to a deck…" in _menu_items(page)
         _close_menu(page)
         if width < 900:
+            page.evaluate(LIFT_WATCH)
             page.evaluate(HOLD, "li.deck[data-deck-id='50'] .name")
-            page.wait_for_timeout(900)
+            expect(page.locator(".ctxmenu")).to_have_count(1)  # the hold opened the menu
+            lifted(page)  # and the finger lifted (HOLD, 600 ms)
             assert "Add to a deck…" in _menu_items(page)
             _close_menu(page)
         tile.locator("button.kebab").click()
@@ -631,6 +670,54 @@ def test_my_decks_draws_a_package_the_deck_list_left_out_and_says_when_it_cannot
     assert errors == []
 
 
+def test_my_decks_reads_its_packages_once_more_after_archidekt_was_busy(server: Server) -> None:
+    """0.7.46 polish A4: the packages read answered 429 with Retry-After (Archidekt busy) is sent
+    once more after that wait; a second busy answer gives the muted line, never a third read."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    busy = json.dumps({"ok": False, "error": "rate_limited", "message": "Too many requests right now."})
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366, "light", exe)
+        sent: list[str] = []
+
+        def once_busy(route) -> None:
+            sent.append(route.request.url)
+            if len(sent) == 1:
+                route.fulfill(
+                    status=429, headers={"Retry-After": "1"}, content_type="application/json", body=busy
+                )
+            else:
+                route.continue_()
+
+        page.route("**/decks/api/packages**", once_busy)
+        page.goto(f"{server.base}/decks?show=packages", wait_until="networkidle")
+        page.locator("li.deck.pkg[data-deck-id='50']").wait_for(state="visible", timeout=8000)
+        assert len(sent) == 2
+        assert page.locator("#pk-note").is_hidden()
+        page.unroute("**/decks/api/packages**")
+        sent.clear()
+
+        def always_busy(route) -> None:
+            sent.append(route.request.url)
+            route.fulfill(
+                status=503, headers={"Retry-After": "1"}, content_type="application/json", body=busy
+            )
+
+        page.route("**/decks/api/packages**", always_busy)
+        page.goto(f"{server.base}/decks?show=packages", wait_until="networkidle")
+        page.locator("#pk-note").wait_for(state="visible", timeout=8000)
+        # fixed wait: the page retries once after Retry-After (1 s) and then stops: 1.5 s proves the
+        # retry came and no third request followed (a timer of the page and a negative check)
+        page.wait_for_timeout(1500)
+        assert len(sent) == 2
+        browser.close()
+    assert errors == []
+
+
 @pytest.mark.parametrize("width,theme", [(390, "light"), (1366, "dark")])
 def test_the_new_deck_and_new_package_boxes_pick_a_folder(server: Server, width: int, theme: str) -> None:
     from playwright.sync_api import sync_playwright
@@ -656,12 +743,15 @@ def test_the_new_deck_and_new_package_boxes_pick_a_folder(server: Server, width:
             page.locator(f"[data-box-open='{opener}']").click()
             box = page.locator(f"#{box_id}")
             box.wait_for(state="visible")
-            page.wait_for_timeout(300)
+            expect(box.locator(f"#{sel_id} option")).to_have_text(["No folder", "Brews"])
+            settled(page)
             sel = box.locator(f"#{sel_id}")
-            assert sel.locator("option").all_inner_texts() == ["Top level (no folder)", "Brews"]
+            assert sel.locator("option").all_inner_texts() == ["No folder", "Brews"]
             assert sel.input_value() == ""
             sel.select_option(fid)
-            page.wait_for_timeout(100)
+            expect(
+                box.locator(f"#{sel_id} + .msel-btn, .msel-btn").filter(has_text="Brews").first
+            ).to_be_attached()
             assert box.locator(f"#{sel_id} + .msel-btn, .msel-btn").filter(has_text="Brews").count() >= 1
             assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
             _close_box(page)

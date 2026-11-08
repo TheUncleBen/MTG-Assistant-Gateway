@@ -12,13 +12,26 @@ package local.mtgassistantgateway.app
  *
  * While the phone camera is open the page sits on its list tab (which stops the page's own camera)
  * and the app keeps the lens. Each photo is handed over with [onPhoto] as a same-origin URL the app
- * answers itself from `shouldInterceptRequest` (the page's CSP allows `img-src 'self'`), so no
- * base64 copy of the picture ever crosses into JavaScript. What the page did with it comes back
+ * answers itself from `shouldInterceptRequest` (the page's CSP allows `img-src 'self'`), so in the
+ * usual case no base64 copy of the picture crosses into JavaScript. The page's service worker
+ * (scope /scan) sees that request first and leaves it alone; the app answers it whether WebView
+ * then asks its WebViewClient or its ServiceWorkerClient. Should neither be asked (the request
+ * reaches the gateway, which answers 404), the glue sends `photo-direct` and the app hands that one
+ * photo over with [photoData]; with no answer either, the photo's `done` carries the error
+ * [PHOTO_LOST], which the panel says plainly. What the page did with it comes back
  * through the `MtgNative.scanEvent` bridge as small JSON objects, each carrying the [install]
  * nonce and the photo's sequence number so stale or spoofed events are dropped: the page's own
  * `scan:auto-added`, `scan:unsure`, `scan:unidentified` and `scan:undo` events, then `done` when
- * the photo has been fully processed, with the status line the page would have shown, or `no-card`
- * in its place when continuous mode found no card outline and so read nothing. In continuous mode the page's own rules apply
+ * the photo has been fully processed, with the status line the page would have shown and what the
+ * photo came to (`matched` with the card's `name`, `set` and `number`; else `read`, the name as read,
+ * and `blurry`), or `no-card`
+ * in its place when continuous mode found no card outline and read nothing. Without an outline the
+ * page's own rule applies (`noOutlineFrame`, pages from 0.7.46): after a few such photos in a row it
+ * reads the dashed box, and a card found there only ever waits on the page for a tap (`unsure`,
+ * then `done` with `pending`); older pages read nothing without an outline. The page's
+ * text recognition starts loading as soon as the phone camera opens ([BEGIN]; the first use
+ * downloads about 8 MB), and its progress comes back as `ocr` events (`state` loading, ready, failed
+ * or missing, `progress` 0 to 1) for the panel's status line. In continuous mode the page's own rules apply
  * (`state.continuous`): a clean, unambiguous read is added without a tap, once per card shown, and
  * a shaky one waits for a tap on the page.
  *
@@ -39,6 +52,11 @@ object ScanGlue {
     const val PHOTO_PATH = "$PHOTO_DIR/"
     /** Long side of the working copy of a photo, matching the page's PHOTO_MAX. */
     const val PHOTO_MAX = 2400
+    /** How long the glue waits for [photoData] after asking for a photo directly (`photo-direct`). */
+    const val DIRECT_MS = 8000
+    /** The `done` event's error when the photo never reached the page, by URL or directly. */
+    const val PHOTO_LOST = "photo-lost"
+    private val BASE64 = Regex("^[A-Za-z0-9+/]*={0,2}$")
     /** The hooks the glue needs on `window.__scan`; all in scan.js's export list. */
     val HOOKS = listOf("flattenCard", "flatTitleRegion", "infoRegionOf", "scanRegion", "showTab", "noCardFrame", "undoLastAdd")
 
@@ -52,6 +70,8 @@ object ScanGlue {
 (function () {
   if (window.__mtgNative) return 'present';
   var PHOTO_MAX = $PHOTO_MAX;
+  var DIRECT_MS = $DIRECT_MS;
+  var PHOTO_LOST = '$PHOTO_LOST';
   var NONCE = '__NONCE__';
   var seq = 0;
   function hooks() {
@@ -71,6 +91,12 @@ object ScanGlue {
       var left = s && s.state.autoAdded ? s.state.autoAdded.length : 0; // automatic adds still there to undo
       send({ type: n, seq: seq, name: d.name || d.text || '', total: d.total, count: d.count, status: d.status, foil: !!d.foil, undoable: left });
     });
+  });
+  // Text recognition loading (pages from 0.7.46): the panel shows the progress, and each step tells
+  // it the page is still at work on a photo it was handed.
+  document.addEventListener('scan:ocr', function (e) {
+    var d = e.detail || {};
+    send({ type: 'ocr', seq: seq, state: String(d.state || ''), progress: typeof d.progress === 'number' ? d.progress : 0 });
   });
   var total = function (s) { return s.state.items.reduce(function (n, it) { return n + (it.quantity || 0); }, 0); };
   function statusBox() {
@@ -104,8 +130,26 @@ object ScanGlue {
       img.src = url;
     });
   }
+  // The photo straight from the app, for when its URL did not load (the request went past the app,
+  // to the gateway, which has no such page): a photo-direct event asks the app, which answers
+  // through photoData. Single use, and the bytes only ever sit in a blob: URL revoked once read.
+  var direct = {};
+  function loadDirect(n) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () { delete direct[n]; reject(new Error(PHOTO_LOST)); }, DIRECT_MS);
+      direct[n] = function (bytes) {
+        clearTimeout(timer);
+        delete direct[n];
+        var u = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+        load(u).then(function (c) { URL.revokeObjectURL(u); resolve(c); },
+          function () { URL.revokeObjectURL(u); reject(new Error(PHOTO_LOST)); });
+      };
+      send({ type: 'photo-direct', seq: n });
+    });
+  }
   async function process(s, url, n, guide) {
-    var c = await load(url);
+    var c;
+    try { c = await load(url); } catch (e) { c = await loadDirect(n); }
     s.state.lastPicture = { w: c.width, h: c.height };
     // Where the dashed box was over the photo, as the page's own guide box is over its video.
     var g = guide ? { x: guide.x * c.width, y: guide.y * c.height, w: guide.w * c.width, h: guide.h * c.height }
@@ -113,11 +157,18 @@ object ScanGlue {
     var flat = s.flattenCard(c, guide ? g : null);
     if (flat) {
       s.state.noCardFrames = 0;
-      await s.scanRegion(flat.canvas, s.flatTitleRegion(flat.width, flat.height), s.infoRegionOf(0, 0, flat.width, flat.height), flat);
+      // flatInfoRegion (pages from 0.7.46) keeps the info line's second row whole; older pages lack it.
+      var info = s.flatInfoRegion ? s.flatInfoRegion(flat.width, flat.height) : s.infoRegionOf(0, 0, flat.width, flat.height);
+      await s.scanRegion(flat.canvas, s.flatTitleRegion(flat.width, flat.height), info, flat);
     } else if (s.state.continuous) {
-      // Continuous mode reads nothing without an outline (the page does the same): count the
-      // frame so a card that has left comes back as new, and say so.
-      s.noCardFrame();
+      // No outline: the page counts the frame (so a card that has left comes back as new) and, after
+      // a few in a row, reads the dashed box; a card found there waits on the page for a tap. A photo
+      // that placed no card says so.
+      if (typeof s.noOutlineFrame === 'function') {
+        if (await s.noOutlineFrame(c, g) === 'read') return;
+      } else {
+        s.noCardFrame();
+      }
       send({ type: 'no-card', seq: n, frames: s.state.noCardFrames, total: total(s) });
       return 'no-card'; // stands in for 'done'
     } else {
@@ -125,6 +176,20 @@ object ScanGlue {
       await s.scanRegion(c, { x: g.x + g.w * 0.06, y: g.y + g.h * 0.035, w: g.w * 0.72, h: g.h * 0.085 },
         s.infoRegionOf(g.x, g.y, g.w, g.h), null);
     }
+  }
+  // What the photo came to, for the panel's line: the card found (name, set, number), or the
+  // name as read when no card matched, and whether the picture was blurred (pages from 0.7.46).
+  function outcome(s, ev) {
+    var p = s.state.pending;
+    var card = p && p.card;
+    ev.pending = !!p;
+    ev.matched = !!card;
+    ev.name = card ? String(card.name || '') : '';
+    ev.set = card ? String(card.set || '').toUpperCase() : '';
+    ev.number = card ? String(card.collector_number || '') : '';
+    ev.read = p && p.ocr ? String(p.ocr.text || '') : '';
+    ev.blurry = !!(p && p.ocr && p.ocr.blurry) || /blurred:/.test(ev.status || '');
+    return ev;
   }
   window.__mtgNative = {
     ready: function () { return !!hooks(); },
@@ -135,6 +200,10 @@ object ScanGlue {
       s.showTab('list'); // stops the page's own camera; the list shows what has been added so far
       s.state.pending = null; s.state.continuous = false;
       statusBox();
+      // Start loading text recognition now, while the person frames the first card, rather than on
+      // the first photo (the page's own camera tab, which would have started it, is not shown).
+      if (s.state.ocrState === 'missing') send({ type: 'ocr', seq: seq, state: 'missing', progress: 0 });
+      else if (typeof s.ensureOcr === 'function') s.ensureOcr();
       return 'ok';
     },
     setContinuous: function (on) {
@@ -149,13 +218,28 @@ object ScanGlue {
       if (!s) return 'no-scan';
       var n = ++seq;
       var box = statusBox(); box.textContent = '';
+      // A new photo replaces a read still waiting on the page (as the page's own Scan does), so
+      // what the done event reports is this photo's outcome, never an earlier one's.
+      s.state.pending = null;
       process(s, url, n, guide || null).then(function (r) {
         if (r === 'no-card') return;
-        send({ type: 'done', seq: n, status: box.textContent, total: total(s), pending: !!s.state.pending });
+        send(outcome(s, { type: 'done', seq: n, status: box.textContent, total: total(s) }));
       }, function (e) {
-        send({ type: 'done', seq: n, status: '', error: String(e && e.message || e), total: total(s), pending: !!s.state.pending });
+        send(outcome(s, { type: 'done', seq: n, status: '', error: String(e && e.message || e), total: total(s) }));
       });
       return 'ok:' + n;
+    },
+    photoData: function (n, b64) {
+      var take = direct[n];
+      if (!take) return 'stale';
+      var bytes;
+      try {
+        var bin = atob(String(b64 || ''));
+        bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      } catch (e) { bytes = new Uint8Array(0); }
+      take(bytes); // an empty or broken hand-over fails at once, as photo-lost
+      return 'ok';
     },
     undo: function () {
       var s = hooks();
@@ -204,6 +288,17 @@ object ScanGlue {
             "{x:${guide[0]},y:${guide[1]},w:${guide[2]},h:${guide[3]}}"
         }
         return "(function(){return window.__mtgNative ? window.__mtgNative.onPhoto('$url', $g) : 'no-glue';})();"
+    }
+
+    /**
+     * Hands photo [seq] to the page directly, for the glue's `photo-direct` event: its URL did not
+     * load. [base64] is the JPEG, or empty when the app no longer has that photo (the page then
+     * reports [PHOTO_LOST] at once). Evaluates to 'ok', or 'stale' when the page is not waiting for it.
+     */
+    fun photoData(seq: Int, base64: String): String {
+        require(seq > 0) { "bad seq" }
+        require(BASE64.matches(base64)) { "bad photo data" }
+        return "(function(){return window.__mtgNative && window.__mtgNative.photoData ? window.__mtgNative.photoData($seq, '$base64') : 'no-glue';})();"
     }
 
     /** The gateway URL the photo with sequence number [n] is served at (see [photoSeqOf]). */

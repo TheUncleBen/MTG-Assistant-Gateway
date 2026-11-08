@@ -50,10 +50,19 @@ LABELS = {
     "profile": "Profile and settings",
     "contest_enter": "Contest entry",
     "contest_withdraw": "Withdraw contest entry",
+    # 0.7.46 (Archidekt parity release 3)
+    "clear_collection": "Clear binder",
+    # 0.7.46: a removed card's row Archidekt keeps, deleted for good (archidekt_log.py)
+    "purge_removed": "Remove a removed card for good",
 }
 ACTIONS = frozenset(LABELS)
-DESTRUCTIVE = frozenset({"delete_deck"})  # never applied by an assistant on its own
-CANNOT_UNDO = frozenset({"delete_deck", "comment_delete"})
+# never applied by an assistant on its own; applied on their review page only (not the card)
+DESTRUCTIVE = frozenset({"delete_deck", "clear_collection", "purge_removed"})
+CANNOT_UNDO = frozenset({"delete_deck", "comment_delete", "clear_collection", "purge_removed"})
+PURGE_NOTE = (
+    "Archidekt keeps a row for each card taken out of a deck. This deletes that row on Archidekt. "
+    "Archidekt has no undo, and the gateway's snapshots don't hold these rows."
+)
 # the comment actions, on a deck's thread or a forum thread (thread_id)
 COMMENT_ACTIONS = frozenset({"comment_post", "comment_edit", "comment_delete", "comment_vote"})
 VOTES = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}
@@ -102,8 +111,25 @@ def contest_thread(value: Any) -> int:
 
     m = re.search(r"(\d{1,12})/?$", str(value or "").strip())
     if not m or int(m.group(1)) <= 0:
-        raise DeckError("invalid", "Give the contest's id or its page address.")
+        raise DeckError("invalid", "Give the contest's ID or its page address.")
     return int(m.group(1))
+
+
+CONTEST_MISSING = (
+    "Archidekt has no forum thread {thread}, so there is no contest to enter. Check the contest's ID "
+    "or page address (get_forum lists the forum's threads). Nothing was proposed."
+)
+
+
+async def _contest_exists(decks: DeckService, sub: str, thread_id: int) -> None:
+    """Refuse an entry into a contest thread Archidekt does not have, when it is proposed rather
+    than when it is applied."""
+    try:
+        await decks._call_unslotted(sub, lambda token, *_: decks.client.comment_thread(token, thread_id))
+    except Exception as exc:
+        if getattr(exc, "kind", None) == "not_found":
+            raise DeckError("not_found", CONTEST_MISSING.format(thread=thread_id)) from None
+        raise
 
 
 async def contest_entry(decks: DeckService, sub: str, thread_id: int, deck_id: str) -> dict[str, Any] | None:
@@ -133,7 +159,7 @@ def _help_text(value: Any, what: str) -> str:
     text = clean_text(raw)
     low, high = HELP_WORDS
     if not low <= _words(text) <= high:
-        raise DeckError("invalid", f"{what} must be {low} to {high} words (it has {_words(text)})")
+        raise DeckError("invalid", f"{what} must be {low} to {high} words (it has {_words(text)}).")
     return text
 
 
@@ -178,6 +204,13 @@ def report_url(kind: str, deck_id: str | None, comment_id: int | None) -> str:
 def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
     """The approval tier of an action proposal (modes.risk_of hands ``action`` proposals here)."""
     action = str((rows or [{}])[0].get("action") or "")
+    if action == "clear_collection":
+        return "destructive", "clears your whole binder; an assistant never applies this by itself"
+    if action == "purge_removed":
+        return (
+            "destructive",
+            "deletes a removed card's row on Archidekt for good; an assistant never applies this by itself",
+        )
     if action in DESTRUCTIVE:
         return "destructive", "deletes a deck; an assistant never applies this by itself"
     if action == "create_folder":
@@ -207,7 +240,7 @@ def _comment_text(text: Any) -> str:
 
 def _vote(value: Any) -> int:
     if str(value) not in VOTES:
-        raise DeckError("invalid", "vote must be up, down or none")
+        raise DeckError("invalid", "Vote must be up, down or none.")
     return VOTES[str(value)]
 
 
@@ -219,7 +252,7 @@ async def _thread_comment(
     decks: DeckService, sub: str, deck_id: str, comment_id: Any, *, keep_doc: bool = False, page: int = 1
 ) -> dict[str, Any]:
     if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
-        raise DeckError("invalid", "comment_id must be a comment's number (get_deck_comments lists them)")
+        raise DeckError("invalid", "comment_id must be a comment's number (get_deck_comments lists them).")
     found, thread = await _social(decks).find_comment(sub, deck_id, comment_id, page, keep_doc=keep_doc)
     return {**found, "_me": thread.get("me"), "_page": thread["page"]}
 
@@ -229,7 +262,7 @@ def _page(value: Any) -> int:
     if value is None:
         return 1
     if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 1000:
-        raise DeckError("invalid", "page must be the thread page get_deck_comments read (1 or more)")
+        raise DeckError("invalid", "page must be the thread page get_deck_comments read (1 or more).")
     return value
 
 
@@ -248,7 +281,7 @@ async def collaborator_target(
     social = _social(decks)
     want = clean_text(str(username or "")).lstrip("@")
     if not want:
-        raise DeckError("invalid", "username is required: the Archidekt username of the person")
+        raise DeckError("invalid", "username is required: the Archidekt username of the person.")
     current = await social.collaborators(sub, deck.id, owned=True)
     if action == "collaborator_add":
         found = await social.find_followed(sub, want)
@@ -276,31 +309,43 @@ async def collaborator_target(
             )
         user_id, name = found
         if any(c["user_id"] == user_id for c in current):
-            raise DeckError("invalid", f"{name} is already a collaborator on this deck")
+            raise DeckError("invalid", f"{name} is already a collaborator on this deck.")
         return user_id, name
     found = next((c for c in current if c["username"].casefold() == want.casefold()), None)
     if found is None:
         names = ", ".join(c["username"] for c in current) or "none"
-        raise DeckError("not_found", f"{want} is not a collaborator on this deck (collaborators: {names})")
+        raise DeckError("not_found", f"{want} is not a collaborator on this deck (collaborators: {names}).")
     return found["user_id"], found["username"]
 
 
 async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[int, str]:
-    """(user id, username) of the person to follow by name: one Archidekt read,
-    through their public decks, which is the only lookup the gateway has, so someone with no
-    public decks is not found."""
+    """(user id, username) of the person to follow by name: through their public decks, or for
+    someone with none through their profile page on archidekt.com (ArchidektClient.user_profile).
+    When that page can't be read, someone the member already follows is still found in the
+    following list (so they can be unfollowed)."""
     want = clean_text(str(username or "")).lstrip("@")
     if not want:
         raise DeckError("invalid", "Give the person's Archidekt username.")
-    found = await decks.user_profile(sub, want)
+    try:
+        found = await decks.user_profile(sub, want)
+    except DeckError as exc:
+        if exc.kind != "changed":
+            raise
+        followed = await _social(decks).find_followed(sub, want)
+        if followed is not None:
+            return followed
+        raise DeckError(
+            "unavailable",
+            f"Archidekt's profile page for {want} didn't show the gateway who they are, so they can't be "
+            f"followed from here just now. Their page on Archidekt: {profile_url(want)}.",
+            follow_url=profile_url(want),
+        ) from exc
     name = clean_text(str((found or {}).get("username") or ""))
     if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
         # one text for follow and unfollow
         raise DeckError(
             "not_found",
-            f"No Archidekt user called {want} with public decks was found. Check the spelling. The "
-            "gateway finds people only through their public decks, so someone with none can't be "
-            f"found from here: go to their page on Archidekt instead ({profile_url(want)}).",
+            f"No Archidekt user called {want} was found. Check the spelling.",
             follow_url=profile_url(want),
         )
     return int(found["id"]), name
@@ -333,10 +378,20 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     """Check the action against Archidekt as it is now, store it as a pending proposal with one
     review row saying exactly what will happen, and return the proposal."""
     if action not in ACTIONS:
-        raise DeckError("invalid", f"unknown action {action!r}")
+        raise DeckError("invalid", f"Unknown action “{action}”.")
     social = (
         _social(decks)
-        if action not in ("delete_deck", "create_folder", "deck_help", "report", "profile", *CONTEST_ACTIONS)
+        if action
+        not in (
+            "delete_deck",
+            "create_folder",
+            "deck_help",
+            "report",
+            "profile",
+            "clear_collection",
+            "purge_removed",
+            *CONTEST_ACTIONS,
+        )
         else None
     )
     if social is not None:
@@ -355,11 +410,12 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         forum_thread = await forum.thread(decks, sub, params["thread_id"])
         changes["deck_id"] = forum.target(forum_thread["id"])
         where = "in the forum thread"
-    elif action not in ("create_folder", "profile") and not by_name:
+    elif action not in ("create_folder", "profile", "clear_collection") and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
-            if action in ("delete_deck", "deck_help", *CONTEST_ACTIONS) or action in COLLABORATOR_ACTIONS
+            if action in ("delete_deck", "deck_help", "purge_removed", *CONTEST_ACTIONS)
+            or action in COLLABORATOR_ACTIONS
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
@@ -393,7 +449,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             who = _owner(deck)
         if owner_id is None:
             raise DeckError(
-                "unavailable", "Archidekt does not say who owns this deck, so there is no one to follow"
+                "unavailable", "Archidekt does not say who owns this deck, so there is no one to follow."
             )
         state = await social.follow_state(sub, owner_id, lookup=True)
         if state["self"]:
@@ -411,7 +467,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         if forum_thread is not None and (forum_thread["locked"] or forum_thread["archived"]):
             raise DeckError("invalid", "This forum thread is locked or archived, so it takes no replies.")
         if forum_thread is None and deck.comment_root is None:
-            raise DeckError("unavailable", "Archidekt reports no comment thread for this deck")
+            raise DeckError("unavailable", "Archidekt reports no comment thread for this deck.")
         target_id = changes["deck_id"]
         on = where if forum_thread is not None else f"on the deck {where}"
         parent = params.get("reply_to")
@@ -473,12 +529,40 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     elif action == "delete_deck":
         cards = sum(c.quantity for c in deck.cards)
         changes["name"] = deck.name
-        row["text"] = f"Delete your deck '{deck.name}' ({cards} cards) from your Archidekt account"
+        changes["cards"] = cards  # the review page's confirm names the deck and its size
+        row["text"] = f"Delete your deck “{deck.name}” ({cards} cards) from your Archidekt account"
         row["note"] = (
-            "Archidekt itself has no undo for a deleted deck. The gateway keeps a snapshot first"
-            + (" and a backup copy on Archidekt" if decks.live.get("archidekt_backups") else "")
-            + "."
+            "Archidekt itself has no undo for a deleted deck. The gateway keeps a snapshot of it first "
+            "(no backup copy is made on Archidekt)."
         )
+    elif action == "clear_collection":
+        from . import collection_bulk
+
+        entries, copies = await collection_bulk.binder_count(decks, sub)
+        if not entries:
+            raise DeckError("invalid", "Your binder is already empty; there is nothing to clear.")
+        changes.update(entries=entries, cards=copies, deck_id=collection_bulk.TARGET)
+        size = f"{entries:,} {'entry' if entries == 1 else 'entries'}" + (
+            f", {copies:,} {'card' if copies == 1 else 'cards'}" if copies is not None else ""
+        )
+        row["text"] = f"Clear your whole binder: remove all {size} from your binder on Archidekt"
+        row["note"] = (
+            "Archidekt itself has no undo. The gateway keeps a copy of your whole binder under History "
+            "first (download it as a CSV, or put it back with Restore to my binder) and checks that your "
+            "binder still has these entries."
+        )
+    elif action == "purge_removed":
+        rows = _purge_rows(deck, params)
+        changes["relation_ids"] = [r["relation_id"] for r in rows]
+        changes["name"] = rows[0]["name"]
+        n = len(rows)
+        copies = f" ({n} rows)" if n > 1 else ""
+        row["text"] = (
+            f"Remove “{rows[0]['name']}”{copies} from the cards Archidekt keeps as taken out of your deck "
+            f"“{deck.name}”, for good"
+        )
+        row["note"] = PURGE_NOTE
+        row["label"] = "Remove"  # the review row's label column is narrow; the title says the rest
     elif action == "create_folder":
         name = decks._folder_name(params.get("name"))
         info = await decks.folders(sub)
@@ -487,10 +571,10 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             shown = [f for f in info["folders"] if f["depth"] and not f.get("backup")]
             hits = [f for f in shown if f["name"].casefold() == inside.casefold()]
             if len(hits) != 1:
-                names = ", ".join(f"'{f['name']}'" for f in shown) or "none"
+                names = ", ".join(f"“{f['name']}”" for f in shown) or "none"
                 raise DeckError(
                     "not_found" if not hits else "invalid",
-                    f"inside must name exactly one of your folders (yours: {names})",
+                    f"inside must name exactly one of your folders (yours: {names}).",
                 )
             parent = hits[0]
         else:
@@ -499,14 +583,14 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         decks._not_the_backup_name(name, parent["depth"] + 1)
         siblings = [f["name"].casefold() for f in info["folders"] if f["parent"] == parent["id"]]
         if name.casefold() in siblings:
-            raise DeckError("invalid", f"There is already a folder called '{name}' there.")
+            raise DeckError("invalid", f"There is already a folder called “{name}” there.")
         changes.update(name=name, parent=parent["id"])
-        where_to = "your top level" if not parent["depth"] else f"'{parent['name']}'"
-        row["text"] = f"Create the folder '{name}' in {where_to}"
+        where_to = "your top level" if not parent["depth"] else f"“{parent['name']}”"
+        row["text"] = f"Create the folder “{name}” in {where_to}"
     elif action == "deck_help":
         what = str(params.get("help_action") or "post")
         if what not in HELP_ACTIONS:
-            raise DeckError("invalid", "help_action must be post, edit or delist")
+            raise DeckError("invalid", "help_action must be post, edit or delist.")
         current = deck_help_of(deck)
         if what == "post":
             if current is not None and current["active"]:
@@ -519,7 +603,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             changes.update(help_action=what, goals=goals, issues=issues)
             if current is not None:  # a delisted or expired one is opened again
                 changes["help_id"] = current["id"]
-            row["text"] = f"Ask for help with your deck publicly on Archidekt's deck help board {where}"
+            row["text"] = f"Ask for help with your deck “{deck.name}” publicly on Archidekt's deck help board"
             row["after_text"] = f"Goals: {goals}\n\nIssues: {issues}"
             row["note"] = "Listed for 7 days, under your name."
         else:
@@ -530,19 +614,19 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                     _help_text(params.get("goals"), "goals"),
                     _help_text(params.get("issues"), "issues"),
                 )
-                row["text"] = f"Change your public help request for your deck {where}"
+                row["text"] = f"Change your public help request for your deck “{deck.name}”"
                 row["before_text"] = f"Goals: {current['goals']}\n\nIssues: {current['issues']}"
                 row["after_text"] = f"Goals: {goals}\n\nIssues: {issues}"
             else:
                 if not current["active"]:
                     raise DeckError("invalid", "This deck's help request is not listed.")
                 goals, issues = current["goals"], current["issues"]
-                row["text"] = f"Take down your help request for your deck {where}"
+                row["text"] = f"Take down your help request for your deck “{deck.name}”"
             changes.update(help_action=what, help_id=current["id"], goals=goals, issues=issues)
     elif action == "report":
         kind = str(params.get("report_kind") or "")
         if kind not in REPORT_KINDS:
-            raise DeckError("invalid", "report_kind must be deck, card, custom_card or comment")
+            raise DeckError("invalid", "report_kind must be deck, card, custom_card or comment.")
         message = clean_text(str(params.get("message") or ""))
         if not message:
             raise DeckError("invalid", "Say what is wrong: a report needs a message.")
@@ -597,15 +681,20 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         from .archidekt import rich_text
 
         thread = contest_thread(params.get("contest"))
+        # the words are checked before Archidekt is asked anything
+        summary = summary_text(params.get("summary")) if action == "contest_enter" else ""
         async with decks.archidekt_slot(sub):
+            if action == "contest_enter":
+                await _contest_exists(decks, sub, thread)
             entry = await contest_entry(decks, sub, thread, deck.id)
         changes["thread_id"] = thread
         if action == "contest_enter":
             if entry is not None:
                 raise DeckError("invalid", "This deck is entered in that contest already.")
-            summary = summary_text(params.get("summary"))
             changes["summary"] = summary
-            row["text"] = f"Enter your deck {where} in the contest (thread {thread}) on Archidekt, publicly"
+            row["text"] = (
+                f"Enter your deck “{deck.name}” in the contest (thread {thread}) on Archidekt, publicly"
+            )
             row["before_text"] = rich_text(deck.description) or "(empty)"
             row["after_text"] = summary
             if formatting.is_formatted(deck.description):
@@ -621,7 +710,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             if entry is None:
                 raise DeckError("not_found", "This deck has no entry in that contest.")
             changes["entry_id"] = int(entry["id"])
-            row["text"] = f"Withdraw your deck {where} from the contest (thread {thread}) on Archidekt"
+            row["text"] = f"Withdraw your deck “{deck.name}” from the contest (thread {thread}) on Archidekt"
             row["note"] = "Archidekt says you can enter again after withdrawing."
     elif action == "profile":
         from . import profile
@@ -652,8 +741,18 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             "id": pid,
             "owner_sub": sub,
             "kind": "action",
-            "deck_id": deck.id if deck else changes["deck_id"] if forum_thread else ACCOUNT_TARGET,
-            "deck_name": deck.name if deck else forum_thread["title"] if forum_thread else ACCOUNT_NAME,
+            "deck_id": deck.id
+            if deck
+            else changes["deck_id"]
+            if forum_thread or action == "clear_collection"
+            else ACCOUNT_TARGET,
+            "deck_name": deck.name
+            if deck
+            else forum_thread["title"]
+            if forum_thread
+            else "Your binder"
+            if action == "clear_collection"
+            else ACCOUNT_NAME,
             "baseline_fingerprint": deck.fingerprint() if action == "delete_deck" else "",
             "changes": changes,
         },
@@ -762,12 +861,18 @@ async def apply(
         result = await _social(decks).add_collaborator(sub, deck_id, int(c["user_id"]))
     elif action == "collaborator_remove":
         result = await _social(decks).remove_collaborator(sub, deck_id, int(c["user_id"]))
+    elif action == "clear_collection":
+        from . import collection_bulk
+
+        result = await collection_bulk.clear(decks, sub, row, progress)
+    elif action == "purge_removed":
+        result = await _apply_purge(decks, sub, deck_id, [int(i) for i in c.get("relation_ids") or []])
     elif action == "create_folder":
         folder = await decks.create_folder(sub, str(c["name"]), int(c["parent"]))
         result = {"folder_id": folder["id"], "name": folder["name"], "verified": True}
     else:
         raise DeckError("invalid", "This proposal names an action this gateway does not know.")
-    decks.db.finish_proposal(row["id"], state="applied", snapshot_id=result.get("snapshot_id"), result=result)
+    decks.record_applied(row["id"], result, progress, snapshot_id=result.get("snapshot_id"))
     return decks.describe(sub, row["id"])
 
 
@@ -847,3 +952,63 @@ async def _apply_contest_enter(
         "snapshot_id": snapshot_id,
         "verified": entered and rich_text(back.description).strip() == summary.strip(),
     }
+
+
+def _purge_rows(deck: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """The removed card rows a ``purge_removed`` proposal is about: the one row ``relation_id``
+    names (the History page's button), or every removed row of the card called ``card`` (an
+    assistant names the card). Refused when the deck has no such removed row."""
+    from .archidekt import removed_rows
+
+    removed = removed_rows(deck)
+    rid = params.get("relation_id")
+    if rid not in (None, ""):
+        hits = [r for r in removed if str(r["relation_id"]) == str(rid).strip()]
+        if not hits:
+            raise DeckError(
+                "not_found",
+                "That card is not among the removed cards Archidekt keeps for this deck now. Reload the "
+                "page to see the list as it is.",
+            )
+        return hits
+    card = clean_text(str(params.get("card") or ""))
+    if not card:
+        raise DeckError("invalid", "Name the removed card (removed_card).")
+    hits = [r for r in removed if r["name"].casefold() == card.casefold()]
+    if not hits:
+        names = ", ".join(dict.fromkeys(f"“{r['name']}”" for r in removed)) or "none"
+        raise DeckError(
+            "not_found",
+            f"“{card}” is not among the removed cards Archidekt keeps for this deck "
+            f"(those it keeps: {names}).",
+        )
+    return hits
+
+
+async def _apply_purge(decks: DeckService, sub: str, deck_id: str, ids: list[int]) -> dict[str, Any]:
+    """Delete each reviewed removed row that is still a removed row, after reading the deck again: a
+    row that is a card in the deck again stops the whole proposal (a delete would take the card
+    out); one already gone is left. Read back after."""
+    from .archidekt import removed_rows
+
+    decks._writes_switch()
+    deck = await decks.get_own_deck(sub, deck_id)
+    live = {c.relation_id for c in deck.cards if c.relation_id is not None}
+    if any(i in live for i in ids):
+        raise needs_look_error(
+            "The card is in the deck again on Archidekt since this was reviewed, so nothing was removed."
+        )
+    still = {r["relation_id"] for r in removed_rows(deck)}
+    sent = [i for i in ids if i in still]
+    for i in sent:
+        await decks._call_unslotted(sub, lambda token, *_, i=i: decks.client.delete_deck_relation(token, i))
+    back = await decks.get_own_deck(sub, deck_id)
+    left = {r["relation_id"] for r in removed_rows(back)} | {
+        c.relation_id for c in back.cards if c.relation_id is not None
+    }
+    decks._audit(
+        "removed_card_deleted",
+        sub=sub,
+        detail={"deck_id": deck_id, "rows": len(sent), "already": len(ids) - len(sent)},
+    )
+    return {"removed_rows": len(sent), "verified": not any(i in left for i in ids)}

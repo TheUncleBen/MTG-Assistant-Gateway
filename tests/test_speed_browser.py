@@ -1,0 +1,172 @@
+"""Speed in a real browser (0.7.46 audit WP1/WP2, owner decision C1), headless Chromium against
+the gateway with the fake Archidekt made slow: a slow page draws its frame at once and is then
+replaced by the finished page (static/feedback.js); the bell's count and the watched names are
+asked once while moving between pages within a minute (static/bell.js, static/cardmenu.js); an
+older deck page on Reload is shown at once and loaded again when it changed. Skipped without a
+Chromium build."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+
+import httpx
+import pytest
+
+from .test_editor_browser import _link
+from .test_scan_browser import _chromium_path
+from .test_suggest_browser import Server
+from .waits import poll
+
+pytest.importorskip("playwright")
+
+# The longest the first frame of a slow page may take: latepage.LATE_AFTER (0.8 s) plus a margin for
+# a loaded runner (0.86 s measured alone, see the stress runs in the 0.7.46 final audit fixes).
+FIRST_FRAME = 2.0
+# The longest a Reload of a deck page kept on show may take (under 0.1 s measured).
+RELOAD = 1.0
+
+
+@pytest.fixture
+def server(tmp_path: Path):
+    s = Server(tmp_path, watchlists_enabled=True)
+    s.start()
+    try:
+        yield s
+    finally:
+        s.stop()
+
+
+def _slow(server: Server, seconds: float) -> None:
+    ark = server.ark
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(seconds)
+        return ark.handle(request)
+
+    client = server.app.state.gateway.decks.client
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+
+
+def _browser(p, exe: str):  # noqa: ANN001, ANN202
+    return p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+
+
+def _until(page, expression: str, timeout: float) -> None:  # noqa: ANN001
+    """Poll ``expression`` (the pages' CSP forbids wait_for_function's eval) across navigations."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        try:
+            if page.evaluate(expression):
+                return
+        except Exception:  # noqa: BLE001, S110 - the page is between two documents
+            pass
+        time.sleep(0.05)  # fixed wait: poll interval of a loop with a deadline
+    raise AssertionError(f"not true within {timeout} s: {expression}")
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_a_slow_page_draws_its_frame_then_the_page(server: Server, width: int) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    # Archidekt answers after 10 s: a frame drawn first comes well inside that on a loaded runner,
+    # and a page that waited for the answer (the bug) could not
+    _slow(server, 10.0)
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        ctx = browser.new_context(viewport={"width": width, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        t0 = time.monotonic()
+        page.goto(f"{server.base}/notifications", wait_until="domcontentloaded")
+        first = time.monotonic() - t0
+        # the frame, sent once the page has taken latepage.LATE_AFTER (0.8 s; 0.86 s measured),
+        # long before Archidekt's 10 s answer; the margin is for a loaded runner, not a slow page
+        assert first < FIRST_FRAME, first
+        assert page.locator("[data-late] .late-note").inner_text() == "Reading this page from Archidekt…"
+        assert page.locator("header.topbar").count() == 1
+        _until(page, "document.readyState !== 'loading' && !document.querySelector('[data-late]')", 30)
+        assert page.locator("main h1").first.inner_text().startswith("Alerts")
+        assert errors == []
+        browser.close()
+
+
+def test_the_bell_and_watched_names_are_asked_once_across_pages(server: Server) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        asked: list[str] = []
+        page.on(
+            "request",
+            lambda r: (
+                asked.append(r.url)
+                if ("/notifications/count" in r.url or "/watchlist/api/names" in r.url)
+                else None
+            ),
+        )
+        done: list[str] = []
+
+        def ended(r) -> None:  # noqa: ANN001
+            if "/notifications/count" in r.url or "/watchlist/api/names" in r.url:
+                done.append(r.url)
+
+        page.on("requestfinished", ended)
+        page.on("requestfailed", ended)
+        for path in ("/", "/decks", "/decks/42", "/collection"):
+            page.goto(f"{server.base}{path}", wait_until="load")
+            page.evaluate(
+                "() => new Promise(r => requestIdleCallback(() => r(), {timeout: 2000}))"
+            )  # the bell asks once the page is idle
+            poll(page, lambda: len(done) == len(asked))  # and its answers are in
+        assert sum("/notifications/count" in u for u in asked) == 1, asked
+        assert sum("/watchlist/api/names" in u for u in asked) == 1, asked
+        browser.close()
+
+
+@pytest.mark.deck_check_live  # it loads the change through the page's /check answer
+def test_an_older_deck_page_on_reload_shows_at_once_and_loads_the_change(server: Server) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway import decks as decks_mod
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    decks = server.app.state.gateway.decks
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        ctx = browser.new_context(viewport={"width": 390, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks/42", wait_until="load")
+        decks._page_decks = {
+            k: (t - decks_mod.PAGE_DECK_RELOAD - 1, d) for k, (t, d) in decks._page_decks.items()
+        }
+        server.ark.decks[42]["name"] = "Renamed on the site"
+        # the read takes 8 s, so a page that waited for it (the bug) is told apart from the copy on
+        # show by a wide margin, whatever the runner's load
+        _slow(server, 8.0)
+        t0 = time.monotonic()
+        page.reload(wait_until="domcontentloaded")
+        took = time.monotonic() - t0
+        assert took < RELOAD, took  # the copy on show (under 0.1 s measured), not the 8 s read
+        # and the copy itself, not the frame a page still reading sends after latepage.LATE_AFTER
+        assert page.locator("[data-late]").count() == 0
+        _until(page, "document.title.indexOf('Renamed on the site') === 0", 30)
+        browser.close()

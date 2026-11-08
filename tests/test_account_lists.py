@@ -183,7 +183,7 @@ async def test_custom_cards_never_take_a_picture_from_the_assistant(stack: Stack
             }
         ],
     )
-    assert pic["ok"] is False and "My lists page" in pic["message"]
+    assert pic["ok"] is False and "Binder › Lists › Custom cards" in pic["message"]
     p = await _propose(
         h,
         token,
@@ -243,6 +243,36 @@ async def test_the_review_page_and_history_show_a_lists_change(stack: Stack) -> 
         assert "Your color tags on Archidekt have these changes now." in page
         history = (await b.http.get("/history")).text
         assert "Your Archidekt lists" in history
+    finally:
+        await b.aclose()
+
+
+async def test_history_lists_a_lists_change_with_the_copy_from_just_before(stack: Stack) -> None:
+    """My lists says a copy from just before each change is kept under History (review F7): the
+    applied change is a History entry, under Your Archidekt lists, and its Details show the list
+    as it was."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    ark.account.tags["alice"] = [{"id": 1, "name": "Cut", "color": "#ff0000"}]
+    p = await _propose(h, token, "color_tags", [{"op": "edit", "name": "Cut", "color": "#00ff00"}])
+    await _apply(h, token, p)
+    b = Browser(h)
+    try:
+        await b.login()
+        history = (await b.http.get("/history")).text
+        assert "Changed your Archidekt lists: Color tag “Cut”: color #ff0000 -&gt; #00ff00" in history
+        # the name opens the entry's Details; the row's menu and the Details lead to My lists
+        assert "data-deck-href='/lists'" in history
+        assert "href='/decks/lists'" not in history and "data-deck-href='/decks/lists'" not in history
+        details = (await b.http.get(f"/history?open=p-{p['proposal_id']}")).text
+        assert "<a href='/lists'>Your Archidekt lists</a>" in details
+        assert "Before: your list as it was just before" in details and "Cut: #ff0000" in details
+        assert f"/proposals/{p['proposal_id']}" in details
+        # narrowed to the lists, it is the one entry; the chips count it
+        mine = (await b.http.get("/history?deck_id=lists")).text
+        assert "Changed your Archidekt lists" in mine
+        assert "the changes applied to them and to your Archidekt lists" in history
     finally:
         await b.aclose()
 
@@ -350,3 +380,13 @@ async def test_a_premier_template_and_defaults_naming_one_wait_for_the_members_p
         h, token, "default_categories", [{"op": "set", "card": "Sol Ring", "categories": ["Ramp"]}]
     )
     assert p["risk"] == "low", p
+
+
+async def test_a_change_named_by_action_reads_as_its_op(stack: Stack) -> None:
+    """Every other propose tool names a change's kind "action" (whole-application audit): the
+    lists take it for "op", so the natural call is not refused."""
+    h = stack.h
+    token = await linked_user(stack)
+    p = await _propose(h, token, "color_tags", [{"action": "create", "name": "Proxy", "color": "#123456"}])
+    assert p["ok"] and p["kind"] == "lists", p
+    assert "Proxy" in p["rows"][0]["text"], p

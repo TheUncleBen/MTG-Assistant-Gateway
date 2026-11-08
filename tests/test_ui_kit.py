@@ -83,7 +83,9 @@ def test_new_icons_are_drawn_in_the_theme_style() -> None:
 @pytest.mark.parametrize("key,word,colour,icon", STATUS_TABLE)
 def test_status_labels_match_the_standard(key: str, word: str, colour: str, icon: str) -> None:
     out = ui.status_label(key)
-    assert out == f"<span class='ui-lbl {colour}'>{theme.icon(icon)}{word}</span>"
+    # Applying draws the theme's one animated spinner (0.7.46), the others their icon
+    mark = theme.SPINNER if icon == "spinner" else theme.icon(icon)
+    assert out == f"<span class='ui-lbl {colour}'>{mark}{word}</span>"
 
 
 @pytest.mark.parametrize("key,word,colour,icon", RISK_TABLE)
@@ -129,14 +131,16 @@ def test_app_chip_names_the_app_and_never_guesses() -> None:
         "alt='' width='16' height='16'><span class='nm'>Claude</span></span>"
     )
     assert ui.app_chip("ChatGPT", client_id="https://chatgpt.com/oauth/c.json").endswith(
-        "alt='' width='16' height='16'><span class='nm'>ChatGPT</span></span>"
+        "alt='' width='16' height='16'></span><span class='nm'>ChatGPT</span></span>"  # its slot (F7)
     )
     assert ui.app_chip("Forge") == f"<span class='ui-app'>{plug}<span class='nm'>Forge</span></span>"
     assert "&lt;script&gt;" in ui.app_chip("<script>")
     for none in (None, "", "  "):
         out = ui.app_chip(none)
-        assert "class='ui-app none' title='No app'" in out and "—" in out
-        assert "<span class='sr-only'>No app</span>" in out
+        # nothing shown (a bare dash read as a stray mark: polish C2); a screen reader hears why
+        assert out == "<span class='ui-app none'><span class='sr-only'>No app</span></span>"
+    risk = ui.no_risk_label()
+    assert "—" not in risk and "<span class='sr-only'>Risk not judged</span>" in risk
 
 
 @pytest.mark.parametrize(
@@ -222,7 +226,14 @@ def test_widget() -> None:
         ui.widget("x", "x", 1, actions=["a", "b", "c"])
     with pytest.raises(ValueError):
         ui.widget("x", "x", 1, tone="green")
-    assert ui.widgets(["<i>"]) == "<section class='ui-widgets' aria-label='At a glance'><i></section>"
+    # the row folds behind a tick box and its label on a phone (theme.py hides them from 600 px)
+    assert ui.widgets(["<i>"], line="3 waiting").endswith(
+        "<section class='ui-widgets' aria-label='At a glance'><i></section>"
+    )
+    assert "<input type='checkbox' class='glance-tgl' id='glance-at-a-glance'>" in ui.widgets(["<i>"])
+    assert "<label class='glance-lbl' for='glance-at-a-glance'>" in ui.widgets(["<i>"], line="3 waiting")
+    assert "<span>3 waiting</span>" in ui.widgets(["<i>"], line="3 waiting")
+    assert "<span>At a glance</span>" in ui.widgets(["<i>"])
 
 
 def test_chips_count_and_mark_the_current_one() -> None:
@@ -282,7 +293,7 @@ def test_table_pieces() -> None:
     )
     assert ui.day_row("Today") == "<div class='tr daygroup'>Today</div>"
     link = ui.open_link("/proposals/1", "Review")
-    assert "class='act linkbtn'" in link and "aria-label='Review'" in link and "sm-only chev" in link
+    assert "class='act ui-cap'" in link and "aria-label='Review'" in link and "sm-only chev" in link
 
 
 def test_pager_says_where_you_are_and_never_caps_silently() -> None:
@@ -303,11 +314,35 @@ def test_selection_bar_and_side_panel() -> None:
     assert bar.startswith("<div class='ui-bar' role='group' aria-label='Checked changes'>")
     assert "<span class='count' aria-live='polite'>2 checked</span><button>" in bar
     assert " hidden>" in ui.selection_bar("", [], label="x", hidden=True)
+    # the slim form (final audit F01): × Cancel first, the count with its word folding away, the
+    # actions, the ⋯ menu of the rest, then the one red action
+    slim = ui.selection_bar(
+        "0 selected",
+        ["<button class='all'>Select all</button>"],
+        label="Selected cards",
+        hidden=True,
+        cancel_cls="col-clear",
+        more=[ui.menu_opener("Tags…", "/collection", "col-bulk-tags", icon_name="tag")],
+        end=["<button class='rm'>Remove</button>"],
+    )
+    assert slim.startswith("<div class='ui-bar slim' role='group' aria-label='Selected cards' hidden>")
+    cancel = "<button type='button' class='btn icon-only bar-x col-clear' aria-label='Cancel' title='Cancel'>"
+    assert cancel in slim
+    count = (
+        "<span class='count' aria-live='polite'><span class='n'>0</span>"
+        " <span class='lbl'>selected</span></span>"
+    )
+    assert count in slim
+    assert slim.index("col-clear") < slim.index("class='count'") < slim.index("class='all'")
+    assert slim.index("class='all'") < slim.index("<details class='dd bar-more'>") < slim.index("class='rm'")
+    menu = slim.split("<div class='menu'>")[1].split("</div></details>")[0]
+    assert menu == f"<a href='/collection' data-box-open='col-bulk-tags'>{ui.icon('tag')} Tags…</a>"
+    assert "aria-label='More actions'" in slim and "aria-haspopup='menu'" in slim
     panel = ui.side_panel(
         "#1 Sol Ring", "<p>body</p>", label="Proposal #1", close_href="/p", back_text="Back"
     )
     assert panel.startswith("<aside class='ui-drawer' aria-label='Proposal #1'>")
-    assert "<p class='page-only'><a href='/p'>← Back</a></p>" in panel
+    assert "<p class='page-only'><a class='ui-cap' href='/p'>← Back</a></p>" in panel
     assert "class='close btn panel-only' href='/p' aria-label='Close' title='Close'>" in panel
     assert ui.split("L") == "<div class='ui-split'>L</div>"
     assert (

@@ -81,19 +81,24 @@ def test_setup_columns_account_boxes_and_back(server: Server) -> None:
         expect(drop.locator(".list a[href='/install?for=chatgpt']")).to_be_visible()
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
 
-        # Account: Disconnect opens its box (no page load); the box's solid red button is a submit.
-        page.goto(f"{server.base}/account/details", wait_until="networkidle")
-        box = page.locator("#disc1")
+        # An assistant's page (Account > Assistants > the app): Disconnect opens its box (no page
+        # load); the box's solid red button is a submit.
+        page.goto(f"{server.base}/account/assistants", wait_until="networkidle")
+        page.locator(".ygrp a.yrow", has_text="Claude").click()
+        page.wait_for_load_state("networkidle")
+        app_url = page.url
+        box = page.locator("#disc")
         expect(box).to_be_hidden()
-        page.locator("a[data-box-open='disc1']").click()
+        page.locator("a[data-box-open='disc']").click()
         expect(box).to_be_visible()
         expect(box.locator("h2")).to_have_text("Disconnect “Claude”?")
         expect(box.locator("button.danger")).to_have_text("Disconnect")
-        assert page.url.endswith("/account/details")
+        assert page.url == app_url
         box.locator("[data-cancel]").click()
         expect(box).to_be_hidden()
 
         # Delete my data: the final button stays disabled until the tick, then submits the form.
+        page.goto(f"{server.base}/account/details", wait_until="networkidle")
         page.locator("a[data-box-open='delete']").click()
         dbox = page.locator("#delete")
         expect(dbox).to_be_visible()

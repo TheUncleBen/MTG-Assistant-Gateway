@@ -147,7 +147,8 @@ def test_an_older_card_draws_the_amended_version_and_approves_it_with_its_code()
     def test(page) -> None:
         card = _open(page, [V2], [{**V2, "state": "rejected"}])
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
-        assert "Changed by Claude. Last change: now +1 Ponder." in card.locator("#note").inner_text()
+        # the app that made it changed it itself: "Updated: …", not "Changed by" (0.7.46, A20)
+        assert "Updated: now +1 Ponder." in card.locator("#note").inner_text()
         assert card.locator("#status").inner_text() == REDRAWN
         card.locator("#reject:enabled").wait_for(timeout=5_000)
         card.locator("#reject").click()
@@ -210,6 +211,7 @@ def test_a_card_on_screen_reads_again_and_shows_a_withdrawn_change_then_stops() 
         )
         assert card.locator("#approve").count() == 0
         # a withdrawn change never comes back: no more reads
+        # fixed wait: a negative check: a withdrawn change is read no more within 1.5 s
         page.wait_for_timeout(1_500)
         assert len(_calls(page, "get_proposal")) == 3
 
@@ -220,9 +222,10 @@ def test_a_newer_version_read_without_a_code_offers_the_review_page_only() -> No
     def test(page) -> None:
         card = _open(page, [V2], meta={})
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
-        page.wait_for_timeout(900)  # past the arming delay
+        # fixed wait: a negative check: past the card's 700 ms arming delay no Approve comes
+        page.wait_for_timeout(900)
         assert card.locator("#approve").count() == 0
-        assert card.locator("#actions button", has_text="Approve on the review page").count() == 1
+        assert card.locator("#actions button", has_text="Apply on the review page").count() == 1
 
     _run(test)
 
@@ -258,6 +261,7 @@ def test_the_timed_reads_stop_after_a_few() -> None:
     def test(page) -> None:
         card = _open(page, [V1], every_ms=100)
         card.locator("#approve:enabled").wait_for(timeout=5_000)
+        # fixed wait: a negative check: in 1.5 s of 100 ms timed reads, six only (then they stop)
         page.wait_for_timeout(1_500)
         assert len(_calls(page, "get_proposal")) == 1 + 6  # the read when drawn, then six timed
 
@@ -271,7 +275,7 @@ def test_a_changed_answer_with_no_read_leaves_the_review_page_not_locked_buttons
         card = _open(page, [V1, V1, "refuse"], [changed])
         card.locator("#approve:enabled").wait_for(timeout=5_000)
         card.locator("#approve").click()
-        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        card.locator("#actions button", has_text="Apply on the review page").wait_for(timeout=5_000)
         assert card.locator("#approve").count() == 0
         assert card.locator("#status").inner_text() == "There is a newer version."
 
@@ -286,7 +290,7 @@ def test_a_changed_answer_whose_read_finds_nothing_leaves_the_review_page() -> N
         card = _open(page, [V1, V1, gone], [changed])
         card.locator("#approve:enabled").wait_for(timeout=5_000)
         card.locator("#approve").click()
-        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        card.locator("#actions button", has_text="Apply on the review page").wait_for(timeout=5_000)
         assert card.locator("#approve").count() == 0
 
     _run(test)
@@ -300,6 +304,7 @@ def test_an_expired_replaced_card_is_not_read_again() -> None:
         old = {**V1, "state": "replaced", "replace_note": "Replaced by #4.", "expires_at": gone}
         card = _open(page, [old], every_ms=100)
         card.locator("#state.replaced").wait_for(timeout=5_000)
+        # fixed wait: a negative check: in 1 s of 100 ms timers no timed read of a replaced change
         page.wait_for_timeout(1_000)
         assert len(_calls(page, "get_proposal")) == 1  # the read when drawn only
 
@@ -313,6 +318,7 @@ def test_a_waiting_card_past_its_old_expiry_is_still_read() -> None:
         late = {**V1, "expires_at": int(time.time()) - 60}
         card = _open(page, [late], every_ms=100, drawn=late)
         card.locator("#title").wait_for(timeout=5_000)
+        # fixed wait: a negative check: in 1.5 s of 100 ms timed reads, six only (then they stop)
         page.wait_for_timeout(1_500)
         assert len(_calls(page, "get_proposal")) == 1 + 6
 
@@ -332,7 +338,8 @@ def test_an_apply_stopped_back_to_waiting_reads_again_and_follows_an_amend() -> 
             "() => window.log.filter((m) => m.method === 'tools/call'"
             " && m.params.name === 'get_proposal').length >= 7"
         )
-        page.wait_for_timeout(300)  # the visit's reads are spent, as on a slow runner
+        # fixed wait: a negative check: no further timed read comes in 300 ms (the visit's are spent)
+        page.wait_for_timeout(300)
         card.locator("#approve").click()
         card.locator("#state.applying").wait_for(timeout=5_000)  # the timed reads stop here
         card.locator("#state.pending").wait_for(timeout=5_000)  # the apply stopped: waiting again

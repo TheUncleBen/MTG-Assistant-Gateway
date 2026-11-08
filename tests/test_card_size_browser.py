@@ -7,6 +7,7 @@ go to MTG_SIZE_SHOTS (a folder) when set. Skipped without a Chromium build."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -42,9 +43,13 @@ def _shot(page, name: str) -> None:
 
 
 def _size(server: Server, size: str | None) -> None:
-    if size is None:
-        server.db.delete_pref("user-1", "card.size")
-    else:
+    """The one size every page used before each page kept its own (still read by a page without
+    its own); each page's own size is forgotten."""
+    from mtg_gateway.prefs import CARD_SIZE_NAMES
+
+    for name in CARD_SIZE_NAMES:
+        server.db.delete_pref("user-1", name)
+    if size is not None:
         server.db.set_pref("user-1", "card.size", size)
 
 
@@ -87,27 +92,46 @@ def test_the_switch_applies_at_once_and_follows_the_account(server: Server, widt
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme=theme)
         page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        phone = width < 600  # a phone's toolbar is one row; the switch is in its View sheet
         sw = page.locator(".toolbar .sizeseg")
-        assert sw.is_visible()
+        assert sw.is_visible() is not phone
         assert page.get_attribute("html", "data-card-size") == "m"
         assert page.get_attribute(".toolbar [data-card-size-set=m]", "aria-pressed") == "true"
         url = page.url
         before = page.evaluate(COLS, ".deckview.stacks")
+        if phone:
+            page.locator(".toolbar .viewbtn").click()
+            sheet = page.locator(".mtgbox[role=dialog]:not([hidden]) .viewsheet")
+            sheet.wait_for(timeout=3000)
+            mirror = sheet.locator(".sizeseg button")
+            assert mirror.all_inner_texts() == ["S", "M", "L"], mirror.all_inner_texts()
+            assert mirror.nth(1).get_attribute("aria-pressed") == "true"
+            for i in range(3):  # a touch target each
+                box = mirror.nth(i).bounding_box()
+                assert box["height"] >= 44 and box["width"] >= 44, box
+            pick = mirror.nth(0)
+        else:
+            pick = page.locator(".toolbar [data-card-size-set=s]")
         with page.expect_response(SAVED) as saved:
-            page.locator(".toolbar [data-card-size-set=s]").click()
+            pick.click()
         assert saved.value.ok  # the account has it once the save answers: no fixed wait
         assert page.get_attribute("html", "data-card-size") == "s" and page.url == url  # no reload
         assert page.get_attribute(".toolbar [data-card-size-set=s]", "aria-pressed") == "true"
+        if phone:
+            assert pick.get_attribute("aria-pressed") == "true"
+            page.keyboard.press("Escape")
+            page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert page.evaluate(COLS, ".deckview.stacks") > before
-        assert server.db.get_pref("user-1", "card.size") == "s"
-        # as tall as the selects beside it (39 px with its border; 46 px on a touch screen)
-        height = page.evaluate(
-            "() => document.querySelector('.toolbar .sizeseg').getBoundingClientRect().height"
-        )
-        select = page.evaluate(
-            "() => document.querySelector('.toolbar .msel-btn').getBoundingClientRect().height"
-        )
-        assert height >= 38.5 and abs(height - select) <= 1 or height >= 44, (height, select)
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
+        if not phone:
+            # as tall as the selects beside it (39 px with its border; 46 px on a touch screen)
+            height = page.evaluate(
+                "() => document.querySelector('.toolbar .sizeseg').getBoundingClientRect().height"
+            )
+            select = page.evaluate(
+                "() => document.querySelector('.toolbar .msel-btn').getBoundingClientRect().height"
+            )
+            assert height >= 38.5 and abs(height - select) <= 1 or height >= 44, (height, select)
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, ".sizeseg button, .field.cardsize .lbl") == []
         _shot(page, f"deck-stacks-small-{width}-{theme}.png")
@@ -160,9 +184,9 @@ def test_quick_size_changes_keep_the_last_one(server: Server) -> None:
         for _ in range(100):  # both saves answered (the first waits 1.2 s on purpose)
             if len(answered) >= 2:
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert len(answered) == 2 and all(r.ok for r in answered)
-        assert server.db.get_pref("user-1", "card.size") == "s"
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
         browser.close()
     assert errors == []
 
@@ -194,11 +218,11 @@ def test_a_save_with_an_unreadable_answer_does_not_stop_the_next_ones(server: Se
         for size in ("l", "m", "s"):
             page.locator(f".toolbar [data-card-size-set={size}]").click()
         for _ in range(100):
-            if len(sent) >= 3 and server.db.get_pref("user-1", "card.size") == "s":
+            if len(sent) >= 3 and server.db.get_pref("user-1", "card.size.deck") == "s":
                 break
-            page.wait_for_timeout(50)
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
         assert len(sent) == 3, sent
-        assert server.db.get_pref("user-1", "card.size") == "s"
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
         browser.close()
     assert errors == []
 
@@ -229,9 +253,67 @@ def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
             with page.expect_response(SAVED) as saved:
                 page.locator(".printpick [data-card-size-set=m]").click()
             assert saved.value.ok
-            assert server.db.get_pref("user-1", "card.size") == "m"
+            assert server.db.get_pref("user-1", "card.size.printings") == "m"
             browser.close()
             assert errors == []
+
+
+def test_the_printing_pickers_size_leaves_the_deck_pages_as_it_is(server: Server) -> None:
+    """The owner, 2026-10-28: each page keeps its own card size. L in the printings dialog leaves the
+    deck page at M, on this page and the next time it opens, and on the account; the dialog opens
+    at L again. A size chosen once for every page before is where each page starts."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        deck_cols = page.evaluate(COLS, ".deckview.grid .cards")
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        sol = ".deckview .row[data-card='Sol Ring'][data-zone='main']"
+        _open_picker(page, page.locator(sol))
+        before = page.evaluate(COLS, ".printpick .ppgrid")
+        with page.expect_response(SAVED) as saved:
+            page.locator(".printpick [data-card-size-set=l]").click()
+        assert saved.value.ok
+        assert page.evaluate(COLS, ".printpick .ppgrid") < before
+        assert page.get_attribute("html", "data-card-size") == "m"
+        assert server.db.get_pref("user-1", "card.size.printings") == "l"
+        assert server.db.get_pref("user-1", "card.size.deck") is None
+        page.keyboard.press("Escape")
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        assert page.get_attribute("html", "data-card-size") == "m"
+        assert page.get_attribute(".toolbar [data-card-size-set=m]", "aria-pressed") == "true"
+        assert page.evaluate(COLS, ".deckview.grid .cards") == deck_cols
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        _open_picker(page, page.locator(sol))
+        assert page.get_attribute(".printpick", "data-card-size") == "l"
+        assert page.get_attribute(".printpick [data-card-size-set=l]", "aria-pressed") == "true"
+        page.keyboard.press("Escape")
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        # the deck page's own S leaves the picker at L, and another page at M
+        with page.expect_response(SAVED) as saved:
+            page.locator(".toolbar [data-card-size-set=s]").click()
+        assert saved.value.ok and page.get_attribute("html", "data-card-size-printings") == "l"
+        page.goto(f"{server.base}/cards?q=sol&view=grid", wait_until="networkidle")
+        assert page.get_attribute("html", "data-card-size") == "m"
+        browser.close()
+    assert errors == []
+    # this device's copy: a page the account has no size for starts with it, and gives it to the
+    # account
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks?view=grid", wait_until="networkidle")
+        page.evaluate("() => localStorage.setItem('mtg.card.size.collection', 'l')")
+        with page.expect_response(SAVED) as saved:
+            page.goto(f"{server.base}/collection?view=grid", wait_until="domcontentloaded")
+        assert saved.value.ok
+        assert page.get_attribute("html", "data-card-size") == "l"
+        assert server.db.get_pref("user-1", "card.size.collection") == "l"
+        browser.close()
+    assert errors == []
 
 
 @pytest.mark.parametrize("width,theme", SIZES)
@@ -255,7 +337,7 @@ def test_collection_my_decks_and_card_search_show_the_switch_in_every_view(
             ("/cards?q=sol&view=grid", ".rbar.cards"),
         ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
-            sheet = width < 600 and bar.startswith(".rbar")  # phones: the switch is in the Filters sheet
+            sheet = width < 600 and ".rbar" in bar  # phones: the switch is in the Filters sheet
             if sheet:
                 page.locator(".sp-open").click()
                 page.locator("#sp-filters.open").wait_for(timeout=3000)
@@ -266,7 +348,11 @@ def test_collection_my_decks_and_card_search_show_the_switch_in_every_view(
             assert page.evaluate(CONTRAST, f"{bar} .sizeseg button, {bar} .cardsize .lbl") == []
             _shot(page, f"{path[1:].split('?')[0]}-{width}-{theme}.png")
             if sheet:
+                # Show sends the Binder's form (a submit button there): let that finish before the
+                # next page, or the two navigations race
                 page.locator(".sp-show").click()
+                page.locator("#sp-filters.open").wait_for(state="detached", timeout=5000)
+                page.wait_for_load_state("networkidle")
         # R-175 (2026-10-21): the switch stays in the list views too, and sizes the row pictures
         if width >= 600:  # on phones the switch waits in the Filters sheet, as above
             page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
@@ -329,5 +415,174 @@ def test_small_cards_keep_stack_names_and_card_names_readable(server: Server, wi
             assert page.locator(".deckview .c .ph .nm").count() > 0, view
             assert page.evaluate(UNDER_CORNER) == [], view
         _shot(page, f"small-names-{width}.png")
+        browser.close()
+    assert errors == []
+
+
+# Each deck tile's ⋮ against its picture: the gap from the picture's bottom (the colour bar's
+# bottom) to the ⋮'s top, and from the ⋮'s bottom to the info area's.
+KEBAB = """
+() => [...document.querySelectorAll('ul.decklist.grid li.deck')].map(li => {
+  const k = li.querySelector(':scope > .kebab').getBoundingClientRect();
+  const t = li.querySelector('.thumb').getBoundingClientRect();
+  const i = li.querySelector('.info').getBoundingClientRect();
+  return {gap: k.top - t.bottom, below: i.bottom - k.bottom};
+})
+"""
+
+
+@pytest.mark.parametrize("width", [375, 1280])
+def test_the_deck_tiles_menu_button_sits_below_the_colour_bar_at_every_size(
+    server: Server, width: int
+) -> None:
+    """The owner, 2026-10-28: the ⋮ overlapped the colour bar: its place was worked out for the M picture
+    alone. At S, M and L it sits under the picture, in the name's area."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        for size in ("s", "m", "l"):
+            _size(server, size)
+            page.goto(f"{server.base}/decks?view=grid", wait_until="networkidle")
+            tiles = page.evaluate(KEBAB)
+            assert tiles, size
+            for tile in tiles:
+                assert tile["gap"] >= 0, (size, tile)
+                assert tile["below"] >= 0, (size, tile)
+        browser.close()
+    assert errors == []
+
+
+def test_a_save_still_waiting_when_the_page_is_left_reaches_the_account(server: Server) -> None:
+    """Two quick changes (L, then S) and the page loaded again at once while the first save has
+    not been answered: the first save was cut off by the navigation (no keepalive) and the second,
+    waiting its turn behind it, was never sent, so the account kept neither. Leaving the page
+    (beforeunload, pagehide, the page going hidden) sends what still waits, merged into one body
+    with keepalive and numbered after the save on the wire, so the older value can't land over
+    the newer one (static/prefs.js, prefs.py). The first save is held by a route: never answered,
+    never continued."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    # the account has a size for the page already: the device's copy (the "copy" save a page
+    # without one makes) can't be what stores the new one
+    server.db.set_pref("user-1", "card.size.deck", "m")
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        posts: list[str] = []
+        held = []
+
+        def hold_first(route) -> None:
+            if route.request.method != "POST":
+                route.continue_()
+                return
+            posts.append(route.request.post_data or "")
+            held.append(route)  # never answered, never continued: it stays on the wire
+
+        # one request only: a request the harness intercepts while the page is being left is
+        # dropped now and then by the interception itself; the flush goes past it, to the gateway
+        page.route(SAVED, hold_first, times=1)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        page.locator(".toolbar [data-card-size-set=l]").click()
+        page.locator(".toolbar [data-card-size-set=s]").click()
+        assert page.get_attribute("html", "data-card-size") == "s"
+        assert len(posts) == 1 and len(held) == 1, posts  # L on the wire, S waiting behind it
+        page.reload(wait_until="load")
+        for _ in range(100):
+            if server.db.get_pref("user-1", "card.size.deck") == "s":
+                break
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
+        # the page loaded while the flush was on its way may still show the old size; the next shows it
+        page.reload(wait_until="load")
+        assert page.get_attribute("html", "data-card-size") == "s"
+        # the second change never went the usual way: only the held first save went through the route
+        # (numbered: this page's first save, so a late L can't land over S; prefs.py drops it)
+        sent = [{k: v for k, v in json.loads(b).items() if k != "page"} for b in posts]
+        assert sent == [{"seq": 1, "set": {"card.size.deck": "l"}}], posts
+        for route in held:  # let the harness drop the held one tidily
+            try:
+                route.abort()
+            except Exception:  # noqa: BLE001  (the page that sent it is gone already)
+                pass
+        browser.close()
+    assert errors == []
+
+
+# the page going hidden and back, as on a phone's app switch (the test says when)
+HIDE_AND_SHOW = """
+(() => {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true, get: () => (window.__mtgHidden ? 'hidden' : 'visible')
+  });
+})();
+"""
+TURN = "h => { window.__mtgHidden = h; document.dispatchEvent(new Event('visibilitychange')); }"
+
+
+def test_two_flushes_with_a_slow_first_one_end_on_the_newest_value(server: Server) -> None:
+    """0.7.46 audit C7: L is on the wire (slow), M waits; the page goes hidden (a flush: M goes at
+    once, and is slow too) and comes back; S, then hidden again (a second flush: S goes and
+    lands). Then the slow ones land, M and then L, after S. The account keeps S: each save
+    carries the page's number for it and the gateway drops the older ones (static/prefs.js,
+    prefs.py). Each choice is sent once."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    server.db.set_pref("user-1", "card.size.deck", "m")  # no device copy: the page has a size
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        posts: list[dict] = []
+        held: list = []
+
+        def slow_l_and_m(route) -> None:
+            if route.request.method != "POST":
+                route.continue_()
+                return
+            body = json.loads(route.request.post_data or "{}")
+            posts.append(body)
+            if (body.get("set") or {}).get("card.size.deck") in ("l", "m"):
+                held.append(route)  # answered later, after S
+            else:
+                route.continue_()
+
+        answered: list = []
+        page.on("response", lambda r: answered.append(r) if "/api/v1/prefs" in r.url else None)
+        page.add_init_script(HIDE_AND_SHOW)
+        page.route(SAVED, slow_l_and_m)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        page.locator(".toolbar [data-card-size-set=l]").click()
+        page.locator(".toolbar [data-card-size-set=m]").click()
+        page.evaluate(TURN, True)  # the first flush: M
+        page.evaluate(TURN, False)
+        page.locator(".toolbar [data-card-size-set=s]").click()
+        assert page.get_attribute("html", "data-card-size") == "s"
+        page.evaluate(TURN, True)  # the second flush: S
+        for _ in range(100):
+            if server.db.get_pref("user-1", "card.size.deck") == "s" and len(held) == 2:
+                break
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
+        assert server.db.get_pref("user-1", "card.size.deck") == "s", posts
+        assert len(held) == 2, posts
+        for route in held:  # M, then L, reach the gateway after S
+            try:
+                route.continue_()
+            except Exception:  # noqa: BLE001  (a save the page cancelled: nothing to let through)
+                pass
+            route.request.response()  # its answer came (none for a save called off) before the next goes
+        for _ in range(100):
+            if len(answered) >= 3:
+                break
+            page.wait_for_timeout(50)  # fixed wait: poll interval of a loop with a deadline
+        assert server.db.get_pref("user-1", "card.size.deck") == "s", posts
+        sizes = [(b.get("set") or {}).get("card.size.deck") for b in posts]
+        assert sizes == ["l", "m", "s"], posts  # each once, no merged repeat of L
+        assert len({b.get("page") for b in posts}) == 1 and [b.get("seq") for b in posts] == [1, 2, 3], posts
         browser.close()
     assert errors == []

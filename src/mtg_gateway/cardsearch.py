@@ -28,10 +28,11 @@ from starlette.responses import JSONResponse, Response
 from . import cardquery as cq
 from . import cardsearch_view as cv
 from . import prefs
-from .pages import NO_STORE, _csrf, browser_session, login_redirect
+from .busy import outage
+from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .scan.service import ScanError
 from .theme import esc as _esc
-from .theme import icon, render, stylesheet_link
+from .theme import icon, in_app, render, stylesheet_link
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -391,13 +392,28 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
 
     def problem_text(exc: ScanError) -> str:
         return {
-            "rate_limited": "Scryfall asked the gateway to wait. Try again later.",
-            "unavailable": "Scryfall is not answering right now. Try again later.",
+            "rate_limited": outage("slow_down", "Scryfall", again=True),
+            "unavailable": outage("unavailable", "Scryfall", again=True),
             "busy": "Your other card lookups are still running. Try again when they finish.",
             "invalid": f"Scryfall could not read that search: {exc}",
             "too_long": "This search is too long. Remove some filters or words.",
             "off": str(exc),
         }.get(exc.kind, f"The cards could not be looked up: {exc}")
+
+    def card_sort(request: Request, sub: str) -> tuple[str, str]:
+        """The sort and direction: the address's, else the one remembered on the account (a pick
+        from this site is remembered: prefs.sort_choice), else the default."""
+        return prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "cards",
+            sorts=[v for v, _ in cq.ORDERS],
+            default=cq.DEFAULT_ORDER,
+            name="order",
+            dirs=[v for v, _ in cq.DIRECTIONS],
+            default_dir="auto",
+        )
 
     async def run_search(f: cq.Filters, page_no: int, sub: str) -> dict[str, Any]:
         scan = state.scan
@@ -406,7 +422,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         query = cq.scryfall_query(f)
         if len(query) > cq.MAX_QUERY:
             # refused whole: a cut search would lose its last filters (paper only among them)
-            raise ScanError("too_long", f"the search is {len(query)} characters, over {cq.MAX_QUERY}")
+            raise ScanError("too_long", f"The search is {len(query)} characters, over {cq.MAX_QUERY}.")
         out = await scan.search_cards(query, order=f.order, direction=f.dir, page=page_no, owner=sub)
         if page_no >= SEARCH_PAGES:
             out = {**out, "has_more": False}  # the page number stops here, so no page follows
@@ -440,6 +456,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         if not prefs.from_this_site(request):  # it asks Scryfall on the member's own allowance
             return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers=NO_STORE)
         f = cq.parse(request.query_params)
+        f.order, f.dir = card_sort(request, sub)
         view, remember = view_of(request, sub)
         try:
             page_no = max(1, min(int(request.query_params.get("page") or 1), SEARCH_PAGES))
@@ -531,11 +548,12 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
     async def cards_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/cards" + (f"?{request.url.query}" if request.url.query else ""))
+            return login_redirect_here(request)
         if state.scan is not None:
             # the pickers' lists start loading now, so they are ready when a picker is opened
             state.scan.ensure_search_options()
         f = cq.parse(request.query_params)
+        f.order, f.dir = card_sort(request, sub)  # as last left (audit F-10)
         view, remember = view_of(request, sub)
         linked, reason = add_reason(sub)
         results = ""
@@ -565,12 +583,15 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                 )
         else:
             results = START_HTML
-        body = f"<section class='panel spanel cs-panel'>{cv.filters_html(f, view=view, total=total)}"
+        # the filter groups on a Fold or desktop start as the member left them (closed until opened)
+        folded = state.db.get_pref(sub, prefs.CARDS_FILTERS) != "open"
+        filters = cv.filters_html(f, view=view, total=total, folded=folded)
+        body = f"<section class='panel spanel cs-panel'>{filters}"
         if not linked:
             body += (
                 f"<p class='readonly'>{icon('link')}<span>Cards can be read but not added: no Archidekt "
                 "account is linked.</span>"
-                "<a href='/account/details#archidekt'>Link it under Account details</a></p>"
+                "<a href='/account/details/archidekt'>Link it under Account details</a></p>"
             )
         body += "</section>"
         more = (
@@ -580,7 +601,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         )
         body += (
             "<section class='cs-out'>"
-            + (cv.HINT_HTML if state.prices is not None else "")
+            + ((cv.HINT_APP_HTML if in_app() else cv.HINT_HTML) if state.prices is not None else "")
             + f"<div id='cs-status' class='cs-status' role='status'>{status_html}</div>"
             + f"<div id='cs-results' class='cs-results' data-linked='{'1' if linked else ''}'>{results}</div>"
             + more

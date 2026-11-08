@@ -9,8 +9,23 @@ from __future__ import annotations
 from typing import Any
 
 from . import deck_stats
-from .archidekt import Deck, DeckCard, rich_text
+from .archidekt import Deck, DeckCard, category_sort_key, rich_text
 from .decks import deck_to_archidekt_text, deck_to_text
+
+# Archidekt's finish words and colour words, as the tools write them everywhere else.
+_FINISHES = {"normal": "nonfoil", "nonfoil": "nonfoil", "foil": "foil", "etched": "etched"}
+_COLOR_LETTERS = {"white": "W", "blue": "U", "black": "B", "red": "R", "green": "G", "colorless": "C"}
+
+
+def finish_of(modifier: Any) -> str:
+    """nonfoil, foil or etched for Archidekt's modifier (Normal, Foil, Etched)."""
+    word = str(modifier or "").strip().lower()
+    return _FINISHES.get(word, word or "nonfoil")
+
+
+def color_letters(colors: list[Any]) -> list[str]:
+    """W, U, B, R, G (and C) for Archidekt's colour words; a letter already given stays."""
+    return [_COLOR_LETTERS.get(str(c).strip().lower(), str(c)) for c in colors]
 
 
 def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
@@ -20,7 +35,8 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
         "categories": c.categories,
         "set": c.set_code,
         "collector_number": c.collector_number,
-        "finish": c.modifier,
+        # the write tools' finish values (nonfoil, foil, etched), not Archidekt's Normal, Foil, Etched
+        "finish": finish_of(c.modifier),
         "in_deck": deck.in_deck(c),
     }
     if not c.categories:
@@ -47,6 +63,8 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
         "scryfall_uid",
     ):
         value = getattr(c, key, None)
+        if key in ("colors", "color_identity") and isinstance(value, list):
+            value = color_letters(value)  # letters, as deck_stats and resolve_cards give them
         if value not in (None, [], "", False):
             out[key] = value
     if getattr(c, "custom_cmc", None) is not None:  # 0 is a real override
@@ -58,7 +76,16 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
 DECK_VIEWS = ("summary", "text", "cards", "export", "full")
 # Card fields an assistant rarely needs (images, ids, the label colour, ranking numbers): left out
 # of the compact "cards" view, kept in "full" for the web pages and the API.
-_FULL_ONLY_CARD_FIELDS = ("image_hash", "scryfall_uid", "label", "edhrec_rank", "salt", "colors")
+_FULL_ONLY_CARD_FIELDS = (
+    "image_hash",
+    "scryfall_uid",
+    "label",
+    "edhrec_rank",
+    "salt",
+    "colors",
+    "types",
+    "subtypes",
+)
 
 
 def deck_out(
@@ -70,10 +97,11 @@ def deck_out(
     view: str = "full",
 ) -> dict[str, Any]:
     """The deck as the tools and API return it. ``view`` picks the body: ``summary`` (statistics
-    only), ``text`` (statistics plus the plain decklist_text and sideboard_text), ``cards``
-    (statistics plus one compact row per card), ``export`` (archidekt_text, Archidekt's own import
-    syntax) or ``full`` (all of them, every card field). ``include_text`` adds each card's rules
-    text (``oracle_text``) and so needs card rows: with ``summary``, ``text`` or ``export`` it
+    only), ``text`` (the headline statistics, stats_brief, plus the plain decklist_text and
+    sideboard_text), ``cards`` (the headline statistics plus one compact row per card),
+    ``export`` (archidekt_text, Archidekt's own import syntax) or ``full`` (all of them, the whole
+    statistics and every card field). ``include_text`` adds each card's rules text
+    (``oracle_text``) and so needs card rows: with ``summary``, ``text`` or ``export`` it
     switches to ``cards``."""
     if view not in DECK_VIEWS:
         view = "full"
@@ -96,6 +124,12 @@ def deck_out(
         "side_count": sum(c.quantity for c in deck.side_cards),
         "commanders": [c.name for c in deck.cards if "Commander" in c.categories],
         "categories": [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)],
+        # the deck's categories with no card filed under them (Archidekt keeps them until deleted)
+        "empty_categories": [
+            c["name"]
+            for c in deck.categories
+            if isinstance(c.get("name"), str) and not any(c["name"] in card.categories for card in deck.cards)
+        ],
         # the member's custom cards in the deck (Archidekt's customCards, not in cards or the counts);
         # id is the custom card's id, as propose_custom_card_changes takes it
         "custom_cards": [
@@ -117,9 +151,10 @@ def deck_out(
                 row["oracle_text"] = c.oracle_text
                 if c.faces:
                     row["faces"] = c.faces
-                if c.flavor:
+                # flavor text and the artist only in the full view: an assistant rarely needs them
+                if c.flavor and view == "full":
                     row["flavor_text"] = c.flavor
-                if c.artist:
+                if c.artist and view == "full":
                     row["artist"] = c.artist
         if view == "cards":
             cards = [{k: v for k, v in row.items() if k not in _FULL_ONLY_CARD_FIELDS} for row in cards]
@@ -131,9 +166,15 @@ def deck_out(
         out["archidekt_text"] = deck_to_archidekt_text(deck)
     if with_stats and view != "export":
         try:
-            out["stats"] = deck_stats.compute(deck)
+            stats = deck_stats.compute(deck)
         except Exception:  # pragma: no cover - statistics must never break a deck read
-            out["stats"] = None
+            stats = None
+        # the text and cards views carry the headline numbers only; deck_stats (and the summary
+        # and full views) give the whole statistics (AT-31)
+        if view in ("text", "cards"):
+            out["stats_brief"] = deck_stats.brief(stats)
+        else:
+            out["stats"] = stats
     return out
 
 
@@ -157,20 +198,43 @@ auto_category = deck_stats.auto_category
 
 
 def cards_by_category(deck: Deck) -> list[tuple[str, list[DeckCard]]]:
-    """Cards grouped the way Archidekt shows them: Commander first, then the deck's own category
-    order, then anything else alphabetically; uncategorised cards under their auto category."""
-    order = [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)]
+    """Cards grouped the way archidekt.com's deck page shows them (owner decision C4: the one
+    order Archidekt has): the Premier categories (the commander zone) first, then every category
+    in the deck, the automatic stacks of uncategorised cards among them, each run sorted by name
+    as Archidekt sorts it (``category_sort_key``: numeric-aware, any case), then Sideboard, then
+    the categories not in the deck (Maybeboard and any other marked "Not in deck"), after every
+    stack that counts (0.7.46 audit D-14). Its answer lists categories by record, an order the
+    site never shows; it keeps no order of its own. "Other" (cards of no main type) comes after
+    the deck's own stacks, as Archidekt has no such stack."""
+    excluded = deck.excluded_categories()
+    premier = deck.premier_categories()
     groups: dict[str, list[DeckCard]] = {}
     for card in deck.cards:
         cats = card.categories or [auto_category(card)]
         groups.setdefault(cats[0], []).append(card)
-    rank = {name: i for i, name in enumerate(order)}
-    rank.setdefault("Commander", -1)
 
-    def key(name: str) -> tuple[int, str]:
-        return (rank.get(name, len(order) + (1 if name == "Other" else 0)), name.lower())
+    def key(name: str) -> tuple[int, tuple[Any, ...]]:
+        if name == "Sideboard":  # its own run whatever its flag, as on Archidekt
+            run = 3
+        elif name in excluded:
+            run = 4
+        elif name in premier:
+            run = 0
+        elif name == "Other":
+            run = 2
+        else:
+            run = 1
+        return (run, category_sort_key(name))
 
     return [(name, sorted(groups[name], key=lambda c: c.name.lower())) for name in sorted(groups, key=key)]
 
 
-__all__ = ["DECK_VIEWS", "auto_category", "card_out", "cards_by_category", "deck_brief", "deck_out"]
+__all__ = [
+    "DECK_VIEWS",
+    "auto_category",
+    "card_out",
+    "cards_by_category",
+    "category_sort_key",
+    "deck_brief",
+    "deck_out",
+]

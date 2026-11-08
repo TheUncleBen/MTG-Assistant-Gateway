@@ -34,8 +34,10 @@ def test_chromium_reaches_only_this_machine_and_routed_pages() -> None:
     with sync_playwright() as p:
         browser = _launch(p, exe)
         page = browser.new_page()
-        with pytest.raises(Error, match="ERR_NAME_NOT_RESOLVED"):
-            page.goto("https://api.scryfall.com/cards/named?exact=Sol+Ring", timeout=10_000)
+        # a name that exists nowhere (.invalid), so even a broken setup sends nothing to a real
+        # service; refused before any name is looked up, whatever this machine's DNS or proxy does
+        with pytest.raises(Error, match="ERR_NAME_NOT_RESOLVED|ERR_PROXY_CONNECTION_FAILED"):
+            page.goto("https://api.scryfall.invalid/cards/named?exact=Sol+Ring", timeout=10_000)
         page.route("https://cards.scryfall.io/**", lambda r: r.fulfill(body=b"ok"))
         assert page.goto("https://cards.scryfall.io/x").ok
         browser.close()

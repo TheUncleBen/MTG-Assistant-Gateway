@@ -1,0 +1,25 @@
+Subject: the sparkline test counts its two prices from today
+
+The upstream test wrote prices for 2026-08-07 and 2026-08-08, and the watchlist
+page draws the last 90 days, so from 2026-11-06 the points fell out of the
+window and the test failed with no code change. The two prices are now one and
+two days before today.
+
+diff --git a/tests/test_http_surface.py b/tests/test_http_surface.py
+index a1de2b0..f546c68 100644
+--- a/tests/test_http_surface.py
++++ b/tests/test_http_surface.py
+@@ -80,8 +80,11 @@ def test_page_has_sparkline_and_themes(db_path):
+     list_id, pp, _ = watchlist_db.create_list(db)
+     watchlist_db.add_card(db, list_id, "Sol Ring")
+     db.execute("INSERT INTO card_uuids (card_name, uuid) VALUES ('Sol Ring','u1')")
+-    watchlist_db.upsert_price(db, "u1", "2026-08-07", "tcgplayer", "normal", 8.0)
+-    watchlist_db.upsert_price(db, "u1", "2026-08-08", "tcgplayer", "normal", 7.0)
++    # two days inside the page's 90-day window, counted from today (fixed dates fell out of it)
++    today = datetime.date.today()
++    for back, price in ((2, 8.0), (1, 7.0)):
++        day = (today - datetime.timedelta(days=back)).isoformat()
++        watchlist_db.upsert_price(db, "u1", day, "tcgplayer", "normal", price)
+     db.close()
+     with client() as c:
+         r = c.get(f"/w/{pp}")

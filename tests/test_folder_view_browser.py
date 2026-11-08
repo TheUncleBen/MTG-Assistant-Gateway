@@ -108,6 +108,34 @@ def test_folders_open_the_breadcrumb_goes_back_and_the_filter_searches_everywher
         browser.close()
 
 
+def test_a_sort_change_refreshes_the_list_in_place_once(server: Server) -> None:
+    """My decks' Order by applies in place (decks.js): one list read, no page load. The deck page's
+    own apply-on-change (deck.js) must leave this live form alone, or the same change also sends
+    the form, a second read races the first and the page reloads under the member."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280, "light", exe)
+        page.goto(f"{server.base}/decks?folder=502", wait_until="networkidle")
+        page.wait_for_selector("ul.decklist .deck")
+        reads: list[str] = []
+        loads: list[str] = []
+        page.on("request", lambda r: reads.append(r.url) if "/api/decks/mine" in r.url else None)
+        page.on("request", lambda r: loads.append(r.url) if r.resource_type == "document" else None)
+        page.locator("#f-order").select_option("name")
+        page.wait_for_function("() => location.search.includes('order=name')", timeout=10_000)
+        page.wait_for_function("() => !document.querySelector('#decks-list[aria-busy]')", timeout=10_000)
+        page.wait_for_load_state("networkidle")
+        assert loads == [], loads
+        assert len(reads) == 1, reads
+        assert "folder=502" in page.url
+        assert _names(page) == ["Atraxa precon"]
+        assert errors == []
+        browser.close()
+
+
 @pytest.mark.parametrize("width,theme", SIZES)
 @pytest.mark.parametrize("view", ["grid", "list"])
 def test_my_decks_by_folder_fits_every_width(server: Server, width: int, theme: str, view: str) -> None:
@@ -168,7 +196,7 @@ def _backup_name_refused(server: Server, width: int, theme: str) -> None:
         note = box.locator(".notice.error")
         note.wait_for(timeout=5000)
         assert note.inner_text() == (
-            "'mtg gateway backups' is the name of the gateway's backup folder. Pick another name."
+            "“mtg gateway backups” is the name of the gateway's backup folder. Pick another name."
         )
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, ".mtgbox .notice.error") == []

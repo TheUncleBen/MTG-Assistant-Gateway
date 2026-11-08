@@ -50,7 +50,8 @@
     return btn;
   }
   var rowEls = {}; // lower name -> the <li> of an existing card
-  // the rows' menu: Open card, Change printing…, Remove from deck, then the card items every page has
+  // the rows' menu: Open card, Change printing…, Remove from deck (Remove from “Sideboard” on a
+  // row whose category is not in the deck), then the card items every page has
   if (window.MtgCardMenu && window.MtgMenu) (function () {
     var Menu = window.MtgMenu, Card = window.MtgCardMenu;
     function rowOf(t) {
@@ -62,8 +63,8 @@
       skip: "button, input, select, summary, details.rowmenu",
       open: function (li, x, y) {
         var m = li.mtgMenu, before = [];
-        before.push(Menu.item("Change printing…", "swap", m.printing));
-        before.push(Menu.item("Remove from deck", "x", m.remove, { danger: true }));
+        before.push(Menu.item("Printings…", "swap", m.printing));
+        before.push(Menu.item(m.removeLabel, "x", m.remove, { danger: true }));
         Card.open({
           name: m.name, onOpen: m.open, collect: true,
           watch: Menu.enabled() ? { watched: false, onWatch: function () { Card.watch({ name: m.name }).catch(function () {}); } } : null,
@@ -227,6 +228,15 @@
     (children || []).forEach(function (c) { if (c) e.appendChild(c); });
     return e;
   }
+  // a change that could not be sent, in the site's one wording (static/fetchjson.js): signed out
+  // with Sign in back to this page, no connection, or the gateway's own message
+  function sayProblem(status, x, what, fallback) {
+    var pr = window.MtgFetch.problem(x, what);
+    var text = pr.signedOut || pr.noConnection ? pr.text : (x && x.message) || fallback || pr.text;
+    status.textContent = text;
+    pr.actions.forEach(function (a) { status.appendChild(document.createTextNode(" ")); status.appendChild(a); });
+    if (status.classList.contains("status")) status.className = "status notice error";
+  }
   function svg(name) {
     var tpl = document.getElementById("icon-" + name);
     if (tpl) return tpl.content.firstElementChild.cloneNode(true);
@@ -336,7 +346,9 @@
       pending.appendChild(ul);
     }
     var n = list.length;
-    root.querySelector(".pendingbox .n").textContent = String(n);
+    var pn = root.querySelector(".pendingbox .n");
+    pn.textContent = String(n);
+    pn.classList.toggle("zero", !n);
     root.querySelector(".count").textContent = n ? n + " change" + (n === 1 ? "" : "s") + " pending" : "No changes yet";
     root.querySelector("button.review .label").textContent = n ? "Save " + n + " change" + (n === 1 ? "" : "s") : "Save changes";
     root.querySelector("button.review").disabled = !n || n > MAX;
@@ -434,8 +446,11 @@
       var r = rows[key];
       if (zone === "side") {
         if (rowEls[key]) return;  // the same side card listed twice: one row
+        // the row leaves its category (Sideboard, Maybeboard), not the deck it does not count in
+        var sideLabel = "Remove from “" + g.name + "”";
+        var sideThumb = thumb(r, c.name);
         var sideLi = el("li", { class: "erow side" }, [
-          thumb(r, c.name),
+          sideThumb,
           el("span", { class: "main" }, [
             el("span", { class: "name", text: c.name }),
             el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " #" + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + " · not in the deck's count" }),
@@ -443,8 +458,15 @@
           ]),
           qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }, c.name),
           categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false, true, c.name),
-          el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + c.name, title: "Remove", onclick: function () { mutate(function () { r.after = 0; }); } }, [svg("x")])
+          el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + c.name + " from “" + g.name + "”", title: sideLabel, onclick: function () { mutate(function () { r.after = 0; }); } }, [svg("x")])
         ]);
+        // the row's menu (a right-click, a press and hold or Shift+F10), as the deck's rows have
+        sideLi.mtgMenu = {
+          name: c.name, focus: sideThumb, removeLabel: sideLabel,
+          open: function () { if (sideThumb.click) sideThumb.click(); },
+          printing: function () { openPicker(r); },
+          remove: function () { mutate(function () { r.after = 0; }); }
+        };
         rowEls[key] = sideLi;
         ul.appendChild(sideLi);
         return;
@@ -464,11 +486,13 @@
         el("summary", { class: "mini", "aria-label": "More for " + c.name, title: "More" }, [svg("more")]),
         menuBox
       ]);
+      // a row whose category is not in the deck leaves that category, not the deck
+      var removeLabel = c.in_deck ? "Remove from deck" : "Remove from “" + g.name + "”";
       more.addEventListener("toggle", function () {
         if (menuBox.firstChild) return;
         menuBox.appendChild(el("label", { class: "field" }, [el("span", { text: "Finish" }), finishSelect(r.setFinish || r.finish, function (v) { mutate(function () { r.setFinish = v === r.finish ? null : v; }); }, c.name)]));
-        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Change printing" })]));
-        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " Remove from deck" })]));
+        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Printings…" })]));
+        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " " + removeLabel })]));
       });
       var nameEl = el("span", { class: "name", text: c.name, title: c.name });
       if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
@@ -486,7 +510,7 @@
       ]);
       // the row's menu (static/menus.js's layer): a right-click, a press and hold or Shift+F10
       li.mtgMenu = {
-        name: c.name, focus: thumbEl,
+        name: c.name, focus: thumbEl, removeLabel: removeLabel,
         open: function () { if (thumbEl.click) thumbEl.click(); },
         printing: function () { openPicker(r); },
         remove: function () { mutate(function () { r.after = 0; }); }
@@ -520,7 +544,7 @@
   // Chips above it say where the card goes; "3 sol ring" adds three; the printings of the
   // highlighted name show beside the list on wide screens, and a click on one adds that printing.
   var addForm = root.querySelector("form.addcard");
-  var input = root.querySelector("input[name=card]");
+  var input = root.querySelector("input[name=name]");
   var catIn = root.querySelector("input[name=addcat]"), zoneIn = root.querySelector("input[name=addzone]");
   var foilIn = root.querySelector("input[name=foil]");
   var addStatus = root.querySelector(".addstatus");
@@ -559,11 +583,25 @@
       ? "Added " + parts.qty + " × " + parts.name + " to the copies already listed for " + (zone === "side" || outside(catIn.value) ? "the maybeboard or sideboard" : "the deck") + "; they keep their own printing and finish. Type the next card, or save."
       : "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
     input.value = "";
+    // the draft (static/draft.js) follows the field: the card is in the pending changes now
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     hidePrints();
     input.focus();
   }
+  // With nothing typed, the box keeps the focus and says "Type a card name." in the browser's own
+  // note at the field (static/suggest.js's needName, shared with the deck page's quick add), in
+  // place of the browser's generic words for a required field (polish batch 3 N4)
+  addForm.noValidate = true;
+  input.addEventListener("input", function () { if (input.value.trim()) window.MtgSuggest.needName(input, false); });
   addForm.addEventListener("submit", function (ev) {
     ev.preventDefault();
+    var empty = !splitQty(input.value).name;
+    window.MtgSuggest.needName(input, empty);
+    if (empty) {
+      input.focus();
+      if (input.reportValidity) input.reportValidity();
+      return;
+    }
     addTyped(input.value, pendingPrint());
   });
   // the card menu on a suggestion (static/cardmenu.js): Art variants… adds the printing picked
@@ -658,12 +696,9 @@
     var btn = pasteForm.querySelector("button");
     btn.disabled = true;
     status.textContent = "Checking " + items.length + " name" + (items.length === 1 ? "" : "s") + "…";
-    fetch("/scan/api/resolve", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
-      body: JSON.stringify({ cards: items })
+    window.MtgFetch.json("/scan/api/resolve", {
+      method: "POST", csrf: cfg.csrf, body: JSON.stringify({ cards: items }), what: "nothing was added"
     })
-      .then(function (res) { return res.json(); })
       .then(function (d) {
         var zone = zoneIn.value === "side" ? "side" : "main";
         var missed = [];
@@ -675,10 +710,11 @@
           });
         });
         area.value = missed.join("\n");
+        area.dispatchEvent(new Event("input", { bubbles: true }));  // the draft keeps only what was missed
         status.textContent = found + " card" + (found === 1 ? "" : "s") + " added to the pending changes" + (missed.length ? "; " + missed.length + " name" + (missed.length === 1 ? " was" : "s were") + " not recognized and stay in the box." : ".");
         btn.disabled = false;
       })
-      .catch(function () { status.textContent = "The names could not be checked (network error); nothing was added."; btn.disabled = false; });
+      .catch(function (err) { sayProblem(status, err, "nothing was added", "The names could not be checked; nothing was added."); btn.disabled = false; });
   });
   root.querySelector("button.undo").addEventListener("click", undo);
   root.querySelector("button.redo").addEventListener("click", redo);
@@ -755,6 +791,31 @@
     askToLeave(function () { if (form.requestSubmit) form.requestSubmit(by); else form.submit(); });
   }, true);
 
+  // On a phone the save bar sits fixed over the tab bar with Save, Undo and Redo only (and the
+  // status on its own line): the card size and the backup tick move out to a row of their own
+  // under the bar, with room for 44 px controls (0.7.46 audit D-10). They move back on a wider
+  // window; their listeners go with them.
+  (function () {
+    var bar = root.querySelector(".editbar");
+    if (!bar) return;
+    var opts = document.createElement("div");
+    opts.className = "editopts";
+    var narrow = window.matchMedia("(max-width: 599.98px)");
+    function place() {
+      var parts = [root.querySelector(".editbar .backup, .editopts .backup"), root.querySelector(".editbar .cardsize, .editopts .cardsize")];
+      if (narrow.matches) {
+        parts.forEach(function (e) { if (e) opts.appendChild(e); });
+        if (opts.childNodes.length && !opts.parentNode) bar.parentNode.insertBefore(opts, bar.nextSibling);
+      } else {
+        var status = bar.querySelector(".status");
+        parts.forEach(function (e) { if (e) bar.insertBefore(e, status); });
+        if (opts.parentNode) opts.remove();
+      }
+    }
+    place();
+    if (narrow.addEventListener) narrow.addEventListener("change", place); else narrow.addListener(place);
+  })();
+
   // save: one proposal, applied at once (apply:true); a big removal asks first. The tick box says
   // whether Archidekt also gets a backup copy (the gateway's snapshot is kept either way).
   var backupBox = root.querySelector("input[name=archidekt_backup]");
@@ -767,62 +828,56 @@
     status.className = "status";
     var old = root.querySelector(".confirmbar");
     if (old) old.remove();
-    fetch("/api/v1/proposals", {
+    // never rejects: signed out and no connection come back as {ok: false} in the site's words
+    window.MtgFetch.answer("/api/v1/proposals", {
       method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
+      csrf: cfg.csrf,
+      what: "nothing was changed",
       body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes(), apply: true, confirmed: confirmed === true,
         archidekt_backup: !(backupBox && !backupBox.checked) })
     })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-      .then(function (res) {
-        var d = res.d || {};
+      .then(function (d) {
+        var res = { ok: d.status >= 200 && d.status < 300 };
         if (res.ok && d.applied) {
           root.dataset.leaving = "1";
           window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved";
         } else if (res.ok && d.needs_confirm) {
-          // the proposal exists but nothing was sent: ask, then apply that same proposal
+          // the proposal exists but nothing was sent: ask in the pop-up box every risky confirm
+          // uses (audit F-7: a bar with Save anyway focused), Keep editing first and focused, the
+          // red button last; then apply that same proposal
           status.textContent = "";
-          saving = false;  // the question bar now holds the edits until it is answered
-          var bar = el("div", { class: "confirmbar notice warn", role: "alertdialog" });
-          bar.appendChild(el("span", { text: d.why + " Save anyway?" }));
-          var yes = el("button", { type: "button", class: "btn-primary", text: "Save anyway" });
-          var no = el("button", { type: "button", text: "Keep editing" });
-          bar.appendChild(yes); bar.appendChild(no);
-          root.querySelector(".editbar").appendChild(bar);
-          yes.addEventListener("click", function () {
-            yes.disabled = true;
-            fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
-              method: "POST", credentials: "same-origin",
-              headers: { "X-CSRF-Token": cfg.csrf, "Content-Type": "application/json" },
-              body: JSON.stringify({ version: d.version, archidekt_backup: !(backupBox && !backupBox.checked) })
-            }).then(function (r) { return r.json(); }).then(function (a) {
-              if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return; }
-              bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false; saving = false;
-            }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; saving = false; });
+          saving = false;  // the box now holds the edits until it is answered
+          var answered = false;
+          window.MtgBox.confirm({
+            title: "Save anyway?", text: d.why, ok: "Save anyway", danger: true, cancel: "Keep editing", focus: "cancel",
+            onOk: function () {
+              answered = true;
+              return window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
+                method: "POST", csrf: cfg.csrf, what: "nothing was changed",
+                body: JSON.stringify({ version: d.version, archidekt_backup: !(backupBox && !backupBox.checked) })
+              }).then(function (a) {
+                if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return true; }
+                sayProblem(status, a, "nothing was changed", "Archidekt refused the change; nothing was saved."); btn.disabled = false; saving = false;
+                return false;
+              });
+            },
+            onClose: function () {
+              if (answered) return;
+              btn.disabled = false; saving = false;
+              // the proposal made for the check is not wanted: reject it so Proposals stays clean
+              window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
+                method: "POST", csrf: cfg.csrf
+              });  // never rejects; a leftover pending proposal is harmless
+            }
           });
-          no.addEventListener("click", function () {
-            bar.remove(); btn.disabled = false; saving = false;
-            // the proposal made for the check is not wanted: reject it so Proposals stays clean
-            fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
-              method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
-            }).catch(function () { /* a leftover pending proposal is harmless */ });
-          });
-          yes.focus();
         } else if (res.ok && d.proposal_id) {
           // writes are off on this gateway: the proposal is kept for later
           root.dataset.leaving = "1";
           window.location.href = "/proposals/" + encodeURIComponent(d.proposal_id);
         } else {
-          status.textContent = d.message || "The changes could not be saved.";
-          status.className = "status notice error";
+          sayProblem(status, d, "nothing was changed", "The changes could not be saved.");
           btn.disabled = false; saving = false;
         }
-      })
-      .catch(function () {
-        status.textContent = "Network error; nothing was changed.";
-        status.className = "status notice error";
-        btn.disabled = false; saving = false;
       });
   }
   root.querySelector("button.review").addEventListener("click", function () { save(false); });

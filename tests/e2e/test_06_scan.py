@@ -156,8 +156,12 @@ def test_scan_page_has_its_own_csp_and_the_rest_keep_the_strict_one(clients, env
             assert await account.header_value("content-security-policy") == ACCOUNT_CSP
             proposals = await page.goto(f"{PUBLIC_URL}/proposals")
             assert await proposals.header_value("content-security-policy") == STRICT_CSP
+            # Home shows the connector address only while no assistant is connected (this member's
+            # are, by now); the Guided setup page always offers it to copy.
+            setup = await page.goto(f"{PUBLIC_URL}/install")
+            assert setup.status == 200 and await page.input_value("#mcp-url") == MCP_URL
             landing = await page.goto(f"{PUBLIC_URL}/")
-            assert landing.status == 200 and MCP_URL in await page.inner_text("body")
+            assert landing.status == 200 and "Hi Alice" in await page.inner_text("body")
             # The home page shows deck covers from Scryfall, so it carries the deck pages' CSP: the
             # strict one plus that single image host and connect-src 'self'.
             assert await landing.header_value("content-security-policy") == HOME_CSP

@@ -11,13 +11,15 @@ import re
 import secrets
 import time
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
+from ..busy import outage
 from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
-from .names import NameCatalog
+from .bulk import PrintingsCopy
+from .names import NameCatalog, fold
 from .scryfall import (
     PRINT_BORDERS,
     PRINT_FINISHES,
@@ -26,6 +28,7 @@ from .scryfall import (
     PRINT_PAGES,
     ScryfallClient,
     ScryfallError,
+    _Cache,
     default_printing,
     good_default,
     summarize,
@@ -43,12 +46,50 @@ MAX_SUGGESTIONS = 8
 # Recovery for names Scryfall cannot place at all (fuzzy 404, empty autocomplete):
 # retry with common OCR confusions swapped, then autocomplete on shorter prefixes.
 MAX_VARIANT_LOOKUPS = 4
-MAX_PREFIX_LOOKUPS = 5
+MAX_PREFIX_LOOKUPS = 5  # answered by the card-name catalog: no Scryfall request
+# The same walk while the catalog is not loaded costs a paced Scryfall autocomplete each. In the
+# resolver's tests every name it recovered was found by the first or second shorter prefix; the
+# rest only ever ran for names that matched nothing (whole-application audit, row 5).
+MAX_SCRYFALL_PREFIX_LOOKUPS = 2
+# A name no lookup could place is remembered this long, so asking again (a proposal retried, the
+# same list resolved twice) costs no Scryfall request at all: a full miss is about eight paced
+# lookups, four seconds at the production pace (whole-application audit, row 5). An hour, so a
+# card Scryfall adds (a new set's previews) is found the same day.
+NOT_FOUND_TTL = 3600
+# A name the batched read did not place waits this long for the card-name catalog when it has not
+# loaded yet (the first moments after a start): one request, instead of a paced walk of
+# autocompletes for each name (0.7.46 re-audit: six unknown names cost 25 requests and 12 s).
+CATALOG_WAIT_SECONDS = 8.0
 MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
+# Without the card-name catalog (its load failed), every recovery step is a paced Scryfall request
+# (0.5 s each): a misread variant's fuzzy lookup, a shorter prefix's autocomplete. A misread title
+# is placed within its first steps; a name that is no card walks them all and finds nothing. Once
+# this many names of one call walked them for nothing, the call's other names skip the walk (they
+# still get their own lookup and suggestions), so a list of unknown names costs about two requests
+# each (final audit of 0.7.46: six unknown names cost 25 requests and 12 s).
+MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG = 2
+# A name that skipped that walk is no miss to keep for NOT_FOUND_TTL (once the catalog is there it
+# may be placed), but asking Scryfall for it again on every call cost 7 requests and 3 s for the
+# same six names (re-audit of 0.7.46, 10a). So it is remembered for this long while the catalog is
+# not loaded, and forgotten as soon as the catalog loads (ScanService._missed_while_down).
+MISS_TTL_WITHOUT_CATALOG = 600
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
+# The printing picker's lookups wait this long for one of the account's places before "busy" (a
+# deck page opens several at once)
+LOOKUP_WAIT_SECONDS = 4.0
+# At most this many of one account's lookups wait for a place at once; one more is busy without
+# waiting (security review 2, R2-06)
+MAX_LOOKUP_WAITERS_PER_USER = 16
+MAX_RESOLVE_WAITERS_PER_USER = 4  # the same for resolve calls waiting their account's one turn
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
+# A second resolve call from one account waits this long for the first to finish (assistants send
+# calls in parallel, AT-38) before it is refused busy. The refusal suggests a wait (suggested_wait,
+# seconds) rather than a retry_after: the running call's end is not known (its budget bounds its
+# extra lookups, not each Scryfall answer).
+RESOLVE_WAIT_SECONDS = 15.0
+SUGGESTED_WAIT_SECONDS = 10
 MIN_PREFIX = 4
 # The card search's picker lists (sets, blocks, types): read again once they are a day old, and
 # a read that came back incomplete (Scryfall busy or down) is tried again after a minute.
@@ -125,9 +166,10 @@ _SKIP = re.compile(r"^\s*(//|#|$)|^\s*(deck|sideboard|commander|maybeboard|compa
 class ScanError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, unavailable, rate_limited, busy."""
 
-    def __init__(self, kind: str, message: str):
+    def __init__(self, kind: str, message: str, *, extra: dict[str, Any] | None = None):
         super().__init__(message)
         self.kind = kind
+        self.extra = dict(extra or {})  # fields the refusal carries (suggested_wait for busy)
 
 
 @dataclass
@@ -236,11 +278,11 @@ class Resolution:
 def parse_text(text: str) -> list[CardInput]:
     """Parse a free-text decklist (one card per line) into inputs."""
     if len(text) > MAX_TEXT:
-        raise ScanError("invalid", "text is too long")
+        raise ScanError("invalid", "text is too long.")
     out: list[CardInput] = []
     lines = text.splitlines()
     if len(lines) > MAX_LINES:
-        raise ScanError("invalid", f"at most {MAX_LINES} lines")
+        raise ScanError("invalid", f"At most {MAX_LINES} lines.")
     for raw in lines:
         line = raw.strip()
         if len(line) > MAX_LINE or _SKIP.match(line):
@@ -265,46 +307,46 @@ def parse_text(text: str) -> list[CardInput]:
 def parse_cards(raw: Any) -> list[CardInput]:
     """Validate a list of ``{name?, set?, collector_number?, quantity?}`` objects."""
     if not isinstance(raw, list):
-        raise ScanError("invalid", "cards must be a list")
+        raise ScanError("invalid", "cards must be a list.")
     if len(raw) > MAX_CARDS:
-        raise ScanError("invalid", f"at most {MAX_CARDS} cards per call")
+        raise ScanError("invalid", f"At most {MAX_CARDS} cards per call.")
     out: list[CardInput] = []
     for i, item in enumerate(raw):
         if isinstance(item, str):
             if len(item) > MAX_LINE:
-                raise ScanError("invalid", f"card {i}: line longer than {MAX_LINE} characters")
+                raise ScanError("invalid", f"Card {i}: line longer than {MAX_LINE} characters.")
             parsed = parse_text(item)
             if not parsed:
-                raise ScanError("invalid", f"card {i}: could not read '{item[:40]}'")
+                raise ScanError("invalid", f"Card {i}: could not read “{item[:40]}”.")
             out.extend(parsed)
             continue
         if not isinstance(item, dict):
-            raise ScanError("invalid", f"card {i} must be an object or a string")
+            raise ScanError("invalid", f"Card {i} must be an object or a string.")
         name = _clean_name(str(item.get("name") or item.get("card_name") or ""))
         set_code = str(item.get("set") or item.get("set_code") or "").strip().lower()
         number = _clean_number(str(item.get("collector_number") or item.get("number") or ""))
         if not name and not (set_code and number):
-            raise ScanError("invalid", f"card {i}: give a name, or a set and collector_number")
+            raise ScanError("invalid", f"Card {i}: give a name, or a set and collector_number.")
         if len(name) > 200 or len(set_code) > 6 or len(number) > 8:
-            raise ScanError("invalid", f"card {i}: field too long")
+            raise ScanError("invalid", f"Card {i}: field too long.")
         if not re.fullmatch(r"[a-z0-9]*", set_code):
-            raise ScanError("invalid", f"card {i}: set must be a set code such as cmr")
+            raise ScanError("invalid", f"Card {i}: set must be a set code such as cmr.")
         if number and not re.fullmatch(r"[A-Za-z0-9★†\-]+", number):
-            raise ScanError("invalid", f"card {i}: collector_number looks wrong")
+            raise ScanError("invalid", f"Card {i}: collector_number looks wrong.")
         qty = item.get("quantity", 1)
         if qty is None:
             qty = 1
         if not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > 999:
-            raise ScanError("invalid", f"card {i}: quantity must be an integer from 1 to 999")
+            raise ScanError("invalid", f"Card {i}: quantity must be an integer from 1 to 999.")
         foil = item.get("foil")
         if foil is not None and not isinstance(foil, bool):
-            raise ScanError("invalid", f"card {i}: foil must be true or false")
+            raise ScanError("invalid", f"Card {i}: foil must be true or false.")
         lang = str(item.get("lang") or "").strip().lower()
         if lang and not re.fullmatch(r"[a-z]{2}", lang):
-            raise ScanError("invalid", f"card {i}: lang must be a two-letter code such as en")
+            raise ScanError("invalid", f"Card {i}: lang must be a two-letter code such as en.")
         art_hash = str(item.get("art_hash") or "").strip()
         if art_hash and (len(art_hash) > 512 or not re.fullmatch(r"[A-Za-z0-9+/=_\-]+", art_hash)):
-            raise ScanError("invalid", f"card {i}: art_hash looks wrong")
+            raise ScanError("invalid", f"Card {i}: art_hash looks wrong.")
         raw_line = str(item.get("raw") or "")[:300]
         out.append(CardInput(name, set_code, number, qty, raw_line, foil=foil, lang=lang, art_hash=art_hash))
     return out
@@ -351,9 +393,11 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     When every copy of a name is one agreed printing (status ``printing``: title and collector
     line agreed, or the printing was chosen by hand) in one finish, the addition also carries
     ``set_code``, ``collector_number`` and ``foil`` so the deck tools can keep that printing.
-    Copies matched by name alone, or spread over several printings, are added by name alone.
+    Copies matched by name alone, or spread over several printings, are added by name alone; the
+    copies of those asked for in foil are a separate addition that carries ``foil``.
     """
     counts: dict[str, int] = {}
+    foils: dict[str, int] = {}
     prints: dict[str, set[tuple[str, str, bool | None]]] = {}
     by_name_only: set[str] = set()
     for it in items:
@@ -362,6 +406,8 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         name = card["name"]
         counts[name] = counts.get(name, 0) + int(it.get("quantity", 1))
+        if it.get("foil") is True:
+            foils[name] = foils.get(name, 0) + int(it.get("quantity", 1))
         if it.get("status") == "printing" and card.get("set") and card.get("collector_number"):
             foil = it.get("foil")
             prints.setdefault(name, set()).add(
@@ -372,17 +418,33 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for name, qty in counts.items():
         change: dict[str, Any] = {"action": "add", "card_name": name}
+        piles: list[tuple[dict[str, Any], int]] = []
         if name not in by_name_only and len(prints.get(name, ())) == 1:
             set_code, number, foil = next(iter(prints[name]))
             change.update({"set_code": set_code, "collector_number": number})
             if foil is not None:  # an unknown finish is not a claim of "not foil"
                 change["foil"] = foil
-        # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
-        while qty > 99:
-            out.append({**change, "quantity": 99})
-            qty -= 99
-        out.append({**change, "quantity": qty})
+            piles.append((change, qty))
+        else:
+            # a finish asked for is kept even when the printing is not: foil copies first
+            foil_qty = foils.get(name, 0)
+            if foil_qty:
+                piles.append(({**change, "foil": True}, foil_qty))
+            if qty - foil_qty:
+                piles.append((change, qty - foil_qty))
+        for pile, n in piles:
+            # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
+            while n > 99:
+                out.append({**pile, "quantity": 99})
+                n -= 99
+            out.append({**pile, "quantity": n})
     return out
+
+
+def ready_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Items ready to use: a card was found, and it is not a conflict waiting for someone to pick
+    the card. Only these go into decklist_text and changes."""
+    return [it for it in items if it.get("card") and it.get("status") != "conflict"]
 
 
 def change_fields(resolved: list[dict[str, Any]]) -> dict[str, Any]:
@@ -407,6 +469,9 @@ class _Budget:
     def __init__(self, lookups: int, deadline: float):
         self.lookups = lookups
         self.deadline = deadline
+        # what recovery (``ScanService._recover``) may still spend of ``lookups``; None: all of it
+        # (0 once MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG walks found nothing)
+        self.recovery: int | None = None
 
     @property
     def expired(self) -> bool:
@@ -416,6 +481,15 @@ class _Budget:
         if self.lookups <= 0 or self.expired:
             return False
         self.lookups -= 1
+        return True
+
+    def spend_recovery(self) -> bool:
+        if self.recovery is not None and self.recovery <= 0:
+            return False
+        if not self.spend():
+            return False
+        if self.recovery is not None:
+            self.recovery -= 1
         return True
 
 
@@ -432,12 +506,22 @@ class ScanService:
         self.db = db
         self.scryfall = scryfall
         self.call_seconds = call_seconds
-        self.names = NameCatalog(lambda: self.scryfall)
+        self.names = NameCatalog(lambda: self.scryfall, local=self._copy_names)
+        # names that resolved to nothing, by their folded spelling (NOT_FOUND_TTL)
+        self.not_found = _Cache(ttl=NOT_FOUND_TTL, max_items=2000)
+        # names that skipped the recovery walk without the catalog (MISS_TTL_WITHOUT_CATALOG)
+        self.down_misses = _Cache(ttl=MISS_TTL_WITHOUT_CATALOG, max_items=2000)
         self.t = thresholds or ScanThresholds()
         self.art_matcher = art_matcher
+        # the local copy of every printing, for when Scryfall can't answer (bulk.py); set by
+        # add_scan beside the database, None without one
+        self.copy: PrintingsCopy | None = None
         self.store = ScanStore(db)
         self._in_flight: set[str] = set()
+        self.queue_wait = RESOLVE_WAIT_SECONDS
         self._lookups: dict[str, int] = {}
+        self._lookup_waiting: dict[str, int] = {}  # an account's lookups waiting in _free_slot
+        self._resolve_waiting: dict[str, int] = {}  # an account's resolve calls waiting their turn
         # the picker lists last read (search_options), when, and the read running now
         self._options: dict[str, Any] | None = None
         self._options_error: ScanError | None = None
@@ -446,17 +530,41 @@ class ScanService:
         self._options_task: asyncio.Task[None] | None = None
 
     # -- resolution -----------------------------------------------------------
-    async def resolve(self, inputs: list[CardInput], *, owner: str | None = None) -> list[Resolution]:
+    async def resolve(
+        self, inputs: list[CardInput], *, owner: str | None = None, waited: list[float] | None = None
+    ) -> list[Resolution]:
         """Resolve ``inputs``. With ``owner`` set, one call per account runs at a time; a second
-        concurrent call is rejected (kind ``busy``) rather than queued behind the shared pacer."""
+        concurrent call waits up to ``queue_wait`` seconds for its turn (the seconds it waited go
+        on ``waited`` when it waited at all; at most MAX_RESOLVE_WAITERS_PER_USER wait at once),
+        then is rejected (kind ``busy``, with
+        suggested_wait) rather than queued behind the shared pacer."""
         if not inputs:
-            raise ScanError("invalid", "nothing to resolve")
+            raise ScanError("invalid", "Nothing to resolve.")
         if len(inputs) > MAX_RESOLVE_CARDS:
-            raise ScanError("invalid", f"at most {MAX_RESOLVE_CARDS} cards per call")
+            raise ScanError("invalid", f"At most {MAX_RESOLVE_CARDS} cards per call.")
         if owner is None:
             return await self._resolve(inputs)
+        start = time.monotonic()
+        if owner in self._in_flight and self._resolve_waiting.get(owner, 0) < MAX_RESOLVE_WAITERS_PER_USER:
+            self._resolve_waiting[owner] = self._resolve_waiting.get(owner, 0) + 1
+            try:
+                while owner in self._in_flight and time.monotonic() - start < self.queue_wait:
+                    await asyncio.sleep(0.05)
+            finally:
+                left = self._resolve_waiting.get(owner, 1) - 1
+                if left > 0:
+                    self._resolve_waiting[owner] = left
+                else:
+                    self._resolve_waiting.pop(owner, None)
         if owner in self._in_flight:
-            raise ScanError("busy", "another card lookup for your account is still running; wait for it")
+            raise ScanError(
+                "busy",
+                "Another card lookup for your account is still running after a short wait; try again "
+                "when it has finished.",
+                extra={"suggested_wait": SUGGESTED_WAIT_SECONDS},
+            )
+        if waited is not None and time.monotonic() - start >= 0.05:
+            waited.append(time.monotonic() - start)
         self._in_flight.add(owner)
         token = art_owner.set(owner)  # gallery builds this call starts count against this member
         try:
@@ -474,7 +582,7 @@ class ScanService:
             yield
             return
         if self._lookups.get(owner, 0) >= MAX_LOOKUPS_PER_USER:
-            raise ScanError("busy", "other card lookups for your account are still running; wait for them")
+            raise ScanError("busy", "Other card lookups for your account are still running; wait for them.")
         self._lookups[owner] = self._lookups.get(owner, 0) + 1
         try:
             yield
@@ -485,15 +593,40 @@ class ScanService:
             else:
                 self._lookups.pop(owner, None)
 
+    async def _free_slot(self, owner: str | None) -> None:
+        """Wait up to LOOKUP_WAIT_SECONDS for one of ``owner``'s lookup places (``_lookup_slot``
+        then takes it, with nothing awaited in between); after that, ``_lookup_slot`` says busy."""
+        if owner is None or self._lookups.get(owner, 0) < MAX_LOOKUPS_PER_USER:
+            return
+        if self._lookup_waiting.get(owner, 0) >= MAX_LOOKUP_WAITERS_PER_USER:
+            return  # enough of this account's lookups wait already: busy at once
+        end = time.monotonic() + LOOKUP_WAIT_SECONDS
+        self._lookup_waiting[owner] = self._lookup_waiting.get(owner, 0) + 1
+        try:
+            while self._lookups.get(owner, 0) >= MAX_LOOKUPS_PER_USER and time.monotonic() < end:
+                await asyncio.sleep(0.05)
+        finally:
+            left = self._lookup_waiting.get(owner, 1) - 1
+            if left > 0:
+                self._lookup_waiting[owner] = left
+            else:
+                self._lookup_waiting.pop(owner, None)
+
     async def _resolve(self, inputs: list[CardInput]) -> list[Resolution]:
         # The wall-clock budget runs from the start of the call, batched pass included.
         budget = _Budget(MAX_RECOVERY_LOOKUPS_PER_CALL, time.monotonic() + self.call_seconds)
         results: list[Resolution | None] = [None] * len(inputs)
+        # 0. A name that found nothing a short while ago finds nothing now: no lookup at all.
+        for i, inp in enumerate(inputs):
+            if (missed := self._missed(inp) or self._missed_while_down(inp)) is not None:
+                results[i] = missed
 
         # 1. One batched exact pass for everything that has a name or a printing.
         idents: list[dict[str, str]] = []
         owners: list[int] = []
         for i, inp in enumerate(inputs):
+            if results[i] is not None:
+                continue
             if inp.set_code and inp.collector_number:
                 idents.append({"set": inp.set_code, "collector_number": inp.collector_number})
             elif inp.name and inp.set_code:
@@ -503,13 +636,15 @@ class ScanService:
             owners.append(i)
         try:
             async with asyncio.timeout(max(0.0, budget.deadline - time.monotonic())):
-                found, missing = await self.scryfall.collection(idents)
+                found, missing = await self.scryfall.collection(idents, cached=True)
         except TimeoutError:
-            return [self._deferred(inp, "budget") for inp in inputs]
+            return [r or self._deferred(inp, "budget") for r, inp in zip(results, inputs, strict=True)]
         except ScryfallError as exc:
             if exc.kind == "rate_limited":
                 # Nothing has been looked up yet: hand everything back as deferred, with the wait.
-                return [self._deferred(inp, "rate_limited") for inp in inputs]
+                return [
+                    r or self._deferred(inp, "rate_limited") for r, inp in zip(results, inputs, strict=True)
+                ]
             if exc.kind == "unavailable":
                 raise ScanError(exc.kind, str(exc)) from exc
             found, missing = [], idents  # fall back to per-card lookups below
@@ -536,6 +671,13 @@ class ScanService:
                 continue
             results[i] = Resolution(inp, status, summarize(card))
 
+        # 1b. Names left to place need the card-name catalog for their suggestions and recovery: when
+        # it has not loaded yet, its one request is waited for (within the call's deadline) rather
+        # than walking paced autocompletes name by name.
+        if any(r is None and inp.name for r, inp in zip(results, inputs, strict=True)):
+            await self.names.ready(min(CATALOG_WAIT_SECONDS, max(0.0, budget.deadline - time.monotonic())))
+
+        fruitless = 0  # names whose recovery walk found nothing, without the catalog
         # 2. Everything else: fuzzy, then suggestions. Recovery lookups share one budget per call.
         # A 429 from Scryfall pauses all lookups for its Retry-After window. Names already
         # resolved keep their matches; the rest come back as "deferred" with the wait time,
@@ -552,6 +694,7 @@ class ScanService:
                 break
             if i in checks:
                 inp = CardInput(inp.name, "", "", inp.quantity, inp.raw, inp.foil, inp.lang, inp.art_hash)
+            before = budget.lookups
             try:
                 async with asyncio.timeout(max(0.0, budget.deadline - time.monotonic())):
                     res = await self._resolve_one(inp, budget)
@@ -569,6 +712,17 @@ class ScanService:
                 break
             if i in checks:
                 res = self._settle_printing(inputs[i], checks[i], res)
+            elif res.status == "not_found" and inp.name:
+                if budget.recovery != 0:
+                    self.not_found.put(_miss_key(inp), res)
+                elif not self.names.loaded:
+                    # a name that skipped the walk: kept only until the catalog is there, which
+                    # may place it (MISS_TTL_WITHOUT_CATALOG)
+                    self.down_misses.put(_miss_key(inp), res)
+                if budget.lookups < before and not self.names.loaded:
+                    fruitless += 1
+                    if fruitless >= MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG:
+                        budget.recovery = 0
             results[i] = res
         # 2b. A card matched by name stands on Scryfall's default printing, its newest, which can be
         # a preview that is not out yet or a printing that is not on paper. Swap in the newest
@@ -613,11 +767,11 @@ class ScanService:
         """
         where = f"{inp.set_code.upper()} {inp.collector_number}"
         if by_name.card and _same_card(by_name.card, printed):
-            return Resolution(inp, "printing", summarize(printed), f"title read as '{inp.name}'")
+            return Resolution(inp, "printing", summarize(printed), f"title read as “{inp.name}”")
         if by_name.card is None and _unique_completion(inp.name, by_name.completions, printed["name"]):
             # A long title cut short by the strip: no card matched the fragment, but the fragment
             # completes to exactly one card name and it is the printed card's.
-            return Resolution(inp, "printing", summarize(printed), f"title read as '{inp.name}'")
+            return Resolution(inp, "printing", summarize(printed), f"title read as “{inp.name}”")
         confident = by_name.card is not None and (
             by_name.status == "exact"
             or _similarity(inp.name, by_name.card["name"]) >= self.t.fuzzy_confident_similarity
@@ -626,7 +780,7 @@ class ScanService:
             # Not settled: the card the name matched is kept, with the printing asked for beside it,
             # until someone picks one. A conflict is never ready to use.
             assert by_name.card is not None
-            note = f"{where} is {printed['name']}, which does not match '{inp.name}'; matched by name instead"
+            note = f"{where} is {printed['name']}, which does not match “{inp.name}”; matched by name instead"
             if by_name.note:
                 note += f"; {by_name.note}"
             requested = {
@@ -645,7 +799,7 @@ class ScanService:
         return Resolution(
             inp,
             "ambiguous",
-            note=f"{where} is {printed['name']} but the title read '{inp.name}'; pick the right card",
+            note=f"{where} is {printed['name']} but the title read “{inp.name}”; pick the right card",
             suggestions=sugg[:MAX_SUGGESTIONS],
             conflict=True,
         )
@@ -726,8 +880,8 @@ class ScanService:
         else:
             n = max(1, self.scryfall.retry_in())
             note = (
-                "not looked up yet; Scryfall asked the gateway to slow down and its lookups are paused for "
-                f"{n} second{'' if n == 1 else 's'}; try again after that"
+                f"Not looked up yet. {outage('slow_down', 'Scryfall')} Its lookups wait {n} "
+                f"second{'' if n == 1 else 's'}; try again after that."
             )
         return Resolution(inp, "deferred", note=note)
 
@@ -778,7 +932,7 @@ class ScanService:
         score = _similarity(inp.name, card["name"])
         if score >= self.t.fuzzy_confident_similarity:
             # Close enough that a second lookup for alternatives would be wasted pacing time.
-            return Resolution(inp, "fuzzy", summary, f"{note}matched '{card['name']}' from '{inp.name}'")
+            return Resolution(inp, "fuzzy", summary, f"{note}matched “{card['name']}” from “{inp.name}”")
         # Scryfall's fuzzy match happily returns an unrelated card for short or
         # garbled names ("Sol Rng" gives Oathsworn Giant). Only accept it when it
         # actually resembles what was read; otherwise hand back suggestions.
@@ -797,7 +951,7 @@ class ScanService:
             return Resolution(
                 inp,
                 "ambiguous",
-                note=f"'{inp.name}' is not close enough to any card name",
+                note=f"“{inp.name}” is not close enough to any card name",
                 suggestions=sugg[:MAX_SUGGESTIONS],
                 completions=suggestions,
             )
@@ -805,7 +959,7 @@ class ScanService:
             inp,
             "fuzzy",
             summary,
-            f"{note}matched '{card['name']}' from '{inp.name}'",
+            f"{note}matched “{card['name']}” from “{inp.name}”",
             [s for s in suggestions if s != card["name"]][:MAX_SUGGESTIONS],
             completions=suggestions,
         )
@@ -819,10 +973,22 @@ class ScanService:
         a list full of garbage cannot run the gateway into Scryfall's rate limit or a timeout.
         """
         name = inp.name
-        spend = budget.spend
+        spend = budget.spend_recovery
+        # The name as read, then without a stray letter the title bar's edge put in front of it
+        # ("fSolRing", "l Sol Ring"). Every match is still guarded against the name as read.
+        bases = [name, *trimmed_starts(name)]
 
-        # 1. Common OCR confusions ("S0l Ring", "Sol Rlng", "Cultlvate", "Rarnpant Growth").
-        for variant in ocr_variants(name, MAX_VARIANT_LOOKUPS):
+        # 1. Common OCR confusions ("S0l Ring", "Sol Rlng", "Cultlvate", "Rarnpant Growth"), and the
+        #    trimmed name itself.
+        variants = ocr_variants(name, MAX_VARIANT_LOOKUPS)
+        for base in bases[1:]:
+            variants += [base, *ocr_variants(base, MAX_VARIANT_LOOKUPS)]
+        for variant in dict.fromkeys(variants):
+            # A swapped letter or digit is worth a lookup only when it makes a card's name: with the
+            # card-name catalog loaded, one it does not know is skipped (no Scryfall request). The
+            # name without a stray first letter is still asked, as a fuzzy lookup may place it.
+            if variant not in bases and self.names.known(variant) is False:
+                continue
             if not spend():
                 return None
             try:
@@ -836,21 +1002,34 @@ class ScanService:
                     inp,
                     "fuzzy",
                     summarize(card),
-                    f"{note}matched '{card['name']}' from '{name}' after correcting likely scan errors",
+                    f"{note}matched “{card['name']}” from “{name}” after correcting likely scan errors",
                 )
+        for base in bases:
+            found = await self._recover_prefix(inp, base, note, budget)
+            if found is not None:
+                return found
+        return None
+
+    async def _recover_prefix(
+        self, inp: CardInput, base: str, note: str, budget: _Budget
+    ) -> Resolution | None:
+        """[_recover]'s second step on ``base`` (the read, or the read with its start trimmed)."""
+        name = inp.name
+        spend = budget.spend_recovery
         # 2. Autocomplete on a shorter and shorter prefix ("Sol R", "Cult").
         tried: set[str] = set()
         lookups = 0
-        for cut in range(len(name) - 1, MIN_PREFIX - 1, -1):
-            prefix = name[:cut].rstrip()
+        for cut in range(len(base) - 1, MIN_PREFIX - 1, -1):
+            prefix = base[:cut].rstrip()
             if len(prefix) < MIN_PREFIX or prefix in tried:
                 continue
             tried.add(prefix)
-            if lookups >= MAX_PREFIX_LOOKUPS or not spend():
+            most = MAX_PREFIX_LOOKUPS if self.names.loaded else MAX_SCRYFALL_PREFIX_LOOKUPS
+            if lookups >= most or not spend():
                 break
             lookups += 1
             try:
-                names = await self.scryfall.autocomplete(prefix)
+                names = await self._complete(prefix)
             except ScryfallError as exc:
                 if exc.kind in ("unavailable", "rate_limited"):
                     raise ScanError(exc.kind, str(exc)) from exc
@@ -863,7 +1042,7 @@ class ScanService:
                 return Resolution(
                     inp,
                     "ambiguous",
-                    note=f"'{name}' could be any of several cards",
+                    note=f"“{name}” could be any of several cards",
                     suggestions=suggestions,
                 )
             if not spend():
@@ -878,15 +1057,49 @@ class ScanService:
                 inp,
                 "fuzzy",
                 summarize(card),
-                f"{note}matched '{card['name']}' from '{name}' by its first letters",
+                f"{note}matched “{card['name']}” from “{name}” by its first letters",
                 suggestions[1:],
             )
         return None
 
+    def _copy_names(self) -> list[str]:
+        """The printings copy's card names, for the name catalog while Scryfall can't send its own."""
+        return self.copy.card_names_now() if self.copy is not None else []
+
+    def _missed(self, inp: CardInput) -> Resolution | None:
+        """The remembered "not found" for this input's name (NOT_FOUND_TTL), as this input's."""
+        if not inp.name:
+            return None
+        kept = self.not_found.get(_miss_key(inp))
+        return replace(kept, input=inp) if kept is not None else None
+
+    def _missed_while_down(self, inp: CardInput) -> Resolution | None:
+        """The "not found" remembered for a name that skipped the recovery walk without the
+        catalog (MISS_TTL_WITHOUT_CATALOG); none at all once the catalog has loaded, when that
+        memory is dropped so the catalog can place them."""
+        if not inp.name or not len(self.down_misses):
+            return None
+        if self.names.loaded:
+            self.down_misses.clear()
+            return None
+        kept = self.down_misses.get(_miss_key(inp))
+        return replace(kept, input=inp) if kept is not None else None
+
+    async def _complete(self, text: str) -> list[str]:
+        """Card names that complete ``text`` (up to 20): from the in-memory card-name catalog
+        (names.py) when it is loaded, which costs no Scryfall request; Scryfall's autocomplete,
+        paced, while it loads. An unknown name walks several of these (_recover_prefix), so this
+        is most of what a miss used to cost."""
+        self.names.ensure()
+        local = self.names.suggest(text)
+        if local is not None:
+            return local
+        return await self.scryfall.autocomplete(text)
+
     async def _suggest(self, name: str) -> list[str]:
-        """All of Scryfall's completions (up to 20); callers shorten what they show."""
+        """All the completions (up to 20); callers shorten what they show."""
         try:
-            return await self.scryfall.autocomplete(name)
+            return await self._complete(name)
         except ScryfallError as exc:
             if exc.kind == "rate_limited":
                 raise ScanError("rate_limited", str(exc)) from exc
@@ -919,10 +1132,10 @@ class ScanService:
         """
         oid = str(oracle_id or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", oid):
-            raise ScanError("invalid", "oracle_id must be a Scryfall oracle id")
+            raise ScanError("invalid", "oracle_id must be a Scryfall oracle ID.")
         num = str(page if page not in (None, "") else 1).strip()
         if not (num.isascii() and num.isdigit()) or not 1 <= int(num) <= PRINT_PAGES:
-            raise ScanError("invalid", f"page must be a whole number from 1 to {PRINT_PAGES}")
+            raise ScanError("invalid", f"page must be a whole number from 1 to {PRINT_PAGES}.")
         picks: dict[str, str | None] = {}
         for key, value, allowed in (
             ("finish", finish, PRINT_FINISHES),
@@ -932,18 +1145,27 @@ class ScanService:
         ):
             v = str(value or "").strip().lower() or None
             if v is not None and v not in allowed:
-                raise ScanError("invalid", f"{key} must be one of: {', '.join(allowed)}")
+                raise ScanError("invalid", f"{key} must be one of: {', '.join(allowed)}.")
             picks[key] = v
         sort = picks.pop("order") or "newest"
         code = str(set_code or "").strip().lower()
         cn = str(number or "").strip()
         if code or cn:
             if not (_PRINT_SET.fullmatch(code) and _PRINT_NUMBER.fullmatch(cn)) or num != "1":
-                raise ScanError("invalid", "set and number must name one printing, on page 1")
+                raise ScanError("invalid", "Set and number must name one printing, on page 1.")
             picks.update(set_code=code, number=cn)
+        await self._free_slot(owner)
         try:
             with self._lookup_slot(owner):
-                out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
+                try:
+                    out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
+                except ScryfallError as exc:
+                    # Scryfall can't be reached, is slowing the gateway down or answered 5xx: the
+                    # local copy answers, saying how old it is (as_of, from_local_copy)
+                    kept = await self._from_copy(exc, oid, page=int(num), order=sort, **picks)
+                    if kept is None:
+                        raise
+                    out = kept
                 if sort != "newest":
                     return out
                 return {**out, "cards": sorted(out["cards"], key=lambda c: not good_default(c))}
@@ -951,6 +1173,53 @@ class ScanService:
             if exc.kind in ("unavailable", "rate_limited", "not_found"):
                 raise ScanError(exc.kind, str(exc)) from exc
             raise ScanError("unavailable", str(exc)) from exc
+
+    async def _from_copy(self, exc: ScryfallError, oracle_id: str, **kw: Any) -> dict[str, Any] | None:
+        """The printings page from the local copy (bulk.py) when ``exc`` says Scryfall can't
+        answer now; None when it said something else (no such card), or the copy has no answer."""
+        if self.copy is None or exc.kind not in ("unavailable", "rate_limited"):
+            return None
+        try:
+            return await self.copy.prints(oracle_id, **kw)
+        except Exception:  # noqa: BLE001 - a copy that can't be read: Scryfall's own answer stands
+            logger.warning("the local copy of Scryfall's printings could not be read", exc_info=True)
+            return None
+
+    async def oracle_from_copy(self, name: str) -> tuple[str, str] | None:
+        """The oracle id and full name of the card called ``name`` from the local copy, for when
+        Scryfall can't place a name now; None without a copy or such a card."""
+        if self.copy is None:
+            return None
+        try:
+            return await self.copy.oracle_of(name)
+        except Exception:  # noqa: BLE001
+            logger.warning("the local copy of Scryfall's printings could not be read", exc_info=True)
+            return None
+
+    async def printing(self, set_code: str, number: str, *, owner: str | None = None) -> dict[str, Any]:
+        """One printing by set code and collector number, as a card summary: how the printing
+        picker finds a deck row's own card (a token named "Goblin" is that token, never a card
+        whose name starts the same). ``not_found`` when Scryfall has no such printing."""
+        code = str(set_code or "").strip().lower()
+        cn = str(number or "").strip()
+        if not (_PRINT_SET.fullmatch(code) and _PRINT_NUMBER.fullmatch(cn)):
+            raise ScanError("invalid", "Set and number must name one printing.")
+        key = f"print:{code}:{cn.lower()}"
+        if (hit := self.scryfall.cards.get(key)) is not None:
+            return hit
+        await self._free_slot(owner)
+        try:
+            with self._lookup_slot(owner):
+                found, _ = await self.scryfall.collection([{"set": code, "collector_number": cn}])
+        except ScryfallError as exc:
+            if exc.kind in ("unavailable", "rate_limited"):
+                raise ScanError(exc.kind, str(exc)) from exc
+            raise ScanError("unavailable", str(exc)) from exc
+        if not found:
+            raise ScanError("not_found", f"Scryfall has no printing {code.upper()} {cn}.")
+        summary = summarize(found[0])
+        self.scryfall.cards.put(key, summary)
+        return summary
 
     async def named_raw(self, name: str, *, owner: str | None = None) -> dict[str, Any]:
         """The whole Scryfall object of one card by exact name (rules text included), through the
@@ -1089,12 +1358,14 @@ class ScanService:
         if self._options is None and self._options_task is not None:
             await asyncio.shield(self._options_task)
         if self._options is None:
-            raise self._options_error or ScanError("unavailable", "Scryfall's lists could not be read")
+            raise self._options_error or ScanError("unavailable", "Scryfall's lists could not be read.")
         return self._options
 
     def close(self) -> None:
         """Cancel the background reads still running (called when the gateway shuts down)."""
         self.names.close()
+        if self.copy is not None:
+            self.copy.close()
         if self._options_task is not None and not self._options_task.done():
             self._options_task.cancel()
         self._options_task = None
@@ -1104,7 +1375,7 @@ class ScanService:
             await self._read_search_options_now()
         except Exception as exc:  # any other failure: keep the lists from earlier, try again later
             logger.warning("card search lists not read (%s)", exc)
-            self._options_error = ScanError("unavailable", "Scryfall's lists could not be read")
+            self._options_error = ScanError("unavailable", "Scryfall's lists could not be read.")
 
     async def _read_search_options_now(self) -> None:
         partial = False
@@ -1147,7 +1418,7 @@ class ScanService:
             counts[r.status] = counts.get(r.status, 0) + 1
         # A conflict keeps the card its name matched, for review, but is not ready to use: it stays
         # out of the counts, the decklist and the changes until someone picks the card.
-        resolved = [it for it in items if it["card"] and it["status"] != "conflict"]
+        resolved = ready_items(items)
         deferred = counts.get("deferred", 0)
         conflicts = counts.get("conflict", 0)
         out = {
@@ -1167,7 +1438,7 @@ class ScanService:
         if conflicts:
             out["conflicts"] = conflicts
             out["conflicts_note"] = (
-                f"{conflicts} of {len(results)} cards name a printing that is a different card. They are "
+                f"{conflicts} of {len(results)} lines name a printing that is a different card. They are "
                 "left out of decklist_text and changes until the user says which card they mean."
             )
         if deferred:
@@ -1177,8 +1448,8 @@ class ScanService:
             head = f"{deferred} of {len(results)} names were not looked up"
             if n:
                 out["message"] = (
-                    f"{head}: Scryfall asked us to wait. Keep the resolved cards and resolve the "
-                    f"deferred names again in about {n} s."
+                    f"{head}. {outage('slow_down', 'Scryfall')} Keep the resolved cards and resolve "
+                    f"the deferred names again in about {n} s."
                 )
             else:
                 out["message"] = (
@@ -1213,14 +1484,14 @@ class ScanService:
     def update_session(self, sub: str, sid: str, **fields: Any) -> dict[str, Any]:
         row = self.store.get(sid, sub)
         if not row:
-            raise ScanError("not_found", "no such scan session for your account")
+            raise ScanError("not_found", "No such scan session for your account.")
         if "name" in fields and fields["name"] is not None:
             row["name"] = _clean_session_name(str(fields["name"]))
         if "items" in fields and fields["items"] is not None:
             row["items"] = _clean_items(fields["items"])
         if "status" in fields and fields["status"] is not None:
             if fields["status"] not in ("open", "done"):
-                raise ScanError("invalid", "status must be open or done")
+                raise ScanError("invalid", "Status must be open or done.")
             row["status"] = fields["status"]
         row["updated_at"] = int(time.time())
         self.store.save(row)
@@ -1228,13 +1499,13 @@ class ScanService:
 
     def delete_session(self, sub: str, sid: str) -> None:
         if not self.store.delete(sid, sub):
-            raise ScanError("not_found", "no such scan session for your account")
+            raise ScanError("not_found", "No such scan session for your account.")
         self.db.audit("scan_session_deleted", sub=sub, detail={"id": sid})
 
     def get_session(self, sub: str, sid: str) -> dict[str, Any]:
         row = self.store.get(sid, sub)
         if not row:
-            raise ScanError("not_found", "no such scan session for your account")
+            raise ScanError("not_found", "No such scan session for your account.")
         return self.describe_session(row)
 
     def find_session(self, sub: str, ref: str) -> dict[str, Any]:
@@ -1247,7 +1518,7 @@ class ScanService:
                     row = self.store.get(r["id"], sub)
                     break
         if row is None:
-            raise ScanError("not_found", f"no scan session named or numbered '{ref[:40]}' for your account")
+            raise ScanError("not_found", f"No scan session named or numbered “{ref[:40]}” for your account.")
         return self.describe_session(row)
 
     def list_sessions(self, sub: str) -> list[dict[str, Any]]:
@@ -1278,6 +1549,20 @@ class ScanService:
             out[name] = found
         return out
 
+    async def did_you_mean(self, names: list[str]) -> dict[str, str]:
+        """For names that are no card, the card Scryfall's fuzzy match takes each for: one paced
+        lookup per name, at most ``MAX_CARD_CHECK_LOOKUPS``; a name with no match is left out."""
+        out: dict[str, str] = {}
+        for name in names[:MAX_CARD_CHECK_LOOKUPS]:
+            try:
+                card = await self.scryfall.named(name, fuzzy=True)
+            except ScryfallError:
+                continue
+            found = str(card.get("name") or "")
+            if found and found.casefold() != name.casefold():
+                out[name] = found
+        return out
+
     def guessed_names(self, sub: str) -> dict[str, str]:
         """Card names this member's scans matched from a misread name: matched name (lower case)
         -> what was read. A proposal adding one of these cards says the name was guessed."""
@@ -1294,7 +1579,8 @@ class ScanService:
     @staticmethod
     def describe_session(row: dict[str, Any]) -> dict[str, Any]:
         items = row["items"]
-        resolved = [it for it in items if it.get("card")]
+        found = [it for it in items if it.get("card")]
+        resolved = ready_items(items)
         return {
             "id": row["id"],
             "name": row["name"],
@@ -1304,9 +1590,9 @@ class ScanService:
             "updated_at": row["updated_at"],
             "item_count": len(items),
             "card_count": sum(int(it.get("quantity", 1)) for it in items),
-            "unresolved": len(items) - len(resolved),
+            "unresolved": len(items) - len(found),
             "items": items,
-            "decklist_text": decklist_text(items),
+            "decklist_text": decklist_text(resolved),
             **change_fields(resolved),
         }
 
@@ -1352,6 +1638,11 @@ _DIGITS_TO_I = str.maketrans({"0": "o", "1": "i", "5": "s", "8": "B"})
 _SWAPS = (("l", "i"), ("i", "l"), ("I", "l"), ("rn", "m"), ("m", "rn"))
 
 
+def _miss_key(inp: CardInput) -> str:
+    """The not-found memory's key: the name as matching folds it, with any set and number."""
+    return f"{fold(inp.name)}|{inp.set_code.lower()}|{inp.collector_number.lower()}"
+
+
 def ocr_variants(name: str, limit: int) -> list[str]:
     """Up to ``limit`` plausible corrections of ``name``: digits folded to letters, then single swaps."""
     out: list[str] = []
@@ -1369,6 +1660,20 @@ def ocr_variants(name: str, limit: int) -> list[str]:
             add(folded[:pos] + b + folded[pos + len(a) :])
             start = pos + 1
     return out
+
+
+def trimmed_starts(name: str) -> list[str]:
+    """``name`` without what the title bar's left edge adds in front of a printed name: a lone
+    lower-case letter ("l Sol Ring"), a lower-case first letter ("fSolRing"; printed names start
+    with a capital or a digit) or an I, l or 1 glued to a capital ("ISolRing"). Empty when the name
+    starts as a printed name can ("A Little Chat", "I Know All, I See All", "Island")."""
+    out: list[str] = []
+    first, _, rest = name.partition(" ")
+    if len(first) == 1 and first.islower() and rest.strip():
+        out.append(rest.strip())
+    if len(name) > 2 and (name[0].islower() or (name[0] in "Il1" and name[1].isupper())):
+        out.append(name[1:].lstrip())
+    return [v for v in dict.fromkeys(out) if len(_norm(v)) >= MIN_PREFIX]
 
 
 def _rank_candidates(name: str, names: list[str], min_similarity: float) -> list[tuple[float, str]]:
@@ -1456,21 +1761,21 @@ _ITEM_CARD_KEYS = (
 
 def _clean_items(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
-        raise ScanError("invalid", "items must be a list")
+        raise ScanError("invalid", "Items must be a list.")
     if len(raw) > MAX_CARDS:
-        raise ScanError("invalid", f"at most {MAX_CARDS} items per session")
+        raise ScanError("invalid", f"At most {MAX_CARDS} items per session.")
     out: list[dict[str, Any]] = []
     for i, it in enumerate(raw):
         if not isinstance(it, dict):
-            raise ScanError("invalid", f"item {i} must be an object")
+            raise ScanError("invalid", f"Item {i} must be an object.")
         qty = it.get("quantity", 1)
         if not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > 999:
-            raise ScanError("invalid", f"item {i}: quantity must be an integer from 1 to 999")
+            raise ScanError("invalid", f"Item {i}: quantity must be an integer from 1 to 999.")
         card = it.get("card")
         clean_card = None
         if card is not None:
             if not isinstance(card, dict) or not isinstance(card.get("name"), str):
-                raise ScanError("invalid", f"item {i}: card must be an object with a name")
+                raise ScanError("invalid", f"Item {i}: card must be an object with a name.")
             clean_card = {}
             for k in _ITEM_CARD_KEYS:
                 v = card.get(k)
@@ -1500,5 +1805,5 @@ def _clean_items(raw: Any) -> list[dict[str, Any]]:
             clean["foil"] = it["foil"]
         out.append(clean)
     if len(json.dumps(out, separators=(",", ":"))) > MAX_SESSION_BYTES:
-        raise ScanError("invalid", f"this scan session is too large (over {MAX_SESSION_BYTES // 1000} KB)")
+        raise ScanError("invalid", f"This scan session is too large (over {MAX_SESSION_BYTES // 1000} KB).")
     return out

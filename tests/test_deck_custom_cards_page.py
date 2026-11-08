@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+from mtg_gateway import decks as decks_mod
+
 from .conftest import Stack, stack_with
 from .test_approval_modes import SHIPPED
 from .test_browse_collection import api, linked
@@ -65,6 +67,33 @@ async def test_custom_cards_are_drawn_in_their_stacks_marked_custom(stack: Stack
         # the picture views draw them too
         page_s = (await b.http.get("/decks/42?view=stacks")).text
         assert page_s.count("class='c custom'") == 2
+    finally:
+        await b.aclose()
+
+
+async def test_a_custom_card_count_costs_a_read_a_write_and_the_read_back(stack: Stack, monkeypatch) -> None:
+    """Review F1: as the deck page's other quick edits, one read (the proposal's, also the apply's
+    snapshot and its check before the write), the write and the read back the page draws from."""
+    # a busy test machine may take longer than ONE_CLICK_REUSE between the read and the write
+    # (the save then reads again, as it should); the window itself is tested on its own
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 60.0)
+    ark = stack.ark
+    _seed(ark)
+    _in_deck(ark, (3101, 44, "Old Ranger", None))
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")
+        ark.calls.clear()
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/custom_cards",
+            {"changes": [{"action": "set_quantity", "custom_card_id": 44, "quantity": 4}]},
+            csrf=csrf,
+        )
+        assert r.status_code == 201 and r.json()["applied"] is True, r.text
+        assert r.json()["custom_rows"][0]["qty"] == 4
+        assert [m for m, _p in ark.calls] == ["GET", "PATCH", "GET"], ark.calls
     finally:
         await b.aclose()
 

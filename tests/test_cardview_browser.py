@@ -13,6 +13,7 @@ import pytest
 
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import expect, settled
 
 pytest.importorskip("playwright")
 
@@ -56,7 +57,7 @@ def test_viewer_draws_symbols_and_fits(server: Server, width: int) -> None:
         target.scroll_into_view_if_needed()
         target.click()
         page.wait_for_selector(".cardview.open", timeout=3000)
-        page.wait_for_timeout(250)
+        settled(page)
         state = page.evaluate(
             "() => { const v = document.querySelector('.cardview'); const b = v.querySelector('.box');"
             " return {dialog: v.getAttribute('role'), modal: v.getAttribute('aria-modal'),"
@@ -74,7 +75,7 @@ def test_viewer_draws_symbols_and_fits(server: Server, width: int) -> None:
         assert "close" in state["focused"]
         assert state["title"]
         page.keyboard.press("Escape")
-        page.wait_for_timeout(200)
+        expect(page.locator(".cardview.open")).to_have_count(0)
         assert page.locator(".cardview.open").count() == 0
         assert errors == []
         browser.close()
@@ -102,7 +103,7 @@ def test_the_viewers_buttons_follow_its_text(server: Server, width: int) -> None
         page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
         page.locator(".deckview .c[data-card='Sol Ring']").first.click()
         page.wait_for_selector(".cardview.open", timeout=3000)
-        page.wait_for_timeout(250)
+        settled(page)
         gap = page.evaluate(
             "() => { const info = document.querySelector('.cardview .info');"
             " const acts = info.querySelector('.acts'); let bottom = -1e9;"
