@@ -1394,7 +1394,8 @@ CSS += """
 /* the S / M / L switch, styled as card search's Grid / List switch */
 .sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
   overflow:hidden;vertical-align:middle}
-.sizeseg button{margin:0;min-width:2.75rem;min-height:calc(var(--ctl) - 2px);height:auto;padding:0 .75rem;
+/* .3em above and below, as a text box: at 200% text the letters grew to the box's edges (polish AL2) */
+.sizeseg button{margin:0;min-width:2.75rem;min-height:calc(var(--ctl) - 2px);height:auto;padding:.3em .75rem;
   border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-weight:400;
     box-shadow:none}
 .sizeseg button + button{border-left:1px solid var(--control-border)}
@@ -2501,13 +2502,14 @@ SEARCH_PANEL_CSS = """
   .spanel .tog{gap:.3rem;padding:.25rem .45rem .25rem .3rem} }
 /* a pick-several filter: a drop-down that opens a checkbox list and shows what is picked */
 .spanel .pickm{position:relative}
-.spanel .pickm-btn{display:flex;align-items:center;gap:.4rem;width:100%;height:var(--ctl);padding:0
-  .6rem 0 1rem;
+/* it grows with its text from 44 px, as a drop-down does (polish AL2: it stayed 44 px at 200%) */
+.spanel .pickm-btn{display:flex;align-items:center;gap:.4rem;width:100%;height:auto;min-height:var(--ctl);
+  padding:.3em .6rem .3em 1rem;
   border:1px solid var(--control-border);border-radius:var(--radius);background:var(--surface);
     color:var(--text);
   cursor:pointer;list-style:none;font-weight:400;box-sizing:border-box}
 .spanel .pickm-btn::-webkit-details-marker{display:none}
-.spanel .pickm-btn .v{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spanel .pickm-btn .v{flex:1 1 auto;min-width:0;overflow-wrap:break-word}  /* what is picked, whole */
 /* its arrow in the orange of every drop-down's arrow (chevron.svg) */
 .spanel .pickm-btn svg{transition:transform .15s;color:var(--orange)}
 .spanel .pickm[open] > .pickm-btn{border-color:var(--orange)}
@@ -2639,7 +2641,9 @@ SEARCH_PANEL_CSS = """
   .spanel .sheet-size{display:block;margin:14px 0 0}
   .spanel .sheet-size .cardsize{display:flex;flex-direction:column;align-items:flex-start;gap:.35rem}
   .spanel .sheet-size .cardsize .lbl{font-weight:700}
-  .spanel .sp-sheet-foot{display:flex;gap:.5rem;position:fixed;left:0;right:0;bottom:0;z-index:3;
+  /* the two buttons share a row while they fit, and go one a row when they don't (200% text) */
+  .spanel .sp-sheet-foot{display:flex;flex-wrap:wrap;gap:.5rem;position:fixed;left:0;right:0;bottom:0;
+    z-index:3;
     background:var(--bg);
     border-top:1px solid var(--border);padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}
   /* the foot's buttons are phone tap targets: 44 px, not 2.9rem (40.6 px) */

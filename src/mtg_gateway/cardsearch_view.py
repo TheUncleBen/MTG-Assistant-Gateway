@@ -52,8 +52,10 @@ CARDS_CSS = """
 .spanel .fmtrow{--gw:30em}
 .spanel .fmtrow .body{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
 .spanel .fmtrow .rows{flex:1 1 280px;min-width:0}
-.spanel .fmtrow .add-row{flex:none;margin:0;display:inline-flex;align-items:center;gap:.3rem;
-  height:var(--ctl)}
+/* Add a format: as wide as its words up to the column, then they wrap; it grows with them from
+   44 px (polish AL1: 309 px wide in a 256 px column at 200% text, its end cut off) */
+.spanel .fmtrow .add-row{flex:0 1 auto;max-width:100%;margin:0;display:inline-flex;align-items:center;
+  gap:.3rem;height:auto;min-height:var(--ctl);padding:.3em 1rem;text-align:left}
 .spanel .fmtrow .row2{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto}
 .spanel .fgrid > .cs-pick{--gw:15.714em}
 .spanel .fgrid > .fg.mv{--gw:12em}
