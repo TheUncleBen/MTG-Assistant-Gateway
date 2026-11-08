@@ -15,7 +15,9 @@ from .test_suggest_browser import Server
 pytest.importorskip("playwright")
 
 PAGES = ["/cards?q=s", "/search?name=a", "/precons", "/decks", "/collection"]
-_SID: dict[int, str] = {}
+# the seeded session of the module's server: the server is kept with it, so its id can't be
+# reused by a later module's server (a stale session showed the sign-in page: CI's /precons skip)
+_SID: dict[int, tuple[Server, str]] = {}
 
 ZOOM = """(zoom) => {
   const html = document.documentElement;
@@ -58,11 +60,13 @@ def test_the_filters_sheet_holds_its_controls_at_200_percent_text(
     path: str,
     zoom: str,
 ) -> None:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
     from playwright.sync_api import sync_playwright
 
-    if id(server) not in _SID:
-        _SID[id(server)] = _seed(server)[0]
-    sid = _SID[id(server)]
+    held = _SID.get(id(server))
+    if held is None or held[0] is not server:
+        held = _SID[id(server)] = (server, _seed(server)[0])
+    sid = held[1]
     exe = _chromium()
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
@@ -74,9 +78,13 @@ def test_the_filters_sheet_holds_its_controls_at_200_percent_text(
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(server.base + path, wait_until="networkidle")
         opener = page.locator(".spanel .sp-open")
-        if not opener.count() or not opener.first.is_visible():
-            browser.close()
-            pytest.skip(f"{path} shows no Filters button at 320 px")
+        # every page here has a Filters button at 320 px: wait for it, never skip (CI ran
+        # /precons before its button showed and counted the skip as a failure)
+        try:
+            opener.first.wait_for(state="visible", timeout=10_000)
+        except PlaywrightTimeout:
+            head = page.locator("h1").first.inner_text() if page.locator("h1").count() else "(no heading)"
+            pytest.fail(f"{path} (“{head}”) shows no Filters button at 320 px after 10 s")
         opener.first.click()
         page.locator("#sp-filters.open").wait_for(timeout=3000)
         page.evaluate(ZOOM, zoom)
