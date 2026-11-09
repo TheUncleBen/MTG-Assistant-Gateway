@@ -70,14 +70,9 @@ window.addEventListener("message", (ev) => {
   } else if (m.method === "ui/notifications/initialized") {
     send({jsonrpc: "2.0", method: "ui/notifications/tool-result", params: window.toolResult});
   } else if (m.method === "tools/call" && m.params.name === "get_proposal") {
-    let sc = window.getReply === null ? (window.toolResult || {}).structuredContent : window.getReply;
-    // a reply's "__meta" is the read's _meta (the card number, a code), not structured content
-    const meta = (sc && sc.__meta) || {};
-    if (sc && sc.__meta) { sc = Object.assign({}, sc); delete sc.__meta; }
-    if (sc === "refuse") send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
-    else send({jsonrpc: "2.0", id: m.id,
-               result: {content: [{type: "text", text: JSON.stringify(sc)}], structuredContent: sc,
-                        _meta: meta}});
+    // "hold": the host keeps the read unanswered until the test calls answerHeld(reply)
+    if (window.getReply === "hold") { window.held.push(m); return; }
+    answerGet(m, window.getReply);
   } else if (m.method === "tools/call") {
     const sc = window.confirmReply;
     const text = JSON.stringify(sc);
@@ -90,6 +85,20 @@ window.addEventListener("message", (ev) => {
     send({jsonrpc: "2.0", id: m.id, error: {code: -32601, message: "nope"}});
   }
 });
+window.held = [];
+function answerGet(m, reply) {
+  const send = (x) => frame.contentWindow.postMessage(x, "*");
+  let sc = reply === null ? (window.toolResult || {}).structuredContent : reply;
+  // a reply's "__meta" is the read's _meta (the card number, a code), not structured content
+  const meta = (sc && sc.__meta) || {};
+  if (sc && sc.__meta) { sc = Object.assign({}, sc); delete sc.__meta; }
+  if (sc === "refuse") send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
+  else send({jsonrpc: "2.0", id: m.id,
+             result: {content: [{type: "text", text: JSON.stringify(sc)}], structuredContent: sc,
+                      _meta: meta}});
+}
+window.answerHeld = (reply) => {
+  const h = window.held; window.held = []; h.forEach((m) => answerGet(m, reply)); };
 // A request the host makes of the card; the card must answer it.
 window.teardown = () => { frame.contentWindow.postMessage(
   {jsonrpc: "2.0", id: 999, method: "ui/resource-teardown", params: {reason: "test"}}, "*"); };
@@ -103,11 +112,15 @@ def _open(
     get_reply: dict | None = None,
     *,
     arm_ms: int | None = None,
+    check_ms: int | None = None,
     host_caps: dict | None = None,
     openai: bool = False,
 ):
     """The card in the host page. ``arm_ms``: a longer arming delay than the card's 700 ms, for a
     test that reads the disabled buttons, so a loaded machine cannot run past it first.
+    ``check_ms``: how long a card drawn waiting waits for its first read before drawing itself
+    whole anyway (the card's own is 4 s). ``get_reply="hold"``: the host answers no read until the
+    test calls ``window.answerHeld(reply)``.
     ``host_caps``: the host's capabilities instead of the default ones. ``openai``: the card's
     window also has ChatGPT's ``window.openai.sendFollowUpMessage``, which logs its call."""
     html = card_html()
@@ -117,6 +130,9 @@ def _open(
             '{jsonrpc: "2.0", method: "openai/sendFollowUpMessage", params: a}, "*"); }};</script>'
         )
         html = html.replace("<head>", "<head>" + stub, 1)
+    if check_ms is not None:
+        assert "var CHECK_WAIT_MS = 4000;" in html
+        html = html.replace("var CHECK_WAIT_MS = 4000;", f"var CHECK_WAIT_MS = {check_ms};")
     if arm_ms is not None:
         assert "var ARM_DELAY_MS = 700;" in html
         html = html.replace("var ARM_DELAY_MS = 700;", f"var ARM_DELAY_MS = {arm_ms};")
