@@ -35,23 +35,23 @@ KEEPALIVE = float(os.environ.get("PUSH_TEST_KEEPALIVE", "5"))
 STATIC = os.environ.get("PUSH_TEST_STATIC", "")
 # The App rows of the gateway's Account page (account_hub.py), as the app's buttons
 PAGE = (
-    "<!doctype html><meta name='viewport' content='width=device-width'><title>Test gateway</title>"
-    "<style>button{display:block;font-size:20px;margin:16px;padding:12px}[hidden]{display:none}</style>"
-    "<p>Test gateway.</p>"
-    "<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
-    "<button type='button' data-native='reload'>Reload</button>"
-    "<button type='button' data-native='changeGateway'>Change gateway</button>"
-    "<script src='/static/feedback.js'></script>"
+    b"<!doctype html><meta name='viewport' content='width=device-width'><title>Test gateway</title>"
+    b"<style>button{display:block;font-size:20px;margin:16px;padding:12px}[hidden]{display:none}</style>"
+    b"<p>Test gateway.</p>"
+    b"<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
+    b"<button type='button' data-native='reload'>Reload</button>"
+    b"<button type='button' data-native='changeGateway'>Change gateway</button>"
+    b"<script src='/static/feedback.js'></script>"
     # Reports what it shows, and clicks a button when the test asks (POST /control/press)
-    "<script>(function(){"
-    "function shown(){return Array.prototype.filter.call(document.querySelectorAll('[data-native]'),"
-    "function(b){return !b.hidden;}).map(function(b){return b.getAttribute('data-native');}).join(',');}"
-    "setTimeout(function(){fetch('/control/seen?bridge='+(window.MtgNative?1:0)+'&shown='+shown());},500);"
-    "setInterval(function(){fetch('/control/press').then(function(r){return r.json();}).then(function(j){"
-    "var b=j.name&&document.querySelector('[data-native=\"'+j.name+'\"]');if(b)b.click();})"
-    ".catch(function(){});},500);"
-    "})();</script>"
-).encode()
+    b"<script>(function(){"
+    b"function shown(){return Array.prototype.filter.call(document.querySelectorAll('[data-native]'),"
+    b"function(b){return !b.hidden;}).map(function(b){return b.getAttribute('data-native');}).join(',');}"
+    b"setTimeout(function(){fetch('/control/seen?bridge='+(window.MtgNative?1:0)+'&shown='+shown());},500);"
+    b"setInterval(function(){fetch('/control/press').then(function(r){return r.json();}).then(function(j){"
+    b"var b=j.name&&document.querySelector('[data-native=\"'+j.name+'\"]');if(b)b.click();})"
+    b".catch(function(){});},500);"
+    b"})();</script>"
+)
 
 lock = threading.Lock()
 streams: list[queue.Queue] = []

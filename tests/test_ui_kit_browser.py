@@ -485,7 +485,10 @@ PHONE_FIT_JS = """
   const r = document.createRange(); r.selectNodeContents(h);
   const lines = new Set([...r.getClientRects()].map(x => Math.round(x.top))).size;
   const grid = document.querySelector('.ui-widgets');
-  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+  // tiles on the first line (the row wraps as flex: 0.7.47)
+  const tops = [...grid.children].filter(c => c.getClientRects().length)
+    .map(c => Math.round(c.getBoundingClientRect().top));
+  const cols = tops.filter(t => t === tops[0]).length;
   const clipped = [...grid.querySelectorAll('.wdg .lab, .wdg .big, .wdg .det')]
     .filter(e => e.getClientRects().length)
     .filter(e => { const edge = e.closest('.wdg').getBoundingClientRect().right + .5;

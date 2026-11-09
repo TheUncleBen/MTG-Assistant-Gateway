@@ -2785,10 +2785,19 @@
     toolbar.classList.add("compact");
     // the one "hold a card to move it" line, above the cards, on a touch phone: for a member's first
     // three deck pages only, then it has said its piece (0.7.47 polish: a permanent hint is noise)
-    var hintSeen = 0;
-    try { hintSeen = parseInt(localStorage.getItem("mtg.movehint.seen") || "0", 10) || 0; } catch (e) { hintSeen = 0; }
-    if (canDrag && touch && narrow() && hintSeen < 3) {
-      try { localStorage.setItem("mtg.movehint.seen", String(hintSeen + 1)); } catch (e) { /* private mode */ }
+    // (counted once a browser session, so the page keeps its shape on Back within one)
+    var hintSeen = 0, hintNow = false;
+    try {
+      hintNow = sessionStorage.getItem("mtg.movehint.now") === "1";
+      hintSeen = parseInt(localStorage.getItem("mtg.movehint.seen") || "0", 10) || 0;
+    } catch (e) { hintSeen = 0; }
+    if (canDrag && touch && narrow() && (hintNow || hintSeen < 3)) {
+      try {
+        if (!hintNow) {
+          localStorage.setItem("mtg.movehint.seen", String(hintSeen + 1));
+          sessionStorage.setItem("mtg.movehint.now", "1");
+        }
+      } catch (e) { /* private mode */ }
       var hint = el("p", "movehint", "Hold a card to move it to another category.");
       cards.parentNode.insertBefore(hint, cards);
       cards.setAttribute("data-hint-top", "");

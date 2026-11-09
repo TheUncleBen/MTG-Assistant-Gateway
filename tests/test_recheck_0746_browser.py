@@ -79,6 +79,8 @@ def test_the_like_counts_ink_sits_on_the_hearts_centre_on_a_phone(
 
     exe = _chromium()
     sid, _pending = _seed(server)
+    # someone else liked the deck: a count to measure (0.7.47: a zero is not shown)
+    server.ark.votes[("someone-else", 300042)] = 1
     with sync_playwright() as p:
         browser, page, errors = _hires(p, server, sid, width, theme, exe, 3)
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
@@ -494,7 +496,8 @@ def test_the_binders_unknown_prices_say_so_in_words(
     theme: str,
 ) -> None:
     """The audit's N7: the Value tile and the list's price column showed a bare "–" for a price
-    nobody knows, while the deck banner says "unknown". The same word, muted, at 4.5:1."""
+    nobody knows. The Value tile says "unknown", muted, at 4.5:1; the rows leave it out rather
+    than repeat it (0.7.47 polish)."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -511,8 +514,7 @@ def test_the_binders_unknown_prices_say_so_in_words(
         assert dashes == [], dashes
         value = page.locator(".wdg", has_text="Value").locator(".big .unpriced")
         assert value.inner_text() == "unknown"
-        prices = page.locator(".ui-table .prc .unpriced")
-        assert prices.count() >= 1 and prices.first.evaluate("e => e.textContent.trim()") == "unknown"
-        assert page.evaluate(CONTRAST, ".wdg .big .unpriced, .ui-table .prc .unpriced") == []
+        assert page.locator(".ui-table .prc .unpriced").count() == 0
+        assert page.evaluate(CONTRAST, ".wdg .big .unpriced") == []
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()

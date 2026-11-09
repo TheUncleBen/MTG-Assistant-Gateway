@@ -380,7 +380,7 @@ async def test_settings_opens_with_the_heading_purpose_and_tab_bar_in_the_wide_c
         groups = text.index("<nav class='ui-chips set-nav'")
         assert h1 < purpose < nav < groups
         assert "<main class='wrap ui-wide'" in text
-        assert ".set-page{max-width:52rem}" in text
+        assert ".set-page{max-width:52rem;margin-left:auto;margin-right:auto}" in text
         assert ".adm-nav{max-width:52rem}" not in text
         assert (
             "Changed here by" not in text

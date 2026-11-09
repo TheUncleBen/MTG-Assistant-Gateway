@@ -119,7 +119,9 @@ def test_a_price_nobody_knows_reads_the_same_way_everywhere(
 ) -> None:
     """N3 (and the audit's N7): the Binder said "unknown" in bold, the loudest text on its row,
     the Watchlist's change cells a bare "–", and the banner's word took its <b>'s weight. One
-    treatment: the word, muted, normal weight, never larger than the text around it, 4.5:1."""
+    treatment: the word, muted, normal weight, never larger than the text around it, 4.5:1.
+    0.7.47 polish: said once, in a summary (the Binder's Value tile); a row, a change period or the
+    deck banner leaves a price nobody knows out instead of repeating "unknown"."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -135,8 +137,7 @@ def test_a_price_nobody_knows_reads_the_same_way_everywhere(
         big = page.locator(".wdg", has_text="Value").locator(".big")
         big_size = big.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
         _one_treatment(page, ".wdg .big .unpriced", at_most=big_size - 1)  # quieter than a real price
-        if width >= 900:
-            _one_treatment(page, ".ui-table .prc .unpriced")
+        assert page.locator(".ui-table .prc .unpriced, .ui-table .pr .unpriced").count() == 0
         assert page.evaluate(MEASURE) == []
         # the Watchlist: the 7-day and 30-day change cells on a card with too little history
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
@@ -145,18 +146,12 @@ def test_a_price_nobody_knows_reads_the_same_way_everywhere(
             ".filter(e => !e.children.length && e.textContent.trim() === '–').length"
         )
         assert dashes == 0
-        if width >= 900:
-            _one_treatment(page, ".w-t .chgs .unpriced")
-        else:
-            page.locator(".w-t .tr .more").first.click()
-            page.locator(".w-t .wx:not([hidden]) .wx-chg").first.wait_for()
-            _one_treatment(page, ".w-t .wx:not([hidden]) .wx-chg .unpriced")
+        assert page.locator(".w-t .unpriced").count() == 0  # only the periods with history
         assert page.evaluate(MEASURE) == []
         # the deck banner keeps its own colour on the banner, with the same word and weight
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-        banner = page.evaluate(UNPRICED, ".banner .unpriced")
-        assert banner and banner[0]["text"] == "unknown" and banner[0]["weight"] == "400", banner
-        assert banner[0]["color"] == "rgba(255, 255, 255, 0.72)", banner
+        # no card priced: the cost is left out (marked hidden, and drawn hidden)
+        assert page.locator(".banner .cost").is_hidden()
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()
 
@@ -295,8 +290,9 @@ def test_the_binders_grid_and_phone_lines_and_the_picker_say_unknown_too(
     width: int,
     theme: str,
 ) -> None:
-    """Audit N7/N12 with polish N3: the Binder grid and the list under 900 px showed nothing for a
-    price nobody knows, and the printing picker said "No price". The one word everywhere."""
+    """Audit N7/N12 with polish N3: the printing picker said "No price". 0.7.47 polish: the Binder's
+    grid and list rows leave a price nobody knows out (the Value tile says it once), never "No
+    price", "–" or "unknown" on every row."""
     from playwright.sync_api import sync_playwright
 
     from .test_printing_picker_browser import _open_picker
@@ -306,12 +302,12 @@ def test_the_binders_grid_and_phone_lines_and_the_picker_say_unknown_too(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/collection?view=grid", wait_until="networkidle")
-        assert page.locator("#cards .cc .pr .unpriced").count() >= 1
-        _one_treatment(page, "#cards .cc .pr .unpriced")
+        assert page.locator("#cards .cc").count() >= 1
+        assert page.locator("#cards .cc .unpriced").count() == 0
         if width < 900:
             page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
-            assert page.locator("#cards .tr .sub .pr .unpriced").count() >= 1
-            _one_treatment(page, "#cards .tr .sub .pr .unpriced")
+            assert page.locator("#cards .tr .sub").count() >= 1
+            assert page.locator("#cards .tr .sub .unpriced").count() == 0
         assert page.evaluate(MEASURE) == []
         if width >= 720:
             page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")

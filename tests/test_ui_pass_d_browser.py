@@ -72,8 +72,9 @@ def _pictures(server: Server, monkeypatch) -> None:
 def _banner_contrast(page) -> float:
     """The least contrast of the banner's grey row text against the banner's own background,
     measured from pixels: the shade is a gradient over the art, so a computed background would
-    be wrong. In the rows' own box each column's commonest colour is the background there (the
-    text is sparse); the least ratio over the columns is the answer."""
+    be wrong. The rows' box is shot with their text made transparent, so every pixel there is
+    background (counting colours per column failed when the rows fit on one line: through a
+    glyph's stem the text outnumbered the background); the least ratio over them is the answer."""
     import io
 
     from PIL import Image
@@ -91,17 +92,19 @@ def _banner_contrast(page) -> float:
     boxes = [_rect(rows.nth(i)) for i in range(rows.count())]
     top, bottom = min(b["t"] for b in boxes) - 2, max(b["b"] for b in boxes) + 2
     left, right = min(b["l"] for b in boxes), max(b["r"] for b in boxes)
-    shot = page.screenshot(clip={"x": left, "y": top, "width": right - left, "height": bottom - top})
+    style = page.add_style_tag(
+        content=".banner .row, .banner .row *{color:transparent!important;"
+        "text-shadow:none!important;border-color:transparent!important}"
+    )
+    try:
+        clip = {"x": left, "y": top, "width": right - left, "height": bottom - top}
+        shot = page.screenshot(clip=clip)
+    finally:
+        style.evaluate("e => e.remove()")
     im = Image.open(io.BytesIO(shot)).convert("RGB")
-    w, h = im.size
     lt, worst = lum(text), 99.0
-    for x in range(w):
-        counts: dict[tuple, int] = {}
-        for y in range(h):
-            c = im.getpixel((x, y))
-            counts[c] = counts.get(c, 0) + 1
-        bg = max(counts, key=counts.get)
-        lb = lum(bg)
+    for c in set(im.getdata()):
+        lb = lum(c)
         worst = min(worst, (max(lt, lb) + 0.05) / (min(lt, lb) + 0.05))
     return worst
 
