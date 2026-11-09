@@ -35,6 +35,9 @@ placeholders showed, and no blue links.
 - **Pull to refresh on every page of the Android app**, except the scanner, the sign-in pages and
   a goldfish game. A pull waits while something you typed or changed is not saved, while a save
   is on its way, or while you hold a card.
+- **The Android app no longer installs its own updates.** Update still downloads the new app and
+  checks it, then saves it to Downloads and opens the Downloads view: open the file there to
+  update. The app no longer asks for permission to install apps.
 - A sign-in that runs out now leaves a line in your activity ("Signed out: the sign-in ran out")
   saying whether it was unused too long or reached its longest, and how long it lasted.
 - **Pages are centred on wide screens**, beside the Fold's side rail too. Account, Account details
