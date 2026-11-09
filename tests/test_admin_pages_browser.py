@@ -25,6 +25,7 @@ PAGES = [
     "/admin/users?open=user-3",
     "/admin/activity",
     "/admin/metrics",
+    "/admin/scanner",
     "/activity",
 ]
 TEXT = (
@@ -81,7 +82,7 @@ def test_every_admin_page_fits_and_reads(server: Server, width: int, theme: str)
                     " const r = document.createRange(); r.selectNodeContents(a);"
                     " return [a.textContent.trim(), r.getClientRects().length]; })"
                 )
-                assert len(lines) == 6 and all(n == 1 for _, n in lines), (path, lines)
+                assert len(lines) == 7 and all(n == 1 for _, n in lines), (path, lines)
             _shot(page, f"admin-{path.strip('/').replace('/', '-') or 'overview'}-{width}-{theme}.png")
         # the six admin tabs sit in the same place on every tab (the 1200 px width)
         lefts = set()

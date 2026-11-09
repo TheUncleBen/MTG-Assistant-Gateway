@@ -231,6 +231,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/app`, `/app/mtg-assistant-gateway.apk`, `/app/latest.json` | `/app` redirects to `/install?for=android`; the APK download and the version file the app checks for updates ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |
 | `/admin/models` (GET, POST) | Admin: the solo test's kept card models, who added each and when, with a Remove button per model |
+| `/admin/scanner` (GET, POST), `/admin/scanner/miss/{id}` | Admin: how far the scanner's picture index has got, and the pictures members kept when a card wasn't found, with Delete per picture; the picture itself (JPEG, never cached) |
 | `/admin/settings` (GET, POST) | Admin: the gateway's settings, grouped, with where each value comes from; a value set in the deployment is shown read-only, the others can be changed here |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |
 | `/.well-known/assetlinks.json` | Android statement vouching for the app the gateway ships (its package ID and signing certificate); an empty list when it ships none |

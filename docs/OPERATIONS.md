@@ -946,6 +946,11 @@ What it shows:
   added it and when, and when it was last changed, with a **Remove** button
   (audited as `card_model_removed`). Each member's models are used only in
   their own tests.
+- **Card scanner** (`/admin/scanner`): how far the scanner's picture index
+  of every printing has got (see [SCANNING.md](SCANNING.md)), and the
+  pictures members kept when the scanner couldn't find a card, newest first,
+  with who kept each and when and a **Delete** button. Pictures are deleted
+  after 30 days, at most 500 are kept, and one member can keep 50 a day.
 - **Settings** (`/admin/settings`): the gateway's settings an
   admin may change without a redeploy (see [the Settings page](#the-settings-page) below).
 

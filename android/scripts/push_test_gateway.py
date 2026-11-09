@@ -38,7 +38,7 @@ PAGE = (
     b"<!doctype html><meta name='viewport' content='width=device-width'><title>Test gateway</title>"
     b"<style>button{display:block;font-size:20px;margin:16px;padding:12px}[hidden]{display:none}</style>"
     b"<p>Test gateway.</p>"
-    b"<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
+    b"<button type='button' data-native='openCamera'>Scan cards</button>"
     b"<button type='button' data-native='reload'>Reload</button>"
     b"<button type='button' data-native='changeGateway'>Change gateway</button>"
     b"<script src='/static/feedback.js'></script>"

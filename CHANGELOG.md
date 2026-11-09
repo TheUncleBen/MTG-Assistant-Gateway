@@ -13,12 +13,52 @@ Proposal cards in Claude and ChatGPT no longer fill the chat: only the newest ca
 that still waits draws in full. Signing in to the Android app comes back to the app by itself
 after Continue, and every page in the app can be pulled down to refresh. Every page reads as one app on every screen: centred on a laptop
 and a wide desktop, one column where two left holes, plain words where program values or
-placeholders showed, and no blue links.
+placeholders showed, and no blue links. The scanner finds cards by their picture while you hold
+them up, the same in the browser and the app, and lets you swap the printing, finish or card
+before it adds one.
 
 ### Upgrade notes
-- Nothing to do: no new settings, environment variables or database steps.
+- **The scanner learns every printing's picture once, in the background.** A few minutes after
+  the first start the gateway fetches Scryfall's small picture of each paper printing (about
+  100,000 pictures, roughly 1.5 GB in all, about 8 a second, so several hours) and keeps a
+  summary of each artwork in the data folder, `<MTG_DATA_DIR>/scan-pictures.sqlite` (about
+  150 MB for 100,000 printings). After that it only fetches new printings. Until the first round
+  is done the scanner reads card titles as before; Admin › Card scanner shows how far it is. It
+  uses the daily printings copy, so **Keep a local copy of card printings** (Settings, General)
+  must stay on, and `MTG_SCAN_ART_ENABLED=false` turns it off. If you restrict outbound traffic,
+  allow `cards.scryfall.io`. The summary is not part of the backup (Scryfall gives it again);
+  deleting the file is safe and starts the fetching over.
+- **About 50 to 60 MB more memory** (measured on an x86 machine, not yet on a Pi): the summary
+  in memory (about 27 MB for 100,000 printings) and the picture model with its runtime (about
+  20 MB, loaded at the first scan). The default `MTG_MEMORY_LIMIT` of 256 MB stays the limit;
+  check the gateway's memory on your own setup before lowering it.
+- The image gains Google's MediaPipe image model (`mobilenet_v3_small.tflite`, about 4 MB,
+  Apache-2.0) and the LiteRT runtime that runs it, fetched and checked at build time with the text
+  recognition files. No new settings or environment variables, and no database steps (the
+  missed pictures table is created at start).
+- The Android app opens the page's own scanner on a gateway from 0.7.47. An app from before
+  0.7.47 still opens its own camera panel, which keeps working.
 
 ### Changed
+- **The scanner finds a card by its picture, while you hold it up.** Hold a card inside the
+  frame and keep it still for a moment: the page sends the straightened card to the gateway,
+  which compares its artwork with every printing's (in a test on 8,474 printings with simulated
+  phone photos, the right card 99 times in 100; real phones still to be measured). No title
+  reading, no shutter, and the same scanner in the browser and the Android app (the big button
+  that opened a separate camera is gone). **Check each card** (the default) shows each card to
+  confirm; **Add right away** adds the cards the gateway is sure of, with Undo, and shows the
+  rest. Printings that share one artwork (reprints) are told apart by the set and number at the
+  bottom left of the card; when that can't be read, the card asks which one, and the set lock
+  still picks it. Before you add, swap the printing, the finish (Non-foil or Foil) or the card
+  ("Not this card" lists the next closest ones). Zoom chips (where the camera reports a zoom
+  range) and two fingers on the viewfinder zoom; **Scan area** moves and resizes the frame for
+  where your phone's camera sits, kept on the device; **Detect now** is there for anyone who
+  prefers a button. Title reading stays for photos the picture can't place.
+- **A card the scanner can't find can be kept for the admin** ("Keep this picture for the
+  admin") instead of a message asking you to send photos to whoever runs the gateway. The new
+  **Admin › Card scanner** page shows the pictures kept, who kept them and when, with Delete, and
+  how far the picture index has got. Pictures are deleted after 30 days, at most 500 are kept,
+  one member can keep 50 a day, and they go with a member's data when it is deleted.
 - **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
   shows one line until it has checked that it is the newest card of a change that still waits.
   Only that card draws its list, pictures and buttons; a card for a change that was updated,

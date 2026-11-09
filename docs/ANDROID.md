@@ -243,7 +243,7 @@ The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
 - **This app, on the Account page** (your picture, top right):
-  *Scan with the app's camera*, *Reload*, *Open a copied link*, *Change gateway*
+  *Scan cards*, *Reload*, *Open a copied link*, *Change gateway*
   and *Check for app updates* (with the installed version). They are in the
   app's own menu too, and in the round button's menu (the round button shows
   only over pages that aren't the gateway's).
@@ -382,13 +382,19 @@ else your gateway serves. A few things are native:
 
 ## 3. Scanning with the phone camera
 
+**From gateway 0.7.47 the app doesn't open a camera of its own.** The `/scan`
+page finds cards by their picture with its own live camera, and the app shows
+that page as it is: the menu's **Scan** opens it, and the camera starts there
+(the app asks for the camera permission the first time). What follows is how an
+app talks to an older gateway, which still reads titles.
+
 The gateway's `/scan` page already reads cards from a photo (see
 [SCANNING.md](SCANNING.md)). The app's camera screen just takes a better photo
 than a browser can, then hands it to that page, which keeps running underneath:
 
 1. On the scan page, the orange shutter or the viewfinder (inside the app they
    open the phone camera, and the page doesn't start a camera of its own), or
-   the menu's **Scan with the app's camera**. The app opens `/scan` if you
+   the menu's **Scan cards**. The app opens `/scan` if you
    aren't on it. The page's **Auto** switch opens the phone camera with Auto
    already on (step 4).
 2. Fill the dashed card outline with the card: that holds the phone about

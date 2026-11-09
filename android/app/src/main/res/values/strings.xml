@@ -19,7 +19,7 @@
     <string name="setup_bad_http">The address must start with https://.</string>
     <string name="setup_bad_userinfo">Leave the user name and password out of the address.</string>
 
-    <string name="menu_scan">Scan with the app\'s camera</string>
+    <string name="menu_scan">Scan cards</string>
     <string name="menu_reload">Reload</string>
     <string name="menu_gateway">Change gateway</string>
     <string name="menu_update">Check for app updates</string>
