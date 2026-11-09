@@ -60,6 +60,7 @@ FAILED_EVENTS = (
 SIGNIN_EVENTS = (
     "browser_login",
     "app_signin_tap_page",
+    "browser_session_ended",
     "login_ok",
     "login_denied",
     "login_rejected_group",
@@ -118,6 +119,7 @@ ADMIN_ACTION_WORDS = {
 ICONS = {
     "browser_login": "login",
     "app_signin_tap_page": "login",
+    "browser_session_ended": "login",
     "login_ok": "login",
     "login_denied": "login",
     "issuer_repinned": "login",

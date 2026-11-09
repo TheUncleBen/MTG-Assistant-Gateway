@@ -112,9 +112,10 @@ class _Pending:
     challenge: str
     next_path: str
     expires: float
-    fresh: bool = False  # signed in during the leg: the return page opens the app by itself
+    fresh: bool = False  # the return page opens the app by itself (after Continue, see auto_return)
     grant: str | None = None  # where the sign-in's provider grant waits for the app's session
     shown: bool = False  # the browser drew the return page (recorded once, in the member's activity)
+    new_sign_in: bool = False  # the ID token shows a sign-in made during the leg (activity's reason)
 
 
 @dataclass
@@ -171,7 +172,14 @@ class AppSignins:
         return hashlib.sha256(code.encode("ascii")).hexdigest()
 
     def issue(
-        self, sub: str, challenge: str, next_path: str, *, fresh: bool = False, grant: str | None = None
+        self,
+        sub: str,
+        challenge: str,
+        next_path: str,
+        *,
+        fresh: bool = False,
+        grant: str | None = None,
+        new_sign_in: bool | None = None,
     ) -> str:
         code = secrets.token_urlsafe(32)
         now = self._clock()
@@ -180,7 +188,15 @@ class AppSignins:
                 del self._codes[k]
             while len(self._codes) >= MAX_PENDING:  # oldest first; dicts keep insertion order
                 del self._codes[next(iter(self._codes))]
-            self._codes[self._key(code)] = _Pending(sub, challenge, next_path, now + self._ttl, fresh, grant)
+            self._codes[self._key(code)] = _Pending(
+                sub,
+                challenge,
+                next_path,
+                now + self._ttl,
+                fresh,
+                grant,
+                new_sign_in=fresh if new_sign_in is None else new_sign_in,
+            )
         return code
 
     def fresh(self, code: str) -> bool:
@@ -234,6 +250,32 @@ def signed_in_since(auth_time: object, started: object, skew: int = FRESH_SKEW) 
     except ValueError:
         return False
     return auth_time >= start - skew
+
+
+# Set in the login session by the Continue press on confirm_body (pages.app_continue): the callback
+# sees it only for a leg a person confirmed in this browser.
+CONTINUED = "app_continued"
+
+
+def auto_return(*, scheme: bool, continued: bool, new_sign_in: bool) -> bool:
+    """Whether the browser's part ends by opening the app by itself (the intent: redirect from the
+    callback and the return page's own try), instead of waiting for a tap on the return page.
+
+    The scheme leg (an Auth Tab on the app's own scheme, which returns to whichever app opened it)
+    still needs a sign-in made during the leg: ``new_sign_in``. An https or Custom Tab leg opens the
+    app by itself after the person's Continue (owner, 2026-11-08: "you're still having to click the
+    button in order to be redirected back to the app"). Before the Continue page existed (0.7.46,
+    security review A-04) a browser still signed in at the identity provider passed any app's leg
+    straight through with nobody there, so only a new sign-in (A-02) could show a person was. Now
+    the leg reaches the identity provider only through Continue, a post that carries a one-use
+    token this browser alone holds in a cookie, pressed on a page that names the gateway and says
+    to continue only after pressing Sign in in its app: the same proof a person is there, at the
+    step before the identity provider. What the link then reaches is unchanged: an ``intent:`` link
+    naming only the gateway app's package, whose sign-in fails without the verifier that the app
+    which started the leg alone holds."""
+    if scheme:
+        return new_sign_in
+    return continued or new_sign_in
 
 
 def intent_url(code: str, package: str, fallback: str | None = None) -> str:
@@ -299,9 +341,9 @@ def canceled_body() -> str:
 
 def return_body(code: str, package: str, *, auto: bool = False) -> str:
     """The browser's last page: a button that opens the app with the one-time code. With ``auto``
-    (a sign-in made during the leg, ``AppSignins.fresh``) app-signin.js follows it once by itself
-    where the browser allows that without a tap. The script runs once the page has loaded, so the
-    small print is drawn before it leaves."""
+    (``auto_return``: after the person's Continue, ``AppSignins.fresh``) app-signin.js follows it
+    once by itself where the browser allows that without a tap. The script runs once the page has
+    loaded, so the small print is drawn before it leaves."""
     url = html.escape(intent_url(code, package))
     # data-once: what app-signin.js remembers, so it tries once per code without keeping the code
     # itself in the browser's storage (a hash of it, under one fixed key)

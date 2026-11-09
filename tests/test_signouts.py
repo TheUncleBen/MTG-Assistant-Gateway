@@ -374,6 +374,42 @@ async def test_the_signed_out_page_says_why_for_time_limits(tmp_path: Path, idp:
         await b.aclose()
 
 
+async def test_a_sign_in_that_ran_out_is_noted_once_in_the_activity(tmp_path: Path, idp: FakeIdP) -> None:
+    """Owner, 2026-11-08: "I feel like I'm being prompted way more often to sign in ... than what is
+    configured". A sign-in that ends by time now leaves a row in the member's activity (why, and how
+    long it lasted), whether the browser or app comes back first or the hourly clean-up finds it,
+    so a short Settings time can be told apart from the provider ending it (Membership could not
+    be checked)."""
+    import json
+
+    def ended() -> list[dict]:
+        with h.db._lock:
+            rows = h.db._conn.execute(
+                "SELECT sub, detail_json FROM audit_log WHERE event = 'browser_session_ended'"
+            ).fetchall()
+        return [{"sub": r[0], **json.loads(r[1])} for r in rows]
+
+    async with running(Harness(make_settings(tmp_path), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        _move(h, created_ago=8 * DAY, expires_in=-DAY)  # last used eight days ago
+        assert (await b.http.get("/decks", headers=NAV)).status_code == 302
+        await reason_page(b, "/decks")
+        await b.http.get("/login", params={"next": "/decks"})  # a second visit adds nothing
+        assert ended() == [{"sub": SUB, "reason": "unused", "lived_hours": 7 * 24.0}]
+
+        # the clean-up finds the next one first
+        await b.login()
+        _move(h, created_ago=10 * DAY, expires_in=-2 * DAY)
+        h.db.purge_expired()
+        h.db.purge_expired()
+        assert [e["reason"] for e in ended()] == ["unused", "unused"]
+        from mtg_gateway.companion import event_label
+
+        assert event_label("browser_session_ended") == "Signed out: the sign-in ran out"
+        await b.aclose()
+
+
 async def test_the_signed_out_page_says_why_for_sign_outs_elsewhere(tmp_path: Path, idp: FakeIdP) -> None:
     settings = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
     async with running(_with_admin(Harness(settings, idp))) as h:

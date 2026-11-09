@@ -32,6 +32,7 @@ import logging
 import math
 import re
 import time
+import unicodedata
 from datetime import UTC, datetime
 from typing import Any
 
@@ -73,6 +74,25 @@ def collection_ident(ident: dict[str, str]) -> dict[str, str]:
         return ident
     front = re.split(r"\s*//\s*", name, maxsplit=1)[0].strip()
     return {**ident, "name": front} if front else ident
+
+
+def _name_key(name: str) -> str:
+    """A card name as a person would read it: case, accents, curly quotes and spacing aside,
+    every character counts. Scryfall's own "exact" lookup ignores punctuation, so it answers
+    "Goblin" (a token) with "_____ Goblin" (an Unfinity card): ``same_name`` tells them apart."""
+    folded = unicodedata.normalize("NFKD", name)
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    for curly, plain in (("\u2019", "'"), ("\u2018", "'"), ("\u201c", '"'), ("\u201d", '"')):
+        folded = folded.replace(curly, plain)
+    return " ".join(folded.lower().split())
+
+
+def same_name(asked: str, card_name: str) -> bool:
+    """Whether a card Scryfall returned for an exact name is that card: its whole name, or its
+    front face's (a double-faced or split card asked for by its front)."""
+    want = _name_key(asked)
+    got = _name_key(card_name)
+    return bool(want) and (got == want or got.split(" // ")[0] == want or want.split(" // ")[0] == got)
 
 
 def today() -> str:
@@ -444,7 +464,10 @@ class ScryfallClient:
         return data
 
     async def named(self, name: str, *, fuzzy: bool = False, set_code: str | None = None) -> dict[str, Any]:
-        """One card by name. Exact by default; ``fuzzy=True`` tolerates typos and OCR noise."""
+        """One card by name. Exact by default; ``fuzzy=True`` tolerates typos and OCR noise. An exact
+        lookup returns only the card with that very name (``same_name``): when Scryfall's own match
+        is another card ("_____ Goblin" for "Goblin"), a search by exact name that includes tokens
+        and emblems finds the real one (``exact_card``)."""
         key = f"named:{'f' if fuzzy else 'e'}:{(set_code or '').lower()}:{name.strip().lower()}"
         if (hit := self.cards.get(key)) is not None:
             return hit
@@ -456,6 +479,8 @@ class ScryfallClient:
         resp = await self._request("GET", "/cards/named", params=params, interval=self.lookup_interval)
         try:
             raw = self._card_or_error(resp, name)
+            if not fuzzy and not same_name(name, str(raw.get("name") or "")):
+                raw = await self.exact_card(name)
         except ScryfallError as exc:
             if exc.kind == "not_found" and not fuzzy:
                 self.misses.put(key, str(exc))
@@ -467,11 +492,50 @@ class ScryfallClient:
     async def named_raw(self, name: str) -> dict[str, Any]:
         """One card by exact name, the whole Scryfall object, not cached here: the caller wants
         the fields ``slim`` drops (rules text, power and toughness, loyalty, flavour) and keeps
-        them in its own small cache (cardsearch.py). Paced like every lookup."""
+        them in its own small cache (cardsearch.py). Paced like every lookup. Only the card with
+        that very name, a token's included (``named``)."""
         resp = await self._request(
             "GET", "/cards/named", params={"exact": name.strip()}, interval=self.lookup_interval
         )
-        return self._card_or_error(resp, name)
+        try:
+            raw = self._card_or_error(resp, name)
+        except ScryfallError as exc:
+            if exc.kind != "not_found":
+                raise
+            return await self.exact_card(name)  # a token: Scryfall's named lookup leaves them out
+        if same_name(name, str(raw.get("name") or "")):
+            return raw
+        return await self.exact_card(name)
+
+    async def exact_card(self, name: str) -> dict[str, Any]:
+        """The card whose whole name is ``name``, tokens and emblems included (``!"name"`` with
+        ``include_extras``), the newest printing first; a real card before a token of the same
+        name. ``not_found`` when no card has that very name (``same_name``)."""
+        q = name.strip().replace('"', "")
+        unknown = f"Scryfall does not know a card named \u201c{name.strip()}\u201d."
+        resp = await self._request(
+            "GET",
+            "/cards/search",
+            params={
+                "q": f'!"{q}"',
+                "include_extras": "true",
+                "unique": "cards",
+                "order": "released",
+                "dir": "desc",
+            },
+            interval=self.lookup_interval,
+        )
+        data = self._json(resp)
+        rows = data.get("data") if data.get("object") == "list" else None
+        if resp.status_code == 404 or not isinstance(rows, list):
+            if resp.status_code not in (200, 404) or data.get("object") not in ("list", "error"):
+                raise ScryfallError("unavailable", SCRYFALL_FAILING)
+            raise ScryfallError("not_found", unknown)
+        hits = [c for c in rows if isinstance(c, dict) and same_name(name, str(c.get("name") or ""))]
+        if not hits:
+            raise ScryfallError("not_found", unknown)
+        hits.sort(key=lambda c: "token" in str(c.get("layout") or "") or c.get("layout") == "emblem")
+        return hits[0]
 
     async def rulings(self, card_id: str) -> list[dict[str, str]]:
         """GET /cards/{id}/rulings: the card's rulings ({date, text, source} each, oldest first as
