@@ -88,11 +88,14 @@ def _name_key(name: str) -> str:
 
 
 def same_name(asked: str, card_name: str) -> bool:
-    """Whether a card Scryfall returned for an exact name is that card: its whole name, or its
-    front face's (a double-faced or split card asked for by its front)."""
+    """Whether a card Scryfall returned for an exact name is that card: its whole name, or any one
+    of its faces' (a double-faced card asked for by its back, a split card by its second half), or
+    the front of the name asked for."""
     want = _name_key(asked)
     got = _name_key(card_name)
-    return bool(want) and (got == want or got.split(" // ")[0] == want or want.split(" // ")[0] == got)
+    if not want:
+        return False
+    return want == got or want in got.split(" // ") or want.split(" // ")[0] == got
 
 
 def today() -> str:
@@ -480,7 +483,7 @@ class ScryfallClient:
         try:
             raw = self._card_or_error(resp, name)
             if not fuzzy and not same_name(name, str(raw.get("name") or "")):
-                raw = await self.exact_card(name)
+                raw = await self.exact_card(name, set_code)
         except ScryfallError as exc:
             if exc.kind == "not_found" and not fuzzy:
                 self.misses.put(key, str(exc))
@@ -507,17 +510,22 @@ class ScryfallClient:
             return raw
         return await self.exact_card(name)
 
-    async def exact_card(self, name: str) -> dict[str, Any]:
-        """The card whose whole name is ``name``, tokens and emblems included (``!"name"`` with
-        ``include_extras``), the newest printing first; a real card before a token of the same
-        name. ``not_found`` when no card has that very name (``same_name``)."""
+    async def exact_card(self, name: str, set_code: str | None = None) -> dict[str, Any]:
+        """The card whose whole name is ``name`` (or one of its faces'), tokens and emblems included
+        (``!"name"`` with ``include_extras``), in ``set_code`` when one is given, the newest
+        printing first; a real card before a token of the same name, and never an Art Series card
+        (its own "Name // Name" would otherwise win for a back face). ``not_found`` when no card has
+        that very name (``same_name``)."""
         q = name.strip().replace('"', "")
+        code = (set_code or "").strip().lower()
+        if code and not re.fullmatch(r"[a-z0-9]{2,8}", code):
+            code = ""
         unknown = f"Scryfall does not know a card named \u201c{name.strip()}\u201d."
         resp = await self._request(
             "GET",
             "/cards/search",
             params={
-                "q": f'!"{q}"',
+                "q": f'!"{q}"' + (f" set:{code}" if code else ""),
                 "include_extras": "true",
                 "unique": "cards",
                 "order": "released",
@@ -531,7 +539,13 @@ class ScryfallClient:
             if resp.status_code not in (200, 404) or data.get("object") not in ("list", "error"):
                 raise ScryfallError("unavailable", SCRYFALL_FAILING)
             raise ScryfallError("not_found", unknown)
-        hits = [c for c in rows if isinstance(c, dict) and same_name(name, str(c.get("name") or ""))]
+        hits = [
+            c
+            for c in rows
+            if isinstance(c, dict)
+            and c.get("layout") != "art_series"
+            and same_name(name, str(c.get("name") or ""))
+        ]
         if not hits:
             raise ScryfallError("not_found", unknown)
         hits.sort(key=lambda c: "token" in str(c.get("layout") or "") or c.get("layout") == "emblem")

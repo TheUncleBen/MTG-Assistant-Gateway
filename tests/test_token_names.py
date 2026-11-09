@@ -113,3 +113,71 @@ class _Null:
 
     def __exit__(self, *exc: object) -> None:
         return None
+
+
+# -- audit 0.7.47 AO1 / AO4: back faces, second halves, Art Series cards and a set asked for ------
+DELVER = {
+    "object": "card",
+    "id": "0e2b2c3e-0000-4000-8000-000000000003",
+    "oracle_id": "22222222-2222-4333-8444-555555555555",
+    "name": "Delver of Secrets // Insectile Aberration",
+    "layout": "transform",
+    "set": "isd",
+    "collector_number": "51",
+}
+DELVER_ART = {
+    "object": "card",
+    "id": "0e2b2c3e-0000-4000-8000-000000000004",
+    "oracle_id": "33333333-2222-4333-8444-555555555555",
+    "name": "Insectile Aberration // Insectile Aberration",
+    "layout": "art_series",
+    "set": "amid",
+    "collector_number": "9",
+}
+FIRE_ICE = {
+    "object": "card",
+    "id": "0e2b2c3e-0000-4000-8000-000000000005",
+    "oracle_id": "44444444-2222-4333-8444-555555555555",
+    "name": "Fire // Ice",
+    "layout": "split",
+    "set": "mh2",
+    "collector_number": "290",
+}
+
+
+def test_a_back_face_or_second_half_is_the_same_card() -> None:
+    assert same_name("Insectile Aberration", DELVER["name"])
+    assert same_name("Ice", "Fire // Ice")
+    assert same_name("Fire", "Fire // Ice")
+    assert not same_name("Goblin", "_____ Goblin")
+
+
+async def test_back_faces_find_their_card_never_the_art_series_card() -> None:
+    searched: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/cards/named":
+            name = request.url.params.get("exact", "")
+            card = {"Insectile Aberration": DELVER, "Ice": FIRE_ICE}.get(name, UNF_GOBLIN)
+            return httpx.Response(200, json=card)
+        if request.url.path == "/cards/search":
+            searched.append(request.url.params.get("q", ""))
+            # the Art Series card comes first, as Scryfall's newest-first order can give it
+            return httpx.Response(200, json={"object": "list", "data": [DELVER_ART, DELVER, GOBLIN_TOKEN]})
+        return httpx.Response(404, json={"object": "error", "details": "?"})
+
+    sf = ScryfallClient(
+        "https://scryfall.test",
+        min_interval=0.0,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://scryfall.test"),
+    )
+    assert (await sf.named("Insectile Aberration"))["oracle_id"] == DELVER["oracle_id"]
+    assert (await sf.named("Ice"))["oracle_id"] == FIRE_ICE["oracle_id"]
+    assert searched == []  # Scryfall's own answer was the card: no search
+    # a search for a back face that does find the Art Series card first still takes the real one
+    assert (await sf.exact_card("Insectile Aberration"))["oracle_id"] == DELVER["oracle_id"]
+    # a set asked for stays in the fallback search (AO4)
+    searched.clear()
+    await sf.named("Goblin", set_code="TDMU")
+    assert searched == ['!"Goblin" set:tdmu']
+    await sf.aclose()
