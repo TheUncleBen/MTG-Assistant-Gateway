@@ -31,6 +31,7 @@ from .scryfall import (
     _Cache,
     default_printing,
     good_default,
+    same_name,
     summarize,
 )
 from .store import ScanStore
@@ -1278,7 +1279,7 @@ class ScanService:
         missing: list[str] = []
         for n in wanted:
             hit = self.scryfall.cards.get(f"peek:{_norm(n)}")
-            if hit is not None:
+            if hit is not None and same_name(n, str(hit.get("name") or "")):
                 out[_norm(n)] = hit
             else:
                 missing.append(n)
@@ -1290,12 +1291,31 @@ class ScanService:
                 if exc.kind in ("unavailable", "rate_limited"):
                     raise ScanError(exc.kind, str(exc)) from exc
                 found = []
+            # Scryfall matches a name with its punctuation ignored ("Goblin" finds "_____ Goblin"):
+            # a card counts only for the name it really has (same_name).
             for card in found:
                 summary = summarize(card)
-                if summary.get("name"):
-                    key = _norm(str(summary["name"]))
-                    out[key] = summary
-                    self.scryfall.cards.put(f"peek:{key}", summary)
+                got = str(summary.get("name") or "")
+                for n in missing:
+                    if _norm(n) not in out and same_name(n, got):
+                        out[_norm(n)] = summary
+                        self.scryfall.cards.put(f"peek:{_norm(n)}", summary)
+            # A token or an emblem ("Goblin", "Treasure"): the collection lookup leaves them out, so
+            # a short list (the printing picker asks for one name) looks for the exact name, tokens
+            # included. Never for a long list: each is one more request.
+            left = [n for n in missing if _norm(n) not in out]
+            if 0 < len(left) <= PEEK_EXTRAS:
+                for n in left:
+                    try:
+                        with self._lookup_slot(owner):
+                            card = await self.scryfall.exact_card(n)
+                    except ScryfallError as exc:
+                        if exc.kind in ("unavailable", "rate_limited"):
+                            raise ScanError(exc.kind, str(exc)) from exc
+                        continue
+                    summary = summarize(card)
+                    out[_norm(n)] = summary
+                    self.scryfall.cards.put(f"peek:{_norm(n)}", summary)
         return [out[_norm(n)] for n in wanted if _norm(n) in out]
 
     async def search_cards(
@@ -1626,6 +1646,9 @@ def _matches_ident(card: dict[str, Any], ident: dict[str, Any]) -> bool:
 
 def _ident_key(ident: dict[str, Any]) -> str:
     return "|".join(f"{k}={str(v).lower()}" for k, v in sorted(ident.items()))
+
+
+PEEK_EXTRAS = 2  # names a peek looks up among tokens and emblems when the collection lookup misses them
 
 
 def _norm(s: str) -> str:

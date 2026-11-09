@@ -589,12 +589,14 @@
   }
 })();
 
-/* Pull to refresh in the Android app (0.7.46, screen 9). The app's pull layer knows nothing of the
-   page's layout, so the page says, at each touch, whether that touch may start a pull: not while
-   the page is scrolled, not while a box, sheet, viewer or menu is open, not from a part of the page
-   that scrolls on its own (the deck editor's panes, a printings sheet, a strip of chips), and not
-   from a text field, and not while a box on the page holds words the member typed and has not sent
-   (a pull loads the page again, which would throw them away). The app keeps the answer only until
+/* Pull to refresh in the Android app (0.7.46, screen 9; every page since 0.7.47). The app's pull
+   layer knows nothing of the page's layout, so the page says, at each touch, whether that touch may
+   start a pull: not while the page is scrolled, not while a box, sheet, viewer or menu is open, not
+   from a part of the page that scrolls on its own (the deck editor's panes, a printings sheet, a
+   strip of chips) or can be dragged (the editor's cards), not from a text field, not while a box
+   or drop-down on the page holds something the member changed and has not sent (a pull loads the
+   page again, which would throw it away), and never on a page that holds state of its own and says
+   so with data-no-pull on its root or body (a goldfish game). The app keeps the answer only until
    the next touch. */
 (function () {
   "use strict";
@@ -618,24 +620,32 @@
   // Boxes the member typed in: only typing marks one (a page script that fills a box fires no
   // input event), and sending its form, or typing it back to what the page came with, clears it.
   var typed = [];
-  document.addEventListener("input", function (e) {
+  function track(e) {
     var el = e.target;
-    if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT") && typed.indexOf(el) < 0) typed.push(el);
-  }, true);
+    if (el && /^(TEXTAREA|INPUT|SELECT)$/.test(el.tagName) && typed.indexOf(el) < 0) typed.push(el);
+  }
+  document.addEventListener("input", track, true);
+  document.addEventListener("change", track, true);
+  function changedChoice(sel) {
+    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].selected !== sel.options[i].defaultSelected) return true;
+    return false;
+  }
   document.addEventListener("submit", function (e) {
     typed = typed.filter(function (el) { return el.form !== e.target; });
   }, true);
   function unsent() {
     typed = typed.filter(function (el) { return el.isConnected; });
     return typed.some(function (el) {
+      if (el.tagName === "SELECT") return changedChoice(el);
       if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
       return el.value !== el.defaultValue;
     });
   }
   function mayPull(target) {
     if (window.scrollY > 0 || boxOpen() || unsent()) return false;
+    if (document.documentElement.hasAttribute("data-no-pull") || document.body.hasAttribute("data-no-pull")) return false;
     var el = target && target.nodeType === 1 ? target : null;
-    if (el && el.closest("input, textarea, select, [contenteditable=''], [contenteditable=true]")) return false;
+    if (el && el.closest("input, textarea, select, [contenteditable=''], [contenteditable=true], [draggable=true]")) return false;
     return !scrollsItself(el);
   }
   window.mtgMayPull = mayPull; // the tests ask it directly

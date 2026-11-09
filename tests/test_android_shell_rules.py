@@ -18,17 +18,17 @@ def _kt(name: str) -> str:
     return (APP / name).read_text(encoding="utf-8")
 
 
-def test_a_forum_thread_never_offers_pull_to_refresh() -> None:
-    """A thread has a reply box and a contest entry: forms, which the app's own rule keeps a pull
-    away from. The forum's front page and its sections still offer it."""
+def test_a_forum_thread_offers_pull_to_refresh_and_guards_its_reply_box() -> None:
+    """0.7.47 (owner, 2026-11-08: every page): a forum thread offers the pull too; its reply box and
+    contest entry are guarded by the page itself (static/topbar.js refuses a pull while something
+    typed is unsent), not by the app's rule."""
     rule = _kt("PullRefresh.kt")
-    assert 'path.startsWith("/forum/")' not in rule
-    assert 'Regex("^/forum(/(?!thread(/|$))[^/]+/[^/]+)?$")' in rule
+    assert "/forum" not in rule.split("object PullRefresh")[1]
     test = (TESTS / "PullRefreshTest.kt").read_text(encoding="utf-8")
-    never = test.split("fun formsTheEditorTheScannerAndAThreadNeverOfferIt")[1].split("@Test")[0]
-    assert '"/forum/thread/123"' in never and '"/forum/thread/123/enter"' in never
-    offered = test.split("fun listPagesOfferIt")[1].split("@Test")[0]
-    assert '"/forum"' in offered and '"/forum/general/rules"' in offered
+    offered = test.split("fun everyPageOffersIt")[1].split("@Test")[0]
+    assert '"/forum"' in offered and '"/forum/general/rules"' in offered and '"/forum/thread/123"' in offered
+    js = (ROOT / "src/mtg_gateway/static/topbar.js").read_text(encoding="utf-8")
+    assert "unsent()" in js
 
 
 def test_a_lint_error_fails_the_build_and_ci_runs_lint() -> None:
