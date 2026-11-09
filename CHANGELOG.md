@@ -10,7 +10,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.47] - 2026-11-09
 
 Proposal cards in Claude and ChatGPT no longer fill the chat: only the newest card of a change
-that still waits draws in full. Every page reads as one app on every screen: centred on a laptop
+that still waits draws in full. Signing in to the Android app comes back to the app by itself
+after Continue, and every page in the app can be pulled down to refresh. Every page reads as one app on every screen: centred on a laptop
 and a wide desktop, one column where two left holes, plain words where program values or
 placeholders showed, and no blue links.
 
@@ -28,6 +29,14 @@ placeholders showed, and no blue links.
   one put a card in your chat and to check first and change the waiting one instead
   (`plan_first`, as for deck edits). `withdraw_proposal` tells assistants to amend a waiting
   proposal rather than withdraw it and propose again.
+- **Signing in to the Android app returns to the app by itself** after you press Continue on
+  "Sign in to the app?", also when the sign-in passes straight through because you are still
+  signed in at your sign-in provider: no second tap on "Open the app".
+- **Pull to refresh on every page of the Android app**, except the scanner, the sign-in pages and
+  a goldfish game. A pull waits while something you typed or changed is not saved, while a save
+  is on its way, or while you hold a card.
+- A sign-in that runs out now leaves a line in your activity ("Signed out: the sign-in ran out")
+  saying whether it was unused too long or reached its longest, and how long it lasted.
 - **Pages are centred on wide screens**, beside the Fold's side rail too. Account, Account details
   and Binder › Lists are one centred column of grouped rows on every screen, with Sign out as a
   full-width row; Deck settings, Admin settings and the proposal review sit in the middle of the
@@ -60,6 +69,9 @@ placeholders showed, and no blue links.
 - Number fields in Admin settings no longer look like payment fields to the browser.
 - A report whose solo test failed always says its own reason: two failed reports opened one
   after the other could show the first one's reason on both.
+- A token's exact name finds the token: "Goblin" opens Goblin tokens, not "_____ Goblin", and a
+  card's back face or second half ("Insectile Aberration", "Ice") finds its card. An exact lookup
+  with a set code keeps that set.
 - Anything a page marks as hidden stays hidden (the deck header's "Est unknown" showed anyway).
 
 ## [0.7.46] - 2026-10-28
