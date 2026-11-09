@@ -1167,7 +1167,6 @@ class MainActivity : ComponentActivity() {
         web.onResume()
         camera?.resume()
         Updater.inFront = true
-        Updater.showPendingConfirmation(this)
         if (this::updater.isInitialized) updater.checkIfDue()
     }
 

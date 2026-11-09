@@ -1,7 +1,7 @@
 package local.mtgassistantgateway.app
 
 /**
- * The rules of the app's own update check ([Updater] does the network and the install), kept free
+ * The rules of the app's own update check ([Updater] does the network and the saving to Downloads), kept free
  * of Android types so the unit tests can drive them.
  *
  * Updates come from the gateway the app is set up for: it serves the APK it ships at [APK_PATH]
@@ -15,6 +15,14 @@ object AppUpdate {
     /** The gateway's JSON about the app it ships (app_page.py), and the APK itself. */
     const val LATEST_PATH = "/app/latest.json"
     const val APK_PATH = "/app/mtg-assistant-gateway.apk"
+    /** An APK's media type, as saved to Downloads. */
+    const val APK_TYPE = "application/vnd.android.package-archive"
+
+    /** The update's file name in Downloads: the version in it, so two saved updates never clash. */
+    fun downloadName(version: String): String {
+        val v = version.trim()
+        return "MTG-Gateway-" + (if (versionCode(v) != null) v.removePrefix("v") else "update") + ".apk"
+    }
     /** How often the app looks on its own while it stays open: at most twice a day. */
     const val INTERVAL_MS = 12L * 3600 * 1000
     /**

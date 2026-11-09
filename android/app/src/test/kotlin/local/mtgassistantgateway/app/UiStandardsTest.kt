@@ -88,7 +88,7 @@ class UiStandardsTest {
     @Test fun errorMessagesCarryNoRawCodes() {
         val s = strings()
         // These once showed an HTTP status, a CameraX code or an installer status; the code goes to the log now.
-        for (name in listOf("setup_not_gateway", "camera_error", "update_install_failed")) {
+        for (name in listOf("setup_not_gateway", "camera_error", "update_save_failed")) {
             val text = s.getValue(name)
             assertFalse(name, text.contains("%"))
             assertFalse(name, Regex("""\(\s*(HTTP|[-\d]+)""").containsMatchIn(text))
@@ -120,7 +120,7 @@ class UiStandardsTest {
         assertTrue(camera.contains("Log.w(TAG, \"camera failed (\$code)"))
         // the toast may name the string by id (Toast.makeText(context, R.string..., length)); what
         // must be gone is a getString that fills the message with the status
-        assertFalse(updater.contains("getString(R.string.update_install_failed, "))
-        assertTrue(updater.contains("Log.w(TAG, \"install failed: status \$status"))
+        assertFalse(updater.contains("getString(R.string.update_save_failed, "))
+        assertTrue(updater.contains("Log.w(TAG, \"update not saved: \${e.message}\")"))
     }
 }

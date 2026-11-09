@@ -662,9 +662,9 @@ def _android(ctx: Context) -> Section:
                     f"computer run `apksigner verify --print-certs {APK_NAME}` and compare its certificate "
                     "SHA-256 digest with the published one.",
                     "Updates: the app asks this gateway for the version it offers here and offers it "
-                    "itself; Update installs it over the app you have (with Auto Blocker still off on a "
-                    "Samsung phone; scanning it with Play Protect or not are both fine). Android only "
-                    "accepts an update "
+                    "itself; Update saves the checked file to your Downloads, and opening it there "
+                    "installs it over the app you have (with Auto Blocker still off on a Samsung phone; "
+                    "scanning it with Play Protect or not are both fine). Android only accepts an update "
                     "signed with the same key as the installed app, so your settings and sign-in are "
                     "kept, and a file signed by anyone else is refused. An app from before 0.7.12 was "
                     "signed with a test key: uninstall it once and install this file.",

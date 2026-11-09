@@ -235,6 +235,7 @@ async def test_the_approved_wording_changes(harness: Harness, monkeypatch: pytes
         assert "neither this app nor its updates" in android
         assert "It may also offer to scan the app first: scanning it or not are both fine." in android
         assert "with Auto Blocker still off on a Samsung phone" in android
+        assert "Update saves the checked file to your Downloads" in android  # 0.7.47: no in-app installer
         assert "unverified" not in android
         # the Markdown keeps its lead and the same intro
         md = (await harness.http.get("/install.md")).text
