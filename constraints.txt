@@ -1,11 +1,14 @@
+ai-edge-litert==1.4.0
 annotated-types==0.8.0
 anyio==4.15.1
 attrs==26.1.0
+backports-strenum==1.2.8
 certifi==2026.7.22
 cffi==2.1.1
 click==8.5.0
 cryptography==50.0.2
 execnet==2.1.2
+flatbuffers==25.12.19
 greenlet==3.5.6
 h11==0.16.0
 httpcore==1.0.9
@@ -20,6 +23,7 @@ jsonschema-specifications==2025.9.1
 jsonschema==4.26.0
 mcp-types==2.3.0
 mcp==2.3.0
+numpy==2.4.6
 opentelemetry-api==1.45.0
 packaging==26.3
 pillow==12.3.0
@@ -42,6 +46,7 @@ rpds-py==2026.9.1
 ruff==0.16.10
 sse-starlette==3.5.0
 starlette==1.7.0
+tqdm==4.70.1
 truststore==0.10.4
 typing_extensions==4.16.0
 typing-inspection==0.4.4

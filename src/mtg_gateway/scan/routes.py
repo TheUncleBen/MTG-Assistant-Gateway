@@ -26,6 +26,7 @@ policy is sent with every /scan/static file.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -69,6 +70,9 @@ SCAN_ICONS = (
     "minus",
     "collection",
     "bookmark",
+    "scan",
+    "drag",
+    "check",
 )
 SCAN_CSP = (
     "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "
@@ -77,6 +81,7 @@ SCAN_CSP = (
     "base-uri 'none'; frame-ancestors 'none'"
 )
 MAX_JSON = 2_000_000
+MAX_PICTURE = 400_000  # a straightened card picture (picture.MAX_UPLOAD)
 mimetypes.add_type("application/wasm", ".wasm")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("application/octet-stream", ".traineddata")
@@ -96,6 +101,12 @@ def _asset_version(static_dir: Path = STATIC_DIR) -> str:
 def ocr_assets_present() -> bool:
     vendor = STATIC_DIR / "vendor"
     return (vendor / "worker.min.js").exists() and (vendor / "lang" / "eng.traineddata").exists()
+
+
+def _is_admin(state: Any, sub: str) -> bool:
+    from ..admin import is_admin  # imported here, as the admin pages import the scan service
+
+    return is_admin(state, sub)
 
 
 def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) -> None:
@@ -165,6 +176,10 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             # cannot show up for another account on a shared device.
             "draft": _draft_key(s, sub),
             "ocr": ocr_assets_present(),
+            # finding cards by their picture (picture.py): used once the index is ready
+            "pictures": service.pictures_ready(),
+            # a missed picture is kept for the admin: the page tells the admin where to find it
+            "admin": _is_admin(state, sub),
             "version": version,
             "static": "/scan/static",
             "thresholds": service.t.as_dict(),
@@ -358,6 +373,58 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
         except ScanError as exc:
             return fail(exc)
         return JSONResponse({"ok": True, **service.describe(results)}, headers=NO_STORE)
+
+    async def picture_body(request: Request) -> bytes | Response:
+        """The JPEG (or PNG, WebP) the page sent as the request's whole body."""
+        kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        if kind not in ("image/jpeg", "image/png", "image/webp"):
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "send a picture"}, 415, headers=NO_STORE
+            )
+        raw = await read_limited(request, MAX_PICTURE)
+        if raw is None:
+            return JSONResponse({"ok": False, "error": "too_large"}, 413, headers=NO_STORE)
+        return raw
+
+    @server.custom_route("/scan/api/identify", methods=["POST"], include_in_schema=False)
+    async def identify(request: Request) -> Response:
+        """Which card is in the straightened picture the page sent (picture.py)."""
+        who = api_user(request, write=True)
+        if isinstance(who, Response):
+            return who
+        raw = await picture_body(request)
+        if isinstance(raw, Response):
+            return raw
+        try:
+            out = await service.identify(raw, owner=who[0])
+        except ScanError as exc:
+            return fail(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route("/scan/api/miss", methods=["POST"], include_in_schema=False)
+    async def keep_miss(request: Request) -> Response:
+        """Keep a picture the scanner could not place, for the admin (misses.py)."""
+        who = api_user(request, write=True)
+        if isinstance(who, Response):
+            return who
+        raw = await picture_body(request)
+        if isinstance(raw, Response):
+            return raw
+        from .picture import decode_picture
+
+        if await asyncio.to_thread(decode_picture, raw) is None:
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "That isn't a picture."}, 400, headers=NO_STORE
+            )
+        note = request.headers.get("x-scan-note", "")[:300]
+        mid = await asyncio.to_thread(service.misses.add, who[0], raw, note)
+        if mid is None:
+            return JSONResponse(
+                {"ok": False, "error": "busy", "message": "You've kept enough pictures for today."},
+                429,
+                headers=NO_STORE,
+            )
+        return JSONResponse({"ok": True, "id": mid}, headers=NO_STORE)
 
     @server.custom_route("/scan/api/sessions", methods=["GET"], include_in_schema=False)
     async def sessions(request: Request) -> Response:

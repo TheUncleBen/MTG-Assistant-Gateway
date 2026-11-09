@@ -1153,6 +1153,7 @@ MEMBER_TABLES = (
     ("snapshots", "owner_sub"),
     ("reports", "owner_sub"),
     ("scan_sessions", "owner_sub"),
+    ("scan_misses", "owner_sub"),  # pictures the scanner missed, kept for the admin
     ("archidekt_links", "sub"),
     ("tokens", "sub"),
     ("browser_sessions", "sub"),

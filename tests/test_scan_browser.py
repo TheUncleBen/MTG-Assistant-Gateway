@@ -938,9 +938,9 @@ def test_android_glue_drives_the_real_page(server: Server, tmp_path: Path) -> No
         # Closing the phone camera: the page goes back to its camera tab only because a read waits there.
         assert page.evaluate("() => window.__mtgNative.end()") == "pending"
         assert page.evaluate("() => window.__scan.state.tab") == "camera"
-        # Inside the app the shutter is the phone camera (test_scan_direction_browser.py has the rest).
-        page.locator("#shutter").click()
-        assert page.evaluate("() => window.__opened") == 1
+        # From 0.7.47 the page never opens the phone camera itself (test_scan_direction_browser.py);
+        # the glue stays for an app from before then, which opens its panel from its own menu.
+        assert page.evaluate("() => window.__opened || 0") == 0
         assert page.evaluate("() => window.__mtgNative.ready()") is True
         assert page.evaluate("() => window.__scan.state.continuous") is False
         assert page.locator("#cam-status[data-mtg-native]").count() == 0

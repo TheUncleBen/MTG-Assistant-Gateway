@@ -112,7 +112,7 @@
     <string name="auto_mode">Auto</string>
     <string name="undo">Undo</string>
     <string name="save_photo">Save this photo</string>
-    <string name="scan_photo_saved">Photo saved in Pictures › %1$s. Send it to whoever runs your gateway, so they can see why the card wasn’t found.</string>
+    <string name="scan_photo_saved">Photo saved in Pictures › %1$s. Update the gateway to 0.7.47 or later to keep missed pictures there for its admin.</string>
     <string name="scan_photo_not_saved">The photo couldn’t be saved. Check the phone has room and try again.</string>
     <string name="auto_on">Auto: hold each card in the dashed box until it is added.</string>
     <string name="auto_off">Auto off. Tap Shoot for one card at a time.</string>

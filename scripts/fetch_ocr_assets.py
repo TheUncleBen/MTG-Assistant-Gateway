@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download the self-hosted OCR assets for the /scan page.
+"""Download the self-hosted OCR assets for the /scan page, and the scanner's image model.
 
 Fetches pinned releases of Tesseract.js (MIT/Apache-2.0), its WebAssembly core
 and the fast English language model (Apache-2.0) from their canonical sources,
@@ -29,6 +29,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "src" / "mtg_gateway" / "scan" / "static" / "vendor"
+# The scanner's image model (scan/picture.py) runs on the gateway, so it sits beside the code,
+# not under static/ where the page's files are served.
+MODEL_DIR = ROOT / "src" / "mtg_gateway" / "scan" / "model"
+# MediaPipe's image embedder, MobileNet V3 small (Apache-2.0, as the file's own metadata says),
+# version 1 of Google's published model, pinned by its SHA-256.
+MODELS = [
+    {
+        "url": "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/"
+        "mobilenet_v3_small.tflite",
+        "sha256": "bbbb4c51a55a53905af1daec995ca1aae355046f8839bb8c9f5ce9271394bc40",
+        "save_as": "mobilenet_v3_small.tflite",
+    },
+]
 
 TESSERACT_JS = "7.0.0"
 TESSERACT_CORE = "7.0.0"
@@ -110,6 +123,13 @@ def main() -> int:
                 if fh is None:
                     sys.exit(f"{src} is not a file")
                 write(rel, fh.read())
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    for model in MODELS:
+        print(model["url"])
+        data = fetch(model["url"])
+        verify(data, model["sha256"], model["url"])
+        (MODEL_DIR / model["save_as"]).write_bytes(data)
+        print(f"  model/{model['save_as']}  {len(data) / 1e6:.1f} MB")
     (VENDOR / "VERSIONS.txt").write_text(
         f"tesseract.js {TESSERACT_JS}\ntesseract.js-core {TESSERACT_CORE}\n"
         f"tessdata_fast {TESSDATA_FAST_COMMIT} eng.traineddata sha256 " + ASSETS[2]["sha256"] + "\n",

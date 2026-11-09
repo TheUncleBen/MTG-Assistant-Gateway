@@ -1057,6 +1057,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             if state.scan.copy is not None:
                 # the local copy of Scryfall's printings, refreshed daily (scan/bulk.py)
                 tasks.append(asyncio.create_task(state.scan.copy.loop(), context=contextvars.Context()))
+            if getattr(state.scan, "pictures", None) is not None:
+                # every printing's artwork, for the scanner (scan/picture.py)
+                tasks.append(asyncio.create_task(state.scan.pictures.loop(), context=contextvars.Context()))
         if state.sweep is None:
             state.sweep = AuthentikSweep(s, state.db, state.decks)
         if state.sweep.enabled:

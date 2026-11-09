@@ -161,9 +161,9 @@ def test_one_column_one_row_bars_and_a_round_centred_capture_button(
             # the page keeps the standard's form column, not a width of its own
             assert _style(page.locator("main.wrap"), "maxWidth") == "728px"
             assert _style(page.locator(".cam-panel"), "display") == "flex"
-            # Auto closes the options row; in the app the shutter and the viewfinder are the phone camera
+            # Auto closes the options row; the app shows the page's own camera too (0.7.47)
             assert page.locator(".scan-opts > :last-child").get_attribute("id") == "auto-switch"
-            assert page.locator("#open-phone-camera").count() == (1 if app else 0)
+            assert page.locator("#open-phone-camera").count() == 0
             # the × sits inside the Set box, and the hint is its tooltip
             box, clear = (
                 page.locator(".setbox").bounding_box(),

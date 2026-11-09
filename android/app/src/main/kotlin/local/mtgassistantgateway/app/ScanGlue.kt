@@ -262,6 +262,16 @@ object ScanGlue {
     /** Asks the page whether the scan hooks are there. Evaluates to `true` or `false`. */
     const val READY: String = "(function(){return !!(window.__mtgNative && window.__mtgNative.ready());})();"
 
+    /**
+     * Asks the page whether it scans with its own live camera (gateways from 0.7.47: cards are found
+     * by their picture while the camera watches, so the phone camera panel is not used). Evaluates to
+     * `true` or `false`; an older gateway's page answers `false` and keeps the panel.
+     */
+    const val OWN_CAMERA: String = "(function(){return !!(window.__scan && window.__scan.ownCamera);})();"
+
+    /** Brings a 0.7.47 page to its camera tab (the menu's Scan, pressed on its list). */
+    const val SHOW_CAMERA: String = "(function(){if (window.__scan && window.__scan.showTab) window.__scan.showTab('camera');})();"
+
     /** Run when the phone camera opens: parks the page on its list tab. Evaluates to 'ok' or 'no-scan'. */
     const val BEGIN: String = "(function(){return window.__mtgNative ? window.__mtgNative.begin() : 'no-glue';})();"
 

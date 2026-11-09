@@ -253,8 +253,9 @@ def test_a_deck_with_no_name_reads_unnamed_deck_in_the_deck_list_card() -> None:
 
 def test_the_scan_pages_wording() -> None:
     scan = (PKG / "scan" / "static" / "scan.js").read_text(encoding="utf-8")
-    # the shutter is Scan card in a browser; in the Android app it opens the phone's camera (0.7.46)
-    assert "const shutterLabel = app ? 'Scan with the phone camera' : 'Scan card';" in scan
+    # the shutter is Scan card while titles are read; with picture scanning it is Detect now, the
+    # same on every platform: the app no longer opens its own camera (0.7.47)
+    assert "const shutterLabel = PICTURES ? 'Detect now' : 'Scan card';" in scan
     assert "title: shutterLabel, 'aria-label': shutterLabel," in scan
     assert "Shoot" not in scan  # that word is the Android camera screen's own
     assert "told(msg, 'Name copied.')" in scan

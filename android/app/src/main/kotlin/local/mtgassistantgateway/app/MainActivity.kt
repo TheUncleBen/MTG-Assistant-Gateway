@@ -601,7 +601,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Opens the phone-camera scan panel, going to the /scan page first if needed; with [auto], it
+     * Opens the scanner: the /scan page, which from gateway 0.7.47 is the scanner itself (its live
+     * camera). An older gateway's page gets the phone-camera scan panel over it; with [auto], that
      * starts scanning on its own (the page's Auto switch). Calls that resume a deferred open keep the
      * choice made when it was asked for.
      */
@@ -614,26 +615,41 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (onScanPage()) {
-            web.evaluateJavascript(ScanGlue.READY) { ready ->
-                if (ready == "true") {
-                    scanReloaded = false
-                    // Park the page on its list tab (stops its own camera) while the panel has the lens.
-                    web.evaluateJavascript(ScanGlue.BEGIN) {
-                        if (camera == null && !isDestroyed) openCamera(pendingAuto)
-                        pendingAuto = false
-                    }
-                } else if (!scanReloaded) {
-                    scanReloaded = true
-                    pendingCamera = true
-                    web.loadUrl(GatewayUrl.join(origin, "/scan"))
+            web.evaluateJavascript(ScanGlue.OWN_CAMERA) { own ->
+                // A gateway from 0.7.47 scans on the page itself, with the live camera that finds
+                // cards as they are held up: the page is the scanner, so nothing more opens.
+                if (own == "true") {
+                    pendingCamera = false
+                    pendingAuto = false
+                    web.evaluateJavascript(ScanGlue.SHOW_CAMERA, null)
                 } else {
-                    scanReloaded = false
-                    Toast.makeText(this, getString(R.string.scan_page_too_old), Toast.LENGTH_LONG).show()
+                    openPanelOnPage()
                 }
             }
         } else {
             pendingCamera = true
             web.loadUrl(GatewayUrl.join(origin, "/scan"))
+        }
+    }
+
+    /** An older gateway's /scan page: open the phone camera panel over it (see [startScan]). */
+    private fun openPanelOnPage() {
+        web.evaluateJavascript(ScanGlue.READY) { ready ->
+            if (ready == "true") {
+                scanReloaded = false
+                // Park the page on its list tab (stops its own camera) while the panel has the lens.
+                web.evaluateJavascript(ScanGlue.BEGIN) {
+                    if (camera == null && !isDestroyed) openCamera(pendingAuto)
+                    pendingAuto = false
+                }
+            } else if (!scanReloaded) {
+                scanReloaded = true
+                pendingCamera = true
+                web.loadUrl(GatewayUrl.join(origin, "/scan"))
+            } else {
+                scanReloaded = false
+                Toast.makeText(this, getString(R.string.scan_page_too_old), Toast.LENGTH_LONG).show()
+            }
         }
     }
 

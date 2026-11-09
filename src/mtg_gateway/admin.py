@@ -69,6 +69,7 @@ OK_MESSAGES = {
     "unlink": "Archidekt account unlinked; the stored session was deleted.",
     "delete_data": "Deleted everything the gateway kept about that person.",
     "model_removed": "Card model removed.",
+    "miss_removed": "Picture deleted.",
 }
 ERR_MESSAGES = {
     "unknown_action": "Unknown action.",
@@ -78,6 +79,7 @@ ERR_MESSAGES = {
     "confirm_delete": "Tick the confirmation box to delete.",
     "failed": "That action could not be done.",
     "model_gone": "That card model was already removed.",
+    "miss_gone": "That picture was already deleted.",
 }
 
 
@@ -309,6 +311,55 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         sep = "&" if "?" in back else "?"
         return RedirectResponse(
             f"{back}{sep}{'ok=model_removed' if removed else 'err=model_gone'}", status_code=303
+        )
+
+    @server.custom_route("/admin/scanner", methods=["GET"], include_in_schema=False)
+    async def scanner(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
+        return page(
+            "Admin: card scanner", _scanner_body(state, _csrf(s, sid), notice=notice), sid=sid, sid_sub=sub
+        )
+
+    @server.custom_route("/admin/scanner", methods=["POST"], include_in_schema=False)
+    async def scanner_post(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        admin_sub, sid = who
+        data = await form(request)
+        if not csrf_form_ok(s, sid, data):
+            return page(
+                "Admin: card scanner",
+                "<div class='adm asc'>"
+                + _head("Admin: card scanner", SCANNER_PURPOSE, "/admin/scanner")
+                + _err("This form expired. Reload the page and try again.")
+                + "</div>",
+                status=403,
+                sid=sid,
+                sid_sub=admin_sub,
+            )
+        misses = _misses(state)
+        removed = misses is not None and misses.delete(str(data.get("id") or ""))
+        return RedirectResponse(
+            f"/admin/scanner?{'ok=miss_removed' if removed else 'err=miss_gone'}", status_code=303
+        )
+
+    @server.custom_route("/admin/scanner/miss/{mid}", methods=["GET"], include_in_schema=False)
+    async def scanner_picture(request: Request) -> Response:
+        """One kept picture (admins only; never cached)."""
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        misses = _misses(state)
+        data = misses.picture(request.path_params["mid"]) if misses is not None else None
+        if data is None:
+            return not_found(False)
+        return Response(
+            data, media_type="image/jpeg", headers={**NO_STORE, "X-Content-Type-Options": "nosniff"}
         )
 
     @server.custom_route("/admin/activity", methods=["GET"], include_in_schema=False)
@@ -635,6 +686,18 @@ KIND_ICONS = {"tool": "activity", "error": "alert", "api": "link", "admin": "shi
 ADMIN_CSS = """
 /* the admin pages (admin.py): dashboards in the 1200 px width, the tab bar in the same place on
    every tab, the System rows lined up as on Settings */
+/* Card scanner: the missed pictures as a grid of card-shaped tiles, each with who, when and Delete */
+.adm .miss-grid{list-style:none;margin:0;padding:0;display:grid;gap:.75rem;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,10rem),1fr))}
+.adm .miss-grid .miss{display:flex;flex-direction:column;gap:.25rem;padding:.6rem;min-width:0;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel)}
+.adm .miss-grid img{display:block;width:100%;height:auto;aspect-ratio:61/85;object-fit:cover;
+  border-radius:var(--radius);background:var(--surface-2)}
+.adm .miss-grid .t{font-weight:700;overflow-wrap:anywhere}
+.adm .miss-grid .sub{color:var(--text-muted);font-size:.86rem;overflow-wrap:anywhere}
+.adm .miss-grid form{margin:.25rem 0 0}
+.adm .miss-grid button{width:100%;min-height:var(--ctl);display:inline-flex;align-items:center;
+  justify-content:center;gap:.4rem}
 .adm .adm-nav{margin:0 0 1rem;display:flex;width:100%}
 .adm .notice{margin:0 0 1rem}
 .adm .ui-widgets .wdg .det{overflow-wrap:anywhere;min-width:0}
@@ -774,6 +837,7 @@ def _nav(active: str) -> str:
         ("/admin/metrics", "Metrics"),
         ("/admin/settings", "Settings"),
         ("/admin/models", "Card models"),
+        ("/admin/scanner", "Card scanner"),
     )
     return (
         "<nav class='hubseg adm-nav' aria-label='Admin'>"
@@ -1998,6 +2062,102 @@ def _models_query(db: Any, q: str, member: str, since: int | None) -> tuple[str,
         where.append("updated_at >= ?")
         args.append(since)
     return " AND ".join(where), args
+
+
+SCANNER_PURPOSE = (
+    "How far the scanner's picture index of every printing has got, and the pictures members kept "
+    "when a card wasn't found. Pictures are deleted after 30 days."
+)
+
+
+def _misses(state: Any) -> Any:
+    scan = getattr(state, "scan", None)
+    return getattr(scan, "misses", None)
+
+
+def _scanner_body(state: Any, csrf: str | None, *, notice: str = "", now: float | None = None) -> str:
+    """/admin/scanner: the picture index (how many printings it has, what it is doing) and the
+    missed pictures, newest first, each with who kept it, when, and Delete."""
+    now = time.time() if now is None else now
+    head = _head("Admin: card scanner", SCANNER_PURPOSE, "/admin/scanner") + notice
+    scan = getattr(state, "scan", None)
+    st = scan.pictures_status() if scan is not None else {"state": "off", "have": 0, "want": None}
+    have, want = int(st.get("have") or 0), st.get("want")
+    words = {
+        "off": "Off: MTG_SCAN_ART_ENABLED or the printings copy is off, or this image has no picture model",
+        "starting": "Starts a few minutes after the gateway",
+        "waiting": "Waiting for the printings copy",
+        "building": "Fetching card pictures",
+        "ready": "Up to date",
+        "error": "A round failed; it tries again within the hour",
+    }
+    state_word = words.get(str(st.get("state")), str(st.get("state") or ""))
+    share = f"{min(100, round(have * 100 / want))}%" if want else ""
+    misses = _misses(state)
+    rows = misses.list() if misses is not None else []
+    people: dict[str, str] = {}
+
+    def who(sub: str) -> str:
+        if sub not in people:
+            name = member_name(state.db, sub)
+            people[sub] = (
+                "a deleted account" if name is None else (NO_NAME if "no username" in name else name)
+            )
+        return people[sub]
+
+    widgets = [
+        ui.widget(
+            "Picture index",
+            "scan",
+            have,
+            unit=f"of {want:,} printings" if want else "printings",
+            detail_html=ui.facts(
+                [state_word, share, "used for scans" if st.get("ready") else "not used yet"]
+            ),
+            tone="alert" if st.get("state") == "error" else "",
+            wide_sm=True,
+        ),
+        ui.widget(
+            "Missed pictures",
+            "image",
+            len(rows),
+            unit="kept",
+            detail=("Newest " + ui.when_text(rows[0]["created_at"], now=now)) if rows else "None kept",
+        ),
+    ]
+    if st.get("error"):
+        widgets.append(ui.widget("Last problem", "alert", "", detail=str(st["error"])[:200], tone="alert"))
+    items = []
+    for r in rows:
+        mid = html.escape(str(r["id"]))
+        by = html.escape(who(r["owner_sub"]))
+        items.append(
+            "<li class='miss'>"
+            f"<a href='/admin/scanner/miss/{mid}' target='_blank' rel='noopener'>"
+            f"<img src='/admin/scanner/miss/{mid}' alt='Missed card picture kept by {by}' "
+            "loading='lazy' width='122' height='170'></a>"
+            f"<span class='t'>{by}</span>"
+            f"<span class='sub'>{ui.when(r['created_at'], now=now)} · {_size_text(r['size'])}</span>"
+            + (f"<span class='sub'>{html.escape(str(r['note']))}</span>" if r.get("note") else "")
+            + "<form method='post' action='/admin/scanner'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            f"<input type='hidden' name='id' value='{mid}'>"
+            f"<button type='submit' class='btn-outline-danger' aria-label='Delete the picture kept by {by}'>"
+            f"{icon('trash')}<span>Delete</span></button></form></li>"
+        )
+    gallery = (
+        "<ul class='miss-grid'>" + "".join(items) + "</ul>"
+        if items
+        else "<div class='ui-card'><p>No missed pictures kept. When the scanner can't find a card, "
+        "the member can keep the picture here for you.</p></div>"
+    )
+    return (
+        f"<div class='adm asc'>{head}"
+        + ui.widgets(widgets)
+        + ui.list_head("Missed pictures", len(rows), note="Newest first")
+        + gallery
+        + "</div>"
+    )
 
 
 def _models_body(

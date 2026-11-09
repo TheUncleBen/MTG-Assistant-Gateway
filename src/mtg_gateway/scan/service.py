@@ -19,6 +19,7 @@ from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
 from .bulk import PrintingsCopy
+from .misses import MissStore
 from .names import NameCatalog, fold
 from .scryfall import (
     PRINT_BORDERS,
@@ -517,6 +518,10 @@ class ScanService:
         # the local copy of every printing, for when Scryfall can't answer (bulk.py); set by
         # add_scan beside the database, None without one
         self.copy: PrintingsCopy | None = None
+        # every printing's artwork, for finding a card by its picture (picture.py); set by add_scan
+        self.pictures: Any = None
+        self.misses = MissStore(db)  # pictures the scanner missed, kept for the admin (misses.py)
+        self._identifying: set[str] = set()  # members with a picture being looked at right now
         self.store = ScanStore(db)
         self._in_flight: set[str] = set()
         self.queue_wait = RESOLVE_WAIT_SECONDS
@@ -529,6 +534,87 @@ class ScanService:
         self._options_at = 0.0
         self._options_next_try = 0.0
         self._options_task: asyncio.Task[None] | None = None
+
+    # -- finding a card by its picture (picture.py) ----------------------------
+    def pictures_ready(self) -> bool:
+        return self.pictures is not None and self.copy is not None and self.pictures.ready()
+
+    def pictures_status(self) -> dict[str, Any]:
+        """For the page and Admin: whether pictures are used, and how far the index is."""
+        if self.pictures is None:
+            return {"state": "off", "have": 0, "want": None}
+        st = dict(self.pictures.status)
+        if not self.pictures.enabled:
+            st["state"] = "off"
+        st["ready"] = self.pictures_ready()
+        return st
+
+    async def identify(self, data: bytes, *, owner: str) -> dict[str, Any]:
+        """The card in a straightened picture the page sent (a JPEG): the closest printing as a
+        card summary (the shape ``resolve`` gives), whether the match is sure, the printings that
+        share its artwork (for the page to choose by the set and number line) and the closest other
+        cards. One picture per member at a time (``busy`` otherwise)."""
+        from . import picture as pic
+
+        if not self.pictures_ready():
+            raise ScanError("unavailable", "Finding cards by their picture isn't ready on this gateway yet.")
+        if len(data) > pic.MAX_UPLOAD:
+            raise ScanError("invalid", "The picture is too large.")
+        if owner in self._identifying:
+            raise ScanError("busy", "Still looking at the last picture.")
+        self._identifying.add(owner)
+        try:
+            image = await asyncio.to_thread(pic.decode_picture, data)
+            if image is None:
+                raise ScanError("invalid", "That isn't a picture the scanner can read.")
+            found = await asyncio.to_thread(self.pictures.identify, image)
+            if not found.get("sure"):
+                # a card held upside down is straightened upside down: try it the other way up and
+                # keep whichever way up is the clearer match
+                from PIL import Image
+
+                turned = await asyncio.to_thread(
+                    self.pictures.identify, image.transpose(Image.Transpose.ROTATE_180)
+                )
+                if turned.get("best") and (
+                    not found.get("best") or turned.get("margin", 0.0) > found.get("margin", 0.0)
+                ):
+                    found = turned
+        finally:
+            self._identifying.discard(owner)
+        best = found.get("best")
+        if not best:
+            return {"card": None, "sure": False, "margin": 0.0, "same_art": [], "others": []}
+        copy = self.copy
+        assert copy is not None
+
+        def rows() -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[dict[str, Any]]]:
+            card = copy.printing_now(best["set"], best["collector_number"])
+            same = [
+                r
+                for a in found["same_art"]
+                if (r := copy.printing_now(a["set"], a["collector_number"])) is not None
+            ]
+            others = []
+            for o in found["others"]:
+                r = copy.printing_now(o["set"], o["collector_number"])
+                if r is not None:
+                    others.append({**r, "similarity": o["similarity"]})
+            return card, same, others
+
+        card, same, others = await asyncio.to_thread(rows)
+        if card is None:
+            return {"card": None, "sure": False, "margin": 0.0, "same_art": [], "others": []}
+        # newest first, as the printing picker lists them
+        same.sort(key=lambda r: str(r.get("released_at") or ""), reverse=True)
+        return {
+            "card": card,
+            "sure": bool(found["sure"]),
+            "margin": found["margin"],
+            "similarity": best["similarity"],
+            "same_art": same,
+            "others": others,
+        }
 
     # -- resolution -----------------------------------------------------------
     async def resolve(

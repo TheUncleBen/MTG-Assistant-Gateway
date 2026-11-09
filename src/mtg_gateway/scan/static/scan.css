@@ -3,9 +3,9 @@
    mouse, 44px on touch) and panels are the shell's flat 3px cards.
 
    Layout: one column at the standard's form width at every size (the shell's main.wrap), the
-   blocks in a fixed order: tabs, the options row (Set, Foil, Auto), the viewfinder (in the Android
-   app, a button that opens the phone camera), status, result, then the capture bar (Photo, the
-   round capture button in the middle, Type). The options row and the capture bar are each one row that never
+   blocks in a fixed order: tabs, with picture scanning the mode switch and the folded Set and foil
+   options (with text reading only, the options row: Set, Foil, Auto), the viewfinder, status,
+   result, then the capture bar (Photo, the round capture button in the middle, Type). The options row and the capture bar are each one row that never
    wraps; on phones the capture bar sticks to the bottom of the screen (thumb reach). */
 .scan{display:flex;flex-direction:column;gap:.75rem;container-type:inline-size}
 .scan .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
@@ -180,8 +180,9 @@ body.picker-open{overflow:hidden}
    (and keeps the guide's card name box inside the preview). */
 .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
 .scan .cam-panel.has-result .cam-hint{display:none}
+/* the scan area: left/top are its centre and width its size, set by scan.js (placeGuide) */
 .scan .camera .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:40%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
+  width:40%;aspect-ratio:63/88;touch-action:none;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
   box-shadow:0 0 0 999px var(--scrim);pointer-events:none}
 .scan .camera .guide::before,.scan .camera .guide::after{content:"";position:absolute;width:14%;height:10%;
   border:3px solid var(--orange);pointer-events:none}
@@ -398,15 +399,6 @@ body.picker-open{overflow:hidden}
 .scan .next button{flex:0 0 auto;min-height:var(--ctl)}
 @media (max-width:480px){.scan .next .nextrow{flex-direction:column;align-items:stretch}}
 
-/* inside the Android app the viewfinder opens the phone camera: one big button over the card frame */
-.scan .camera .phone-cam{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:0;
-  background:transparent;color:var(--navbar-text);display:flex;align-items:center;justify-content:center;cursor:pointer}
-.scan .camera .phone-cam .cap{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--ctl);padding:.4rem 1.1rem;
-  font-size:min(1rem,20px);
-  max-width:calc(100% - 2rem);border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);
-  font-weight:700;text-align:left;box-shadow:var(--shadow)}
-.scan .camera .phone-cam:hover .cap{background:var(--navbar-bg)}
-.scan .camera .phone-cam:focus-visible{outline:3px solid var(--orange-select);outline-offset:-3px}
 /* the running count of the scan, a tab in the viewfinder's top-left corner above the dashed name box:
    tucked into the corner and its text capped, so even on a narrow phone at large text sizes it ends
    above the name box (which starts about 46 px down in a 280 px wide viewfinder) */
@@ -418,3 +410,59 @@ body.picker-open{overflow:hidden}
   backdrop-filter:blur(2px);cursor:pointer}
 .scan .tally[hidden]{display:none}
 .scan .tally:hover{background:var(--navbar-bg);color:var(--navbar-text)}
+
+/* picture scanning (0.7.47): the mode switch, the folded Set and foil options, the movable scan
+   area, zoom chips, and the check sheet for a card found by its picture */
+.scan .scan-mode{display:flex;width:100%;margin:0}
+.scan .scan-mode > button{flex:1 1 0;min-width:0;white-space:normal;line-height:1.2;padding-block:.35rem}
+.scan details.scan-more{margin:0}
+.scan details.scan-more > summary{width:max-content;max-width:100%}
+.scan details.scan-more[open] > summary{margin-bottom:.5rem}
+.scan details.scan-more:not([open]) > :not(summary){display:none}
+.scan .camera .guide .grip{display:none;position:absolute;right:-14px;bottom:-14px;width:28px;height:28px;border-radius:50%;
+  background:var(--orange);border:2px solid var(--surface);box-shadow:var(--shadow);cursor:nwse-resize}
+.scan .camera.editing .guide{pointer-events:auto;cursor:move;border-style:dashed;border-color:var(--orange)}
+.scan .camera.editing .guide:focus-visible{outline:3px solid var(--focus);outline-offset:4px}
+.scan .camera.editing .guide .grip{display:block}
+/* a 44 px target around the round grip */
+.scan .camera.editing .guide .grip::after{content:"";position:absolute;inset:-8px}
+.scan .camera.looking .guide{border-color:var(--orange)}
+.scan .area-btn{position:absolute;left:.5rem;bottom:.5rem;z-index:2;min-height:var(--ctl);min-width:var(--ctl);padding:.4rem .7rem;
+  border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
+  display:inline-flex;align-items:center;gap:.35rem;backdrop-filter:blur(2px)}
+.scan .area-btn[hidden]{display:none}
+.scan .area-btn:hover{background:var(--navbar-bg);color:var(--navbar-text)}
+.scan .camera{container-type:inline-size}
+@container (max-width:20em){.scan .area-btn .lbl,.scan .torch .lbl{display:none}}
+.scan .area-bar{position:absolute;left:.5rem;right:.5rem;bottom:.5rem;z-index:4;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
+  padding:.5rem;border-radius:var(--radius);background:var(--surface-2);border:1px solid var(--border);box-shadow:var(--shadow);color:var(--text)}
+.scan .area-bar[hidden]{display:none}
+.scan .area-bar .txt{flex:1 1 12rem;min-width:0;font-weight:700;font-size:.9rem}
+.scan .area-bar button{flex:none}
+.scan .zoom-chips{position:absolute;right:.5rem;bottom:.5rem;z-index:2;display:flex;gap:4px;padding:3px;border-radius:24px;
+  background:var(--banner-a);border:1px solid var(--navbar-muted);backdrop-filter:blur(2px)}
+.scan .zoom-chips[hidden]{display:none}
+.scan .zoom-chips button{min-height:var(--ctl);min-width:var(--ctl);padding:0 .35rem;border-radius:22px;border:0;
+  background:transparent;color:var(--navbar-text);font-weight:700;font-variant-numeric:tabular-nums}
+.scan .zoom-chips button[aria-pressed=true]{background:var(--orange);color:var(--on-orange)}
+.scan .camera:has(.zoom-chips:not([hidden])) .glare-hint,.scan .camera:has(.area-btn:not([hidden])) .glare-hint{bottom:3.9rem}
+.scan .result.found{position:relative}
+.scan .result.found .close{position:absolute;right:.25rem;top:.25rem;min-width:var(--ctl);min-height:var(--ctl);padding:0;
+  border:0;background:transparent;color:var(--text-muted)}
+.scan .result.found .close:hover{color:var(--text);background:var(--surface-2)}
+.scan .result.found h3{padding-right:calc(var(--ctl) - .25rem)}
+.scan .sheet-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.5rem 0}
+.scan .sheet-row .lbl{flex:0 0 5.5rem;font-weight:700;color:var(--text-muted)}
+.scan .sheet-row .setcode{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700}
+.scan .sheet-row .printings{min-height:var(--ctl)}
+.scan .hubseg.finish{display:inline-flex;margin:0}
+.scan .hubseg.finish button:disabled{opacity:.45}
+.scan .chips.same-art button[aria-pressed=true]{border-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
+.scan .chips.same-art button{font-family:ui-monospace,Menlo,Consolas,monospace}
+.scan .result .price{margin:.25rem 0}
+.scan .result .kept{margin:.5rem 0 0}
+.scan .others[hidden]{display:none}
+.scan .status-picture,.scan .status-picture_choice{color:var(--green-text);border-color:var(--green);background:var(--green-tint)}
+.scan .status-picture_unsure{color:var(--orange-text);border-color:var(--orange);background:var(--orange-tint)}
+.scan .hubseg > button[aria-checked=true]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.scan .chips.same-art button{border:1px solid var(--border)}
