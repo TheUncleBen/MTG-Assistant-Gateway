@@ -1013,7 +1013,7 @@ ACT_CSS = """
 .act-page .wdg .det{overflow-wrap:anywhere}
 @media (max-width:599.98px){
   /* two widgets a row on a phone, one when the text is large */
-  .act-page .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}}
+  .act-page .ui-widgets{--wdg-min:9rem}}
 /* the rows' layout follows the table's own width in its text (a container, as the lists' toolbars
    do): the lined-up columns while they fit, the two-line rows under 61em (a 900 px viewport at
    the pages' 14 px text) and the stacked rows under 40em (600 px). So at 200% text the When and

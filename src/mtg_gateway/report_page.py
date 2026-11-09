@@ -2049,11 +2049,12 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-stats .tile .ci{background:var(--surface-2)}
 .rv-page .charts.rv-charts{grid-template-columns:1fr;gap:.5rem 1.5rem}
 @media (min-width:900px){.rv-page .charts.rv-charts{grid-template-columns:1fr 1fr}
-  .rv-page .rv-w{grid-template-columns:repeat(3,minmax(0,1fr))}
+  /* three a row; a last row of two shares the width (theme .ui-widgets: no hole at its end) */
+  .rv-page .rv-w{--wdg-min:calc(33.333% - .5rem)}
   /* three a row gave a tile 10 em at 200% text on a 900-1024 px window ("$310./00", "100 /
      cards": final polish Z5); the row is a container (theme .ui-widgets) measured in its own em,
      and below 39 em (three tiles of 12.5 em and the gaps) each tile takes the row */
-  @container (max-width:39em){ .rv-page .rv-w .wdg{grid-column:1 / -1} }}
+  @container (max-width:39em){ .rv-page .rv-w > .wdg{flex-basis:100%} }}
 .rv-page .rv-chart{margin:0}
 .rv-page .rv-chart h3{margin:.5rem 0 .2rem}
 .rv-page .rv-chart .ui-hint{margin:0 0 .35rem}
@@ -2099,7 +2100,7 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-flat .ui-table{border:1px solid var(--card-border);border-radius:var(--radius-panel);
   background:var(--surface)}
 .rv-page .rv-flat .ui-table .th{background:var(--surface-2);border-bottom:0}
-@media (min-width:900px){.rv-page .solo-forge .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (min-width:900px){.rv-page .solo-forge .ui-widgets{--wdg-min:calc(33.333% - .5rem)}}
 /* turn by turn: four short numbers and a damage bar */
 .rv-page .sf-turns .tr{min-height:40px}
 .rv-page .sf-turns .n{text-align:right;font-variant-numeric:tabular-nums}

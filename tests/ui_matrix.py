@@ -23,7 +23,9 @@ What is measured, beyond the overflow sweep's sideways scroll, clipping and over
 * ``contrast``: text whose colour against its background is under 4.5:1 (3:1 for large text).
 * ``unstyled``: a button or select the browser draws itself (its grey default face).
 * ``raw-value``: shown text that leaks a program value: undefined, null, NaN, None, [object …], an
-  ISO timestamp, a price with one decimal ($12.5) or a number with four or more decimals.
+  ISO timestamp, a price with one decimal ($12.5) or a number with four or more decimals; a setting's
+  own name (MTG_…); "unknown" as a value in more than one place; an element marked hidden that is
+  drawn all the same (0.7.47 polish: "Est unknown", every Binder row's "unknown", env var names).
 * ``plural``: "1 cards", "1 decks" and the like.
 * ``target``: on a touch screen, a control smaller than 44 × 44 px.
 * ``mid-word``: a word of 4 to 12 letters drawn across two lines.
@@ -341,6 +343,27 @@ CHECKS = (
     }
   }
 
+  // --- a few panels or tiles in a grid whose last line stops short and leaves a gap at its end
+  // (the key numbers' five tiles three a row, the guide's four parts three a row: 0.7.47 polish);
+  // a long gallery of covers ends where it ends
+  const boxed = (k) => { const c = getComputedStyle(k);
+    return c.backgroundColor !== 'rgba(0, 0, 0, 0)' || parseFloat(c.borderTopWidth) > 0; };
+  for (const box of main.querySelectorAll('*')) {
+    if (!visible(box) || !getComputedStyle(box).display.includes('grid')) continue;
+    const kids = [...box.children].filter(visible);
+    if (kids.length < 2 || kids.length > 8) continue;
+    if (!box.matches('.ui-widgets') && !(kids.length >= 3 && kids.every(k => boxed(k) && k.getBoundingClientRect().width >= 200))) continue;
+    // pictures (cards, covers): a gallery ends where it ends
+    if (box.matches('.cards, .recent') || kids.some(k => k.querySelector('img, .pic'))) continue;
+    const rs = kids.map(k => k.getBoundingClientRect());
+    const tops = [...new Set(rs.map(r => Math.round(r.top)))].sort((a, b) => a - b);
+    if (tops.length < 2) continue;
+    const cr = box.getBoundingClientRect();
+    const lastRight = Math.max(...rs.filter(r => Math.round(r.top) === tops[tops.length - 1]).map(r => r.right));
+    if (cr.right - lastRight > cr.width * .2)
+      add('hole', box, 'its last row of tiles stops ' + Math.round(cr.right - lastRight) + 'px short of the end');
+  }
+
   // --- stranded: a wrapped row of controls whose last line holds a lone control
   const ctl = 'button, a.btn, .btn, details.dd, summary, select, [role=button]';
   for (const row of main.querySelectorAll('*')) {
@@ -360,6 +383,25 @@ CHECKS = (
     if (lone && by.some(ks => ks.length >= 2))
       add('stranded', lone[0], 'alone on a line of its own beside lines of ' +
         Math.max(...by.map(ks => ks.length)) + ' controls');
+  }
+  // ... and a row of labelled fields whose last field wrapped alone and stretched across the whole
+  // line while the line above holds two or more (0.7.47 polish: Search decks' Owner under Format
+  // and Commander)
+  const field = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, .msel-btn';
+  for (const row of main.querySelectorAll('*')) {
+    const cs = getComputedStyle(row);
+    if (!(cs.display.includes('flex') && cs.flexWrap === 'wrap' && !cs.flexDirection.startsWith('column'))) continue;
+    if (!visible(row)) continue;
+    const kids = [...row.children].filter(visible);
+    if (kids.length < 3 || !kids.every(k => k.querySelector(field) || k.querySelector('label, legend'))) continue;
+    const tops = kids.map(k => Math.round(k.getBoundingClientRect().top));
+    const lines = [...new Set(tops)].sort((a, b) => a - b);
+    if (lines.length < 2) continue;
+    const by = lines.map(t => kids.filter((k, i) => tops[i] === t));
+    const last = by[by.length - 1], prev = by[by.length - 2];
+    const rw = row.getBoundingClientRect().width;
+    if (last.length === 1 && prev.length >= 2 && last[0].getBoundingClientRect().width > rw * .9)
+      add('stranded', last[0], 'a field alone on its line, stretched across it, under a line of ' + prev.length);
   }
 
   // --- link-blue: a link drawn in a blue (the browser's default or any blue text colour)
@@ -420,6 +462,26 @@ CHECKS = (
   ];
   for (const [re, what] of raws) { const m = text.match(re);
     if (m) add('raw-value', null, what + ' shown: "' + text.substr(Math.max(0, m.index - 20), 60).replace(/\s+/g, ' ') + '"'); }
+  // a setting's own name (an environment variable) in the page: members and admins read plain words
+  // (a <code> is an instruction for the operator's stack, as a locked setting's "set in your stack")
+  const wEnv = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let t = wEnv.nextNode(); t; t = wEnv.nextNode()) {
+    const envm = t.nodeValue.match(/\bMTG_[A-Z0-9_]{3,}\b/);
+    if (envm && t.parentElement && visible(t.parentElement) && !t.parentElement.closest('code, script, style')) {
+      add('raw-value', t.parentElement, 'a setting name shown: "' + envm[0] + '"'); break; }
+  }
+  // "unknown" as a value in more than one place: a placeholder repeated down a list or across a
+  // header (say it once, in a summary, or leave the value out)
+  const unk = [...document.querySelectorAll('main *, .banner *')].filter(e => visible(e) &&
+    !e.children.length && /^unknown$/i.test(e.textContent.trim()));
+  if (unk.length > 1) add('raw-value', unk[0], '"unknown" shown ' + unk.length + ' times');
+  // an element marked hidden that is drawn all the same (its own display rule beat [hidden])
+  for (const e of document.querySelectorAll('body [hidden]')) {
+    if (e.closest('template, [hidden] [hidden]')) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden') {
+      add('raw-value', e, 'marked hidden but drawn'); break; }
+  }
   const pl = text.match(/(?<![\d.,])1 (cards|decks|proposals|changes|items|games|members|copies|printings|lists|days|hours|minutes|results|reports|rows)\b/);
   if (pl) add('plural', null, '"' + pl[0] + '"');
 

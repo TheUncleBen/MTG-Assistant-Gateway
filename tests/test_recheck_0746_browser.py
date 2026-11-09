@@ -163,11 +163,12 @@ def test_the_goldfish_status_wraps_without_a_dangling_dot_or_a_lone_fact(
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
         status = page.locator("#gf-status")
-        assert "Opening hand" in status.inner_text() and "Exile 0" in status.inner_text()
+        # 0.7.47: the turn and the library; each zone's heading carries its own count
+        assert "Opening hand" in status.inner_text() and "Library" in status.inner_text()
+        assert "Exile" not in status.inner_text() and "Hand 7" not in status.inner_text()
+        assert page.locator("#gf-hand .gf-n").inner_text().strip() != ""
         assert page.evaluate(MEASURE) == []
-        lines = _balanced_facts(page, "#gf-status")
-        if width == 360:
-            assert len(lines) >= 2, lines  # the phone does wrap this line: the check is real
+        _balanced_facts(page, "#gf-status")
         page.evaluate(TEXT_200)
         redrawn(page)
         _balanced_facts(page, "#gf-status")

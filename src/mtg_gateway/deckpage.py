@@ -524,7 +524,9 @@ def banner_html(
         f"<span class='cost'{'' if stats.get('priced_cards') else ' hidden'}>"
         "<span class='lg'>Est cost: </span><span class='sm'>Est </span>"
         f"<b class='orange'>{est_cost_html(stats)}</b><span class='lg'> (Archidekt prices)</span></span>"
-        "<span><span class='lg'>Salt sum: </span><span class='sm'>Salt </span>"
+        # no salt known, or none at all: left out too ("Salt 0.0" read as a placeholder: 0.7.47 polish)
+        f"<span class='salt'{'' if (stats.get('salt_total') or 0) > 0 else ' hidden'}>"
+        "<span class='lg'>Salt sum: </span><span class='sm'>Salt </span>"
         f"<b class='orange'>{esc(salt)}</b></span>"
         "</div></div>"
     )
@@ -824,7 +826,8 @@ def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True, waiting: 
         f"<button type='button' class='soc{' on' if liked else ''}' data-social='vote' "
         f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}'"
         f"{title(like_tip)}>"
-        f"{icon('heart')}<b class='n'>{deck.points}</b>"
+        # no likes yet: no "0" beside the heart (0.7.47 polish: a zero read as noise)
+        f"{icon('heart')}<b class='n'{'' if deck.points else ' hidden'}>{deck.points}</b>"
         f"<span>{'Voted down' if down else 'Liked' if liked else 'Like'}</span></button>"
     )
     marked = deck.bookmarked
@@ -2843,6 +2846,8 @@ GOLDFISH_CSS = """
 .gf-controls [hidden]{display:none}
 .gf-controls button{margin:0}
 .gf-size{margin-left:auto}
+/* a phone: the game's buttons share their lines evenly instead of one a line (0.7.47 polish) */
+@media (max-width:599.98px){.gf-controls > button{flex:1 1 auto}}
 .gf-size .cardsize{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;
   margin:0}
 .gf-size .cardsize .lbl{color:var(--text-muted)}
@@ -4099,6 +4104,10 @@ html.cardview-open{overflow:hidden}
 .statfocus span{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
 .statfocus button{min-height:32px}
 /* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
+/* the deck's tiles wrap as a row whose last line shares its width (0.7.47 polish: a grid's columns
+   left a hole beside the last tiles at large text) */
+.panel.stats .tiles{display:flex;flex-wrap:wrap}
+.panel.stats .tiles > *{flex:1 1 min(100%,6.5rem);min-width:0}
 /* fixed columns: the numbers' column is narrow, the names have the rest, and a name breaks between
    its words ("Enchantment" stays whole at large text); only a word longer than the whole column
    (an unbroken category name) breaks inside */
@@ -4318,8 +4327,9 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   .addbox form.addcard .go button{flex:1} }
 /* (0.7.47) one category under another on every screen: side by side, a short category beside a
    long one left a screen-high hole under it, and balanced columns cost five times the layout time */
-.cats.existing{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;max-width:80rem;
-  margin-left:auto;margin-right:auto}
+/* the same width as Add a card and the toolbar above (a narrower centred column made two widths
+   on one page: 0.7.47 polish) */
+.cats.existing{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}
 .cats.existing > details.cat{margin:0}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}
 .addbox form.scanpick button{margin:0}

@@ -378,6 +378,9 @@ details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
    phone a 12-letter word of a heading needs the 4 px a gutter of 28 px took (re-audit N02); a
    full-bleed element spans them with var(--gutter) */
 :root{--gutter:min(1rem,16px)}
+/* an element marked hidden is never drawn, whatever display its own rules give it (0.7.47 polish:
+   the deck banner's hidden "Est unknown" showed, its span's inline-block beating [hidden]) */
+[hidden]{display:none!important}
 .wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 var(--gutter)}
 main.wrap{flex:1;padding:var(--main-top,1rem) var(--gutter) 3rem;container-type:inline-size}
 /* a heading wraps between words, at a hyphen where the browser has a dictionary, and inside a
@@ -1963,7 +1966,7 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .with-panel .ui-table .tr{grid-template-columns:var(--cols-md)}
   .with-panel .ui-table .md-hide{display:none}
   .with-panel .ui-table .sub{display:flex}
-  .with-panel .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
+  .with-panel .ui-widgets{--wdg-min:11rem}
 }
 @media (max-width:1099.98px){
   .ui-split.with-panel .list-only{display:none}
@@ -2064,8 +2067,11 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .glance-tgl:checked + .glance-lbl + .ui-widgets{padding:min(.75rem,11px);margin-bottom:1rem;
     border:1px solid var(--card-border);
     border-top:0;border-radius:0 0 var(--radius-panel) var(--radius-panel);background:var(--surface-2)} }
-.ui-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;
-  margin:0 0 1.25rem}
+.ui-widgets{display:flex;flex-wrap:wrap;gap:.75rem;margin:0 0 1.25rem}
+/* (0.7.47 polish) a row of tiles that wraps: each tile at least --wdg-min wide, and the tiles of a
+   last row that is not full share its width, so five tiles never leave a hole at the bottom right
+   as a grid's columns did; a page asks for N a row with --wdg-min: calc(100% / N - the gaps) */
+.ui-widgets > *{flex:1 1 min(100%,var(--wdg-min,13rem));min-width:0}
 .wdg{display:flex;flex-direction:column;gap:.35rem;min-width:0;padding:.85rem 1rem;background:var(--surface);
   border:1px solid var(--card-border);border-radius:var(--radius-panel)}
 /* the label wraps at its spaces beside its icon, and a word too wide for the room beside the icon
@@ -2104,25 +2110,25 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .bar-split{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-2)}
 .bar-split i{display:block;height:100%}
 @media (min-width:600px) and (max-width:899.98px){
-  .ui-widgets{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .wdg.wide-sm{grid-column:1 / -1}
+  .ui-widgets{--wdg-min:calc(50% - .375rem)}
+  .ui-widgets > .wdg.wide-sm{flex-basis:100%}
 }
 /* the row measured in its own em (final polish Z5): two a row at 600-899 px gave a tile 12 em at
    200% text on a 720 px window, where a price and its unit no longer fit a line; below 25.75 em
    (two tiles of 12.5 em and the gap) each tile takes the row. At 100% the row has 40 em at 600 px */
 .ui-widgets{container-type:inline-size}
 @media (min-width:600px) and (max-width:899.98px){
-  @container (max-width:25.75em){ .wdg{grid-column:1 / -1} } }
+  @container (max-width:25.75em){ .ui-widgets > .wdg{flex-basis:100%} } }
 @media (max-width:599.98px){
   /* two a row, or one a row when enlarged text leaves a half too narrow for 8.5rem */
-  .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,max(8.5rem,calc(50% - .25rem))),1fr));
+  .ui-widgets{--wdg-min:max(8.5rem,calc(50% - .25rem));
     gap:.5rem}
   .wdg{padding:.6rem min(.7rem,10px)}  /* the side padding stops at its 100% size, as the fold's */
   .wdg .big{font-size:1.5rem}
   .wdg .det{font-size:.82rem}
   .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center;padding:0 .4rem;
     font-size:.86rem}
-  .wdg.wide-sm{grid-column:1 / -1}
+  .ui-widgets > .wdg.wide-sm{flex-basis:100%}
 }
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
 /* a fold-out under a row or a section (a report's details, a watched card's history) */
@@ -2473,6 +2479,11 @@ SEARCH_PANEL_CSS = """
 /* the filter groups: whole groups in a fluid row, each at least --gw wide, growing to fill its row */
 .spanel .fgrid{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-start}
 .spanel .fgrid > *{flex:1 1 var(--gw,10.714em);min-width:0;margin:0}
+/* four groups or more: the colours take a line of their own and the rest share the next, rather
+   than the last group wrapping alone across the whole width (0.7.47 polish: Search decks' Owner) */
+.spanel .fgrid:has(> :nth-child(4)) > .fg.colors{flex-basis:100%}
+/* ... and when the rest cannot share one line either (large text), one a line, never two and one */
+@container (max-width:44em){.spanel .fgrid:has(> :nth-child(4)) > .fg{flex-basis:100%}}
 .spanel fieldset.fg{border:0;padding:0;margin:0;min-width:0;min-inline-size:0}
 .spanel .fg .l{display:block;font-weight:700;margin:0 0 .35rem;padding:0}
 .spanel .fg .l .hint{display:inline;font-weight:400;color:var(--text-muted);font-size:.86rem;margin:0}

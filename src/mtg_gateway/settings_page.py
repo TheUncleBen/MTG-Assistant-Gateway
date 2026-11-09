@@ -259,7 +259,10 @@ SETTINGS_CSS = """
 /* the admin Settings page: one flat card per group, one row per setting,
    every control in the same 16rem column so the boxes, switches and lists line up */
 /* the form stays in the 52rem column under the tab bar (the page itself is 1200 px) */
-.set-page{max-width:52rem}
+.set-page{max-width:52rem;margin-left:auto;margin-right:auto}
+/* (0.7.47 polish) centred under the tab bar, not hugging its left; with room the group chips wrap
+   onto a second line rather than run out of the column with no sign that more follow */
+@media (min-width:900px){.set-nav{flex-wrap:wrap;overflow:visible}}
 .set-page .notice{margin:0 0 1rem}
 .set-nav{margin:0 0 1rem}
 .set-nav .ui-chip{background:var(--surface);min-height:var(--ctl)}

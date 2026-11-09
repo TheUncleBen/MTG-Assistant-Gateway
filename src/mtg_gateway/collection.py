@@ -1646,10 +1646,11 @@ def price_text(r: dict[str, Any]) -> str:
 
 def price_cell(r: dict[str, Any]) -> str:
     """The list's Price column: the row's value, and under it the copies times the unit price;
-    "unknown" when Scryfall has no price for its finish."""
+    empty when Scryfall has no price for its finish: the Value tile says once that some cards have
+    no price, rather than "unknown" in every row (0.7.47 polish)."""
     p = r.get("price")
     if not p:
-        return UNPRICED_HTML
+        return ""
     qty = int(r.get("quantity") or 0)
     unit = money(p["unit"], p["currency"])
     if qty <= 1:
@@ -1848,7 +1849,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
             f"{body}{badges}</button>"
             f"<div class='meta'><span class='nm'>{_tick(r)}<span class='name' title='{name}'>{name}</span>"
             f"{_kebab(r['name'], rid)}</span><span class='ty'>{sub}</span>"
-            + f"<span class='pr'>{_esc(price) if price else UNPRICED_HTML}</span>"
+            + (f"<span class='pr'>{_esc(price)}</span>" if price else "")
             + chips
             + f"</div><div class='act'>{stepper}</div>{shims}</li>"
         )
@@ -1862,12 +1863,18 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
         else "<span class='thumb'></span>"
     )
     # under 900 px the Price column is hidden: the price goes on the card's own lines; a price
-    # nobody knows says so there too, as the column does (audit N7, N12)
-    price = _esc(price_text(r)) or UNPRICED_HTML
+    # nobody knows is left out there, as the column leaves it out (0.7.47 polish)
+    price = _esc(price_text(r))
     # one span a fact, the dots between them drawn (ui.facts), so none is left at a line's end
     sub_md = ui.facts((set_line, set_name, fin_word, cond_word, lang_word), html=True)
     sub_sm = ui.facts(
-        (set_line, fin_word, _esc(cond or "Not set"), lang_word, f"<span class='pr'>{price}</span>"),
+        (
+            set_line,
+            fin_word,
+            _esc(cond or "Not set"),
+            lang_word,
+            price and f"<span class='pr'>{price}</span>",
+        ),  # noqa: E501
         html=True,
     )
     sub_md += f"<span class='pr lgh'>{price}</span>"

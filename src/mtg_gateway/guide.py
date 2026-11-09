@@ -55,8 +55,10 @@ GUIDE_CSS = """
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
 .gsearch .status:empty{display:none}
 /* the contents page: a card a part, its topics as rows */
-.gcontents{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem;
-  margin-top:1rem}
+/* (0.7.47 polish) the four parts one, two or four a row, never three and one left alone */
+.gcontents{display:grid;gap:1rem;margin-top:1rem;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,max(18rem,calc(50% - .5rem))),1fr))}
+@container (min-width:76rem){.gcontents{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .gcontents .gpart{margin:0}
 .gtoc{list-style:none;margin:0;padding:0}
 .gtoc li{margin:0}

@@ -56,11 +56,16 @@ a.blue{color:#1d55b3} .faint{color:#bbb}
 <div class=row><button>One</button><button>Two</button><button>Three</button><button>More</button></div>
 <p><a class=blue href='#'>a blue link</a> <span class=faint>faint words</span> Total: $12.5 1 cards</p>
 <input name=cardnumber placeholder='Card name'>
+<p><button style='all:revert'>Plain</button> <a href='#' class=btn style='display:inline-block;width:24px;height:24px'>x</a></p>
+<div style='width:70px;overflow-wrap:anywhere;font-size:20px'>Cultivating</div>
+<div style='width:1400px;height:2px'></div>
 </main></body></html>
 """
 
 
 def test_the_checks_find_each_kind_of_problem() -> None:
+    """Every kind of check the matrix makes fires on a page made to fail it (audit AO5: three of
+    them were not proved), so a check that stops working fails here rather than passing quietly."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -81,11 +86,17 @@ def test_the_checks_find_each_kind_of_problem() -> None:
         "raw-value",
         "plural",
         "payment-autofill",
+        "unstyled",
+        "target",
+        "mid-word",
+        "overflow",
     ):
         assert kind in kinds, (kind, kinds)
 
 
-@pytest.mark.parametrize("path", ["/search", "/cards", "/decks"])
+# each with a filter set, so the sheet's foot holds Clear filters beside Show results and wraps to
+# two rows at 200% text: without one the foot is one row and the old fixed room was enough (audit AO3)
+@pytest.mark.parametrize("path", ["/search?name=a", "/cards?q=s", "/decks?q=a"])
 def test_a_filter_sheets_foot_never_covers_its_last_control(server: Server, path: str) -> None:  # noqa: F811
     """At 200% text on a 320 px phone the sheet's Clear filters and Show results wrap onto two rows
     (176 px), and the sheet's fixed 154 px of room left the card size S/M/L partly under them
@@ -134,3 +145,33 @@ def test_a_filter_sheets_foot_never_covers_its_last_control(server: Server, path
         )
         browser.close()
     assert gap >= 0, f"the sheet's last control is {-gap:.0f} px under its foot"
+
+
+PLACEHOLDERS = """
+<!doctype html><html><head><meta name=viewport content='width=device-width'>
+<style>body{margin:0;background:#fff;color:#111;font:16px sans-serif} .c{display:inline-block}</style>
+</head><body><main>
+<p>Newest backup: off (MTG_BACKUP_COPY_DIR not set)</p>
+<ul><li>Sol Ring <span>unknown</span></li><li>Arcane Signet <span>unknown</span></li></ul>
+<p><span class=c hidden>Est unknown</span></p>
+</main></body></html>
+"""
+
+
+def test_the_raw_value_check_finds_placeholders_and_setting_names() -> None:
+    """0.7.47 polish found what the first checks let through: a setting's name on Admin, "unknown"
+    in every Binder row, and the deck banner's hidden "Est unknown" drawn by its own display rule."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.set_content(PLACEHOLDERS)
+        msgs = [f["msg"] for f in page.evaluate(M.CHECKS, {"touch": False, "text": 1}) if f["kind"] == "raw-value"]
+        browser.close()
+    assert any("MTG_BACKUP_COPY_DIR" in m for m in msgs), msgs
+    assert any('"unknown" shown 2 times' in m for m in msgs), msgs
+    assert any("marked hidden but drawn" in m for m in msgs), msgs

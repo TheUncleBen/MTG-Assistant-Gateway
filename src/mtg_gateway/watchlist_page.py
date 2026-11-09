@@ -199,7 +199,10 @@ def change_html(v: float | None) -> str:
 
 
 def changes_html(view: dict[str, Any]) -> str:
-    return "".join(f"<span>{label} {change_html(view.get(key))}</span>" for label, key in CHANGE_KEYS)
+    # only the periods with history: "7 days unknown · 30 days unknown" under every new card read as
+    # noise (0.7.47 polish)
+    kept = [(label, view.get(key)) for label, key in CHANGE_KEYS if view.get(key) is not None]
+    return "".join(f"<span>{label} {change_html(v)}</span>" for label, v in kept)
 
 
 def alert_text(alerts: dict[str, Any], currency: str, added: float | None = None) -> str:

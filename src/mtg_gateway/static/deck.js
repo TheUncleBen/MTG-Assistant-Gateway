@@ -1290,7 +1290,11 @@
       // the phone's short count ("100 cards", deckpage.banner_html)
       else if (/^[\d,]+ cards?$/.test(t) && sp.classList.contains("sm") && st.card_count !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.card_count, "card") : st.card_count + " cards";
       else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) setCost(b, st); }
-      else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = st.salt_text || Number(st.salt_total).toFixed(1); }
+      else if (/^Salt sum:/.test(t) && st.salt_total !== undefined) {
+        // shown only with some salt (deckpage.banner_html leaves 0 and unknown out)
+        sp.hidden = !(Number(st.salt_total) > 0);
+        var s2 = $("b", sp); if (s2 && st.salt_total !== null) s2.textContent = st.salt_text || Number(st.salt_total).toFixed(1);
+      }
     });
     // the deck's date, as Archidekt stamped this save (deckpage.updated_when)
     var when = $(".banner .row > span > time.ui-when");
@@ -2770,8 +2774,12 @@
       controls.appendChild(moreBtn);
     }
     toolbar.classList.add("compact");
-    // the one "hold a card to move it" line, above the cards, on a touch phone
-    if (canDrag && touch && narrow()) {
+    // the one "hold a card to move it" line, above the cards, on a touch phone: for a member's first
+    // three deck pages only, then it has said its piece (0.7.47 polish: a permanent hint is noise)
+    var hintSeen = 0;
+    try { hintSeen = parseInt(localStorage.getItem("mtg.movehint.seen") || "0", 10) || 0; } catch (e) { hintSeen = 0; }
+    if (canDrag && touch && narrow() && hintSeen < 3) {
+      try { localStorage.setItem("mtg.movehint.seen", String(hintSeen + 1)); } catch (e) { /* private mode */ }
       var hint = el("p", "movehint", "Hold a card to move it to another category.");
       cards.parentNode.insertBefore(hint, cards);
       cards.setAttribute("data-hint-top", "");

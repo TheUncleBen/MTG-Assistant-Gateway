@@ -667,8 +667,8 @@ ADMIN_CSS = """
    row gave a tile 10 em at 200% text on a 900-1024 px window, where System's "Gateway" ran out
    of its tile (audit 71911eba M1); the row is a container (theme .ui-widgets) measured in its own
    em, and below 39 em (three tiles of 12.5 em and the gaps) each tile takes the row */
-@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}
-  @container (max-width:39em){ .ao .ui-widgets .wdg{grid-column:1 / -1} }}
+@media (min-width:900px){.ao .ui-widgets{--wdg-min:calc(33.333% - .5rem)}
+  @container (max-width:39em){ .ao .ui-widgets > .wdg{flex-basis:100%} }}
 .ao .ao-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;align-items:start}
 .ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
 .ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}
@@ -995,13 +995,15 @@ def _overview_body(state: Any, now: float | None = None) -> str:
     ]
     # the System panel: every row as today, the same wording
     if not sysd["backups_enabled"]:
-        backup: Any = _Html(f"off ({ui.breakable('MTG_BACKUP_DIR')} not set)")
+        # plain words, no setting names (0.7.47 polish: Ben, no env var names in the UI); the
+        # deployment guide names the setting
+        backup: Any = "Off: no backup folder is set up"
     elif sysd["last_backup_at"]:
         backup = _Html(ui.when(sysd["last_backup_at"], now=now))
     else:
         backup = "none yet"
     if not sysd["backup_copies_enabled"]:
-        copies: Any = _Html(f"off ({ui.breakable('MTG_BACKUP_COPY_DIR')} not set)")
+        copies: Any = "Off: no folder for copies is set up"
     elif sysd["last_backup_copy_at"]:
         copies = _Html(ui.when(sysd["last_backup_copy_at"], now=now))
     else:
@@ -1187,7 +1189,7 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
     if u["check"] == "off":
-        state: Any = _Html("off (<code>MTG_<wbr>UPDATE_<wbr>CHECK=false</code>)")
+        state: Any = "Off: turned off in the gateway's setup"
     elif u.get("error"):
         state = f"last check failed ({u['error']}), trying again within the hour"
     elif u.get("latest"):
