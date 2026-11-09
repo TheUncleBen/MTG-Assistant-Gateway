@@ -66,6 +66,7 @@ from .auth_provider import (
     cookie_name,
 )
 from .backup import nightly_loop, purge_loop
+from .binder_hub import add_binder_routes
 from .browse import add_browse_routes, add_browse_tools
 from .cards import (
     CardLinks,
@@ -1294,6 +1295,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     state.db.price_days = s.price_history_days
     _notify_events(state)
     add_watchlist_routes(server, state)
+    add_binder_routes(server, state)
     add_watchlist_tools(server, state)
     add_summary_tool(server, state)
     # Every tool's input schema self-contained: nested shapes (a deck change, the simulator's

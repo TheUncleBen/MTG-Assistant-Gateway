@@ -360,9 +360,11 @@ async def test_nothing_is_read_or_priced_for_a_binder_nobody_opened(stack: Stack
 # -- c) the Watchlist's size ----------------------------------------------------------------------
 
 
-def test_the_limits_are_5000_cards_and_100_decks() -> None:
+def test_cards_have_no_limit_by_default_and_decks_100() -> None:
+    # 0.7.47 (the owner's decision 3): 0 is no limit, and the owner can still set one
     assert (
-        MANAGED_SETTINGS["watch_max_cards"].default == 5000 and MANAGED_SETTINGS["watch_max_cards"].hi == 5000
+        MANAGED_SETTINGS["watch_max_cards"].default == 0
+        and MANAGED_SETTINGS["watch_max_cards"].hi == 1_000_000
     )
     assert (
         MANAGED_SETTINGS["watch_max_decks"].default == 100 and MANAGED_SETTINGS["watch_max_decks"].hi == 100

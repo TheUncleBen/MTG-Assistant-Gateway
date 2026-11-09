@@ -1070,6 +1070,49 @@ def _step_22(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS gateway_alerts_sub ON gateway_alerts (sub, id)")
 
 
+def _step_23(conn: sqlite3.Connection) -> None:
+    """0.7.47 One Binder: a watched card that follows the member's price alert defaults
+    (``uses_defaults``: changing the defaults changes its alerts; its own alerts set it to 0), and
+    the owned cards a member put in one of their lists (``list_cards``; a watched card's list
+    stays ``watch_cards.list_name``). A watch whose alerts are the defaults it would get today (the
+    member's saved ones, else 0.7.46's shipped "10% under the price when added") follows them;
+    a member with no saved defaults moves to the new shipped ones (10% under, 20% over)."""
+    _add_column(conn, "watch_cards", "uses_defaults", "INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS list_cards (
+            sub TEXT NOT NULL,
+            scryfall_id TEXT NOT NULL,
+            finish TEXT NOT NULL DEFAULT 'nonfoil',
+            name TEXT NOT NULL DEFAULT '',
+            list_name TEXT NOT NULL,
+            added_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, scryfall_id, finish)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS list_cards_list ON list_cards (sub, list_name)")
+    cols = ("alert_pct", "alert_above", "alert_below", "alert_drop_pct", "alert_rise_pct")
+    keys = ("pct", "above", "below", "drop", "rise")
+    saved: dict[str, dict[str, Any]] = {}
+    for sub, value in conn.execute("SELECT sub, value_json FROM account_prefs WHERE name = 'watch.alerts'"):
+        try:
+            v = json.loads(value)
+        except ValueError:
+            continue
+        if isinstance(v, dict):
+            saved[sub] = v
+    rows = conn.execute(f"SELECT id, sub, {', '.join(cols)} FROM watch_cards").fetchall()
+    for r in rows:
+        wid, sub, have = r[0], r[1], tuple(r[2:])
+        if sub in saved:
+            want = tuple(saved[sub].get(k) for k in keys)
+            if have == tuple(None if x is None else float(x) for x in want):
+                conn.execute("UPDATE watch_cards SET uses_defaults = 1 WHERE id = ?", (wid,))
+        elif have == (None, None, None, 10.0, None):
+            conn.execute(
+                "UPDATE watch_cards SET uses_defaults = 1, alert_rise_pct = 20.0 WHERE id = ?", (wid,)
+            )
+
+
 # A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
 # result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
 RISK_REASON_KEY = "_risk_reason"
@@ -1098,6 +1141,7 @@ MIGRATIONS = [
     _step_20,
     _step_21,
     _step_22,
+    _step_23,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -1160,6 +1204,7 @@ MEMBER_TABLES = (
     ("metrics", "sub"),
     ("watch_cards", "sub"),
     ("watch_lists", "sub"),
+    ("list_cards", "sub"),  # the owned cards they put in their lists
     ("watch_decks", "sub"),
     ("deck_values", "sub"),
     ("binder_records", "sub"),  # their Binder as last read, for its value
@@ -1586,8 +1631,8 @@ class Database:
 
     def _count_watchlist_writes(self) -> None:
         """Count every write to what a member's Watchlist rows are worked out from, as SQLite makes
-        it: ``watch_cards`` and ``binder_records`` per member (an insert, update or delete of a
-        row, by any statement, a member's data being deleted included) and
+        it: ``watch_cards``, ``binder_records`` and ``list_cards`` per member (an insert, update or
+        delete of a row, by any statement, a member's data being deleted included) and
         ``price_points`` for everyone (a price is not personal). Nothing else counts, so a Binder
         visit or an assistant's tool call, which write elsewhere, leave the kept rows in place.
         The triggers are TEMP: they live on this connection and nothing is written to the file. A
@@ -1604,7 +1649,7 @@ class Database:
         self._conn.create_function("mtg_price_write", 0, shared)
         # a database an older step list made (tests) may lack some; the steps run only at open
         present = {r[0] for r in self._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        for table in ("watch_cards", "binder_records", "price_points"):
+        for table in ("watch_cards", "binder_records", "list_cards", "price_points"):
             if table not in present:
                 continue
             for event, body in (

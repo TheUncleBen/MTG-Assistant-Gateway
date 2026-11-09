@@ -1159,6 +1159,11 @@ class CollectionService:
         rec = await self._record(sub, rid, name)
         tags: list[dict[str, Any]] = []
         tag_ids: list[int] | None = None
+        if "add_tags" in data and "tags" not in data:
+            # One Binder's "Tag on Archidekt": these tags on top of the ones the entry has
+            tags = await self.tags(sub)
+            have = collection_tags.record_tag_names(rec, {int(t["id"]): t for t in tags if "id" in t})
+            data = {**data, "tags": have + [n for n in data["add_tags"] if n not in have]}
         if "tags" in data:
             try:
                 names = collection_tags.clean_names(data["tags"])
@@ -2965,7 +2970,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     # remove, each read back); a row that could not be changed is named, the rest still go. A
     # removal's rows are kept for Undo a while, by a token that is the member's own.
     bulk_undos: dict[str, tuple[str, float, list[dict[str, Any]]]] = {}
-    BULK_DOES = ("condition", "finish", "tags", "remove")
+    BULK_DOES = ("condition", "finish", "tags", "addtag", "remove")
     BULK_SAID = {"condition": "Condition set", "finish": "Finish set", "tags": "Tags set"}
     STOP_KINDS = ("not_linked", "auth", "writes_disabled", "unavailable", "rate_limited", "busy")
 
@@ -3021,6 +3026,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             fields["finish"] = data["finish"]
         elif doing == "tags":
             fields["tags"] = [t for t in (data.get("tags") or "").split("\n") if t.strip()]
+        elif doing == "addtag":
+            fields["add_tags"] = [t for t in (data.get("tags") or "").split("\n") if t.strip()]
+            if not fields["add_tags"]:
+                return bulk_notice(sub, "error", "Choose a tag first.")
         done = 0
         failed: list[str] = []
         kept: list[dict[str, Any]] = []
@@ -3368,6 +3377,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if not code or code not in msgs:
             return ""
         return strip(msgs[code], "ok" if code in ("added", "removed", "updated", "imported") else "error")
+
+    # One Binder (binder_hub.py) shows the notice of a bulk change it sent here, Undo included
+    state.collection_notice = notice  # type: ignore[attr-defined]
 
     def head(actions_html: str = "", *, sub: str = "", total: int | None = None) -> str:
         # Binder's switch (Cards | Lists | Watchlist) names the page, with the counts it knows:
@@ -3846,7 +3858,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return login_redirect_here(request, "/collection")
         data = await form(request)
         back = _safe_next(data.get("next") or "/collection")
-        if not back.startswith("/collection"):
+        if not back.startswith(("/collection", "/binder")):  # One Binder's bulk changes come back there
             back = "/collection"
         if not check_csrf(sid, data):
             return RedirectResponse(f"{back}{'&' if '?' in back else '?'}err=expired", status_code=303)

@@ -54,7 +54,7 @@ WATCH_ADD = "watch.add"
 # the member's price alert defaults, set on every card they watch from then on (mockup screen 8):
 # {pct, above, below, drop, rise}, each a number or absent (off); prices.DEFAULT_ALERTS until set
 WATCH_ALERTS = "watch.alerts"
-_ALERT_HI = {"pct": 1000, "above": 1_000_000, "below": 1_000_000, "drop": 100, "rise": 1000}
+_ALERT_HI = {"pct": 1000, "above": 1_000_000, "below": 1_000_000, "drop": 100, "rise": 1000, "floor": 1000}
 _FINISHES = ("nonfoil", "foil", "etched")
 _CONDITIONS = ("NM", "LP", "MP", "HP", "DMG")
 _LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")

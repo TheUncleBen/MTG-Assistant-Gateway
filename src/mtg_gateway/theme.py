@@ -1491,6 +1491,11 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
 UI_CSS = """
 /* width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
+/* One Binder (0.7.47): "‹ Binder" back on the pages that open from the Binder page */
+.bn-up{margin:0}
+.bn-back{display:inline-flex;align-items:center;gap:.2rem;min-height:44px;color:var(--orange-text);font-weight:700;
+  text-decoration:none}
+.bn-back svg.i{width:18px;height:18px}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
 /* its parts never shrink under their words: when they are wider than the screen (large text on a
@@ -3006,7 +3011,7 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
-    ("/collection", "Binder", "collection"),
+    ("/binder", "Binder", "collection"),
     ("/proposals", "Assistant", "proposals"),
 ]
 # The pages one nav place stands for: Assistant's switch (Proposals, History, Reports)
@@ -3024,9 +3029,11 @@ BINDER_PAGES = (
 NAV_PLACE = {
     "/history": "/proposals",
     "/reports": "/proposals",
-    "/collection/lists": "/collection",
-    "/collection/wants": "/collection",
-    "/watchlist": "/collection",
+    "/collection": "/binder",
+    "/collection/lists": "/binder",
+    "/collection/wants": "/binder",
+    "/watchlist": "/binder",
+    "/binder/settings": "/binder",
 }
 # The pages that light the picture (the Account place)
 ACCOUNT_PAGES = ("/account", "/account/details")

@@ -90,7 +90,7 @@ def test_the_step_to_22_saves_a_schema_21_copy_and_going_back_puts_it_back(
     _old_database(path, 21)
     db = Database(path, upgrade_dir=folder)
     try:
-        assert db.schema_version == dbmod.SCHEMA_VERSION == 22
+        assert db.schema_version == dbmod.SCHEMA_VERSION == 23
         db.add_gateway_alert("u1", "prices", "Sol Ring fell below $10", "Sol Ring is $9.50.", "/watchlist")
         assert [r["title"] for r in db.gateway_alerts("u1")] == ["Sol Ring fell below $10"]
     finally:
@@ -196,7 +196,7 @@ def test_an_older_version_goes_back_to_its_copy(tmp_path: Path, monkeypatch: pyt
     # back on this version: the copy saved before the upgrade is put back
     db = Database(path, upgrade_dir=folder)
     try:
-        assert db.schema_version == 22
+        assert db.schema_version == 23
         assert [r[0] for r in db._conn.execute("SELECT sub FROM users")] == ["u1"]
         assert db._conn.execute("SELECT revoked FROM tokens").fetchone()[0] == 1  # everyone signs in again
         assert db._conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -341,7 +341,7 @@ def test_going_back_keeps_members_disabled_unlinked_and_deleted(
         newer.close()
     db = Database(path, upgrade_dir=folder)
     try:
-        assert db.schema_version == 22
+        assert db.schema_version == 23
         assert db.get_user("u1") is None
         # their proposal's versions go with it (deletes cascade on the prepared copy too)
         assert db._conn.execute("SELECT count(*) FROM proposal_versions").fetchone()[0] == 0
@@ -598,7 +598,7 @@ def test_going_back_keeps_the_member_s_current_archidekt_link_and_phone_key(
             newer.close()
     db = Database(path, upgrade_dir=folder)
     try:
-        assert db.schema_version == 22
+        assert db.schema_version == 23
         link = db.get_link("u1")
         assert link and (link["archidekt_username"], link["archidekt_user_id"], link["secret_enc"]) == (
             "accountB",
@@ -748,7 +748,7 @@ def test_going_back_works_when_the_newer_audit_log_can_t_take_the_mark(
         Database(path, upgrade_dir=folder).close()
     db = Database(path, upgrade_dir=folder)
     try:
-        assert db.schema_version == 22
+        assert db.schema_version == 23
     finally:
         db.close()
     assert len(upgrade_backup.copies(folder, upgrade_backup.SET_ASIDE_PREFIX)) == 1

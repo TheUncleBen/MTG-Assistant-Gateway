@@ -353,6 +353,29 @@ scans are listed under **Sessions**. The details are in
 
 ## Binder
 
+With watchlists on, **Binder** opens one page for every card you own or want.
+On the left (on a phone, first) are **All cards**, **Owned**, **Want**,
+**Price alerts** (cards past their alert price now), your lists, and under
+More: **Archidekt collection**, Decks I watch, **Watch settings** and
+Archidekt lists. On the right is
+one list: a printing you own and watch is one row, with its price, its move
+over a week, how many copies you own, its alert prices and its list. A tap
+opens the card. **Select** ticks rows for the bar: **Price alerts** (your
+defaults, or alerts of their own), **Add to list**, **Watch**, and under ⋯
+**Stop watching**, **Tag on Archidekt** (adds a binder tag, the others stay)
+and **Remove from binder**. Each change offers **Undo**.
+
+- **Lists** hold cards you own and cards you want; a card is in one list at a
+  time. Lists live on the gateway; Archidekt's binder tags stay Archidekt's,
+  as a filter.
+- **Watch settings** hold your price alert defaults: shipped as 10% under and
+  20% over the price a card had when you watched it, with moves under $0.50
+  ignored. Cards that use your defaults change when you change them; cards
+  you gave alerts of their own keep them.
+
+The rest of this section is the **Archidekt collection** page (Binder › More,
+and the page Binder opens when watchlists are off).
+
 **Binder** is the list of cards you own (your Archidekt collection), shown and edited here through the account you linked, and what
 you add here appears on archidekt.com at once. With watchlists on, the
 gateway keeps a copy of it as last read whole, to work out its value (below). Scan a pile and save it, add cards by name, or mark a
@@ -533,8 +556,8 @@ and Watchlist) keeps the price of cards and decks you choose, once a day:
   the cards back with their alerts, their list and their price history.
 
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
-are checked once a day; the operator sets how many cards and decks you may
-watch (up to 5,000 cards and 100 decks) and how long prices are kept (a year unless they changed it). Your
+are checked once a day; you may watch as many cards as you like unless the
+operator set a limit, and up to 100 decks and how long prices are kept (a year unless they changed it). Your
 assistant can do the same: watch a card or a deck, stop watching, list your
 watchlist and read a card's price history. The watchlist changes nothing on
 Archidekt, so it needs no proposal.

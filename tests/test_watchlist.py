@@ -124,7 +124,7 @@ def test_a_0_7_22_database_is_upgraded_and_keeps_its_rows(tmp_path: Path, monkey
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 22
+        assert new.schema_version == db_module.SCHEMA_VERSION == 23
         assert new.get_user("u1") is not None
         tables = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {
@@ -341,7 +341,10 @@ async def test_assistant_tools_watch_list_history_and_unwatch(stack: Stack, monk
     await stack.gw.prices.run_daily()
     listed = structured(await call(h, token, "list_watchlist"))
     assert [c["name"] for c in listed["cards"]] == ["Sol Talisman"]
-    assert "history" not in listed["cards"][0] and listed["limits"] == {"cards": 5000, "decks": 100}
+    assert "history" not in listed["cards"][0] and listed["limits"] == {
+        "cards": None,
+        "decks": 100,
+    }  # None: no limit (0.7.47)
     hist = structured(await call(h, token, "card_price_history", {"card": "sol talisman"}))
     assert [p["day"] for p in hist["cards"][0]["history"]] == ["2026-10-12", "2026-10-13"]
     dh = structured(await call(h, token, "card_price_history", {"deck_id": "42"}))
@@ -545,7 +548,8 @@ async def test_price_alerts_reach_the_member(stack: Stack, monkeypatch) -> None:
     msg = stack.ntfy.messages[-1]
     # the alert opens the card's row (test_watchlist_rows)
     assert msg["title"] == "Price alert" and msg["click"] == f"https://mtg.test/watchlist?open={wid}#wr-{wid}"
-    assert msg["message"] == "Sol Ring rose 23.1% and rose above $1.50: $1.30 to $1.60."
+    # 0.7.47: the one-day move is $0.30, under the shipped $0.50 floor, so only the price crossing counts
+    assert msg["message"] == "Sol Ring rose above $1.50: $1.30 to $1.60."
 
 
 # -- summaries ----------------------------------------------------------------------------------
@@ -628,7 +632,7 @@ def test_settings_default_off_and_the_token_comes_from_a_file(monkeypatch, tmp_p
     s = load_settings()
     assert s.ntfy_url is None and s.ntfy_token is None
     assert (s.watch_max_cards, s.watch_max_decks, s.price_history_days, s.price_hour_utc) == (
-        5000,
+        0,  # 0.7.47: no limit
         100,
         365,
         6,
