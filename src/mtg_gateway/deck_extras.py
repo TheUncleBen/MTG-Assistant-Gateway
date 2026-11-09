@@ -487,7 +487,7 @@ def color_tag_options(
     want = (f"{want_name},{want_colour}" if want_colour else want_name) if want_name else ""
     if want and want_name.casefold() not in seen:
         seen[want_name.casefold()] = want
-    out = [f"<option value=''{' selected' if not want else ''}>None</option>"]
+    out = [f"<option value=''{' selected' if not want else ''}>No color tag</option>"]
     for value in seen.values():
         name = value.rsplit(",", 1)[0]
         out.append(f"<option value='{esc(value)}'{' selected' if value == want else ''}>{esc(name)}</option>")

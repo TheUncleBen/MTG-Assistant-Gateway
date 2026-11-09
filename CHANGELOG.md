@@ -7,6 +7,39 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.47] - 2026-11-09
+
+Every page reads as one app on every screen: centred on a laptop and a wide desktop, one column
+where two left holes, plain words where program values showed, and no blue links.
+
+### Upgrade notes
+- Nothing to do: no settings, environment variables or database changes.
+
+### Changed
+- **Pages are centred on wide screens**, beside the Fold's side rail too. Account, Account details
+  and Binder › Lists are one centred column of grouped rows on every screen, with Sign out as a
+  full-width row; Deck settings and the proposal review sit in the middle of the page.
+- **The card viewer is a list of grouped rows**: Printings first, then the deck's actions (Copies,
+  Move to, Add to binder, Edit in deck editor, and Remove from deck last, in red), then Rulings,
+  Price history and the sites. On a narrow screen or with large text it is one column.
+- **Links are the text's colour, underlined**, orange on hover, on the website and in reports.
+- **Clearer numbers and labels**: a deck category reads "12 cards · $34.50" (no "Qty:"), a deck
+  with no prices hides its cost instead of "Est unknown", a list that fits on one page shows no
+  pager, "Not connected yet" replaces "None connected", the curve's "None" is "All cards" and the
+  colour tag's "None" is "No color tag". The per-category "drag cards here" hint is gone.
+- **The deck editor's categories are one centred column**, so a short category no longer leaves
+  a hole beside a long one; Home keeps one column when large text leaves no room for two.
+- **Rows of buttons share their line** when they wrap, so no button sits alone on a line.
+
+### Fixed
+- At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
+  cover the sheet's last control (the card size).
+- Long names break between their parts instead of inside a word (a member's name, a printing's
+  set and rarity).
+- Number fields in Admin settings no longer look like payment fields to the browser.
+- A report whose solo test failed always says its own reason: two failed reports opened one
+  after the other could show the first one's reason on both.
+
 ## [0.7.46] - 2026-10-28
 
 Assistants keep one live card per change in the chat, proposals never apply themselves, and tool

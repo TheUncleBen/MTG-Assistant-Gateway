@@ -93,7 +93,8 @@ _LIGHT = """
     --seg-track:var(--surface-3); --seg-on:var(--surface); /* a switch's track and its chosen part */
     --seg-muted:#4c4c4c; /* a softer word on the track (a tab's count): 4.8:1 on --surface-3 */
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
-    --text:#383838; --link:#1d55b3; /* 5.2:1 on --surface-2 (the menu); Archidekt's #4183c4 is 3.8:1 */
+    /* links are the text colour, underlined in running text (no blue links: Ben, 0.7.46 checklist) */
+    --text:#383838; --link:#383838;
     /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
     --text-muted:#5e5e5e;
     --menu-head:#595959; /* 5.2:1 on --surface-2 */
@@ -183,7 +184,7 @@ CSS = (
   /* a switch's chosen part is lighter than its track, raised as on iOS: #e3e3e3 on it 5.4:1 */
   --seg-track:#2f2f2f; --seg-on:#5a5a5a; --seg-muted:#a8a8a8; /* 5.6:1 on the track */
   --border:#5f5f5f; --border-soft:#323232; --card-border:#525252;
-  --text:#e3e3e3; --text-muted:#a8a8a8; --link:#73a8dc;
+  --text:#e3e3e3; --text-muted:#a8a8a8; --link:#e3e3e3;
   --menu-head:#b0b0b0; /* 5.4:1 on --surface-2 */
   --toolbar-bg:#2e2d2d; --toolbar-text:#f5f5f5;
   --navbar-bg:#111111; --navbar-text:#ffffff; --navbar-muted:#e3e3e3;
@@ -1540,6 +1541,14 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
 .hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
+/* a place's switch with no actions beside it sits in the middle, as the Assistant's does (Ben's UI
+   principles: a switch is centred or full width, never leaving empty space to one side) */
+.ui-head.hubhead:not(:has(> .acts)){justify-content:center}
+/* a page of grouped lists (Account, Account details, Assistants, Binder › Lists) is one centred
+   column; its heading and switch line up with the column instead of the wider page (Ben, 0.7.46
+   checklist: everything shifted to the left on a desktop) */
+main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
+.wide main.wrap:has(> .yhub, > .acc, > .lp-col){max-width:calc(42rem + 2rem)}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%} .hubseg.seg-grid{display:grid}
   .hubbar{display:block}
   /* large text on a narrow phone: a part keeps its name on one line and moves to the next row
@@ -2619,7 +2628,8 @@ SEARCH_PANEL_CSS = """
   .spanel .rbar .sortcw .msel-btn .msel-txt{white-space:normal;overflow:visible;text-overflow:clip}
   .spanel .sp-filters{display:none;position:fixed;inset:0;z-index:80;margin:0;background:var(--bg);
     overflow:auto;
-    overscroll-behavior:contain;padding:0 1rem calc(5.5rem + env(safe-area-inset-bottom))}
+    overscroll-behavior:contain;
+    padding:0 1rem calc(var(--sp-foot,5.5rem) + 1rem + env(safe-area-inset-bottom))}
   .spanel .sp-filters.open{display:block}
   /* a sheet holding only the card size (the Binder with no tags: "View") is a bottom sheet the
      height of its content over a scrim, not a full screen; its foot sits in it (polish re-check Q5) */

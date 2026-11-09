@@ -1912,23 +1912,16 @@ ACCOUNT_CSS = (
     ".ydetails .yme .sub{overflow-wrap:anywhere}"
     # the one red row: Delete my data…
     ".ygrp .yrow.ydanger,.ygrp .yrow.ydanger > svg.i{color:var(--danger-text)}"
-    # one column on a phone: the groups in the mockup's order (Archidekt, Assistant, This gateway,
-    # Your data), not column by column
-    "@media (max-width:699.98px){.ydetails .ycols{display:flex;flex-direction:column;align-items:stretch}"
-    ".ydetails .ycol{display:contents}"
-    ".ydetails .ygrp[data-g='1']{order:1}.ydetails .ygrp[data-g='2']{order:2}"
-    ".ydetails .ygrp[data-g='3']{order:3}}"
-    # and the same one column when the list is narrow in its own text (under 44em: 616 px at 14px,
-    # 1232 px at 200%), so each fold keeps room for its words
-    ".ydetails{container-type:inline-size}"
-    "@media (min-width:700px){@container (max-width:44em){"
+    # one centred column on every screen (as iOS Settings and the Account page): the groups in the
+    # mockup's order (Archidekt, Assistant, This gateway, Your data), not column by column
     ".ydetails .ycols{display:flex;flex-direction:column;align-items:stretch}"
     ".ydetails .ycol{display:contents}"
     ".ydetails .ygrp[data-g='1']{order:1}.ydetails .ygrp[data-g='2']{order:2}"
-    ".ydetails .ygrp[data-g='3']{order:3}}}"
+    ".ydetails .ygrp[data-g='3']{order:3}"
     # a section's page: one card, as wide as the list's column at most; the list itself as wide
     # as the Account page (two columns from 700 px)
-    ".acc{max-width:40rem}.acc.acc-list{max-width:62rem}.acc .card{margin-bottom:1rem}"
+    ".acc{max-width:42rem;margin-left:auto;margin-right:auto}.acc.acc-list{max-width:42rem}"
+    ".acc .card{margin-bottom:1rem}"
     ".acc .notice.disclosure{background:var(--blue-tint);border-left-color:var(--blue)}"
     ".acc .ui-actions .btn,.acc .ui-actions button{white-space:normal;max-width:100%;text-align:center}"
     ".acc form.inbox{margin:0}.acc form.inbox p{margin:0 0 .5rem}"
@@ -2044,7 +2037,7 @@ async def details_html(
     )
     assistant = [
         _yrow(
-            "Assistants", "shield", href=assistants.PAGE, value=f"{n} connected" if n else "None connected"
+            "Assistants", "shield", href=assistants.PAGE, value=f"{n} connected" if n else "Not connected yet"
         ),
         _yrow(
             "Default for new assistants",

@@ -60,13 +60,16 @@ HOME_CSS = """
 /* desktop (1280 px up): the deck covers take the page's width, with what needs you and the
    connection details in a column beside them, so the page's lower half is not empty (0.7.46
    re-audit D28); the covers grow from 10rem to 17rem a column (three a row at 1280 px, four at 1440) */
-@media (min-width:1280px){
+/* (0.7.47) only while the room holds 60 lines of text across: at 200% text a laptop's page is
+   too narrow for two columns, and the side column left a screen-high hole beside the covers */
+.home .home-box{container-type:inline-size}
+@media (min-width:1280px){ @container (min-width:60em){
   .home .home-grid.side{display:grid;grid-template-columns:minmax(0,1fr) 24rem;grid-template-rows:auto 1fr;
     gap:1rem;align-items:start}
   .home .home-grid.side > .panel:not(.connect){grid-column:1;grid-row:1 / span 2;margin:0}
   .home .home-grid.side > .needs,.home .home-grid.side > .connect{grid-column:2;margin:0}
   .home .home-grid .recent{grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))}
-}
+}}
 /* phones: the covers as one row to swipe, each cover a screen's half */
 @media (max-width:599.98px){
   .home .recent{display:flex;overflow-x:auto;scroll-snap-type:x proximity;gap:.6rem;
@@ -347,7 +350,7 @@ def home_grid(needs: str, recent: str, connect: str) -> str:
     when there is a panel and something to put beside it (class ``side``); otherwise they
     follow each other as on a phone."""
     side = " side" if recent and (needs or connect) else ""
-    return f"<div class='home-grid{side}'>{needs}{recent}{connect}</div>"
+    return f"<div class='home-box'><div class='home-grid{side}'>{needs}{recent}{connect}</div></div>"
 
 
 def connect_html(mcp_url: str) -> str:

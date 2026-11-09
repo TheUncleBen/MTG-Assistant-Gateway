@@ -232,7 +232,7 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
         assert card.get_attribute("data-qty") == "2"
         assert card.locator(".qty, .q").first.inner_text() == "2"
         stack_meta = card.locator("xpath=ancestor::section[contains(@class,'stack')]//div[@class='meta']")
-        assert stack_meta.inner_text().startswith("Qty: 2") or re.match(r"Qty: \d+", stack_meta.inner_text())
+        assert re.match(r"\d+ cards?( · \$[\d,.]+)?$", stack_meta.inner_text()), stack_meta.inner_text()
         assert page.locator(".banner .row span", has_text="Size:").inner_text() == "Size: 101"
         assert page.locator(".banner .legal.bad").count() == 1  # 101 cards: not legal, as on Archidekt
         checks = page.locator(".stats .checks")

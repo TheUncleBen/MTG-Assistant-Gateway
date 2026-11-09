@@ -428,7 +428,8 @@ def hub_html(
     )
     if watch_lists is None:
         return (
-            f"{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div></div></div>"
+            f"<div class='lp-col'>{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}"
+            "</div></div></div></div>"
         )
     wrows = []
     for wl in watch_lists:
@@ -485,13 +486,13 @@ def hub_html(
         close_href=HUB,
     )
     return (
-        f"{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div>"
-        f"<div class='ycol'>{watch}</div></div></div>{box}"
+        f"<div class='lp-col'>{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}"
+        f"{watch}</div></div></div></div>{box}"
     )
 
 
 HUB_CSS = """
-.lp-hub{max-width:62rem;margin:0}
+.lp-col{max-width:42rem;margin:0 auto}.lp-hub{max-width:none;margin:0}
 /* the name box narrows the rows (QG-25): a hidden row or group is gone, the count line only shows
    with words */
 .lp-hub .ygrp[hidden],.lp-hub .yrow[hidden]{display:none}

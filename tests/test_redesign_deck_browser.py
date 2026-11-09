@@ -244,11 +244,11 @@ def test_a_tap_opens_the_viewer_whose_printing_row_opens_the_printings_sheet(
         card.click()
         view = page.locator(".cardview.open")
         view.wait_for(timeout=3000)
-        expect(view.locator(".printrow .lbl")).to_have_text("Printing")
+        expect(view.locator(".printrow .lbl")).to_have_text("Printings")
         settled(page)
         # the Printing row names the printing and opens the sheet (F3)
         row = view.locator(".printrow")
-        assert row.locator(".lbl").inner_text() == "Printing"
+        assert row.locator(".lbl").inner_text() == "Printings"
         assert "CMR" in row.locator(".val").inner_text()
         # the actions: the count, Move to…, Remove in outline red, then the binder and the editor
         acts = [t.strip() for t in view.locator(".acts .btn").all_inner_texts()]

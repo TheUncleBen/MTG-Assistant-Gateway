@@ -578,7 +578,7 @@ CSS = (
   min-width:min(16rem,100%);padding:0 1.5rem;border-radius:14px;white-space:normal;text-align:center}
 .ydisc .btn svg.i{width:18px;height:18px;flex:none}
 /* a short page: one column, as wide as a phone screen at most */
-.yhub.ylone{max-width:40rem;margin:0}
+.yhub.ylone{max-width:42rem;margin:0 auto}
 .yhub.ylone .ycols{grid-template-columns:minmax(0,1fr)}
 .mtgbox .body form.inbox p{margin:0 0 .6rem;line-height:1.45}
 """

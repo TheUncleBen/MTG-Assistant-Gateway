@@ -216,7 +216,7 @@ async def test_a_member_with_no_assistant_yet(stack: Stack) -> None:
     await linked_member(stack)
     b = await browser(h)
     details = (await b.http.get("/account/details")).text
-    assert "href='/account/assistants'" in details and "None connected" in details
+    assert "href='/account/assistants'" in details and "Not connected yet" in details
     assert "<div class='card' id='mode'>" not in details  # one Assistants row instead of two cards
     page = (await b.http.get("/account/assistants")).text
     await b.aclose()

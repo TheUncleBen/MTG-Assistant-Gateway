@@ -955,7 +955,7 @@
     title.title = name;
     h2.appendChild(title);
     head.appendChild(h2);
-    head.appendChild(el("div", "meta", "Qty: 0"));
+    head.appendChild(el("div", "meta", "0 cards"));
     st.appendChild(head);
     var rows = cards.classList.contains("text") || cards.classList.contains("table") || cards.classList.contains("brewer");
     var list = rows ? el("ul", "plain rows") : el("div", "cards");
@@ -1261,7 +1261,7 @@
         if (!isNaN(p)) { price += p * n; priced = true; }
       });
       var meta = $(".stackhead .meta", st);
-      if (meta) meta.textContent = "Qty: " + qty + (priced && price ? " · Price: " + money(price) : "");
+      if (meta) meta.textContent = qty + (qty === 1 ? " card" : " cards") + (priced && price ? " · " + money(price) : "");
     });
   }
   function swapHtml(selector, html, insertInto, before) {
@@ -1308,6 +1308,8 @@
   // no card priced: a muted "unknown" with its tooltip, as deckpage.est_cost_html draws it (polish C7)
   function setCost(b, st) {
     if (!b) return;
+    var cost = b.closest(".banner .cost");
+    if (cost) cost.hidden = st.priced_cards === 0;  // deckpage.banner_html leaves an unknown cost out
     b.textContent = "";
     if (st.priced_cards === 0) {
       var u = document.createElement("span");

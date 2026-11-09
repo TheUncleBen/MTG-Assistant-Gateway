@@ -71,12 +71,47 @@ def structured(result: dict) -> dict:
     return result["structuredContent"]
 
 
-class Browser:
-    """A browser with its own cookie jar against the gateway."""
+class _FollowLate(httpx.AsyncBaseTransport):
+    """What static/feedback.js does with a slow page's frame (latepage.py): wait on its /late/ key,
+    then load the address again for the finished page. A page that takes longer than LATE_AFTER
+    under a loaded test run (the full suite on every core) otherwise hands a test the frame instead
+    of the page it asked for, a flake by timing rather than by code."""
 
-    def __init__(self, h: Harness):
+    def __init__(self, inner: httpx.AsyncBaseTransport):
+        self.inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        resp = await self.inner.handle_async_request(request)
+        if request.method != "GET":
+            return resp
+        raw = b"".join([part async for part in resp.aiter_raw()])
+        await resp.aclose()
+        # the body as sent (gzip and all) goes back to the client, which decodes it as usual
+        if "text/html" not in resp.headers.get("content-type", ""):
+            return httpx.Response(resp.status_code, headers=resp.headers, stream=httpx.ByteStream(raw))
+        text = httpx.Response(200, headers=resp.headers, content=raw)
+        late = re.search(rb"data-late='(/late/[A-Za-z0-9_-]+)'", await text.aread())
+        if late is None:
+            return httpx.Response(resp.status_code, headers=resp.headers, stream=httpx.ByteStream(raw))
+        wait = httpx.Request("GET", request.url.copy_with(path=late.group(1).decode(), query=None))
+        wait.headers.update({k: v for k, v in request.headers.items() if k.lower() == "cookie"})
+        await (await self.inner.handle_async_request(wait)).aread()
+        return await self.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self.inner.aclose()
+
+
+class Browser:
+    """A browser with its own cookie jar against the gateway. ``follow_late``: a slow page's frame
+    is followed to the finished page as the site's script does (off for the tests of the frame)."""
+
+    def __init__(self, h: Harness, *, follow_late: bool = True):
         self.h = h
-        self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=h.app), base_url=GATEWAY)
+        transport: httpx.AsyncBaseTransport = httpx.ASGITransport(app=h.app)
+        if follow_late:
+            transport = _FollowLate(transport)
+        self.http = httpx.AsyncClient(transport=transport, base_url=GATEWAY)
 
     async def login(self, next_path: str = "/account") -> httpx.Response:
         r = await self.http.get("/login", params={"next": next_path})

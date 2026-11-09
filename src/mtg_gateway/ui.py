@@ -732,6 +732,10 @@ def pager(
     nothing is capped silently. Empty when the list is."""
     if total <= 0:
         return ""
+    if newer_href is None and older_href is None and offset <= 0:
+        # one page: the list's heading already counts it, and two dead buttons under a short list
+        # read as broken ("1–1 of 1 ← Newer Older →": the 0.7.47 UI sweep); a cap note still shows
+        return f"<p class='ui-pager-note muted small'>{esc(note)}</p>" if note else ""
     start = max(0, offset) + 1
     end = min(total, max(0, offset) + per_page)
     info = f"{start:,}–{end:,} of {total:,}" + (f" · {esc(note)}" if note else "")

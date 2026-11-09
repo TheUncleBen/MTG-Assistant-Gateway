@@ -265,3 +265,16 @@ async def test_a_website_press_joining_an_assistants_refused_run_keeps_its_repor
         gw.reports.mf.call = real
         release.set()
         await b.aclose()
+
+
+def test_two_failed_solo_tests_keep_their_own_reasons() -> None:
+    """A parsed solo-test block is kept by its content (report_view._PARSED); the reason a failed one
+    shows (its note) is part of that content. Two failed reports, one cut off by a restart and one
+    refused, each say their own reason, whichever page was opened first (0.7.47: a full test run
+    showed the restart's words on the refused report's page)."""
+    from mtg_gateway.report_view import parse_goldfish
+
+    stopped = {"tool": "goldfish_run", "ok": False, "error": True, "note": "The gateway restarted."}
+    refused = {"tool": "goldfish_run", "ok": False, "error": True, "note": "Still running."}
+    assert "restarted" in json.dumps(parse_goldfish(stopped))
+    assert "Still running" in json.dumps(parse_goldfish(refused))

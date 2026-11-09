@@ -107,7 +107,10 @@ def test_the_viewers_buttons_follow_its_text(server: Server, width: int) -> None
         gap = page.evaluate(
             "() => { const info = document.querySelector('.cardview .info');"
             " const acts = info.querySelector('.acts'); let bottom = -1e9;"
-            " for (const c of info.children) { if (c === acts || !c.getClientRects().length) continue;"
+            " const top = acts.getBoundingClientRect().top;"
+            # 0.7.47: the actions come before Rulings and the sites; the gap is to the text above them
+            " for (const c of info.children) { if (c === acts || !c.getClientRects().length"
+            "   || c.getBoundingClientRect().top >= top) continue;"
             " bottom = Math.max(bottom, c.getBoundingClientRect().bottom); }"
             " const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);"
             " return (acts.getBoundingClientRect().top - bottom) / rem; }"

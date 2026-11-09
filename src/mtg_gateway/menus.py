@@ -43,6 +43,9 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 .ui-head.phead{align-items:center;justify-content:space-between;margin:0 0 12px}
 .ui-head.phead .acts{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .ui-head.phead .acts .btn,.ui-head.phead .acts button{margin:0}
+/* a row of actions that wraps (200% text on a tablet) fills each line evenly, never a lone button
+   under the others (Ben's UI principles: balanced button rows) */
+.ui-head.phead .acts > .btn,.ui-head.phead .acts > button,.ui-head.phead .acts > details{flex:1 1 auto}
 /* My decks: the switch starts the row, the actions end it; on a phone the switch takes the width and
    the three actions share the row under it, one third each */
 .ui-head.hubhead{gap:12px}

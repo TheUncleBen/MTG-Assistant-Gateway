@@ -61,11 +61,12 @@ OVERLAP = """() => {
   return 0;
 }"""
 
-# the link colour a plain <a> gets, compared with an element's own
+# a colour in the blue hue of a link the site did not style
 IS_BLUE = """(el) => {
-  const probe = document.createElement('a'); probe.href = '#'; document.body.appendChild(probe);
-  const link = getComputedStyle(probe).color; probe.remove();
-  return getComputedStyle(el).color === link;
+  // blue: the hue a browser's or a site's link colour has (0.7.47: the site's links are the text
+  // colour, so a link drawn blue is one the site did not style)
+  const [r, g, b] = getComputedStyle(el).color.match(/[\\d.]+/g).map(Number);
+  return b > r + 40 && b > g + 15;
 }"""
 
 

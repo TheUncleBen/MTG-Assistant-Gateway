@@ -80,7 +80,7 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         assert "<span class='lbl'>Sign out on all my devices…</span>" in page
         # approval mode and connected apps: one Assistants row (each assistant has its own mode) and
         # the default's row; no form sits on the list
-        assert "<span class='lbl'>Assistants</span><span class='val'>None connected</span>" in page
+        assert "<span class='lbl'>Assistants</span><span class='val'>Not connected yet</span>" in page
         assert "href='/account/assistants/default'" in page and "Ask me every time" in page
         assert "Save approval mode" not in page and "<div class='card' id='mode'>" not in page
         assert "<div class='card'" not in page and orange(page) == 0

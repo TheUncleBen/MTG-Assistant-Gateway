@@ -518,7 +518,11 @@ def banner_html(
         f"<span class='sm'>{plural(size, 'card')}</span>"
         "</div><div class='row'>"
         f"<span class='lg'>Size: {size}</span>"
-        "<span><span class='lg'>Est cost: </span><span class='sm'>Est </span>"
+        # no card priced yet: the cost is left out rather than shown as "Est unknown" (Ben, 0.7.46
+        # checklist: every display of information cleaned up); the page's script shows it once a
+        # price arrives
+        f"<span class='cost'{'' if stats.get('priced_cards') else ' hidden'}>"
+        "<span class='lg'>Est cost: </span><span class='sm'>Est </span>"
         f"<b class='orange'>{est_cost_html(stats)}</b><span class='lg'> (Archidekt prices)</span></span>"
         "<span><span class='lg'>Salt sum: </span><span class='sm'>Salt </span>"
         f"<b class='orange'>{esc(salt)}</b></span>"
@@ -1444,7 +1448,10 @@ def cards_html(
         head = (
             f"<div class='stackhead'><h2><span class='title{strike}' title='{esc(name)}'>{esc(name)}</span>"
             f"{menu}</h2>"
-            f"<div class='meta'>Qty: {qty}" + (f" · Price: {money(price)}" if price else "") + "</div></div>"
+            # "4 cards · $12.30": the count and the price as words, not "Qty: 4 · Price: $12.30"
+            f"<div class='meta'>{plural(qty, 'card')}"
+            + (f" · {money(price)}" if price else "")
+            + "</div></div>"
         )
         if view in ROW_VIEWS:
             body = (
@@ -1767,7 +1774,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
 # out-of-identity pips, quantities by subtype and keyword; a click on a chart part focuses its
 # cards). Every variant is drawn here; static/deckstats.js only shows one and filters the list.
 
-CURVE_MODES = (("none", "None"), ("type", "Type"), ("category", "Category"))
+CURVE_MODES = (("none", "All cards"), ("type", "Type"), ("category", "Category"))
 SERIES_SLOTS = 7  # categorical colours k1..k7; any further group folds into "Other" (k0)
 
 
@@ -3287,6 +3294,7 @@ DECK_CSS = (
 .banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:1.143rem;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
 .banner .row b.orange{color:#ffa94d;font-weight:700}  /* 4.5:1 on the banner's grey (audit D14) */
+.banner .row > .cost[hidden]{display:none}
 /* muted words on the banner ("unknown" for a price nobody knows): the page's muted grey is 1.5:1
    on the shade in the light theme (polish R2), so the banner's white at reduced opacity, which
    follows the shade and keeps 4.5:1 across the whole gradient as the row's #d6d6d6 does */
@@ -3810,9 +3818,6 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .c.dragging{opacity:.4}
 .deckview .row.dragging{outline:2px dashed var(--orange);outline-offset:-2px;background:var(--surface-2)}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to move them';
-  color:var(--text-muted)}
-@media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
    darkened page; the image column grows with the window, the text column scrolls on its own. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
@@ -3880,7 +3885,7 @@ html.cardview-open{overflow:hidden}
 .cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--orange)}
 .cardview .printrow .pic{display:inline-flex;flex:none;color:var(--orange-text)}
 .cardview .printrow .lbl{flex:none;color:var(--text-muted);font-weight:700}
-.cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:break-word}
 .cardview .printrow .chev{flex:none;color:var(--text-muted);font-size:1.4rem;line-height:1}
 /* the action rows: [− n +] [Move to…] [Remove], then (after .br) [Add to binder] [Edit in deck editor] */
 .cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;padding-top:.25rem}
@@ -4311,9 +4316,10 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   .addbox form.addcard{grid-template-columns:1fr}
   .addbox form.addcard .go{justify-content:space-between}
   .addbox form.addcard .go button{flex:1} }
-/* categories side by side on wide screens, one column on phones */
-.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,36rem),1fr));gap:1rem;
-  align-items:start}
+/* (0.7.47) one category under another on every screen: side by side, a short category beside a
+   long one left a screen-high hole under it, and balanced columns cost five times the layout time */
+.cats.existing{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;max-width:80rem;
+  margin-left:auto;margin-right:auto}
 .cats.existing > details.cat{margin:0}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}
 .addbox form.scanpick button{margin:0}
@@ -4477,10 +4483,10 @@ html.printpick-open{overflow:hidden}
   gap:.4rem;width:100%;height:auto;min-width:0;margin:0;padding:.4rem;border:2px solid var(--border-soft);
   border-radius:8px;background:var(--surface-2);color:var(--text);text-align:left;font-weight:400;
   cursor:pointer}
-.pptile:hover{border-color:var(--link);background:var(--surface-2);color:var(--text)}
+.pptile:hover{border-color:var(--orange);background:var(--surface-2);color:var(--text)}
 .pptile:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .pptile.current,.pptile.picked{border-color:var(--orange)}
-.pptile.on{border-color:var(--link);box-shadow:0 0 0 2px var(--link)}
+.pptile.on{border-color:var(--orange);box-shadow:0 0 0 2px var(--orange)}
 .pptile .ppimg{display:block;width:100%;aspect-ratio:5/7;border-radius:4.5%;overflow:hidden;
   background:var(--surface-3)}
 .pptile .ppimg img{display:block;width:100%;height:100%;object-fit:cover}
@@ -4654,6 +4660,62 @@ ul.erows{container-type:inline-size}
 /* The phone's one-row save bar wraps with large text rather than run off the screen. */
 .editor{container-type:inline-size}
 @container (max-width:17rem){ .editbar{flex-wrap:wrap} .editbar .review{flex:1 1 auto} }
+/* The card viewer's actions and links as grouped lists, the Account page's iOS rows (Ben, 0.7.46
+   checklist: the menu a tap on a card opens "needs a revision with all of our current UI
+   standards"): Printings, then the deck's actions (Copies − n +, Move to…, Add to binder, Edit in
+   deck editor, Remove from deck last in red), then Rulings, Price history and the sites. Each row
+   is 48 px, its words at the left; no pile of bordered buttons. */
+.cardview .printrow,.cardview .more,.cardview .acts{border:1px solid var(--border-soft);border-radius:14px;
+  background:var(--surface-2)}
+.cardview .printrow{min-height:48px;padding:.35rem 1rem;flex-wrap:wrap;row-gap:.15rem}
+/* large text: the printing's set and rarity go under the label rather than one letter a line */
+.cardview .printrow .val{flex:1 1 7em}
+.cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--border-soft);
+  background:var(--surface-3)}
+.cardview .more,.cardview .acts{display:flex;flex-direction:column;flex-wrap:nowrap;gap:0;padding:0;
+  overflow:hidden}
+.cardview .more > *,.cardview .acts > *{display:flex;align-items:center;justify-content:flex-start;gap:.6rem;
+  width:100%;min-height:48px;margin:0;padding:0 1rem;border:0;border-radius:0;background:transparent;
+  color:var(--text);font:inherit;font-weight:400;text-align:left;text-decoration:none;box-shadow:none;
+  flex:none}
+.cardview .more > * + *,.cardview .acts > * + *{border-top:1px solid var(--border-soft)}
+.cardview .more > :is(a,button):hover,.cardview .acts > :is(a,button):hover,
+.cardview .more > :is(a,button):focus-visible,.cardview .acts > :is(a,button):focus-visible{
+  background:var(--surface-3);color:var(--text)}
+.cardview .acts > .btn,.cardview .acts > button,.cardview .acts > a{justify-content:flex-start;
+  text-align:left}
+.cardview .acts .br{display:none}
+/* each row 48 px (44 px at least on a touch screen): the viewer's own .btn.small rules (40 px) must
+   not win over the row's height */
+.cardview .more > :is(a,button,.btn),.cardview .acts > :is(a,button,.btn){min-height:48px;height:auto}
+/* large text (the window under 22 of its own ems: 200% on a phone, a narrow window at 150%): the
+   picture, the name and the rows one under another, each the full width, so no word breaks in two
+   beside the picture (0.7.47 UI sweep: "Tyrant", "Creature", "Mythic") */
+.cardview{container-type:inline-size}
+@container (max-width:22em){
+  .cardview .box{grid-template-columns:minmax(0,1fr);grid-template-areas:'head' 'pic' 'info'}
+  .cardview .pane{width:min(100%,16rem);justify-self:center}
+  .cardview .head{flex-direction:row;align-items:flex-start} }
+/* the grid's cards one a row when two would leave each under 10 of its own ems (200% text on a
+   phone): a card name in two columns broke mid-word ("Terramorphic", "Wickerbough") */
+.deckview.grid{container-type:inline-size}
+@container (max-width:20em){ .deckview.grid .cards{grid-template-columns:minmax(0,1fr)} }
+/* what can be done with the card comes before where to read more about it */
+.cardview .info > .acts{order:1}.cardview .info > .more,.cardview .info > .rulings,
+.cardview .info > .prices{order:2}
+.cardview .acts .btn-outline-danger{order:99;color:var(--danger-text);font-weight:700}
+/* the red row lights up rather than darkens: red on the grey hover face was 3.6:1 (a tap leaves
+   the row hovered on a phone) */
+.cardview .acts .btn-outline-danger:hover,.cardview .acts .btn-outline-danger:focus-visible{
+  color:var(--danger-text);background:var(--surface)}
+/* Copies: the word at the left, − n + at the right of its row */
+.cardview .acts .qtyctl{display:flex;flex:none;gap:.5rem}
+.cardview .acts .qtyctl::before{content:"Copies";flex:1 1 auto}
+.cardview .acts .qtyctl button{display:inline-flex;align-items:center;justify-content:center;width:44px;
+  min-width:44px;height:36px;min-height:36px;padding:0;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface);font-size:1.2rem;font-weight:700}
+@media (pointer:coarse){ .cardview .acts .qtyctl button{height:44px;min-height:44px} }
+.cardview .rulings{border-top:0}
 """
     + DECK_CSS_A
     + DECK_CSS_C

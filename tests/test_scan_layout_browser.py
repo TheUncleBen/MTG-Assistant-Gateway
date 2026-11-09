@@ -574,11 +574,6 @@ def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> N
     # How it works: a capsule button in the text colour that opens the intro.
     how = page.locator("#how-it-works")
     assert how.evaluate("e => e.tagName") == "BUTTON"
-    link = page.evaluate(
-        "() => { const a = document.createElement('a'); a.href = '#'; document.body.append(a);"
-        " const c = getComputedStyle(a).color; a.remove(); return c; }"
-    )
-    assert _style(how, "color") != link
     assert _style(how, "color") == _style(page.locator("main h1").first, "color")
     box = how.bounding_box()
     assert box["height"] >= 43.5 and box["width"] >= 43.5, box

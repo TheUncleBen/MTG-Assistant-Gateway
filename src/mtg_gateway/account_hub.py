@@ -142,27 +142,6 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
     return out
 
 
-def balance(gs: list[tuple[int, str, list[Row]]]) -> tuple[list[list[Any]], list[Any]]:
-    """Two even columns and, with an odd number of groups, the smallest one centred under them
-    (a member on the website: Your account beside Assistants and apps, Look under both). The
-    largest group goes first into the shorter column; each column keeps the groups' order, and
-    Your account is always at the top left."""
-    rest = list(gs)
-    lone: list[Any] = []
-    if len(rest) % 2:
-        small = min(rest, key=lambda g: (len(g[2]), -g[0]))
-        rest.remove(small)
-        lone = [small]
-    cols: list[list[Any]] = [[], []]
-    for g in sorted(rest, key=lambda g: (-len(g[2]), g[0])):
-        h = [sum(len(x[2]) + 1 for x in c) for c in cols]
-        cols[0 if h[0] <= h[1] else 1].append(g)
-    cols = [sorted(c) for c in cols]
-    if cols[1] and cols[1][0][0] == 0:
-        cols.reverse()
-    return cols, lone
-
-
 def _group_html(g: tuple[int, str, list[Row]]) -> str:
     return (
         f"<section class='ygrp'><h2>{html.escape(g[1])}</h2>"
@@ -181,16 +160,17 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
     mode = html.escape(modes.MODE_LABELS.get(state.decks.mode_of(sub), ""))
     app = in_app()
     sub_line = ui.facts([linked, f"Default approval: {mode}" if mode else ""], html=True)
-    cols, lone = balance(groups(csrf, admin=admin, app=app))
+    # one centred column of grouped lists on every screen, as iOS Settings draws them: two columns
+    # side by side left a hole under the shorter one on a desktop (Ben, 0.7.46 checklist)
+    gs = sorted(groups(csrf, admin=admin, app=app))
     return (
         "<div class='yhub'>"
         "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
         f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
         f"<span class='sub'>{sub_line}</span></span></div>"
-        "<div class='ycols'>"
-        + "".join(f"<div class='ycol'>{''.join(_group_html(g) for g in c)}</div>" for c in cols if c)
-        + "</div>"
-        + "".join(f"<div class='ylone'>{_group_html(g)}</div>" for g in lone)
+        "<div class='ycols'><div class='ycol'>"
+        + "".join(_group_html(g) for g in gs)
+        + "</div></div>"
         + "<form class='ysignout' method='post' action='/logout'>"
         f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
         "<button type='submit' class='btn' data-busy-text='Signing out…'>"
@@ -201,7 +181,7 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
 
 
 HUB_CSS = """
-.yhub{max-width:62rem;margin:0 auto}
+.yhub{max-width:42rem;margin:0 auto}
 .yhub .yme{display:flex;align-items:center;gap:1rem;padding:.9rem 1rem;margin:0 0 1.25rem;border-radius:14px;
   background:var(--surface);border:1px solid var(--border-soft);color:var(--text);text-decoration:none}
 .yhub .yme img.av{width:56px;height:56px;border-radius:50%;object-fit:cover;flex:none}
@@ -210,9 +190,7 @@ HUB_CSS = """
 .yhub .yme .who{display:flex;flex-direction:column;gap:.2rem;min-width:0;flex:1 1 12em}
 .yhub .yme b{font-size:1.15rem;overflow-wrap:break-word}
 .yhub .yme .sub{color:var(--text-muted);font-size:.9rem;overflow-wrap:anywhere}
-.ycols{display:grid;gap:0 1.5rem;align-items:start}
-@media (min-width:700px){ .ycols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-  .ylone{max-width:calc(50% - .75rem);margin:0} }
+.ycols{display:grid;grid-template-columns:minmax(0,1fr);gap:0;align-items:start}
 .ycol{display:flex;flex-direction:column;min-width:0}
 .ygrp{margin:0 0 1.25rem}
 /* a group with no row left (This app in an app without the bridge, or an older one) shows no
@@ -267,10 +245,10 @@ HUB_CSS = """
   .ygrp .yfold button:hover{background:var(--surface-2)} }
 /* Sign out: a real button at the foot, its icon and words centred together, with the note on what
    it clears on its own line under it (beside the button, the note ran out of a 320 px window) */
-.ysignout{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;margin:.5rem 0 1rem}
-.ysignout > p{margin:0;max-width:100%}
-.ysignout .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:48px;
-  min-width:min(16rem,100%);padding:0 1.5rem;border-radius:14px;background:var(--surface);
+.ysignout{display:flex;flex-direction:column;align-items:stretch;gap:.5rem;margin:.5rem 0 1rem}
+.ysignout > p{margin:0 .9rem;max-width:100%}
+.ysignout .btn{display:flex;align-items:center;justify-content:center;gap:.5rem;min-height:50px;width:100%;
+  margin:0;padding:0 1.5rem;border-radius:14px;background:var(--surface);
   border:1px solid var(--border);color:var(--danger-text);font-weight:700;line-height:1.2}
 .ysignout .btn svg.i{width:18px;height:18px}
 .ysignout .btn:hover{background:var(--surface-2);color:var(--danger-text)}

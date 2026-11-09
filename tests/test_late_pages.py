@@ -36,7 +36,7 @@ def _slow(stack: Stack, seconds: float) -> list[str]:
 
 
 async def _linked(stack: Stack) -> Browser:
-    b = Browser(stack.h)
+    b = Browser(stack.h, follow_late=False)
     await b.login("/")
     r = await b.link("alice", "pw-alice")
     assert r.status_code == 303, r.text
@@ -71,7 +71,7 @@ async def test_a_slow_page_sends_its_frame_at_once_then_the_finished_page(stack:
 
 async def test_the_finished_page_is_only_for_the_session_that_asked(stack: Stack) -> None:
     b = await _linked(stack)
-    other = Browser(stack.h)
+    other = Browser(stack.h, follow_late=False)
     await other.login("/")
     try:
         asked = _slow(stack, 2.0)

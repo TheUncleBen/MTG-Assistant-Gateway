@@ -555,7 +555,7 @@ async def test_the_add_a_package_box_offers_the_decks_tags_and_my_color_tags(sta
         page = (await b.http.get("/decks/42")).text
         assert "<label for='dx-ptag'>Color tag</label>" in page
         assert "<select id='dx-ptag' name='color_tag' data-src='/decks/api/color_tags'>" in page
-        assert "<option value='' selected>None</option>" in page
+        assert "<option value='' selected>No color tag</option>" in page
         assert "<option value='Have,#37d67a'>Have</option>" in page
         assert "<option value='Maybe,#2185d0'>Maybe</option>" in page
         assert "<option value='Cut,#ff4d4f'>" not in page
@@ -577,7 +577,7 @@ async def test_the_add_a_package_box_offers_the_decks_tags_and_my_color_tags(sta
         assert "<option value='Keep,#123456' selected>Keep</option>" in r.text
         r = await _post(b, "/decks/42/package", package="", color_tag="Have,#37d67a")
         assert "<option value='Have,#37d67a' selected>Have</option>" in r.text
-        assert "<option value='' selected>None</option>" not in r.text
+        assert "<option value='' selected>No color tag</option>" not in r.text
         # the swatch beside the select carries the chosen tag's colour (only a plain hex colour)
         assert "class='tagdot dx-tagdot' style='background:#37d67a'" in r.text
         r = await _post(b, "/decks/42/package", package="", color_tag="Odd,url(x)")

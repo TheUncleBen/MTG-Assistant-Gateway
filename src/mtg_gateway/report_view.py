@@ -345,6 +345,8 @@ def _block_key(block: dict[str, Any]) -> str:
         json.dumps(block.get("quantities"), sort_keys=True, default=str) if block.get("quantities") else "",
         json.dumps(block.get("mana_cards"), default=str) if block.get("mana_cards") else "",
         json.dumps(block.get("error"), default=str) if block.get("error") else "",
+        # a failed block's reason (research_failure): two failures with different notes are two parses
+        block.get("note") if isinstance(block.get("note"), str) else "",
         str(bool(block.get("ok"))),
     ):
         h.update(part.encode("utf-8", "surrogatepass"))

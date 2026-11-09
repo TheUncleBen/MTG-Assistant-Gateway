@@ -755,7 +755,7 @@ def _control(spec: SettingSpec, value: Any, *, locked: bool, described: str) -> 
         f"<span class='set-num{' has-u' if spec.unit else ''}'>"
         f"<input type='number' id='f-{key}' name='{name}' "
         f"value='{html.escape(shown_value)}' min='{lo}' max='{_plain(spec.hi)}' step='{step}' "
-        f"inputmode='{'numeric' if spec.kind == 'int' else 'decimal'}' "
+        f"inputmode='{'numeric' if spec.kind == 'int' else 'decimal'}' autocomplete='off' "
         f"aria-describedby='{described}{unit_id} r-{key}'{dis}>{unit}</span>"
         f"<p class='range' id='r-{key}'>Allowed: {html.escape(span)}</p>"
     )

@@ -98,6 +98,10 @@ SETTINGS_CSS = """
 .ds-nav{display:none}
 @media (min-width:1100px){.ds-wrap{grid-template-columns:11rem minmax(0,52rem)}
   .ds-nav{display:block;position:sticky;top:12px;align-self:start;margin-top:118px}}
+/* with room for it, an empty track the nav's width on the right keeps the settings themselves in
+   the middle of the window, under the page's heading (0.7.47 UI sweep: they leaned right) */
+@media (min-width:1280px){main.wrap:has(> .ds-wrap){max-width:calc(74rem + 48px + 2 * var(--gutter))}
+  @container (min-width:76em){.ds-wrap{grid-template-columns:11rem minmax(0,52rem) 11rem}}}
 .ds-nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--border-soft)}
 .ds-nav a{display:flex;align-items:center;min-height:44px;padding:0 .75rem;color:var(--text-muted);
   text-decoration:none;font-weight:700;font-size:.92rem;margin-left:-2px;border-left:2px solid transparent}

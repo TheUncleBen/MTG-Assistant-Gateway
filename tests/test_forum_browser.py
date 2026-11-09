@@ -201,7 +201,7 @@ def test_the_package_box_color_tag_fills_with_my_tags_as_it_opens(
         page.locator("#dx-ptag option[value='Cut,#ff4d4f']").wait_for(state="attached", timeout=4000)
         assert ("GET", "/api/decks/colorTags/") in ark.calls
         assert page.evaluate("() => [...document.querySelectorAll('#dx-ptag option')].map(o => o.text)") == [
-            "None",
+            "No color tag",
             "Have",
             "Cut",
         ]
