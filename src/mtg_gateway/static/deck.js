@@ -260,7 +260,12 @@
   }
   function signInAction() { return Fetch.signInLink("btn"); }
   var editUrl = "/api/v1/decks/" + enc(deckId) + "/edit";
-  var saving = false;
+  var saving = false, awaiting = 0;
+  // The app's pull to refresh waits while a save is on its way or a quantity step waits to be sent
+  // (static/topbar.js): a pull would load the page over it.
+  (window.mtgHolds = window.mtgHolds || []).push(function () {
+    return saving || awaiting > 0 || histBusy || qtySteps.some(function (s) { return s.timer || s.queued; });
+  });
   // -- a change big enough to ask first (modes.hand_edit_confirm): the endpoint made the proposal
   // and waits for the answer. A removal asks in the shared box, which ends on the solid red button;
   // a commander question keeps the page's own dialog strip. The proposal made for the check is
@@ -350,7 +355,11 @@
       saving = false;
       // Archidekt is slow and the save carries on behind: the page stays on the deck, keeps its
       // Saving note and draws the row once the save ends (0.7.46 audit D-07)
-      if (d.ok && d.status === 202 && d.proposal_id) return awaitApply(d.proposal_id, changes, undoChanges, opts);
+      if (d.ok && d.status === 202 && d.proposal_id) {
+        awaiting++;
+        var done = function () { awaiting--; };
+        return awaitApply(d.proposal_id, changes, undoChanges, opts).then(function (x) { done(); return x; }, function (e) { done(); throw e; });
+      }
       if (d.ok && d.proposal_id) { location.href = "/proposals/" + enc(d.proposal_id); return d; }  // writes are off: kept for review
       var failed = new Error(d.message || "The change could not be saved.");
       failed.code = d.error || "";
@@ -3084,6 +3093,7 @@
         all.filter(function (x) { return x.name === (name || c.name); })[0] || null;
     }
     window.addEventListener("beforeunload", function (ev) { if (busy) { ev.preventDefault(); ev.returnValue = ""; } });
+    (window.mtgHolds = window.mtgHolds || []).push(function () { return busy > 0; });  // no pull to refresh mid-save (static/topbar.js)
     function post(fields) {
       var fd = new URLSearchParams();
       fd.set("csrf", CSRF); fd.set("json", "1"); fd.set("page", "deck");

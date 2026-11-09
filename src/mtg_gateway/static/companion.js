@@ -743,6 +743,8 @@
   window.addEventListener("beforeunload", function (ev) {
     if (changes().length && !root.dataset.leaving) { ev.preventDefault(); ev.returnValue = ""; }
   });
+  // the app's pull to refresh waits while changes are staged (static/topbar.js)
+  (window.mtgHolds = window.mtgHolds || []).push(function () { return changes().length > 0; });
   // Back from the page that a discard went to may restore this one from memory: guard it again.
   window.addEventListener("pageshow", function (ev) { if (ev.persisted) delete root.dataset.leaving; });
 

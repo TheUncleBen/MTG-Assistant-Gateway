@@ -641,9 +641,19 @@
       return el.value !== el.defaultValue;
     });
   }
+  // Work a page script holds that a pull would lose (the deck editor's staged changes, a save on
+  // its way): each such script adds a function to window.mtgHolds that says true while it does.
+  function holding() {
+    var holds = window.mtgHolds || [];
+    for (var i = 0; i < holds.length; i++) {
+      try { if (holds[i]()) return true; } catch (err) { return true; }
+    }
+    return false;
+  }
   function mayPull(target) {
     if (window.scrollY > 0 || boxOpen() || unsent()) return false;
     if (document.documentElement.hasAttribute("data-no-pull") || document.body.hasAttribute("data-no-pull")) return false;
+    if (holding()) return false;
     var el = target && target.nodeType === 1 ? target : null;
     if (el && el.closest("input, textarea, select, [contenteditable=''], [contenteditable=true], [draggable=true]")) return false;
     return !scrollsItself(el);
