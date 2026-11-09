@@ -76,8 +76,9 @@ import java.io.ByteArrayInputStream
  *   notifications on this phone asks for the notification permission, starts the service and asks
  *   once to let the app run in the background;
  * - the app's own updates from the gateway it is set up for ([Updater]): a bar offers a newer
- *   version, one tap installs it over this one. Checked at each cold launch and just after a
- *   sign-in (at most once an hour), on returning to the app (at most twice a day) and on request.
+ *   version, and Update saves it to Downloads for the person to open. Checked at each cold
+ *   launch and just after a sign-in (at most once an hour), on returning to the app (at most
+ *   twice a day) and on request.
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
  * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
