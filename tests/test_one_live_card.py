@@ -664,7 +664,9 @@ def test_the_card_sent_to_the_chat_leaves_out_the_sources_comments_and_indentati
     from mtg_gateway.cards import card_html as any_card
 
     html = card_html()
-    assert len(html.encode()) < 68_000, len(html.encode())  # 85,318 bytes before
+    # 85,318 bytes before 0.7.46; 0.7.47's check before a card draws its list (no card spam) adds
+    # about 760 bytes, and saves an older card's whole list and pictures
+    assert len(html.encode()) < 68_800, len(html.encode())
     lines = html.split("\n")
     assert not [x for x in lines if x.strip().startswith(("//", "/*"))]
     assert not [x for x in lines if x != x.strip() or not x.strip()][:-1]

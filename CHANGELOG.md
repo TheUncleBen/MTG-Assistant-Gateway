@@ -7,6 +7,23 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.47] - 2026-11-09
+
+### Upgrade notes
+- Nothing to change: no new settings, variables or database steps for the chat cards.
+
+### Changed
+- **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
+  shows one line until it has checked that it is the newest card of a change that still waits.
+  Only that card draws its list, pictures and buttons; a card for a change that was updated,
+  withdrawn, replaced, applied or rejected stays one line and never loads its pictures, so a
+  long chat stays light. If the check can't get through within a few seconds, the card shows in
+  full as before (Approve always checks once more).
+- From the third new deck one assistant proposes within 5 minutes, the result tells it that each
+  one put a card in your chat and to check first and change the waiting one instead
+  (`plan_first`, as for deck edits). `withdraw_proposal` tells assistants to amend a waiting
+  proposal rather than withdraw it and propose again.
+
 ## [0.7.46] - 2026-10-28
 
 Assistants keep one live card per change in the chat, proposals never apply themselves, and tool
