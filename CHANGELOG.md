@@ -36,16 +36,16 @@ before it adds one.
   Apache-2.0) and the LiteRT runtime that runs it, fetched and checked at build time with the text
   recognition files. No new settings or environment variables, and no database steps (the
   missed pictures table is created at start).
-- The Android app opens the page's own scanner on a gateway from 0.7.47. An app from before
-  0.7.47 still opens its own camera panel, which keeps working.
+- The Android app opens the page's own scanner once the gateway has learned the card pictures.
+  Until then, and in an app from before 0.7.47, the app's own camera panel scans as before.
 
 ### Changed
 - **The scanner finds a card by its picture, while you hold it up.** Hold a card inside the
   frame and keep it still for a moment: the page sends the straightened card to the gateway,
-  which compares its artwork with every printing's (in a test on 8,474 printings with simulated
+  which compares its artwork with every printing's (in a test on 8,474 printings with made-up
   phone photos, the right card 99 times in 100; real phones still to be measured). No title
   reading, no shutter, and the same scanner in the browser and the Android app (the big button
-  that opened a separate camera is gone). **Check each card** (the default) shows each card to
+  that opened a separate camera is gone once the pictures are learned). **Check each card** (the default) shows each card to
   confirm; **Add right away** adds the cards the gateway is sure of, with Undo, and shows the
   rest. Printings that share one artwork (reprints) are told apart by the set and number at the
   bottom left of the card; when that can't be read, the card asks which one, and the set lock

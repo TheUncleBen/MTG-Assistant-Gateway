@@ -203,6 +203,16 @@ body.picker-open{overflow:hidden}
   color:var(--navbar-text);font-weight:900;font-size:1.1rem;text-shadow:0 1px 3px var(--navbar-bg)}
 .scan .camera .flash{position:absolute;inset:0;background:var(--navbar-text);opacity:0;pointer-events:none;transition:opacity .25s}
 .scan .camera .flash.on{opacity:.6;transition:none}
+/* inside the Android app, while the gateway reads titles, the viewfinder opens the phone camera:
+   one big button over the card frame */
+.scan .camera .phone-cam{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:0;
+  background:transparent;color:var(--navbar-text);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.scan .camera .phone-cam .cap{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--ctl);padding:.4rem 1.1rem;
+  font-size:min(1rem,20px);
+  max-width:calc(100% - 2rem);border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);
+  font-weight:700;text-align:left;box-shadow:var(--shadow)}
+.scan .camera .phone-cam:hover .cap{background:var(--navbar-bg)}
+.scan .camera .phone-cam:focus-visible{outline:3px solid var(--orange-select);outline-offset:-3px}
 
 /* the capture bar: Photo, the round capture button in the middle, Type; one row at every width */
 .scan .controls{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:1rem;padding:.6rem 0}

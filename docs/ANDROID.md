@@ -382,11 +382,13 @@ else your gateway serves. A few things are native:
 
 ## 3. Scanning with the phone camera
 
-**From gateway 0.7.47 the app doesn't open a camera of its own.** The `/scan`
-page finds cards by their picture with its own live camera, and the app shows
-that page as it is: the menu's **Scan** opens it, and the camera starts there
-(the app asks for the camera permission the first time). What follows is how an
-app talks to an older gateway, which still reads titles.
+**Once the gateway finds cards by their picture (0.7.47), the app doesn't open
+a camera of its own.** The `/scan` page finds cards with its own live camera,
+and the app shows that page as it is: the menu's **Scan cards** opens it, and
+the camera starts there (the app asks for the camera permission the first
+time). What follows is how the app scans while the gateway still reads titles:
+an older gateway, or a 0.7.47 gateway still learning the card pictures after an
+upgrade.
 
 The gateway's `/scan` page already reads cards from a photo (see
 [SCANNING.md](SCANNING.md)). The app's camera screen just takes a better photo

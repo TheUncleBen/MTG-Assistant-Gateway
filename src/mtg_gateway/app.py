@@ -1047,7 +1047,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             await asyncio.to_thread(state.decks.purge_expired_links)
         except Exception:  # never keep the gateway from starting; the hourly round tries again
             logger.exception("sealing or purging stored Archidekt sessions failed")
-        tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
+        tasks = [asyncio.create_task(purge_loop(state.db, also=hourly_purge(state)))]
         # the decks of changes cut off by the last shutdown (or the backstop) are read back
         tasks.append(asyncio.create_task(state.decks.read_back_loop()))
         if state.reports is not None:
@@ -1401,6 +1401,21 @@ def _notify_events(state: AppState) -> None:
 
     if state.reports is not None:
         state.reports.on_finished = report_finished
+
+
+def hourly_purge(state: Any) -> Callable[[], None]:
+    """What the hourly purge does besides the database's own expiry: the expired Archidekt sessions,
+    and the scanner's missed pictures past their 30 days (scan/misses.py), so they go on time even
+    when no one keeps another picture or opens Admin › Card scanner."""
+
+    def run() -> None:
+        try:
+            state.decks.purge_expired_links()
+        finally:
+            if getattr(state, "scan", None) is not None:
+                state.scan.misses.purge()
+
+    return run
 
 
 def create_app(

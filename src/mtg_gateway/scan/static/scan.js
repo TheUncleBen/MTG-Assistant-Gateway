@@ -392,8 +392,10 @@
     bar.append(field, help, sw);
     if (!PICTURES) {
       const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
+        title: phoneCamera() ? 'Scan with the phone camera, adding cards as they are read' : null,
         onclick: () => {
-          if (state.continuous) stopContinuous();
+          if (phoneCamera()) openPhoneCamera(true);
+          else if (state.continuous) stopContinuous();
           else if (!startContinuous()) setStatus('Open the camera first to scan continuously.');
         } },
         'Auto');
@@ -422,10 +424,20 @@
     return seg;
   }
 
-  /* In the Android app before 0.7.47 the viewfinder was a button that opened the phone's own camera.
-     The page's own live camera is the scanner everywhere now (it finds cards while you hold them up),
-     so the app shows this page as it is (MainActivity.startScan asks window.__scan.ownCamera). */
-  const phoneCamera = () => false;
+  /* With picture scanning the page's own live camera is the scanner everywhere (it finds cards
+     while you hold them up), so the Android app shows this page as it is (MainActivity.startScan
+     asks window.__scan.ownCamera). Until the gateway's picture index is ready the page reads titles,
+     and inside the app (it provides window.MtgNative; a browser has none) the orange shutter, the
+     viewfinder and Auto open the phone's own camera, which has the torch strength, zoom and
+     exposure a page cannot reach; its camera panel hands each photo to this page (ScanGlue.kt).
+     openCameraAuto (apps from 0.7.46) opens it with Auto on; an older app opens it and Auto is
+     switched on there. */
+  const phoneCamera = () => !PICTURES && !!(window.MtgNative && typeof window.MtgNative.openCamera === 'function');
+  function openPhoneCamera(auto) {
+    const n = window.MtgNative;
+    if (!n) return;
+    if (auto && typeof n.openCameraAuto === 'function') n.openCameraAuto(); else n.openCamera();
+  }
 
   /* Listeners the camera tab's controls put on document are tied to one render: re-rendering the tab
      (every visit) aborts the previous set, so handlers for detached elements do not pile up. */
@@ -435,7 +447,12 @@
   function renderCamera(panel) {
     if (camListeners) camListeners.abort();
     camListeners = new AbortController();
-    const video = h('video', { playsinline: true, autoplay: true, muted: true });
+    const app = phoneCamera();
+    // In the app, while titles are read, the viewfinder is one big button that opens the phone camera.
+    const video = app
+      ? h('button', { type: 'button', class: 'phone-cam', id: 'open-phone-camera', onclick: () => openPhoneCamera(false) },
+        h('span', { class: 'cap' }, cameraIcon(), 'Open the phone camera'))
+      : h('video', { playsinline: true, autoplay: true, muted: true });
     const torch = h('button', { type: 'button', class: 'torch', id: 'torch', hidden: true, 'aria-pressed': 'false',
       'aria-label': 'Torch', title: 'Torch',
       onclick: () => setTorch(!getTorch()).then(() => torch.setAttribute('aria-pressed', getTorch() ? 'true' : 'false')) },
@@ -446,25 +463,26 @@
       icon('alert'), 'Glare: tilt the card away from the light');
     const guide = h('div', { class: 'guide', id: 'scan-guide' }, PICTURES ? null : h('div', { class: 'title' }),
       h('span', { class: 'grip', 'aria-hidden': 'true' }));
-    const areaBtn = h('button', { type: 'button', class: 'area-btn', id: 'area-btn', 'aria-pressed': 'false', 'aria-label': 'Scan area',
+    const areaBtn = h('button', { type: 'button', class: 'area-btn', id: 'area-btn', 'aria-pressed': 'false', 'aria-label': 'Scan area', hidden: app,
       title: 'Move or resize the scan area', onclick: () => editArea(true) }, icon('edit'), h('span', { class: 'lbl', text: 'Scan area' }));
     const zoom = h('div', { class: 'zoom-chips', id: 'zoom-chips', role: 'group', 'aria-label': 'Zoom', hidden: true });
-    const cam = h('div', { class: 'camera' + (PICTURES ? ' pictures' : ''), id: 'camera' }, video, guide,
+    const cam = h('div', { class: 'camera' + (PICTURES ? ' pictures' : '') + (app ? ' app' : ''), id: 'camera' }, video, guide,
       h('div', { class: 'flash', id: 'flash' }), renderTally(), torch, areaBtn, zoom, glare, renderAreaBar());
     placeGuide(guide);
     bindPinch(cam);
     // Under the viewfinder, not over it: at large text sizes it would cover the scan area.
     const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: PICTURES
       ? 'Hold a card inside the frame. It is found as soon as it is still.'
+      : app ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
       : 'Hold the phone about 15 cm (6 in) from the card, the card in the frame and its name in the dashed box.' });
     const status = h('p', { class: 'muted', id: 'cam-status', role: 'status', text: '' });
     // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
     // open the camera with one, the app's file chooser never does); the camera is the camera.
     const file = h('input', { type: 'file', accept: 'image/*', id: 'photo-file', class: 'sr',
       onchange: (e) => e.target.files[0] && scanFile(e.target.files[0]) });
-    const shutterLabel = PICTURES ? 'Detect now' : 'Scan card';
+    const shutterLabel = PICTURES ? 'Detect now' : app ? 'Scan with the phone camera' : 'Scan card';
     const shutter = h('button', { class: 'shutter', id: 'shutter', title: shutterLabel, 'aria-label': shutterLabel,
-      onclick: () => (PICTURES ? detectNow(video) : captureFrame(video)) }, PICTURES ? icon('search') : cameraIcon(), h('span', { class: 'sr', text: shutterLabel }));
+      onclick: () => (PICTURES ? detectNow(video) : app ? openPhoneCamera(false) : captureFrame(video)) }, PICTURES ? icon('search') : cameraIcon(), h('span', { class: 'sr', text: shutterLabel }));
     // Photo, the capture button in the middle, Type: one row.
     const controls = h('div', { class: 'controls' },
       h('label', { class: 'btn ctl', for: 'photo-file', title: 'Scan a photo from your pictures' }, icon('image'), h('span', { text: 'Photo' })), shutter,
@@ -486,7 +504,10 @@
     status.after(renderUnidentified());
     // Text recognition starts loading with the camera when it reads every card; with picture
     // scanning it loads only when a set and number line has to be read.
-    startCamera(video).then(() => {
+    // (In the app, while titles are read, at once: the phone camera's first photo needs it, and the
+    // glue starts it again when that camera opens.)
+    if (app) { if (cfg.ocr) ensureOcr(); }
+    else startCamera(video).then(() => {
       if (!PICTURES && cfg.ocr) ensureOcr();
       if (PICTURES && state.stream) startWatching(video);
     });
@@ -732,7 +753,7 @@
       // In the app the hint under the viewfinder already says to tap the shutter. A scan that
       // waited for the engine (scanRegion, or Auto) goes on with its own words: Ready would
       // write over them.
-      if (!scanning() && !PICTURES) setStatus('Ready. Hold the card flat and tap Scan.');
+      if (!scanning() && !PICTURES) setStatus(phoneCamera() ? '' : 'Ready. Hold the card flat and tap Scan.');
       emit('ocr', { state: 'ready', progress: 1 });
     } catch (err) {
       state.ocrState = 'failed';
@@ -2449,8 +2470,9 @@
     tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, noOutlineFrame, nameIsComplete, ensureOcr,
     scanFile, guideTitleRegion, listValue, sharpnessOf, photoCanvas,
     loadPrints, choosePrinting, setFoil, foilChoices, openPicker, closePicker,
-    // picture scanning (0.7.47); ownCamera tells the Android app this page is the scanner itself
-    ownCamera: true, identifyPicture, pictureResult, pickPrinting, watchFrame, detectNow, clampArea, editArea, showMiss };
+    // picture scanning (0.7.47); ownCamera tells the Android app this page is the scanner itself,
+    // which it is once the picture index is ready (until then the app's own camera panel scans)
+    ownCamera: PICTURES, identifyPicture, pictureResult, pickPrinting, watchFrame, detectNow, clampArea, editArea, showMiss };
 
   loadDraft();
   loadDeviceChoices();

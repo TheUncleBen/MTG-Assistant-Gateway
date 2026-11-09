@@ -168,7 +168,8 @@ async def purge_loop(
     db: Database, interval: float = PURGE_INTERVAL_SECONDS, also: Callable[[], object] | None = None
 ) -> None:
     """Expire tokens, sessions and proposals and apply the retention caps every hour, whether or
-    not backups are configured; ``also`` runs after each round (the expired Archidekt sessions).
+    not backups are configured; ``also`` runs after each round (app.hourly_purge: the expired
+    Archidekt sessions and missed scanner pictures).
     A failure is logged and retried on the next round."""
     while True:
         await asyncio.sleep(interval)
@@ -180,4 +181,4 @@ async def purge_loop(
             try:
                 await asyncio.to_thread(also)
             except Exception:
-                logger.exception("purge of expired Archidekt sessions failed")
+                logger.exception("hourly purge of Archidekt sessions or missed scanner pictures failed")

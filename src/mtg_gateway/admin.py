@@ -10,6 +10,7 @@ never create a user or change a group. Every action writes an ``admin_<action>``
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import html
 import json
@@ -355,7 +356,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(who, Response):
             return who
         misses = _misses(state)
-        data = misses.picture(request.path_params["mid"]) if misses is not None else None
+        mid = request.path_params["mid"]
+        data = await asyncio.to_thread(misses.picture, mid) if misses is not None else None
         if data is None:
             return not_found(False)
         return Response(

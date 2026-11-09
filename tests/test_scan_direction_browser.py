@@ -223,28 +223,51 @@ window.MtgNative = {
 """
 
 
-@pytest.mark.parametrize("app", ["app", "browser"])
-def test_in_the_app_the_page_scans_with_its_own_camera(server: Server, app: str) -> None:  # noqa: F811
-    """0.7.47: the scanner is the page everywhere. Inside the Android app (window.MtgNative) the
-    page starts its own live camera as a browser does and never asks the app for the phone camera
-    panel; it tells the app so through window.__scan.ownCamera (MainActivity.startScan)."""
+@pytest.mark.parametrize("app", ["app", "older-app", "browser"])
+def test_in_the_app_the_shutter_and_auto_open_the_phone_camera(server: Server, app: str) -> None:  # noqa: F811
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
+    older = APP_BRIDGE.replace("openCameraAuto", "notThere")
+    bridge = {"app": APP_BRIDGE, "older-app": older, "browser": ""}[app]
     with sync_playwright() as p:
-        browser, page, errors = _page(
-            p, exe, server, init=TABLE_CAMERA + (APP_BRIDGE if app == "app" else "")
-        )
-        page.wait_for_function("() => (document.querySelector('#camera video') || {}).videoWidth > 0")
-        assert page.evaluate("() => window.__cameraOpened || 0") == 1
-        assert page.locator("#phone-camera, #open-phone-camera").count() == 0
-        assert page.evaluate("() => window.__scan.ownCamera") is True
+        browser, page, errors = _page(p, exe, server, init=TABLE_CAMERA + bridge)
+        page.wait_for_function("() => window.__scan.state.ocrState !== 'idle'")
+        if app == "browser":
+            page.wait_for_function("() => (document.querySelector('#camera video') || {}).videoWidth > 0")
+        else:
+            # fixed wait: a negative check: in the app the page's own camera does not start
+            # within 300 ms
+            page.wait_for_timeout(300)
+        opened = page.evaluate("() => window.__cameraOpened || 0")
+        if app == "browser":
+            # A browser keeps its own camera, and the shutter reads the frame.
+            assert opened == 1 and page.locator("#camera video").count() == 1
+            assert page.locator("#phone-camera, #open-phone-camera").count() == 0
+            assert page.evaluate("() => window.__calls") is None
+            browser.close()
+            return
+        # The app: the page's own camera never starts; the shutter is the phone camera. Until the
+        # gateway's picture index is ready (0.7.47) the page tells the app it isn't the scanner, so
+        # the app keeps its own camera panel with the torch, zoom and exposure (MainActivity.startScan).
+        assert opened == 0 and page.locator("#camera video").count() == 0
+        assert page.evaluate("() => window.__scan.ownCamera") is False
+        assert page.locator("#phone-camera").count() == 0  # the shutter does its job now
         shutter = page.locator("#shutter")
-        assert shutter.get_attribute("aria-label") == "Scan card"
+        assert shutter.get_attribute("aria-label") == "Scan with the phone camera"
+        assert "phone camera" in page.locator("#cam-hint").text_content()
+        shutter.click()
+        # The viewfinder itself is one big way in.
+        page.locator("#open-phone-camera").click()
+        box = page.locator("#open-phone-camera").bounding_box()
+        assert box["height"] >= 44 and box["width"] >= 44
+        # Auto opens the phone camera scanning on its own; an older app opens it for the person to
+        # switch Auto on there.
         page.locator("#auto-switch").click()
-        assert page.locator("#auto-switch").get_attribute("aria-checked") == "true"
-        page.locator("#auto-switch").click()
-        assert page.evaluate("() => window.__calls || []") == []
+        assert page.locator("#auto-switch").get_attribute("aria-checked") == "false"
+        auto = "openCameraAuto" if app == "app" else "openCamera"
+        assert page.evaluate("() => window.__calls") == ["openCamera", "openCamera", auto]
+        assert page.evaluate("() => window.__scan.state.continuous") is False
         assert errors == []
         browser.close()
 
@@ -304,5 +327,8 @@ def test_the_running_count_leaves_the_name_box_clear_at_any_text_size(
         cam = page.locator("#camera").bounding_box()
         assert b["height"] >= 44 and b["y"] + b["height"] <= name["y"] + 0.5, (b, name)
         assert b["x"] >= cam["x"] and b["x"] + b["width"] <= cam["x"] + cam["width"], (b, cam)
+        # The phone camera button in the middle stays a full target too.
+        open_btn = page.locator("#open-phone-camera .cap").bounding_box()
+        assert open_btn["height"] >= 44 and open_btn["x"] >= cam["x"], open_btn
         assert errors == []
         browser.close()

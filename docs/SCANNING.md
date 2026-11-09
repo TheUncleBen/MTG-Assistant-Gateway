@@ -110,9 +110,9 @@ What's on it:
   many cards the scan holds ("12 cards"); tap it to open the list. Once the
   gateway prices scanned cards, the scan's value will show next to the
   count.
-- **In the Android app.** From gateway 0.7.47 the app shows this page as
-  it is, with its own live camera. Against an older gateway, the orange
-  shutter and the viewfinder open the phone's own camera panel, with its
+- **In the Android app.** Once the gateway has learned the card pictures
+  (0.7.47) the app shows this page as it is, with its own live camera.
+  Until then, and against an older gateway, the orange shutter and the viewfinder open the phone's own camera panel, with its
   torch brightness, zoom and exposure, and **Auto** opens it scanning on its
   own (see [ANDROID.md](ANDROID.md#3-scanning-with-the-phone-camera)).
 - **Torch, zoom and brightness.** A Torch button turns the phone's flash

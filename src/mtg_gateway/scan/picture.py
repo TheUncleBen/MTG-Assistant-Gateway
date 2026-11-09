@@ -79,6 +79,7 @@ BATCH = 100  # rows written at a time
 PASS = 2000  # printings taken from the copy per pass of a round
 CHECK_EVERY = 3600.0  # how often the background loop looks for new printings
 START_DELAY = 120.0  # after a start, out of the start's way (and after the printings copy's look)
+SLOW_DOWN = object()  # _read_capped: the image host answered 429
 LATER = b""  # _fetch_and_embed: the host said slow down; the printing is tried again, not skipped
 COMPLETE_SHARE = 0.95  # of the copy's printings in the index before the scanner uses it
 RETRY_AFTER_ERROR = 600.0  # a failed picture is tried again on a later round, not at once
@@ -196,6 +197,14 @@ def decode_picture(data: bytes, max_side: int = 2000) -> Any | None:
         return im.convert("RGB")
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
         return None
+
+
+def as_plain_jpeg(im: Any, quality: int = 85) -> bytes:
+    """A decoded picture saved again as a plain JPEG: no EXIF, GPS or other metadata from the
+    upload is kept, and what is stored is always the JPEG it is served as."""
+    out = BytesIO()
+    im.save(out, "JPEG", quality=quality)
+    return out.getvalue()
 
 
 class PictureIndex:
@@ -677,15 +686,30 @@ class PictureIndex:
                 await asyncio.sleep(min(wait, 5.0))
             self._last_fetch = time.monotonic()
         try:
-            resp = await self._client().get(url, headers={"User-Agent": self.user_agent})
+            data = await self._read_capped(url)
         except httpx.HTTPError:
             return None
-        if resp.status_code == 429:
+        if data is SLOW_DOWN:
             self._paused_until = time.monotonic() + PAUSE_ON_429
             return LATER
-        if resp.status_code != 200 or len(resp.content) > MAX_IMAGE_BYTES:
+        if not isinstance(data, bytes):
             return None
-        return await asyncio.to_thread(self._embed_bytes, resp.content)
+        return await asyncio.to_thread(self._embed_bytes, data)
+
+    async def _read_capped(self, url: str) -> bytes | object | None:
+        """The picture's bytes, read as they arrive and given up on as soon as they pass
+        MAX_IMAGE_BYTES; SLOW_DOWN on a 429; None for any other answer."""
+        async with self._client().stream("GET", url, headers={"User-Agent": self.user_agent}) as resp:
+            if resp.status_code == 429:
+                return SLOW_DOWN
+            if resp.status_code != 200:
+                return None
+            got = bytearray()
+            async for chunk in resp.aiter_bytes():
+                got += chunk
+                if len(got) > MAX_IMAGE_BYTES:
+                    return None
+            return bytes(got)
 
     def _embed_bytes(self, data: bytes) -> bytes | None:
         im = decode_picture(data)

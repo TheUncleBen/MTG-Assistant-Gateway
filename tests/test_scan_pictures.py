@@ -215,6 +215,30 @@ async def test_only_the_image_host_is_ever_fetched(tmp_path: Path) -> None:
     idx.close()
 
 
+async def test_a_picture_too_big_is_given_up_on_while_it_downloads(tmp_path: Path) -> None:
+    """The size cap holds while the picture streams in: the gateway stops reading as soon as it
+    passes MAX_IMAGE_BYTES instead of loading the whole body first."""
+    sent = []
+
+    async def endless():
+        for _ in range(200):  # 200 x 64 KB, far past the cap
+            sent.append(1)
+            yield b"\0" * 65536
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=endless(), headers={"content-type": "image/jpeg"})
+
+    idx = index(tmp_path, image_http=httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    assert await idx._fetch_and_embed(f"{HOST}small/sol-c21.jpg") is None
+    assert len(sent) <= pic.MAX_IMAGE_BYTES // 65536 + 2, len(sent)
+    # an ordinary picture still arrives whole, and an empty one is not taken for a slow-down
+    idx._http = image_host()
+    assert await idx._fetch_and_embed(f"{HOST}small/sol-c21.jpg")
+    idx._http = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"")))
+    assert await idx._fetch_and_embed(f"{HOST}small/sol-c21.jpg") is None
+    idx.close()
+
+
 async def test_printings_the_copy_no_longer_has_are_dropped(tmp_path: Path) -> None:
     idx = index(tmp_path)
     await idx.sync()
@@ -377,6 +401,64 @@ async def test_a_member_keeps_a_missed_picture_for_the_admin(stack: Stack, tmp_p
     await b.aclose()
 
 
+async def test_a_kept_picture_is_stored_as_a_plain_jpeg(stack: Stack) -> None:
+    """Whatever the upload carried (EXIF, GPS, another format) only the picture is kept, as the
+    JPEG it is served as."""
+    from PIL import Image
+
+    b = Browser(stack.h)
+    await b.login("/scan")
+    exif = Image.Exif()
+    exif[0x010F] = "Phone maker"  # Make
+    exif[0x8825] = {2: (1.0, 2.0, 3.0)}  # GPS
+    tagged = io.BytesIO()
+    Image.open(io.BytesIO(photo(9))).save(tagged, "JPEG", exif=exif)
+    png = io.BytesIO()
+    Image.open(io.BytesIO(photo(9))).save(png, "PNG")
+    for data, kind in ((tagged.getvalue(), "image/jpeg"), (png.getvalue(), "image/png")):
+        r = await post_picture(b, "/scan/api/miss", data, kind=kind)
+        assert r.status_code == 200, r.text
+        kept = stack.gw.scan.misses.picture(r.json()["id"])
+        assert kept[:3] == b"\xff\xd8\xff" and b"Phone maker" not in kept
+        im = Image.open(io.BytesIO(kept))
+        assert im.format == "JPEG" and not im.getexif()
+    await b.aclose()
+
+
+async def test_the_hourly_purge_deletes_missed_pictures_past_30_days(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missed pictures go after 30 days even when no one keeps another one or opens Admin › Card
+    scanner: the gateway's hourly purge round deletes them."""
+    import mtg_gateway.app as app_mod
+
+    rounds: list = []
+
+    async def one_round(db: Any, interval: float = 3600, also: Any = None) -> None:
+        rounds.append(also)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(app_mod, "purge_loop", one_round)
+    async with running(Harness(make_settings(tmp_path), idp)) as h:
+        misses = h.app.state.gateway.scan.misses
+        new = misses.add("user-9", b"new")
+        # one kept 31 days ago (written straight in: adding one would purge on its own)
+        with misses.db.tx() as c:
+            c.execute(
+                "INSERT INTO scan_misses (id, owner_sub, created_at, picture, note) VALUES (?,?,?,?,?)",
+                ("old", "user-9", time.time() - (KEEP_DAYS + 1) * 86400, b"old", ""),
+            )
+        old = "old"
+        assert misses.picture(old) == b"old"
+        for _ in range(100):
+            if rounds:
+                break
+            await asyncio.sleep(0.01)
+        assert rounds and rounds[0] is not None
+        await asyncio.to_thread(rounds[0])
+        assert misses.picture(old) is None and misses.picture(new) == b"new"
+
+
 # -- Admin › Card scanner ------------------------------------------------------------------------
 @pytest.fixture
 async def gw(tmp_path: Path, idp: FakeIdP):
@@ -402,7 +484,15 @@ async def test_admins_see_the_index_and_the_missed_pictures_and_can_delete_them(
         r = await b.http.get("/admin/scanner", headers=NAVIGATE)
         text = html.unescape(r.text)
         assert f"src='/admin/scanner/miss/{mid}'" in text and "bram" in text
+        # the picture is read off the event loop, as the scan routes read theirs
+        import threading
+
+        threads: list[str] = []
+        read = scan.misses.picture
+        scan.misses.picture = lambda m: threads.append(threading.current_thread().name) or read(m)
         pict = await b.http.get(f"/admin/scanner/miss/{mid}")
+        del scan.misses.picture
+        assert threads and threads[0] != threading.main_thread().name, threads
         assert pict.status_code == 200 and pict.headers["content-type"] == "image/jpeg"
         assert pict.headers["cache-control"] == "no-store" and pict.content == photo(9)
         csrf = await b.csrf("/admin/scanner")

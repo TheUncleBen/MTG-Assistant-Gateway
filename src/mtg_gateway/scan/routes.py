@@ -410,14 +410,17 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
         raw = await picture_body(request)
         if isinstance(raw, Response):
             return raw
-        from .picture import decode_picture
+        from .picture import as_plain_jpeg, decode_picture
 
-        if await asyncio.to_thread(decode_picture, raw) is None:
+        im = await asyncio.to_thread(decode_picture, raw)
+        if im is None:
             return JSONResponse(
                 {"ok": False, "error": "invalid", "message": "That isn't a picture."}, 400, headers=NO_STORE
             )
+        # kept as a fresh JPEG: nothing but the picture is stored, and it is the type it is served as
+        kept = await asyncio.to_thread(as_plain_jpeg, im)
         note = request.headers.get("x-scan-note", "")[:300]
-        mid = await asyncio.to_thread(service.misses.add, who[0], raw, note)
+        mid = await asyncio.to_thread(service.misses.add, who[0], kept, note)
         if mid is None:
             return JSONResponse(
                 {"ok": False, "error": "busy", "message": "You've kept enough pictures for today."},

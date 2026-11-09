@@ -159,6 +159,35 @@ def _page(p, exe, srv: Server, *, answers: list[dict], admin: bool = False, widt
     return browser, page, errors, calls
 
 
+APP_BRIDGE = """
+window.__calls = [];
+window.MtgNative = {
+  openCamera: function () { window.__calls.push('openCamera'); },
+  openCameraAuto: function () { window.__calls.push('openCameraAuto'); },
+  version: function () { return 'test'; },
+};
+"""
+
+
+def test_in_the_app_the_page_is_the_scanner_once_pictures_are_ready(server: Server) -> None:  # noqa: F811
+    """With the picture index ready the page starts its own live camera inside the Android app too,
+    never opens the app's camera panel, and tells the app so (window.__scan.ownCamera, read by
+    MainActivity.startScan). Before then the app keeps its panel (test_scan_direction_browser.py)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21)], init=APP_BRIDGE)
+        assert page.evaluate("() => window.__scan.ownCamera") is True
+        page.wait_for_function("() => (document.querySelector('#camera video') || {}).videoWidth > 0")
+        assert page.locator("#open-phone-camera").count() == 0
+        assert page.locator("#shutter").get_attribute("aria-label") == "Detect now"
+        page.wait_for_selector("#found", timeout=15000)
+        assert page.evaluate("() => window.__calls") == []
+        assert errors == []
+        browser.close()
+
+
 def test_a_card_held_still_is_found_shown_to_check_and_sent_once(server: Server) -> None:  # noqa: F811
     from playwright.sync_api import sync_playwright
 
