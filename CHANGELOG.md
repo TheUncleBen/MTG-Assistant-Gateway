@@ -9,27 +9,48 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.7.47] - 2026-11-09
 
-Every page reads as one app on every screen: centred on a laptop and a wide desktop, one column
-where two left holes, plain words where program values showed, and no blue links.
+Proposal cards in Claude and ChatGPT no longer fill the chat: only the newest card of a change
+that still waits draws in full. Every page reads as one app on every screen: centred on a laptop
+and a wide desktop, one column where two left holes, plain words where program values or
+placeholders showed, and no blue links.
 
 ### Upgrade notes
-- Nothing to do: no settings, environment variables or database changes.
+- Nothing to do: no new settings, environment variables or database steps.
 
 ### Changed
+- **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
+  shows one line until it has checked that it is the newest card of a change that still waits.
+  Only that card draws its list, pictures and buttons; a card for a change that was updated,
+  withdrawn, replaced, applied or rejected stays one line and never loads its pictures, so a
+  long chat stays light. If the check can't get through within a few seconds, the card shows in
+  full as before (Approve always checks once more).
+- From the third new deck one assistant proposes within 5 minutes, the result tells it that each
+  one put a card in your chat and to check first and change the waiting one instead
+  (`plan_first`, as for deck edits). `withdraw_proposal` tells assistants to amend a waiting
+  proposal rather than withdraw it and propose again.
 - **Pages are centred on wide screens**, beside the Fold's side rail too. Account, Account details
   and Binder › Lists are one centred column of grouped rows on every screen, with Sign out as a
-  full-width row; Deck settings and the proposal review sit in the middle of the page.
+  full-width row; Deck settings, Admin settings and the proposal review sit in the middle of the
+  page.
 - **The card viewer is a list of grouped rows**: Printings first, then the deck's actions (Copies,
   Move to, Add to binder, Edit in deck editor, and Remove from deck last, in red), then Rulings,
   Price history and the sites. On a narrow screen or with large text it is one column.
 - **Links are the text's colour, underlined**, orange on hover, on the website and in reports.
-- **Clearer numbers and labels**: a deck category reads "12 cards · $34.50" (no "Qty:"), a deck
-  with no prices hides its cost instead of "Est unknown", a list that fits on one page shows no
-  pager, "Not connected yet" replaces "None connected", the curve's "None" is "All cards" and the
-  colour tag's "None" is "No color tag". The per-category "drag cards here" hint is gone.
-- **The deck editor's categories are one centred column**, so a short category no longer leaves
-  a hole beside a long one; Home keeps one column when large text leaves no room for two.
-- **Rows of buttons share their line** when they wrap, so no button sits alone on a line.
+- **Clearer numbers and labels**: a deck category reads "12 cards · $34.50" (no "Qty:"); the deck
+  header leaves out a cost nobody knows and a salt sum of 0; a deck with no likes shows no "0";
+  Binder, card search and Watchlist rows leave out a price nobody knows instead of "unknown" in
+  every row (the Binder's Value tile says it once); a list that fits on one page shows no pager;
+  Admin says "Off: no backup folder is set up" in plain words instead of setting names; "Not
+  connected yet" replaces "None connected", the curve's "None" is "All cards" and the colour
+  tag's "None" is "No color tag". The per-category "drag cards here" hint is gone, and the deck
+  page's "Hold a card to move it" line shows on a member's first three deck pages only.
+- **No holes beside short panels**: the deck editor's categories are one column at the page's
+  width; rows of key numbers share their last line (five tiles no longer leave a gap at the
+  bottom right); the Guide's four parts are one, two or four a row; Home keeps one column when
+  large text leaves no room for two.
+- **Rows of buttons and fields share their line** when they wrap, so no button sits alone on a
+  line and no filter stretches alone across one; Goldfish's buttons share their lines on a phone,
+  and its status line says the turn and the library (each zone's heading has its own count).
 
 ### Fixed
 - At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
@@ -39,6 +60,7 @@ where two left holes, plain words where program values showed, and no blue links
 - Number fields in Admin settings no longer look like payment fields to the browser.
 - A report whose solo test failed always says its own reason: two failed reports opened one
   after the other could show the first one's reason on both.
+- Anything a page marks as hidden stays hidden (the deck header's "Est unknown" showed anyway).
 
 ## [0.7.46] - 2026-10-28
 

@@ -33,6 +33,7 @@ from .decklist import DecklistError, parse_decklist, to_text
 from .decks import (
     APPLY_WAIT_SECONDS,
     MAX_CHANGES,
+    PLAN_NEW_DECK_TEXT,
     REJECT_REASON_MAX,
     UNDO_KINDS,
     DeckError,
@@ -547,7 +548,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 warnings.append(problem)
             if lead := _commander_warning(deck_format, made.get("changes") or {}):
                 warnings.append(lead)
-            return _proposal({"ok": True, **made, "warnings": warnings})
+            made = state.decks.plan_hint(sub, "new deck", {"ok": True, **made}, PLAN_NEW_DECK_TEXT)
+            return _proposal({**made, "warnings": warnings})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 
@@ -883,8 +885,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Take back one of your own waiting proposals because the user's newer request makes it "
             "pointless (say why in reason, e.g. 'card removed in #5'). It stays visible as withdrawn. "
-            "Only the app that made a proposal may withdraw it; otherwise the user rejects it. Changes "
-            "nothing on Archidekt."
+            "Only the app that made a proposal may withdraw it; otherwise the user rejects it. To fix "
+            "one, amend_proposal it, not propose again. Changes nothing on Archidekt."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     )

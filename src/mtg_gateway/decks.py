@@ -184,6 +184,13 @@ PLAN_FIRST_TEXT = (
     "card in the chat, and amend_proposal changes a proposal that is still waiting. Many small "
     "proposals leave the deck half changed, often not legal, between them."
 )
+# The same hint for new decks (0.7.47, card spam): every propose_new_deck draws a card in the chat.
+PLAN_NEW_DECK_TEXT = (
+    "Your app has proposed {n} new decks in the last {minutes} minutes, and each one put a card in "
+    "the user's chat. Check a deck with check_new_deck before proposing it, change one that still "
+    "waits with amend_proposal (new_deck), and pass replaces when a new deck takes the place of one "
+    "that waits, rather than withdrawing it and proposing again."
+)
 
 
 def _plan_clock() -> float:
@@ -9116,10 +9123,15 @@ class DeckService:
         out = await self._propose_linked(
             sub, deck_id, raw_changes, replaces=replaces, depends_on=depends_on, separate=separate
         )
+        return self.plan_hint(sub, _clean_deck_id(deck_id), out, PLAN_FIRST_TEXT)
+
+    def plan_hint(self, sub: str, target: str, out: dict[str, Any], text: str) -> dict[str, Any]:
+        """``out`` with ``plan_first`` (``text``) once an app has sent PLAN_FIRST_AFTER proposals
+        for ``target`` (a deck ID, or "new deck" for new decks) within PLAN_WINDOW_SECONDS."""
         client = current_client.get()
         if not out.get("ok", True) or client in (None, BROWSER_CLIENT, ADMIN_CLIENT):
             return out
-        key = (sub, client, _clean_deck_id(deck_id))
+        key = (sub, client, target)
         now = _plan_clock()
         recent = [t for t in self._plan_calls.get(key, []) if now - t <= PLAN_WINDOW_SECONDS] + [now]
         self._plan_calls[key] = recent
@@ -9130,7 +9142,7 @@ class DeckService:
         if len(recent) >= PLAN_FIRST_AFTER:
             out = {
                 **out,
-                "plan_first": PLAN_FIRST_TEXT.format(n=len(recent), minutes=PLAN_WINDOW_SECONDS // 60),
+                "plan_first": text.format(n=len(recent), minutes=PLAN_WINDOW_SECONDS // 60),
             }
         return out
 

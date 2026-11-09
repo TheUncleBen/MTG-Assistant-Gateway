@@ -56,7 +56,8 @@ a.blue{color:#1d55b3} .faint{color:#bbb}
 <div class=row><button>One</button><button>Two</button><button>Three</button><button>More</button></div>
 <p><a class=blue href='#'>a blue link</a> <span class=faint>faint words</span> Total: $12.5 1 cards</p>
 <input name=cardnumber placeholder='Card name'>
-<p><button style='all:revert'>Plain</button> <a href='#' class=btn style='display:inline-block;width:24px;height:24px'>x</a></p>
+<p><button style='all:revert'>Plain</button>
+<a href='#' class=btn style='display:inline-block;width:24px;height:24px'>x</a></p>
 <div style='width:70px;overflow-wrap:anywhere;font-size:20px'>Cultivating</div>
 <div style='width:1400px;height:2px'></div>
 </main></body></html>
@@ -170,7 +171,8 @@ def test_the_raw_value_check_finds_placeholders_and_setting_names() -> None:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         page.set_content(PLACEHOLDERS)
-        msgs = [f["msg"] for f in page.evaluate(M.CHECKS, {"touch": False, "text": 1}) if f["kind"] == "raw-value"]
+        found = page.evaluate(M.CHECKS, {"touch": False, "text": 1})
+        msgs = [f["msg"] for f in found if f["kind"] == "raw-value"]
         browser.close()
     assert any("MTG_BACKUP_COPY_DIR" in m for m in msgs), msgs
     assert any('"unknown" shown 2 times' in m for m in msgs), msgs
