@@ -75,8 +75,9 @@ download button. Then:
    opens in your phone's browser ([Sign-in](#2-using-it) below).
 
 **Updates** come to the app by themselves ([Updates](#updates) below): when a
-newer version is out, a bar at the top offers it and **Update** installs it over
-the one you have, keeping your settings and sign-in. **Change gateway** on the
+newer version is out, a bar at the top offers it, **Update** saves it to your
+Downloads, and opening it there installs it over the one you have, keeping your
+settings and sign-in. **Change gateway** on the
 Account page (your picture, top right), under This app, brings the address screen back; over
 a page that isn't the gateway's (the sign-in page, say) it is in the round
 button's menu at the bottom right.
@@ -95,26 +96,28 @@ app**. When there is a newer version, a bar at the top says **Version x.y.z of
 the app is available**:
 
 1. Tap **Update**. The app downloads the gateway's
-   `/app/mtg-assistant-gateway.apk` and checks it before installing anything:
+   `/app/mtg-assistant-gateway.apk` and checks it before saving anything:
    it must have the size and SHA-256 the gateway gave, be this app (the same
    package ID) in the version the gateway names, and be signed with the same
-   certificate as the app you have. If any of that fails, nothing is installed
+   certificate as the app you have. If any of that fails, nothing is saved
    and the app says why.
-2. The first time, Android asks you to allow installs from MTG Assistant
-   Gateway ("Install unknown apps"). Allow it, go back, and confirm. On a
-   Samsung Galaxy phone, Auto Blocker must be off for this, as for the first
-   install. If Play Protect offers to scan the update, scanning it or not are
-   both fine.
-3. Android installs the update over the app and closes it. Open the app again
-   from its icon. Your gateway address and sign-in are kept.
+2. The app saves the checked file to your **Downloads** as
+   `MTG-Gateway-x.y.z.apk` and opens your Downloads. (If the phone has no
+   Downloads view, open the file from your Files app.)
+3. Tap the file and choose **Update**. Android asks once to allow installs from
+   the app you opened it with (Files or Downloads), as for the first install. On a
+   Samsung Galaxy phone, Auto Blocker must be off for this. If Play Protect offers
+   to scan the update, scanning it or not are both fine. Your gateway address and
+   sign-in are kept; open the app again from its icon.
 
-From Android 12, after that first permission, Android may install later
-updates without asking again, because the app is updating itself
-(`PackageInstaller.SessionParams.setRequireUserAction`). Android still makes
-that call: on some phones and versions it asks every time, and the app shows
-its confirmation when it does. **Later** hides the bar, and the app does not
-offer that version again on its own for three days; **Check for app updates**
-on the Account page still offers it.
+Since 0.7.47 the app does not install updates itself and does not ask for the
+permissions to (`REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION`):
+an app that can install apps is one of the things Play Protect weighs when it
+warns about an app from outside Google Play. Google does not publish exactly what
+it weighs, so this alone may not clear the warning. Saving to Downloads needs no
+storage permission on Android 10 and later. **Later** hides the bar, and the app
+does not offer that version again on its own for three days; **Check for app
+updates** on the Account page still offers it.
 
 What it sends: one request to your own gateway, with the sign-in the app
 already holds, and the download from the same gateway. Nothing goes to GitHub
@@ -756,9 +759,8 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   ones already shown (not the messages themselves),
   and whether it has already asked Android for the notification permission
   and to run in the background. It asks for internet and
-  camera, and for the two permissions that let it install its own updates
-  (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
-  installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
+  camera (it does not ask to install apps: an update is saved to your Downloads
+  and you open it there), and for
   the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
   only to notice the connection coming back while a page has failed to load.
   For push notifications it asks for `POST_NOTIFICATIONS` (to show your messages;

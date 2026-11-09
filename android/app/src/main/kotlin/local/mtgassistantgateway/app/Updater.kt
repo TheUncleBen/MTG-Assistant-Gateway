@@ -1,16 +1,16 @@
 package local.mtgassistantgateway.app
 
 import android.app.Activity
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.Context
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageInfo
-import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
-import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
 import android.webkit.CookieManager
 import android.widget.Toast
@@ -34,10 +34,12 @@ import java.security.MessageDigest
  * 2. Download, when the person taps Update: the gateway's APK into the app's cache, then checked
  *    before anything is installed: the size and SHA-256 the gateway gave, same package, the offered
  *    version, signed by this app's own certificate.
- * 3. Install through Android's PackageInstaller. Android asks once to allow installs from this app
- *    ("Install unknown apps"). From Android 12, an app updating itself may skip the confirmation
- *    (PackageInstaller.SessionParams.setRequireUserAction); Android still decides, and when it asks,
- *    [InstallResultReceiver] shows its confirmation. Android itself refuses an APK signed with another key.
+ * 3. Save the checked APK to the phone's Downloads folder and open Downloads, where the person
+ *    taps it and Android's own installer updates the app. The app does not install anything
+ *    itself (0.7.47, owner 2026-11-09): it asks for no install permission
+ *    (REQUEST_INSTALL_PACKAGES, UPDATE_PACKAGES_WITHOUT_USER_ACTION), the pattern Google Play
+ *    Protect flagged on a sideloaded app that downloads and installs code. Android itself refuses
+ *    an APK signed with another key.
  *
  * Nothing goes anywhere but the member's own gateway. A build with an empty UPDATE_REPO
  * (build.gradle.kts) never looks for updates.
@@ -113,7 +115,7 @@ class Updater(private val activity: Activity, private val ui: Ui) {
         prefs.snoozedUpdateAt = System.currentTimeMillis()
     }
 
-    /** Downloads, checks and installs [offer]. */
+    /** Downloads and checks [offer], then saves it to Downloads for the person to install. */
     fun install(offer: AppUpdate.Offer) {
         if (busy) return
         busy = true
@@ -134,24 +136,29 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                 main.post { busy = false; if (!activity.isDestroyed) { ui.hideOffer(); toast(problem) } }
                 return@Thread
             }
-            main.post { ui.showWorking(activity.getString(R.string.update_installing, offer.version)) }
-            val installProblem = try {
-                commit(apk)
+            val name = AppUpdate.downloadName(offer.version)
+            val saveProblem = try {
+                saveToDownloads(apk, name)
                 null
             } catch (e: IOException) {
-                Log.w(TAG, "install not committed: ${e.message}") // the reason stays out of the toast
-                activity.getString(R.string.update_install_failed)
-            } catch (e: RuntimeException) { // SecurityException included
-                Log.w(TAG, "install not committed: ${e.javaClass.simpleName} ${e.message}")
-                activity.getString(R.string.update_install_failed)
+                Log.w(TAG, "update not saved: ${e.message}") // the reason stays out of the toast
+                activity.getString(R.string.update_save_failed)
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "update not saved: ${e.javaClass.simpleName} ${e.message}")
+                activity.getString(R.string.update_save_failed)
             } finally {
-                apk.delete() // the session holds its own copy
+                apk.delete()
             }
             main.post {
                 busy = false
                 if (!activity.isDestroyed) {
                     ui.hideOffer()
-                    toast(installProblem ?: activity.getString(R.string.update_handed_over))
+                    if (saveProblem != null) {
+                        toast(saveProblem)
+                    } else {
+                        toast(activity.getString(R.string.update_saved, name))
+                        openDownloads()
+                    }
                 }
             }
         }.start()
@@ -293,109 +300,44 @@ class Updater(private val activity: Activity, private val ui: Ui) {
     private fun installedCerts(): List<String> =
         certsOf(activity.packageManager.getPackageInfo(activity.packageName, PackageManager.GET_SIGNING_CERTIFICATES))
 
-    // -- install ------------------------------------------------------------
+    // -- saving to Downloads ---------------------------------------------------
 
-    private fun commit(apk: File) {
-        val installer = activity.packageManager.packageInstaller
-        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-            setAppPackageName(activity.packageName)
-            setSize(apk.length())
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-            }
+    /** The checked APK into the phone's Downloads folder (MediaStore, no storage permission from Android 10). */
+    private fun saveToDownloads(apk: File, name: String) {
+        val resolver = activity.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, AppUpdate.APK_TYPE)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.Downloads.IS_PENDING, 1)
         }
-        val id = installer.createSession(params)
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IOException("Downloads refused the file")
         try {
-            installer.openSession(id).use { session ->
-                session.openWrite("base.apk", 0, apk.length()).use { out ->
-                    apk.inputStream().use { it.copyTo(out) }
-                    session.fsync(out)
-                }
-                // Mutable: PackageInstaller adds the result to it. The receiver is not exported, so
-                // only this session's result reaches it.
-                val result = PendingIntent.getBroadcast(
-                    activity,
-                    id,
-                    Intent(activity, InstallResultReceiver::class.java).setPackage(activity.packageName),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-                )
-                session.commit(result.intentSender)
+            (resolver.openOutputStream(uri) ?: throw IOException("Downloads gave no stream")).use { out ->
+                apk.inputStream().use { it.copyTo(out) }
             }
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
         } catch (e: Exception) {
-            runCatching { installer.abandonSession(id) }
-            throw if (e is IOException || e is SecurityException) e else IOException(e.message, e)
+            runCatching { resolver.delete(uri, null, null) }
+            throw if (e is IOException) e else IOException(e.message, e)
+        }
+    }
+
+    /** Android's own Downloads list, where the saved update is tapped to install it. */
+    private fun openDownloads() {
+        try {
+            activity.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: ActivityNotFoundException) {
+            toast(activity.getString(R.string.update_open_downloads))
         }
     }
 
     private fun toast(text: String) = Toast.makeText(activity, text, Toast.LENGTH_LONG).show()
 
-    /**
-     * PackageInstaller's answer. When Android wants the person to confirm (or to allow installs
-     * from this app first), it hands over its own confirmation screen. That is shown at once while
-     * the app is in front; Android does not let an app in the background open a screen, so then it
-     * waits for the app to come back ([showPendingConfirmation]). After a successful update Android
-     * restarts nothing: the update closed the app and it opens again from its icon.
-     */
-    class InstallResultReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
-                PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                    val confirm = confirmation(context, intent) ?: return
-                    if (inFront) {
-                        launch(context, confirm)
-                    } else {
-                        pendingConfirmation = confirm
-                    }
-                }
-                PackageInstaller.STATUS_SUCCESS -> Unit
-                PackageInstaller.STATUS_FAILURE_ABORTED -> Unit // the person said no
-                else -> {
-                    val why = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
-                    Log.w(TAG, "install failed: status $status $why".trim()) // the code stays out of the toast
-                    Toast.makeText(context, R.string.update_install_failed, Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
     companion object {
         private const val TAG = "MtgAssistant"
         /** Whether MainActivity is resumed (set from its onResume/onPause). */
         @Volatile var inFront = false
-        @Volatile private var pendingConfirmation: Intent? = null
-
-        /** Shows a confirmation Android asked for while the app was in the background. */
-        fun showPendingConfirmation(context: Context) {
-            val confirm = pendingConfirmation ?: return
-            pendingConfirmation = null
-            launch(context, confirm)
-        }
-
-        /**
-         * The confirmation screen PackageInstaller handed over, only if it belongs to a system app
-         * (the platform's installer), with any URI grants removed: this receiver only ever starts
-         * Android's own install confirmation.
-         */
-        private fun confirmation(context: Context, result: Intent): Intent? {
-            val confirm = if (Build.VERSION.SDK_INT >= 34) {
-                result.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION") result.getParcelableExtra(Intent.EXTRA_INTENT)
-            } ?: return null
-            confirm.removeFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
-            )
-            val target = context.packageManager.resolveActivity(confirm, 0)?.activityInfo?.applicationInfo ?: return null
-            return if (target.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0) confirm else null
-        }
-
-        private fun launch(context: Context, confirm: Intent) {
-            try {
-                context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            } catch (e: RuntimeException) {
-                Toast.makeText(context, R.string.update_confirm_failed, Toast.LENGTH_LONG).show()
-            }
-        }
     }
 }

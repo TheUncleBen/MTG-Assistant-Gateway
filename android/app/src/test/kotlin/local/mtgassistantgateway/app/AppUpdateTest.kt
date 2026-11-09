@@ -106,4 +106,12 @@ class AppUpdateTest {
         assertFalse(AppUpdate.snoozed(code, code, now + 60_000, now)) // the clock went back
         assertTrue(AppUpdate.SNOOZE_MS == 3L * 24 * 3600 * 1000)
     }
+
+    /** 0.7.47: the update is saved to Downloads under a name with its version (no in-app installer). */
+    @Test fun theSavedUpdateIsNamedByItsVersion() {
+        assertEquals("MTG-Gateway-0.7.47.apk", AppUpdate.downloadName("0.7.47"))
+        assertEquals("MTG-Gateway-0.7.47.apk", AppUpdate.downloadName("v0.7.47"))
+        assertEquals("MTG-Gateway-update.apk", AppUpdate.downloadName("../"))
+        assertEquals("application/vnd.android.package-archive", AppUpdate.APK_TYPE)
+    }
 }

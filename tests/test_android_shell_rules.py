@@ -159,3 +159,24 @@ def test_android_check_keeps_the_jvm_crash_log_and_bounds_the_daemon() -> None:
     props = (ROOT / "android/gradle.properties").read_text(encoding="utf-8")
     args = next(line for line in props.splitlines() if line.startswith("org.gradle.jvmargs="))
     assert "-Xmx3g" in args and "-XX:MaxMetaspaceSize=1g" in args and "-Dfile.encoding=UTF-8" in args
+
+
+def test_the_app_never_asks_to_install_apps() -> None:
+    """0.7.47 (owner approved, 2026-11-09, T-216 Play Protect): the app no longer installs its own
+    updates. It holds neither install permission, starts no PackageInstaller session, and saves the
+    checked update to Downloads (MediaStore) for the person to open."""
+    manifest = (ROOT / "android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    install = ("REQUEST_INSTALL_PACKAGES", "UPDATE_PACKAGES_WITHOUT_USER_ACTION", "REQUEST_DELETE_PACKAGES")
+    for perm in install:
+        assert perm not in manifest
+    assert "InstallResultReceiver" not in manifest
+    for src in APP.glob("*.kt"):
+        code = re.sub(r"/\*.*?\*/|//[^\n]*", "", src.read_text(encoding="utf-8"), flags=re.S)
+        assert "PackageInstaller" not in code, src.name
+        assert "ACTION_INSTALL_PACKAGE" not in code, src.name
+    updater = _kt("Updater.kt")
+    assert "MediaStore.Downloads.EXTERNAL_CONTENT_URI" in updater
+    assert "Environment.DIRECTORY_DOWNLOADS" in updater
+    assert "DownloadManager.ACTION_VIEW_DOWNLOADS" in updater
+    # the check before saving stays: a file that fails it is never saved
+    assert updater.index("verify(") < updater.index("saveToDownloads(apk")

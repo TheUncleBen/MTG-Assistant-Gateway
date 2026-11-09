@@ -29,17 +29,16 @@
     <string name="update_now">Update</string>
     <string name="update_later">Later</string>
     <string name="update_downloading">Downloading version %1$s…</string>
-    <string name="update_installing">Installing version %1$s…</string>
-    <string name="update_handed_over">Installing the update. If Android asks, allow installs from this app, then reopen the app.</string>
+    <string name="update_saved">Saved %1$s to Downloads. Tap it there and choose Update; the app opens again from its icon.</string>
+    <string name="update_open_downloads">The update is in your Downloads folder. Open it from your Files app and choose Update.</string>
     <string name="update_none">You have the newest version (%1$s).</string>
     <string name="update_off">This build doesn\'t check for updates. Get them from your gateway\'s Android app page.</string>
     <string name="update_check_failed">Could not check for an update. Check the connection, sign in if asked, then try again.</string>
     <string name="update_other_key">Version %1$s has a different signing key, so it can\'t update this app. See the Android app page.</string>
     <string name="update_download_failed">The update did not download completely. Try again later.</string>
-    <string name="update_not_an_app">The downloaded file is not the expected version of this app, so it was not installed.</string>
-    <!-- The installer's status and message go to the log (Updater), not into the toast. -->
-    <string name="update_install_failed">The update was not installed. Try again later.</string>
-    <string name="update_confirm_failed">Android wants you to confirm the update. Open the app and tap Update again.</string>
+    <string name="update_not_an_app">The downloaded file is not the expected version of this app, so it was not saved.</string>
+    <!-- Why saving failed goes to the log (Updater), not into the toast. -->
+    <string name="update_save_failed">The update could not be saved to Downloads. Try again later.</string>
     <string name="update_checking">Checking for app updates…</string>
     <string name="fab_label">Menu</string>
     <!-- Push notifications (NotifyService). -->
