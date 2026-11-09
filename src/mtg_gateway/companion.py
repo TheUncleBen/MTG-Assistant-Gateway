@@ -557,6 +557,8 @@ EVENT_LABELS = {
     "browser_login": "Signed in on the website",
     # the Android app's browser sign-in did not come back by itself (pages.login_app_return)
     "app_signin_tap_page": "App sign-in showed the “Open the app” page in the browser",
+    # a sign-in that ran out, noted when its browser or app came back (pages.login)
+    "browser_session_ended": "Signed out: the sign-in ran out",
     "login_ok": "Signed in",
     "login_denied": "Sign-in refused",
     "login_rejected_group": "Sign-in refused: not in an allowed group",

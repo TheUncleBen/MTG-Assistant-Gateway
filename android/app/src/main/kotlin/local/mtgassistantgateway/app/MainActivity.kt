@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var prefs: Prefs
     private lateinit var origin: String
     private lateinit var web: WebView
-    /** Pull to refresh over the page ([PullRefresh]): on for the list pages, off elsewhere. */
+    /** Pull to refresh over the page ([PullRefresh]): on for every gateway page but a few. */
     private lateinit var refresh: SwipeRefreshLayout
     /**
      * The page's word on the last touch: whether it may start a pull (static/topbar.js, through
@@ -366,7 +366,7 @@ class MainActivity : ComponentActivity() {
     // -- pull to refresh ----------------------------------------------------
 
     /**
-     * A pull from the top of a list page ([PullRefresh.offered], set per page in
+     * A pull from the top of a page ([PullRefresh.offered], set per page in
      * [Client.onPageStarted]) shows the orange disc under the page's own top bar and, let go past
      * the threshold, loads the page again with the pull's header ([pull]); the disc goes when the
      * new page has drawn or the load failed ([Client]). The layer only pulls when the page is at its top
@@ -1229,7 +1229,7 @@ class MainActivity : ComponentActivity() {
             // loading tells the app so itself (layer())
             layerOpen = false
             syncFab()
-            // pull to refresh on the list pages only; a new page starts with the touch allowed
+            // pull to refresh where the page offers it; a new page starts with the touch allowed
             pagePull = true
             refresh.isEnabled = allowed && PullRefresh.offered(origin, url)
             if (!allowed) {

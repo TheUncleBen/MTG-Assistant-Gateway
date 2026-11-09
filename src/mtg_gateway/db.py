@@ -163,6 +163,15 @@ SESSION_HOLDER = "s:"
 LOGIN_GRANT_TTL = 86400
 
 
+# At most this many "sign-in ran out" rows a clean-up adds to the activity log in one run.
+SESSION_END_AUDITS = 1000
+
+
+def session_end_detail(reason: str, lived: int) -> dict[str, Any]:
+    """The activity row's detail for a sign-in that ran out: why, and how long it lasted."""
+    return {"reason": reason, "lived_hours": round(lived / 3600, 1)}
+
+
 def _expiry_reason(created: int, expires: int, longest: int) -> str:
     """Why a session whose end time has passed ended: it ran into the longest sign-in time (its end
     was capped there, give or take a minute), or else it went unused."""
@@ -2192,17 +2201,25 @@ class Database:
         n += self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
         n += self._delete_batched("auth_codes", "expires_at < ?", (now,))
         n += self._delete_batched("login_sessions", "expires_at < ?", (now,))
+        ran_out: list[tuple[str, str, int]] = []
         with self.tx() as c:
             # each expired session leaves a note of why it ended for its browser's next visit
             longest = self.session_max_age()
-            for key, created, expires in c.execute(
-                "SELECT id_hash, created_at, expires_at FROM browser_sessions WHERE expires_at < ?", (now,)
+            for key, sub, created, expires in c.execute(
+                "SELECT id_hash, sub, created_at, expires_at FROM browser_sessions WHERE expires_at < ?",
+                (now,),
             ).fetchall():
+                reason = _expiry_reason(int(created), int(expires), longest)
                 c.execute(
                     "INSERT OR IGNORE INTO session_ends (id_hash, reason, ended_at) VALUES (?, ?, ?)",
-                    (key, _expiry_reason(int(created), int(expires), longest), int(expires)),
+                    (key, reason, int(expires)),
                 )
+                ran_out.append((str(sub), reason, max(0, int(expires) - int(created))))
         n += self._delete_batched("browser_sessions", "expires_at < ?", (now,))
+        for sub, reason, lived in ran_out[:SESSION_END_AUDITS]:
+            # the member's activity says a sign-in ran out (note_session_expiry does it when the
+            # browser comes back first)
+            self.audit("browser_session_ended", sub=sub, detail=session_end_detail(reason, lived))
         n += self._delete_batched("session_ends", "ended_at < ?", (now - SESSION_END_NOTICE,))
         with self.tx() as c:
             # provider grants of sessions that ended (expired, or ended by a path that kept no
@@ -2655,6 +2672,35 @@ class Database:
             return None
         row = self._one("SELECT reason FROM session_ends WHERE id_hash = ?", (key,))
         return str(row["reason"]) if row is not None else None
+
+    def note_session_expiry(self, session_id: str) -> tuple[str, str, int] | None:
+        """A browser session whose time ran out (unused, or its longest time): record why in
+        session_ends, drop it, and return (member, reason, the seconds it lived) the first time
+        only, so its browser's next visit is noted once in the member's activity
+        (pages.login). None when it is live, unknown, or ended some other way."""
+        now = int(time.time())
+        key = hash_token(session_id)
+        longest = self.session_max_age()
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT sub, created_at, expires_at FROM browser_sessions WHERE id_hash = ?", (key,)
+            ).fetchone()
+            if row is None:
+                return None
+            created, expires = int(row["created_at"]), int(row["expires_at"])
+            if created <= now - longest:
+                reason = "longest"
+            elif expires < now:
+                reason = _expiry_reason(created, expires, longest)
+            else:
+                return None
+            c.execute(
+                "INSERT OR REPLACE INTO session_ends (id_hash, reason, ended_at) VALUES (?, ?, ?)",
+                (key, reason, now),
+            )
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (SESSION_HOLDER + key,))
+            c.execute("DELETE FROM browser_sessions WHERE id_hash = ?", (key,))
+        return str(row["sub"]), reason, max(0, min(expires, now) - created)
 
     MEMBER_TABLES = MEMBER_TABLES
 

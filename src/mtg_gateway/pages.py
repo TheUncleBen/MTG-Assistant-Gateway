@@ -42,7 +42,7 @@ from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .busy import outage
 from .clickguard import GUARD_DWELL_MS, GUARD_SETTLE_MS, form_stamp, guarded_form, submitted_too_soon
-from .db import SESSION_END_NOTICE
+from .db import SESSION_END_NOTICE, session_end_detail
 from .decks import (
     ADMIN_CLIENT,
     REVIEW_PAGE,
@@ -231,6 +231,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if sub:
                 return RedirectResponse(nxt, status_code=302)
             sid = request.cookies.get(session_cookie)
+            ended = state.db.note_session_expiry(sid) if sid else None
+            if ended is not None:
+                # Once per session: the member's activity says a sign-in ran out and why, so a
+                # sign-in asked for "too often" can be told apart from one the provider ended
+                # (membership_unverifiable) or a short Settings time (owner, 2026-11-08).
+                who, why, lived = ended
+                state.db.audit("browser_session_ended", sub=who, detail=session_end_detail(why, lived))
             if sid and state.db.session_end_reason(sid):
                 # This browser's sign-in ended for a reason it should hear first (an unused or
                 # longest time, the sign-in service, an admin): the page says why, with Sign in.
@@ -274,6 +281,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             resp.delete_cookie(leg_cookie, path="/", secure=secure, httponly=True, samesite="lax")
             return resp
         params = {"next": leg.next_path, "app_challenge": leg.challenge}
+        # a person pressed Continue in this browser: the callback may open the app by itself
+        # (app_signin.auto_return)
+        params[app_signin.CONTINUED] = "1"
         # when the leg started: a sign-in it asks for must be made after this (auth_time)
         params["app_started"] = str(int(time.time()))
         fresh = leg.fresh
@@ -1434,18 +1444,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     "has no auth_time" if "auth_time" not in identity.raw_claims else "shows no new sign-in",
                 )
                 return RedirectResponse(app_signin.SCHEME_REFUSED, status_code=303, headers=headers)
-            # Only after a sign-in made during the leg does the return page open the app by itself:
-            # any app can start an https leg too, and a browser still signed in at the provider
-            # passes it straight through, so the page then waits for the member's tap.
-            code = state.app_signins.issue(  # type: ignore[attr-defined]
-                identity.sub, challenge, nxt, fresh=fresh_in, grant=session.get("grant_holder")
+            # The return page and the Custom Tab's redirect open the app by itself after the
+            # person's Continue (app_signin.auto_return); the scheme leg only after a new sign-in,
+            # which it has to show above.
+            auto = app_signin.auto_return(
+                scheme=scheme,
+                continued=session["params"].get(app_signin.CONTINUED) == "1",
+                new_sign_in=fresh_in,
             )
-            if back == app_signin.INTENT_RETURN and fresh_in:
+            code = state.app_signins.issue(  # type: ignore[attr-defined]
+                identity.sub,
+                challenge,
+                nxt,
+                fresh=auto,
+                grant=session.get("grant_holder"),
+                new_sign_in=fresh_in,
+            )
+            if back == app_signin.INTENT_RETURN and auto:
                 # A Custom Tab: Chrome opens an intent: link only from a navigation the person
                 # started, which the return page's script is not, so this redirect ends the one
-                # their own Sign-in press started. The same rule as the page's own try (a sign-in
-                # made during the leg) and the same link, naming only the app's package; the page
-                # with the button is the fallback for a browser that won't open the app.
+                # their own Continue press started. The link names only the app's package; the
+                # page with the button is the fallback for a browser that won't open the app.
                 from . import app_page  # imports this module
 
                 fallback = f"{s.public_url.rstrip('/')}{app_signin.RETURN_PATH}?code={code}"
@@ -1477,7 +1496,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if first is not None:
                 # The browser drew the page, so this sign-in did not come back by itself (an Auth
                 # Tab never loads it): the member's activity says so, once per code.
-                reason = "after a new sign-in" if first.fresh else "no new sign-in"
+                reason = "after a new sign-in" if first.new_sign_in else "no new sign-in"
                 state.db.audit("app_signin_tap_page", sub=first.sub, detail={"reason": reason})
             resp = small(
                 "Signed in",

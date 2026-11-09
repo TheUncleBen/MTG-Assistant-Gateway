@@ -11,32 +11,29 @@ import javax.xml.parsers.DocumentBuilderFactory
 class PullRefreshTest {
     private val origin = "https://mtg.example.com"
 
-    @Test fun listPagesOfferIt() {
+    /** Owner, 2026-11-08: every page, as in any other app (0.7.46 offered it on list pages only). */
+    @Test fun everyPageOffersIt() {
         for (path in listOf(
             "/", "/decks", "/decks?folder=Commander", "/collection", "/collection/wants", "/watchlist",
             "/proposals", "/history", "/reports", "/notifications", "/precons", "/cards?q=sol+ring",
             "/search?q=meren", "/forum", "/forum/general/rules", "/forum/threads/all", "/activity", "/decks/",
             "/collection/lists", "/lists/templates", "/lists/defaults?page=2", "/lists/tags", "/lists/btags",
             "/lists/custom?q=elf", "/users/alice", "/users/Some%20One?order=name",
+            // pages 0.7.46 left out: the page itself refuses a pull while something typed is unsent
+            "/decks/12345", "/decks/12345/", "/decks/12345/edit", "/decks/12345/settings", "/decks/new",
+            "/decks/new-package", "/account", "/account/details", "/admin", "/admin/settings", "/install?for=android",
+            "/guide", "/lists/templates/new", "/users/alice/decks", "/users", "/forum/thread/123",
+            "/proposals/42", "/history/reports/7", "/skill",
         )) {
             assertTrue(path, PullRefresh.offered(origin, "$origin$path"))
         }
     }
 
-    @Test fun theDeckPageFollowsItsSwitch() {
-        assertEquals(PullRefresh.DECK_PAGE, PullRefresh.offered(origin, "$origin/decks/12345"))
-        assertEquals(PullRefresh.DECK_PAGE, PullRefresh.offered(origin, "$origin/decks/12345/"))
-    }
-
-    @Test fun formsTheEditorTheScannerAndAThreadNeverOfferIt() {
+    /** The scanner, signing in or out and a goldfish game: a pull would lose what the page holds. */
+    @Test fun theScannerSignInAndAGameNeverOfferIt() {
         for (path in listOf(
-            "/decks/12345/edit", "/decks/12345/settings", "/decks/12345/goldfish", "/decks/new",
-            "/decks/new-package", "/scan", "/scan/sessions", "/account", "/account/details",
-            "/admin/settings", "/login", "/install?for=android", "/guide", "/lists/templates/new",
-            "/lists/custom/picture", "/users/alice/decks", "/users",
-            // a forum thread: its reply box and contest entry are forms
-            "/forum/thread/123", "/forum/thread/123/", "/forum/thread/123/enter", "/forum/thread?thread=123",
-            "/forum/general/rules/more",
+            "/scan", "/scan/", "/scan/sessions", "/login", "/login?next=%2F", "/login/app-return?code=x",
+            "/logout", "/signed-out", "/auth/callback?code=x", "/decks/12345/goldfish", "/data-deleted",
         )) {
             assertFalse(path, PullRefresh.offered(origin, "$origin$path"))
         }
