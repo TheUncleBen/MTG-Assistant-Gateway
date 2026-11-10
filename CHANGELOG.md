@@ -38,6 +38,9 @@ placeholders showed, and no blue links.
 - **The Android app no longer installs its own updates.** Update still downloads the new app and
   checks it, then saves it to Downloads and opens the Downloads view: open the file there to
   update. The app no longer asks for permission to install apps.
+- **A QR code on the Android setup page.** Read on a computer, the Android section of the setup
+  page shows a QR code of its own address: point the phone's camera at it to open the page on the
+  phone. Phones don't show it.
 - A sign-in that runs out now leaves a line in your activity ("Signed out: the sign-in ran out")
   saying whether it was unused too long or reached its longest, and how long it lasted.
 - **Pages are centred on wide screens**, beside the Fold's side rail too. Account, Account details
