@@ -2778,7 +2778,7 @@
         items.push(Menu.item("Undo", "history", undoLast, { disabled: !undoBtnEl || undoBtnEl.disabled, title: "Nothing to undo" }));
         items.push(Menu.item("Redo", "history", redoLast, { disabled: !redoBtnEl || redoBtnEl.disabled, title: "Nothing to redo" }));
         var r = moreBtn.getBoundingClientRect();
-        Menu.open({ head: "Deck tools", label: "Deck tools", items: items, focusBack: moreBtn }, r.left, r.bottom + 4);
+        Menu.open({ head: "Deck tools", label: "Deck tools", items: items, focusBack: moreBtn, anchor: moreBtn }, r.left, r.bottom + 4);
       });
       controls.appendChild(moreBtn);
     }
@@ -3977,7 +3977,7 @@
       var edh = $("a[data-edhplay]", testDd);
       if (edh) t.push(item("Play on EDHPlay", "play", function () { Menu.whenClosed(function () { edh.click(); }); }));
       var r = testBtn.getBoundingClientRect();
-      Menu.open({ head: "Test and play", label: "Test and play: " + d.name, items: t, focusBack: testBtn }, r.left, r.bottom + 4);
+      Menu.open({ head: "Test and play", label: "Test and play: " + d.name, items: t, focusBack: testBtn, anchor: testBtn }, r.left, r.bottom + 4);
     });
   }
 

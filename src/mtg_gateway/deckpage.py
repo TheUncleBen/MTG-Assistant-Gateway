@@ -4065,7 +4065,9 @@ html.cardview-open{overflow:hidden}
 .statctl .seg2 button{margin:0;border-radius:0}
 .statctl .seg2 button:first-child{border-radius:var(--radius) 0 0 var(--radius)}
 .statctl .seg2 button:last-child{border-radius:0 var(--radius) var(--radius) 0;margin-left:-1px}
-.statctl button[data-set=lands]{margin-left:.5rem}
+/* the space before Lands only is the switch's trailing margin: wrapped to a line of its own (large
+   text on a phone), Lands only starts at the line's edge, not .5rem in (0.7.47) */
+.statctl .seg2{margin-right:.5rem}
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
 .k5{background:#e87ba4} .k6{background:#9085e9} .k7{background:#e34948} .k0{background:#8a8a8a}

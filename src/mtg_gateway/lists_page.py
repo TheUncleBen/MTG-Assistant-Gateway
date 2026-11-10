@@ -1638,8 +1638,8 @@ CSS = """
 .lp .act .lp-dd > summary.kebab svg.i{width:20px;height:20px;fill:currentColor;stroke:currentColor}
 .lp .lp-dd .menu{min-width:220px;max-width:min(20rem,calc(100vw - 2rem))}
 .lp .lp-dd .menu a{min-height:44px}
-.lp .lp-dd .menu svg.i{width:18px; height:18px; color:var(--orange); fill:none; stroke:currentColor;
-  stroke-width:1.8}
+.lp .lp-dd .menu svg.i{width:max(18px,.85em); height:max(18px,.85em); color:var(--orange); fill:none;
+  stroke:currentColor; stroke-width:1.8}
 .lp .ui-table .sm-only.flags{display:none}
 .lp-under{display:flex; justify-content:space-between; align-items:center; gap:.5rem; margin-top:.2rem;
   min-height:1.2rem}

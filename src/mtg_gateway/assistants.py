@@ -573,9 +573,12 @@ CSS = (
 .yhub .yme .alogo.big.oa img{width:60px;height:60px;margin:-10px}
 .yhub .yme .alogo.big.term svg.i{width:32px;height:32px}
 .yhub .yme b{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
-.ydisc{display:flex;justify-content:center;margin:.5rem 0 1rem}
-.ydisc .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:48px;
-  min-width:min(16rem,100%);padding:0 1.5rem;border-radius:14px;white-space:normal;text-align:center}
+/* the page's foot action spans the column, as Account's Sign out does (0.7.46: a 16rem button
+   centred under the rows, a pattern no other page had) */
+.ydisc{display:flex;flex-direction:column;align-items:stretch;margin:.5rem 0 1rem}
+.ydisc form{display:flex;flex-direction:column;margin:0}
+.ydisc .btn{display:flex;align-items:center;justify-content:center;gap:.5rem;min-height:50px;width:100%;
+  margin:0;padding:0 1.5rem;border-radius:14px;white-space:normal;text-align:center}
 .ydisc .btn svg.i{width:18px;height:18px;flex:none}
 /* a short page: one column, as wide as a phone screen at most */
 .yhub.ylone{max-width:42rem;margin:0 auto}

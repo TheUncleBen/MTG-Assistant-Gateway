@@ -68,6 +68,15 @@ placeholders showed, and no blue links.
   and its status line says the turn and the library (each zone's heading has its own count).
 
 ### Fixed
+- **Menus open at their buttons.** A ⋮ menu, and the deck page's Test and play and Deck tools
+  menus, open just under their button, or just over it near the bottom of the window. Before,
+  they were pushed up over the button.
+  On a phone, the More sheet rises from the More tab instead of the middle of the screen.
+- Menu items line up: at large text every item's icon is the same size, so the words start in one
+  column, and the Binder's More menu on a phone keeps its icons.
+- Assistants' Guided setup and Disconnect all assistants span the column, as Sign out does on
+  Account.
+- In Deck stats, Lands only lines up with the row above when large text wraps it to its own line.
 - At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
   cover the sheet's last control (the card size).
 - Long names break between their parts instead of inside a word (a member's name, a printing's

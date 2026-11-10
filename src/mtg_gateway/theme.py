@@ -271,6 +271,9 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
    a fold's summary, or a label that works one (the Binder's "10 entries · …" fold, a search box's
    magnifier) */
 :is(button, .btn, [role=tab], [role=button], summary, label) > svg.i{min-width:.85em;min-height:.85em}
+/* a drop-down's item icons: one size, link or button (see .ctxmenu .i) */
+.menu :is(a, button, .item) > svg.i{width:max(18px,.85em);height:max(18px,.85em);min-width:0;min-height:0;
+  flex:none}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
 
 /* global toolbar (navbar): flat, 50px, links bold white turning orange */
@@ -1183,7 +1186,10 @@ body .tabbar:has(details.more[open]){z-index:25}
   pointer-events:none;top:0;left:0}
 .tabbar details.more summary{list-style:none;cursor:pointer}
 .tabbar details.more summary::-webkit-details-marker{display:none}
-.tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
+/* the More sheet rises from its own tab, the bar's last, held at the window's right edge (0.7.47:
+   centred on the window, it floated beside the tab it came from) */
+.tabbar details.more .menu.sheet{position:fixed;left:auto;right:calc(.5rem + env(safe-area-inset-right));
+  transform:none;top:auto;
   bottom:calc(56px + env(safe-area-inset-bottom) + .5rem);width:min(18rem,calc(100vw - 2rem));
   z-index:30;border-radius:16px;padding:.5rem}
 .tabbar details.more .menu.sheet a{min-height:44px;padding:0 1rem}
@@ -2172,7 +2178,10 @@ CARD_MENU_CSS = """
   overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
 .ctxmenu .ghead{padding:.55rem 1rem .15rem;font-size:.75rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.04em;color:var(--menu-head)}
-.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange-text);fill:none;
+/* one size for every item's icon, link or button (a button's icon grew with large text and a link's
+   did not: the items' text then started in two columns, 0.7.47) */
+.ctxmenu .ic,.ctxmenu .i{width:max(18px,.85em);height:max(18px,.85em);min-width:0;min-height:0;flex:none;
+  color:var(--orange-text);fill:none;
   stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
 /* The menu scrolls as a whole when the window is short; its items never shrink to make room (a
@@ -2213,7 +2222,7 @@ CARD_MENU_CSS = """
   .menu a,.menu button,.menu .item,details.dd .menu a,details.dd .menu button,details.dd .menu .item{
     min-height:44px}
 /* a row without an icon keeps an empty slot the icon's width, so every row's text lines up */
-.ctxmenu .ic-slot{display:inline-block;width:18px;height:18px;flex:none}
+.ctxmenu .ic-slot{display:inline-block;width:max(18px,.85em);height:max(18px,.85em);flex:none}
 /* the toast after a watch (and after an add on Card search) */
 .toast.cards-toast{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;z-index:95}
 .toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}

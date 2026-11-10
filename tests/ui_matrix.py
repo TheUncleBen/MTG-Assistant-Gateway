@@ -9,10 +9,14 @@ Two ways in:
 * ``python -m tests.ui_matrix OUT_DIR`` runs the whole matrix locally, saves a screenshot of every
   page on every screen, and writes ``OUT_DIR/index.html``: each page's screenshots side by side,
   with the findings under each, so a person can look at the whole site in one place before a push.
+* ``python -m tests.ui_matrix OUT_DIR --recheck OLD_DIR/findings.json`` draws again only the page,
+  screen and text size combinations that had findings in that earlier run (the ledger): what
+  passed is not looked at again until the next full run.
 
 What is measured, beyond the overflow sweep's sideways scroll, clipping and overlaps:
 
-* ``off-centre``: on a screen 900 px or wider, the page's content leans to one side (its left and
+* ``off-centre``: on a screen 600 px or wider (an open Fold beside its rail too: 0.7.46's
+  Assistants hugged the left there), the page's content leans to one side (its left and
   right margins differ by more than 48 px and 8% of the window).
 * ``hole``: two panels side by side whose heights differ so much that a large empty block is left
   under the shorter one (a two-column grid where one column holds three rows and the other five).
@@ -26,6 +30,14 @@ What is measured, beyond the overflow sweep's sideways scroll, clipping and over
   ISO timestamp, a price with one decimal ($12.5) or a number with four or more decimals; a setting's
   own name (MTG_…); "unknown" as a value in more than one place; an element marked hidden that is
   drawn all the same (0.7.47 polish: "Est unknown", every Binder row's "unknown", env var names).
+* ``loose-button``: a button alone on its line, stretched to a width that is neither its own nor
+  its column's nor a panel's beside it, or sitting at neither edge nor the middle of its column
+  (0.7.46's Sign out: half a two-column grid wide, under the grid's left column).
+* ``menu-*`` (the menu pass, ``_menu_pass``): each menu button on the page opened in turn, and
+  what opened measured against it: ``menu-clip`` (past an edge of the window), ``menu-covers``
+  (over its own button), ``menu-detached`` (more than 12 px away), ``menu-misaligned`` (at neither
+  edge of its button, unless held at the window's edge), ``menu-items`` (the items' text starts in
+  more than one column), ``menu-none`` (the button opened nothing).
 * ``plural``: "1 cards", "1 decks" and the like.
 * ``target``: on a touch screen, a control smaller than 44 × 44 px.
 * ``mid-word``: a word of 4 to 12 letters drawn across two lines.
@@ -259,8 +271,56 @@ CHECKS = (
   if (document.documentElement.scrollWidth > vw + 1)
     add('overflow', null, 'page scrolls sideways by ' + (document.documentElement.scrollWidth - vw) + 'px');
 
+
+  // --- loose-button: a button alone on its line, stretched to no width around it or placed at
+  // neither edge nor the middle of its column
+  for (const b of main.querySelectorAll('button, a.btn, input[type=submit]')) {
+    if (!visible(b) || pinned(b)) continue;
+    if (b.closest('.menu,.ctxmenu,[role=dialog],dialog,table,li,nav,header,footer,.cardview,.spanel,summary,.kebab,form.inline,.msel-btn')) continue;
+    // a button inside a sentence ("… delete them. How it works") is part of its line of text
+    if (b.parentElement && [...b.parentElement.childNodes].some(n => n.nodeType === 3 && n.data.trim())) continue;
+    // one of a row of controls that wrapped: the stranded check's
+    if (b.parentElement && [...b.parentElement.children].some(c => c !== b && visible(c) && c.matches('button,a.btn,.chip,input,select'))) continue;
+    const br = b.getBoundingClientRect();
+    let C = b.parentElement;
+    while (C && C !== main && C.getBoundingClientRect().width < br.width + 40) C = C.parentElement;
+    if (!C) continue;
+    let lone = true;
+    for (let a = b; a && a !== C && lone; a = a.parentElement) {
+      for (const s2 of (a.parentElement ? a.parentElement.children : [])) {
+        if (s2 === a || !visible(s2)) continue;
+        const r2 = s2.getBoundingClientRect();
+        if (Math.min(r2.bottom, br.bottom) - Math.max(r2.top, br.top) > 4) { lone = false; break; }
+      }
+    }
+    if (!lone) continue;
+    const cs = getComputedStyle(b), ccs = getComputedStyle(C), cr = C.getBoundingClientRect();
+    const cl = cr.left + parseFloat(ccs.paddingLeft) + parseFloat(ccs.borderLeftWidth);
+    const crr = cr.right - parseFloat(ccs.paddingRight) - parseFloat(ccs.borderRightWidth);
+    const rg = document.createRange();
+    rg.selectNodeContents(b);
+    const inner = rg.getBoundingClientRect().width;
+    const natural = inner + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) * 2;
+    const near = (x, y) => Math.abs(x - y) <= 2;
+    if (br.width > natural + 48) {
+      if (near(br.left, cl) && near(br.right, crr)) continue;
+      // as wide as a panel above or below it in the same column (a grid's column)
+      let matched = false;
+      for (const el of C.querySelectorAll('*')) {
+        if (el === b || el.contains(b) || b.contains(el) || !visible(el)) continue;
+        const r2 = el.getBoundingClientRect();
+        if (near(r2.left, br.left) && near(r2.right, br.right)) { matched = true; break; }
+      }
+      if (!matched)
+        add('loose-button', b, 'alone on its line and stretched to ' + Math.round(br.width) + 'px: neither its own ' +
+          Math.round(natural) + 'px nor its column\'s ' + Math.round(crr - cl) + 'px nor a panel\'s');
+    } else if (!near(br.left, cl) && !near(br.right, crr) && !near((br.left + br.right) / 2, (cl + crr) / 2)) {
+      add('loose-button', b, 'alone on its line at neither edge nor the middle of its column (' +
+        Math.round(br.left - cl) + 'px from its left)');
+    }
+  }
   // --- off-centre: the content's union box against the room beside the side rail, on wide screens
-  if (vw >= 900 && !big) {
+  if (vw >= 600 && !big) {
     let room = 0;  // the right edge of a rail pinned to the left
     for (const el of document.querySelectorAll('body > *, body > * > nav')) {
       const cs = getComputedStyle(el);
@@ -545,6 +605,119 @@ CHECKS = (
 )
 
 
+# -- the menu pass: every menu, drop-down and themed list opened from its own button ----------------
+# Marks the page's menu buttons (data-um-t), at most two of each kind and 16 in all, and the pop-ups
+# already shown (data-um-pre), and returns the buttons' numbers.
+MENU_FIND = (
+    "() => {"
+    + _COMMON
+    + r"""
+  document.querySelectorAll('[data-um-t]').forEach(e => e.removeAttribute('data-um-t'));
+  const POPS = '.ctxmenu,.menu,[role=menu],[role=listbox],[role=dialog],dialog[open],.sheet';
+  document.querySelectorAll(POPS).forEach(e => { if (visible(e)) e.setAttribute('data-um-pre', ''); });
+  // a box one types into opens its list on typing, not on a tap: not a menu button here
+  const sel = 'details.dd > summary, .kebab, [aria-haspopup]:not([aria-haspopup=false]):not(input):not([role=combobox])';
+  const seen = {}, ids = [];
+  // a box open over the page (New deck, Package): only its own buttons can be reached
+  const modal = [...document.querySelectorAll('[aria-modal=true],dialog[open],.mtgbox')].find(visible);
+  let n = 0;
+  for (const t of document.querySelectorAll(sel)) {
+    if (!visible(t) || t.disabled || t.closest(POPS)) continue;
+    if (modal && !modal.contains(t)) continue;
+    if (t.tagName === 'SUMMARY' && t.parentElement.open) continue;
+    const up = t.parentElement && t.parentElement.closest('[class]');
+    const sig = t.tagName + '.' + [...t.classList].sort().join('.') + '|' + (t.getAttribute('aria-haspopup') || '')
+      + '|' + (up ? [...up.classList].sort().join('.') : '');
+    if ((seen[sig] = (seen[sig] || 0) + 1) > 2) continue;
+    t.setAttribute('data-um-t', String(n));
+    ids.push(n++);
+    if (n >= 16) break;
+  }
+  return ids;
+}"""
+)
+
+# What opened from button ``i``, measured against the button: [{kind, el, msg}], and the box to
+# shoot around both; null when nothing opened (yet).
+MENU_CHECK = (
+    "(i) => {"
+    + _COMMON
+    + r"""
+  const t = document.querySelector('[data-um-t="' + i + '"]');
+  if (!t) return {gone: true};
+  const vh = window.innerHeight;
+  const POPS = '.ctxmenu,.menu,[role=menu],[role=listbox],[role=dialog],dialog[open],.sheet';
+  let pop = null;
+  if (t.tagName === 'SUMMARY') {
+    if (!t.parentElement.open) return null;
+    pop = [...t.parentElement.children].find(c => c !== t && visible(c)) || null;
+  } else {
+    let best = 0;
+    for (const e of document.querySelectorAll(POPS)) {
+      if (e.hasAttribute('data-um-pre') || e.contains(t) || !visible(e)) continue;
+      if (e.parentElement && e.parentElement.closest(POPS) && !e.parentElement.closest('[data-um-pre]')) continue;
+      const r = e.getBoundingClientRect(), a = r.width * r.height;
+      if (a > best) { best = a; pop = e; }
+    }
+  }
+  if (!pop) return null;
+  const tr = t.getBoundingClientRect(), pr = pop.getBoundingClientRect();
+  const fixed = pinned(pop);
+  const r = (v) => Math.round(v);
+  // a sheet spans the window's width (over a phone's tab bar too)
+  const sheet = pr.width >= vw - 34;
+  const dialog = !sheet && (pop.getAttribute('role') === 'dialog' || pop.tagName === 'DIALOG');
+  if (pr.left < -1 || pr.right > vw + 1)
+    add('menu-clip', t, 'its panel runs off the ' + (pr.left < -1 ? 'left' : 'right') + ' edge by '
+      + r(pr.left < -1 ? -pr.left : pr.right - vw) + 'px');
+  if (fixed ? pr.bottom > vh + 1 : pr.bottom + scrollY > document.documentElement.scrollHeight + 1)
+    add('menu-clip', t, 'its panel runs off the bottom by ' + r(fixed ? pr.bottom - vh : pr.bottom + scrollY - document.documentElement.scrollHeight) + 'px');
+  if (fixed && pr.top < -1) add('menu-clip', t, 'its panel runs off the top by ' + r(-pr.top) + 'px');
+  if (!sheet && !dialog) {
+    const below = pr.top >= tr.bottom - 1, above = pr.bottom <= tr.top + 1;
+    const xOver = Math.min(pr.right, tr.right) - Math.max(pr.left, tr.left);
+    if (!below && !above && xOver > 2)
+      add('menu-covers', t, 'its panel covers its own button');
+    const gap = below ? pr.top - tr.bottom : above ? tr.top - pr.bottom : 0;
+    if (gap > 12) add('menu-detached', t, 'its panel opens ' + r(gap) + 'px away from the button');
+    const dl = Math.abs(pr.left - tr.left), dr = Math.abs(pr.right - tr.right);
+    const edge = pr.left <= 17 || pr.right >= vw - 17;
+    if (Math.min(dl, dr) > 2 && !(edge && xOver > 0))
+      add('menu-misaligned', t, 'its panel lines up with neither edge of the button ('
+        + r(pr.left - tr.left) + 'px left, ' + r(pr.right - tr.right) + 'px right)');
+  }
+  // the items' text starts in one column
+  const items = [...pop.querySelectorAll('[role=menuitem],[role=option],[role=menuitemradio],[role=menuitemcheckbox],:scope > a,:scope > button,:scope > form > button,:scope > .item')]
+    .filter(e => visible(e) && e.getBoundingClientRect().width >= pr.width * .6);  // rows, not a row's − and +
+  const starts = [];
+  for (const it of items) {
+    const w = document.createTreeWalker(it, NodeFilter.SHOW_TEXT, {acceptNode: (n) => n.data.trim() && visible(n.parentElement) ? 1 : 3});
+    const n = w.nextNode();
+    if (!n) continue;
+    const rg = document.createRange();
+    rg.setStart(n, n.data.length - n.data.trimStart().length);
+    rg.setEnd(n, n.data.length);
+    const rr = rg.getClientRects()[0];
+    if (rr) starts.push(r(rr.left));
+  }
+  if (starts.length >= 2) {
+    const lo = Math.min(...starts), hi = Math.max(...starts);
+    if (hi - lo > 2) add('menu-items', t, "its items' text starts at " + new Set(starts).size + ' places (' + lo + '-' + hi + 'px)');
+  }
+  const u = {l: Math.min(tr.left, pr.left), t: Math.min(tr.top, pr.top), r: Math.max(tr.right, pr.right), b: Math.max(tr.bottom, pr.bottom)};
+  return {out, box: u, fixed};
+}"""
+)
+
+# Closes whatever a menu button opened.
+MENU_CLOSE = r"""(i) => {
+  const t = document.querySelector('[data-um-t="' + i + '"]');
+  if (t && t.tagName === 'SUMMARY') t.parentElement.open = false;
+  if (window.MtgMenu && window.MtgMenu.isOpen && window.MtgMenu.isOpen()) window.MtgMenu.close(false);
+  document.querySelectorAll('dialog[open]').forEach(d => { if (!d.hasAttribute('data-um-pre')) d.close(); });
+}"""
+
+
 @dataclass
 class Finding:
     page: str
@@ -554,6 +727,7 @@ class Finding:
     kind: str
     el: str
     msg: str
+    shot: str = ""  # a close-up of a menu finding (the menu pass)
 
     def line(self) -> str:
         return f"{self.page} [{self.display} {self.theme} {self.text * 100}%] {self.kind}: {self.el} {self.msg}".strip()
@@ -581,6 +755,8 @@ def sweep(
     kinds: set[str] | None = None,
     shots_dir: Path | None = None,
     probe: str = "",
+    menus: bool = True,
+    only: set[tuple[str, str, int]] | None = None,
 ) -> Sweep:
     """Draws every path on every display, theme and text size and runs CHECKS on each; with
     ``shots_dir``, saves a full-page screenshot of each. ``kinds`` keeps only those findings."""
@@ -607,6 +783,8 @@ def sweep(
             for path in paths:
                 for theme in themes:
                     for text in texts:
+                        if only is not None and (path, d.key, text) not in only:
+                            continue  # passed in the ledger's run: not looked at again
                         ctx.add_cookies([{"name": "mtg_theme", "value": theme, "url": server.base}])
                         server.db.delete_prefs("user-1", prefixes=("view.",))
                         url, _, state = path.partition("#")
@@ -641,9 +819,87 @@ def sweep(
                             name = f"{_slug(path)}__{d.key}__{theme}__{text * 100}.png"
                             page.screenshot(path=str(shots_dir / name), full_page=not state)
                             res.shots[(path, d.key, theme, text)] = name
+                        # the menus' places don't change with the theme: once, in the first one
+                        if menus and not state and theme == themes[0]:
+                            _menu_pass(page, path, d, theme, text, res, kinds, shots_dir)
             ctx.close()
         browser.close()
     return res
+
+
+def _menu_pass(page, path: str, d: Display, theme: str, text: int, res: Sweep, kinds, shots_dir) -> None:  # noqa: ANN001
+    """Opens each menu button on the page in turn (MENU_FIND) and measures what opened against it
+    (MENU_CHECK): ``menu-clip``, ``menu-covers``, ``menu-detached``, ``menu-misaligned``,
+    ``menu-items`` and ``menu-none`` (a menu button that opened nothing)."""
+    url = page.url
+    ids = page.evaluate(MENU_FIND)
+    done: set[int] = set()
+    while ids:
+        i = ids.pop(0)
+        if i in done:
+            continue
+        done.add(i)
+        found: list[dict] = []
+        label = page.evaluate(
+            "(i) => { const t = document.querySelector('[data-um-t=\"' + i + '\"]'); if (!t) return '';"
+            " const s = t.tagName.toLowerCase() + (t.classList.length ? '.' + [...t.classList].slice(0, 3).join('.') : '');"
+            " const n = (t.getAttribute('aria-label') || t.innerText || '').trim().replace(/\\s+/g, ' ').slice(0, 40);"
+            " return n ? s + ' \"' + n + '\"' : s; }",
+            i,
+        )
+        if not page.locator(f'[data-um-t="{i}"]').count():
+            continue  # the page drew that part again (a live list): its mark went with it
+        try:
+            page.locator(f'[data-um-t="{i}"]').first.click(timeout=2_000)
+        except Exception as exc:  # noqa: BLE001
+            res.errors.append(
+                f"{path} {d.key} {text * 100}%: menu button {label} not clickable ({type(exc).__name__})"
+            )
+            continue
+        # what opened slides or fades in, and a drop-down's own script moves it inside the
+        # window on its toggle event: measured where it comes to rest
+        page.wait_for_timeout(100)
+        page.evaluate(
+            "() => Promise.race([Promise.all(document.getAnimations().filter(a => a.playState === 'running'"
+            " && isFinite(a.effect && a.effect.getComputedTiming().endTime)).map(a => a.finished.catch(() => 0))),"
+            " new Promise(r => setTimeout(r, 800))])"
+        )
+        got = None
+        for _ in range(5):
+            got = page.evaluate(MENU_CHECK, i)
+            if got:
+                break
+            page.wait_for_timeout(150)
+        if got is None:
+            found = [{"kind": "menu-none", "el": label, "msg": "opened nothing"}]
+        elif not got.get("gone"):
+            found = got["out"]
+        shot = ""
+        if found and got and shots_dir is not None and not got.get("gone"):
+            b = got["box"]
+            vw, vh = d.width, d.height
+            x0, y0 = max(0, b["l"] - 24), max(0, b["t"] - 24)
+            x1, y1 = min(vw, b["r"] + 24), min(vh, b["b"] + 24)
+            if x1 - x0 > 4 and y1 - y0 > 4:
+                shot = f"{_slug(path)}__{d.key}__{text * 100}__menu{i}.png"
+                page.screenshot(
+                    path=str(shots_dir / shot), clip={"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+                )
+        for f in found:
+            if kinds is None or f["kind"] in kinds:
+                res.findings.append(Finding(path, d.key, theme, text, f["kind"], f["el"], f["msg"], shot))
+        try:
+            page.keyboard.press("Escape")
+            page.evaluate(MENU_CLOSE, i)
+            page.wait_for_timeout(120)
+        except Exception:  # noqa: BLE001
+            pass
+        if page.url.split("#")[0] != url.split("#")[0]:
+            # a button that went to another page: back to this one, and on with the next button
+            page.goto(url, wait_until="networkidle", timeout=30_000)
+            if text > 1:
+                page.evaluate(TEXT_200)
+            ids = [j for j in page.evaluate(MENU_FIND) if j not in done]
 
 
 def report(res: Sweep, out: Path, paths: list[str], displays: list[Display] = DISPLAYS) -> None:
@@ -695,7 +951,9 @@ def report(res: Sweep, out: Path, paths: list[str], displays: list[Display] = DI
                         + (
                             "<ul>"
                             + "".join(
-                                f"<li>{html.escape(f.kind)}: {html.escape(f.el)} {html.escape(f.msg)}</li>"
+                                f"<li>{html.escape(f.kind)}: {html.escape(f.el)} {html.escape(f.msg)}"
+                                + (f" <a href='shots/{f.shot}'>close-up</a>" if f.shot else "")
+                                + "</li>"
                                 for f in fs
                             )
                             + "</ul>"
@@ -720,6 +978,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--themes", default="light,dark")
     ap.add_argument("--text", default="1,2")
     ap.add_argument("--no-shots", action="store_true")
+    ap.add_argument("--no-menus", action="store_true", help="skip opening each menu button")
+    ap.add_argument(
+        "--recheck",
+        type=Path,
+        default=None,
+        help="a previous run's findings.json (the ledger): only the page, screen and text size "
+        "combinations that had findings there are drawn again",
+    )
     ap.add_argument("--probe", default="", help="a script evaluated on each layout, its answer printed")
     a = ap.parse_args(argv)
 
@@ -734,6 +1000,11 @@ def main(argv: list[str] | None = None) -> int:
         sid, pending = OS._seed(s)
         s.app.state.gateway.decks.archidekt_budget.per_window = 100_000
         paths = a.pages.split(",") if a.pages else pages(pending)
+        only = None
+        if a.recheck:
+            ledger = json.loads(a.recheck.read_text())
+            only = {(f["page"], f["display"], f["text"]) for f in ledger}
+            paths = [p for p in paths if any(o[0] == p for o in only)]
         disp = [d for d in DISPLAYS if not a.displays or d.key in a.displays.split(",")]
         shots = None if a.no_shots else a.out / "shots"
         if shots:
@@ -747,6 +1018,8 @@ def main(argv: list[str] | None = None) -> int:
             texts=tuple(int(t) for t in a.text.split(",")),
             shots_dir=shots,
             probe=a.probe,
+            menus=not a.no_menus,
+            only=only,
         )
         report(res, a.out, paths, disp)
         print(f"{len(res.findings)} findings, {len(res.errors)} errors -> {a.out / 'index.html'}")

@@ -55,12 +55,18 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
      doubled) rather than a word overflowing its button (final audit F02) */
   .ui-head.hubhead .acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5em),1fr));
     gap:8px}
-  .ui-head.hubhead .acts .btn,.ui-head.hubhead .acts button{width:100%;padding:0 .4rem;gap:.3rem;
+  /* the head's own buttons only, never the items of its More menu (0.7.47: the menu lost its icons
+     and padding on a phone, its two items' text starting 7 px apart) */
+  .ui-head.hubhead .acts > .btn,.ui-head.hubhead .acts > button,.ui-head.hubhead .acts > form > button,
+  .ui-head.hubhead .acts > details > summary{width:100%;padding:0 .4rem;gap:.3rem;
     font-size:.93rem;white-space:normal;text-align:center;line-height:1.1}
-  .ui-head.hubhead .acts svg{display:none} }
+  .ui-head.hubhead .acts > .btn svg,.ui-head.hubhead .acts > button svg,
+  .ui-head.hubhead .acts > form > button svg,
+  .ui-head.hubhead .acts > details > summary svg{display:none} }
 /* the Collection menu's quantity row: one fewer, the count, one more; the menu stays open */
 .ctxmenu .mqty{display:flex;align-items:center;gap:.25rem;padding:.15rem .5rem .15rem 1rem;min-height:38px}
-.ctxmenu .mqty .lbl{flex:1;color:var(--text-muted)}
+/* the label starts where the items' text does, after their 18 px icon and its .6rem gap */
+.ctxmenu .mqty .lbl{flex:1;color:var(--text-muted);padding-left:calc(max(18px, .85em) + .6rem)}
 .ctxmenu .mqty .n{min-width:2ch;text-align:center;font-variant-numeric:tabular-nums}
 .ctxmenu .mqty button.step{width:var(--ctl);min-height:var(--ctl);padding:0;justify-content:center;
   border:1px solid var(--control-border);border-radius:var(--radius);font-weight:700}

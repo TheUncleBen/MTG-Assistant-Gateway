@@ -461,7 +461,7 @@
   // button's, so a ⋮ at the end of a row or column never pushes the menu out of that column
   var anchor = null;
   /* s: {head (the item's name), label (for readers; default "Menu: head"), items (nodes), cls,
-     focusBack (an element)}; x, y: where it opens (the pointer, or the ⋮). */
+     focusBack (an element), anchor (the button it opens from, when not bind's ⋮)}; x, y: where it opens (the pointer, or the ⋮). */
   function openMenu(s, x, y) {
     close(false);
     var m = el("div", "menu ctxmenu cs-menu" + (s.cls ? " " + s.cls : ""));
@@ -485,15 +485,32 @@
     document.body.appendChild(scrim);
     m.style.visibility = "hidden";
     document.body.appendChild(m);
-    var pad = 8, w = m.offsetWidth, h = m.offsetHeight;
-    if (anchor && anchor.right - w >= pad) x = anchor.right - w;
+    // s.anchor: the button a script opens the menu from itself (Test and play, Deck tools), as bind's ⋮
+    var at = anchor || (s.anchor && s.anchor.getBoundingClientRect ? s.anchor.getBoundingClientRect() : null);
+    var pad = 8, gap = 4, w = m.offsetWidth, h = m.offsetHeight;
+    if (at && at.right - w >= pad) x = at.right - w;
     m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + "px";
     // never over the sticky top bar: a menu taller than the room under it scrolls instead
     var bar = document.querySelector("header.topbar"), barEnd = bar ? bar.getBoundingClientRect().bottom : 0;
     var top = Math.max(pad, barEnd + pad);
     if (top > window.innerHeight / 2) top = pad;  // a window shorter than twice the bar
-    m.style.top = Math.max(top, Math.min(y, window.innerHeight - h - pad)) + "px";
-    m.style.maxHeight = (window.innerHeight - parseFloat(m.style.top) - pad) + "px";
+    if (at) {
+      // From a ⋮: just under it, or just over it when the room there is larger, never over the
+      // button itself (0.7.47: a folder's menu near the window's foot was pushed up over its ⋮).
+      // A menu taller than the room on its side scrolls.
+      var below = window.innerHeight - pad - (at.bottom + gap), above = at.top - gap - top;
+      if (h <= below || below >= above) {
+        m.style.top = (at.bottom + gap) + "px";
+        m.style.maxHeight = Math.max(below, 0) + "px";
+      } else {
+        var hh = Math.min(h, above);
+        m.style.top = (at.top - gap - hh) + "px";
+        m.style.maxHeight = hh + "px";
+      }
+    } else {
+      m.style.top = Math.max(top, Math.min(y, window.innerHeight - h - pad)) + "px";
+      m.style.maxHeight = (window.innerHeight - parseFloat(m.style.top) - pad) + "px";
+    }
     m.style.visibility = "";
     menu = m;
     menuBack = s.focusBack || null;

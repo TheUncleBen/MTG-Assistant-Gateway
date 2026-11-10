@@ -60,6 +60,7 @@ a.blue{color:#1d55b3} .faint{color:#bbb}
 <a href='#' class=btn style='display:inline-block;width:24px;height:24px'>x</a></p>
 <div style='width:70px;overflow-wrap:anywhere;font-size:20px'>Cultivating</div>
 <div style='width:1400px;height:2px'></div>
+<div style='width:860px'><div><button style='width:400px'>Sign out</button></div></div>
 </main></body></html>
 """
 
@@ -91,6 +92,7 @@ def test_the_checks_find_each_kind_of_problem() -> None:
         "target",
         "mid-word",
         "overflow",
+        "loose-button",
     ):
         assert kind in kinds, (kind, kinds)
 
@@ -177,3 +179,57 @@ def test_the_raw_value_check_finds_placeholders_and_setting_names() -> None:
     assert any("MTG_BACKUP_COPY_DIR" in m for m in msgs), msgs
     assert any('"unknown" shown 2 times' in m for m in msgs), msgs
     assert any("marked hidden but drawn" in m for m in msgs), msgs
+
+
+MENU_FIXTURE = """
+<!doctype html><html><head><meta name=viewport content='width=device-width'>
+<style>body{margin:0;font:16px sans-serif} main{display:block;padding:40px 200px}
+details{position:relative;margin:0 0 60px} summary{list-style:none;width:80px;height:44px}
+.menu{position:absolute;background:#eee;width:220px;display:flex;flex-direction:column}
+.menu a{display:flex;gap:8px;min-height:40px;padding:0 16px;align-items:center;color:#111}
+#wide{display:block;width:700px} #wide .menu{right:0;top:48px}
+#far .menu{left:0;top:110px}
+#over .menu{left:0;top:0}
+#off{width:80px} #off .menu{right:150px;top:48px}
+#ragged .menu{left:0;top:48px} #ragged a.ind{padding-left:40px}
+</style></head><body><main>
+<details class='dd wide' id=wide><summary>Wide</summary><div class=menu><a>One</a><a>Two</a></div></details>
+<details class='dd far' id=far><summary>Far</summary><div class=menu><a>One</a><a>Two</a></div></details>
+<details class='dd over' id=over><summary>Over</summary><div class=menu><a>One</a><a>Two</a></div></details>
+<details class='dd off' id=off><summary>Off</summary><div class=menu><a>One</a><a>Two</a></div></details>
+<details class='dd ragged' id=ragged><summary>Ragged</summary>
+<div class=menu><a>One</a><a class=ind>Two</a></div></details>
+<button aria-haspopup=menu style='width:80px;height:44px'>Dead</button>
+</main></body></html>
+"""
+
+
+def test_the_menu_pass_finds_each_kind_of_misplaced_menu() -> None:
+    """Each menu check fires on a page made to fail it: a panel hanging from a details wider than
+    its button (misaligned), one 66 px under it (detached), one over it (covers), one past the
+    window's left edge (clip), items whose text starts in two columns, and a menu button that opens
+    nothing."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    res = M.Sweep()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.set_content(MENU_FIXTURE)
+        laptop = next(d for d in M.DISPLAYS if d.key == "laptop")
+        M._menu_pass(page, "fixture", laptop, "light", 1, res, None, None)
+        browser.close()
+    got = {(f.kind, f.el.split()[0]) for f in res.findings}
+    for want in (
+        ("menu-misaligned", "summary"),
+        ("menu-detached", "summary"),
+        ("menu-covers", "summary"),
+        ("menu-clip", "summary"),
+        ("menu-items", "summary"),
+        ("menu-none", "button"),
+    ):
+        assert want in got, (want, sorted(got))
+    assert res.errors == []
