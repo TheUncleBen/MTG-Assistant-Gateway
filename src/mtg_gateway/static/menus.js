@@ -721,15 +721,16 @@
     ];
     Menu.open({ head: name, label: "List: " + name, items: items, focusBack: $("summary.kebab", head) || head }, x, y);
   }
-  // a watchlist list's row on Binder › Lists (lists_page): its ⋮, a right-click or a hold open
+  // a list's row in the Binder page's library (binder_hub, One Binder 0.7.47; before it Binder ›
+  // Lists, lists_page): its ⋮, a right-click or a hold open
   // the same Rename list… and Delete list… as the list's head on the Watchlist (the links of its
   // no-script drop-down, which open the Watchlist with that box)
   function listRowOf(node) {
-    var row = node && node.closest ? node.closest(".lp-hub .yrow.wlrow") : null;
+    var row = node && node.closest ? node.closest(".lp-hub .yrow.wlrow, .bn-lib .yrow.wlrow") : null;
     return row && $("details.rowmenu", row) ? row : null;
   }
   function openListRowMenu(row, x, y) {
-    var name = ($("a.lbl span", row) || row).textContent.trim();
+    var name = row.getAttribute("data-name") || ($("a.lbl span", row) || row).textContent.trim();
     var items = [];
     $$("details.rowmenu .menu > a", row).forEach(function (a) {
       if (items.length) items.push(sep());

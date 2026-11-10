@@ -14,7 +14,7 @@ import pytest
 
 from .test_deck_menu_browser import Server, _chromium, _overflow, _page
 from .test_deck_views_browser import _shot
-from .waits import expect, quiet
+from .waits import expect, quiet, redrawn
 
 pytest.importorskip("playwright")
 
@@ -413,19 +413,30 @@ def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme:
         for zoom in (None, TEXT_200):
             if zoom:
                 page.evaluate(zoom)
+                redrawn(page)
             for size in ("s", "m", "l"):
                 page.locator(f".gf-size [data-card-size-set={size}]").click()
+                # the page's resize work (the top bar's fit) runs in the next frame: measure the
+                # end state, not the frame between (2 px wide at 344 px under a loaded machine)
+                redrawn(page)
                 got = page.evaluate(SIZE_STATE)
                 assert got["segInside"] and got["whole"], (size, zoom is not None, got)
                 assert got["contrast"] >= 4.5, (size, zoom is not None, got)
                 # (the switch sits at the end of the game's button row now, so it is no longer
                 # left-aligned with the first button)
                 assert got["row"] or zoom is not None, (size, zoom is not None, got)
-                assert _overflow(page) == 0, (size, zoom is not None)
+                assert _overflow(page) == 0, (size, zoom is not None, page.evaluate(PAST_EDGE))
             _contrast_ok(page)
         _shot(page, f"goldfish-size-{width}-{scheme}")
         browser.close()
     assert errors == []
+
+
+# What reaches past the window's right edge, for the message of a failed overflow check.
+PAST_EDGE = """() => { const vw = document.documentElement.clientWidth;
+  return [...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > vw + 0.5)
+    .slice(0, 6)
+    .map(e => e.tagName + '.' + e.className + ' ' + Math.round(e.getBoundingClientRect().right)); }"""
 
 
 # Each cell's ⋮ against its card: label, size, and whether the two overlap or leave the window.

@@ -98,6 +98,10 @@ class View:
         self.desc = qp.get("dir") != "asc"
         # the phone shows the list once the member picked something from the library
         self.picked = any(qp.get(k) for k in ("show", "list", "q", "tag"))
+        # a box drawn open (a list row's menu without scripts, or an old link): New list, and Rename
+        # or Delete for the list shown
+        box = qp.get("box") or ""
+        self.box = box if box == "newlist" or (box in ("rename", "delete") and self.list) else ""
 
     def href(self, **change: Any) -> str:
         v = {
@@ -139,6 +143,30 @@ def _row_label(
     )
 
 
+def _list_row(name: str, href: str, count: int, sub: str, on: bool) -> str:
+    """A list in the library: the row opens it; its ⋮, a right-click or a press and hold
+    (static/menus.js, the same menu as Binder › Lists had, R-228) offer Rename list… and Delete
+    list…, which open the list with that box (real links without scripts)."""
+    items = "".join(
+        f"<a href='{esc(PATH + '?' + urlencode({'list': name, 'box': box}))}' data-icon='{ic}'{extra}>"
+        f"{icon(ic)}{text}</a>"
+        for text, ic, box, extra in (
+            ("Rename list…", "edit", "rename", ""),
+            ("Delete list…", "trash", "delete", " class='danger'"),
+        )
+    )
+    cur = " aria-current='page'" if on else ""
+    return (
+        f"<div class='yrow wlrow{' on' if on else ''}' data-name='{esc(name)}'>"
+        f"<a class='lbl' href='{esc(href)}'{cur}>{icon('list')}"
+        f"<span>{esc(name)}<small>{esc(sub)}</small></span></a><span class='val'>{count:,}</span>"
+        "<details class='dd rowmenu bn-dd'><summary class='kebab' "
+        f"aria-label='Menu for the list {esc(name)}' title='Menu' aria-haspopup='menu'>"
+        f"{icon('more')}</summary>"
+        f"<div class='menu'><div class='head'>{esc(name)}</div>{items}</div></details></div>"
+    )
+
+
 def library_html(
     view: View,
     counts: dict[str, int],
@@ -167,11 +195,10 @@ def library_html(
         c = per_list.get(wl["name"], {"want": 0, "owned": 0})
         bits = [f"{c['want']:,} want" if c["want"] else "", f"{c['owned']:,} owned" if c["owned"] else ""]
         mine.append(
-            _row_label(
-                view.href(list=wl["name"], show="all", q="", tag=""),
-                "list",
+            _list_row(
                 wl["name"],
-                f"{wl['count']:,}",
+                view.href(list=wl["name"], show="all", q="", tag=""),
+                wl["count"],
                 " · ".join(b for b in bits if b) or "Empty",
                 view.list == wl["name"],
             )
@@ -539,6 +566,8 @@ def boxes_html(
             ui.box_button("Cancel", cancel=True),
             ui.box_button("Make list", kind="primary", form="bn-newlist-f"),
         ],
+        open=view.box == "newlist",
+        close_href=back,
     )
     extra = ""
     if view.list:
@@ -557,6 +586,8 @@ def boxes_html(
                 ui.box_button("Cancel", cancel=True),
                 ui.box_button("Rename", kind="primary", form="bn-rename-f"),
             ],
+            open=view.box == "rename",
+            close_href=back,
         ) + ui.box(
             "bn-delete",
             "Delete list",
@@ -571,6 +602,8 @@ def boxes_html(
                 ui.box_button("Keep it", cancel=True),
                 ui.box_button("Delete list", kind="danger-solid", form="bn-delete-f"),
             ],
+            open=view.box == "delete",
+            close_href=back,
         )
     return alerts + move + tag + remove + newlist + extra
 
@@ -643,6 +676,20 @@ CSS = """
   color:var(--text-muted);font-size:.82rem;margin-top:.1rem}
 .bn .ygrp .yrow .lbl{padding:.5rem 0}
 .bn .ygrp .yrow.on{background:var(--orange-tint)}
+/* a list's row: the link takes the row, its ⋮ at the end (the menu also opens from a right-click
+   or a press and hold, static/menus.js) */
+.bn-lib .yrow.wlrow{padding-right:.25rem;gap:.5rem}
+.bn-lib .yrow.wlrow a.lbl{display:flex;align-items:center;gap:.8rem;flex:1 1 auto;min-width:0;min-height:44px;
+  color:inherit;text-decoration:none;padding:.5rem 0}
+.bn-lib .yrow.wlrow a.lbl svg.i{width:20px;height:20px;flex:none;color:var(--orange-text)}
+.bn-lib .yrow.wlrow a.lbl span{min-width:0;overflow-wrap:break-word}
+.bn-lib .yrow.wlrow a.lbl small{display:block;color:var(--text-muted);font-size:.82rem;margin-top:.1rem}
+.bn-lib .yrow.wlrow a.lbl:hover span{text-decoration:underline}
+.bn-lib .yrow.wlrow .bn-dd > summary.kebab{display:inline-grid;place-items:center;width:44px;height:44px;
+  border-radius:10px;list-style:none;cursor:pointer}
+.bn-lib .yrow.wlrow .bn-dd > summary.kebab::-webkit-details-marker{display:none}
+.bn-lib .yrow.wlrow .bn-dd > summary.kebab:hover{background:var(--surface-2)}
+.bn-lib .yrow.wlrow .bn-dd .menu{min-width:12rem;right:0;left:auto}
 .bn .ygrp .yrow.add{color:var(--orange-text);font-weight:700}
 .bn-head{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
 .bn-head h2{margin:0;font-size:1.5rem;margin-right:auto;overflow-wrap:break-word;min-width:0}

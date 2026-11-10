@@ -13,7 +13,7 @@ import pytest
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
-from .waits import expect
+from .waits import expect, redrawn
 
 pytest.importorskip("playwright")
 
@@ -538,6 +538,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         for zoom in (ROOT_200, TEXT_200):
             page.reload(wait_until="networkidle")
             page.evaluate(zoom)
+            redrawn(page)
             fit = page.evaluate(
                 """() => {
                   const panel = document.querySelector('.reports-page').getBoundingClientRect();
@@ -688,6 +689,7 @@ def test_compare_page_never_scrolls_sideways_at_200_percent_text(
             assert page.locator(".cmp-cols .cmp-col").count() >= 2  # both decks' columns
             if zoom != "none":
                 page.evaluate(zoom)
+                redrawn(page)
             state = page.evaluate(
                 """() => {
                   const vw = document.documentElement.clientWidth;
@@ -755,6 +757,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
             page.goto(f"{server.base}/history/reports/rep_more", wait_until="networkidle")
             if zoom != "none":
                 page.evaluate(zoom)
+                redrawn(page)
             box = page.locator("#forge-more")
             box.scroll_into_view_if_needed()
             label = "none" if zoom == "none" else ("root" if zoom == ROOT_200 else "text")

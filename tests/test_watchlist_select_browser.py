@@ -287,9 +287,10 @@ def test_every_surface_fits_at_100_and_200_percent_text(
         browser.close()
 
 
-def test_a_list_on_the_binder_page_has_rename_and_delete_in_its_menu(server: Server) -> None:
-    """One Binder (0.7.47): a list is a row of the Binder page's library; opened, its List menu has
-    Rename list… and Delete list…, each a box on the page."""
+def test_a_list_row_on_the_binder_page_opens_its_menu_from_a_right_click_and_a_hold(server: Server) -> None:
+    """One Binder (0.7.47): a list's row in the Binder page's library has the same menu from a
+    right-click (a mouse), its ⋮, and a press and hold (a phone): Rename list… and Delete list…
+    (review 2, M7; R-228), without leaving the page; a pick opens the list with that box."""
     from playwright.sync_api import sync_playwright
 
     sid = seed(server)
@@ -297,16 +298,47 @@ def test_a_list_on_the_binder_page_has_rename_and_delete_in_its_menu(server: Ser
     with sync_playwright() as p:
         browser, page, errors = _open(p, server, sid, width=1280, height=900, theme="light", exe=exe)
         page.goto(f"{server.base}/binder", wait_until="networkidle")
+        row = page.locator(".bn-lib .yrow.wlrow", has_text="Meren wants")
+        row.locator("a.lbl").click(button="right")
+        _menu(page)
+        assert _items(page) == ["Rename list…", "Delete list…"]
+        assert page.locator(".ctxmenu .head").inner_text().strip() == "Meren wants"
+        page.keyboard.press("Escape")
+        expect(page.locator(".ctxmenu")).to_have_count(0)
+        quiet(page)
+        assert page.locator(".ctxmenu").count() == 0 and page.url.endswith("/binder")
+        row.locator("summary.kebab").click()
+        _menu(page)
+        assert _items(page) == ["Rename list…", "Delete list…"]
+        # Rename list… opens the list with its box drawn open, the name filled in
         with page.expect_navigation(wait_until="networkidle"):
-            page.locator(".bn-lib a.yrow", has_text="Meren wants").click()
-        assert page.locator("#bn-title").inner_text() == "Meren wants"
-        page.locator(".bn-listmenu > summary").click()
-        items = page.locator(".bn-listmenu .menu a").all_inner_texts()
-        assert [t.strip() for t in items] == ["Rename list…", "Delete list…"]
-        page.locator(".bn-listmenu .menu a", has_text="Rename list…").click()
+            page.locator(".ctxmenu [role=menuitem]", has_text="Rename list…").click()
         box = page.locator("#bn-rename")
         expect(box).to_be_visible()
         assert box.locator("input[name=new_name]").input_value() == "Meren wants"
+        assert page.locator("#bn-title").inner_text() == "Meren wants"
+        page.keyboard.press("Escape")
+        assert errors == [], errors
+        browser.close()
+        # a phone: the hold, as Chrome on Android sends it (the touch, then its contextmenu)
+        browser, page, errors = _open(p, server, sid, width=375, height=812, theme="dark", exe=exe, ua=APP_UA)
+        page.goto(f"{server.base}/binder", wait_until="networkidle")
+        row = page.locator(".bn-lib .yrow.wlrow", has_text="Meren wants")
+        row.scroll_into_view_if_needed()
+        b = row.locator("a.lbl").bounding_box()
+        x, y = b["x"] + 30, b["y"] + b["height"] / 2
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        page.locator(".ctxmenu").first.wait_for(timeout=3000)  # held: the hold opened the menu
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
+        row.locator("a.lbl").evaluate(
+            """(a, xy) => a.dispatchEvent(new MouseEvent("contextmenu",
+                {bubbles: true, cancelable: true, clientX: xy[0], clientY: xy[1]}))""",
+            [x, y],
+        )
+        _menu(page)
+        assert _items(page) == ["Rename list…", "Delete list…"]
+        assert page.url.endswith("/binder")
         page.keyboard.press("Escape")
         assert errors == [], errors
         browser.close()

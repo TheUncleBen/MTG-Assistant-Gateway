@@ -15,7 +15,7 @@ from mtg_gateway.app_signin import RETURN_PATH, challenge_of
 
 from .test_consent_browser import _chromium_or_skip, _launch
 from .test_guide_browser import Server
-from .waits import poll
+from .waits import poll, redrawn
 
 pytest.importorskip("playwright")
 
@@ -185,6 +185,7 @@ def test_the_page_before_the_provider_reads_and_fits_everywhere(idp_server, widt
                 worst, what = page.evaluate(CONTRAST)
                 assert worst >= 4.5, (worst, what)
                 page.evaluate(TEXT_200)
+                redrawn(page)
                 _buttons_fit(page, width < 1000)
                 assert not errors, errors
                 ctx.close()
