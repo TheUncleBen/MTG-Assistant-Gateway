@@ -85,6 +85,38 @@ def _take_undo(sub: str, token: str) -> tuple[str, Any] | None:
     return hit[2], hit[3]
 
 
+# What a notice says after a change is kept here, not in the address: the address carries a
+# token (``m``) that only the member who made the change can read back (audit AT2, 0.7.47), so a
+# link made elsewhere can never put its own words in a notice on the gateway's page. A count
+# (``n``) goes in the address as digits only, and the page words it.
+_notes: dict[str, tuple[str, float, str]] = {}
+
+
+def _keep_note(sub: str, text: str) -> str:
+    t = time.time()
+    for k in [k for k, (_s, at, _x) in _notes.items() if t - at > UNDO_TTL]:
+        _notes.pop(k, None)
+    while len(_notes) >= 500:
+        _notes.pop(next(iter(_notes)))
+    token = secrets.token_urlsafe(12)
+    _notes[token] = (sub, t, text[:300])
+    return token
+
+
+def _read_note(sub: str, token: str) -> str | None:
+    """The words kept under ``token`` for this member (a reload shows them again), or None."""
+    hit = _notes.get(token or "")
+    if hit is None or hit[0] != sub or time.time() - hit[1] > UNDO_TTL:
+        return None
+    return hit[2]
+
+
+def _count(raw: str | None, word: str = "card") -> str:
+    """``n`` from the address, worded here: digits only, anything else says nothing."""
+    raw = (raw or "").strip()
+    return plural(min(int(raw), 10_000_000), word) if raw.isdigit() else ""
+
+
 class View:
     """A Binder address: what the list shows (``show``, ``list``), its filters and order."""
 
@@ -832,11 +864,15 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
         if ok == "bulk" or err == "bulk":
             return coll("bulk", sub=sub, token=qp.get("t"), csrf=csrf, back=back) if coll else ""
         if err:
-            return ui.notice(qp.get("e") or "That did not work. Try again.", "error", role="alert")
+            said = _read_note(sub, qp.get("m") or "")
+            return ui.notice(said or "That did not work. Try again.", "error", role="alert")
         if ok not in OK_WORDS:
             return ""
-        n = qp.get("n") or ""
-        text = OK_WORDS[ok].format(n=n, l=f"“{qp.get('l') or ''}”")
+        n = _count(qp.get("n"))
+        name = _read_note(sub, qp.get("m") or "")
+        if ("{l}" in OK_WORDS[ok] and name is None) or ("{n}" in OK_WORDS[ok] and not n):
+            return ""  # words that are no longer kept (or never were): no notice rather than a half one
+        text = OK_WORDS[ok].format(n=n, l=f"“{name or ''}”")
         undo = qp.get("undo") or ""
         btn = (
             f" <form method='post' action='{PATH}' class='inline'><input type='hidden' name='csrf'"
@@ -911,16 +947,24 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
         )
         return page(f"{TITLE}: {view.title()}" if view.picked else TITLE, body, sub=sub, sid=sid)
 
-    def done(back: str, ok: str, **more: str) -> RedirectResponse:
+    def done(
+        back: str, ok: str, sub: str, n: int | None = None, name: str = "", undo: str = ""
+    ) -> RedirectResponse:
         if not back.startswith(PATH):
             back = PATH
+        more = {
+            "n": str(n) if n is not None else "",
+            "m": _keep_note(sub, name) if name else "",
+            "undo": undo,
+        }
         q = urlencode({"ok": ok, **{k: v for k, v in more.items() if v}})
         return RedirectResponse(back + ("&" if "?" in back else "?") + q, status_code=303)
 
-    def failed(back: str, message: str) -> RedirectResponse:
+    def failed(back: str, message: str, sub: str = "") -> RedirectResponse:
         if not back.startswith(PATH):
             back = PATH
-        q = urlencode({"err": "1", "e": message[:300]})
+        # signed out or a stale form: the page's own words for a failure, nothing kept
+        q = urlencode({"err": "1", **({"m": _keep_note(sub, message)} if sub else {})})
         return RedirectResponse(back + ("&" if "?" in back else "?") + q, status_code=303)
 
     def picked(data: dict[str, list[str]], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -940,13 +984,13 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
         data = {k: v[0] for k, v in fields.items()}
         back = (data.get("back") or PATH)[:600]
         if raw is None or not csrf_form_ok(s, sid, data):
-            return failed(back, "This form expired. Reload the page and try again.")
+            return failed(back, "This form expired. Reload the page and try again.", sub)
         action = data.get("action", "")
         try:
             if action == "undo":
                 hit = _take_undo(sub, data.get("token", ""))
                 if hit is None:
-                    return failed(back, "That Undo is no longer available.")
+                    return failed(back, "That Undo is no longer available.", sub)
                 kind, payload = hit
                 if kind == "state":
                     svc.restore_watch_state(sub, payload["watches"])
@@ -956,24 +1000,24 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
                     svc.stop_watching(sub, payload)
                 elif kind == "unwatch":
                     svc.rewatch(sub, payload)
-                return done(back, "undone")
+                return done(back, "undone", sub)
             if action in ("newlist", "rename", "delete"):
                 if action == "newlist":
                     name = svc.create_list(sub, data.get("name", ""))
-                    return done(PATH + "?" + urlencode({"list": name}), "newlist", l=name)
+                    return done(PATH + "?" + urlencode({"list": name}), "newlist", sub, name=name)
                 if action == "rename":
                     name = svc.rename_list(sub, data.get("name", ""), data.get("new_name", ""))
-                    return done(PATH + "?" + urlencode({"list": name}), "renamed", l=name)
+                    return done(PATH + "?" + urlencode({"list": name}), "renamed", sub, name=name)
                 name = data.get("name", "")
                 svc.delete_list(sub, name)
-                return done(PATH, "deleted", l=name)
+                return done(PATH, "deleted", sub, name=name)
             rows = picked(fields, binder_library.all_rows(svc, sub))
             if not rows:
-                return failed(back, "Select at least one card first.")
+                return failed(back, "Select at least one card first.", sub)
             watched = [r["watch_id"] for r in rows if r["watch_id"]]
             if action == "alerts":
                 if not watched:
-                    return failed(back, "None of those cards is watched yet. Watch them first.")
+                    return failed(back, "None of those cards is watched yet. Watch them first.", sub)
                 before = svc.watch_state(sub, watched)
                 if data.get("mode") == "own":
                     svc.set_alerts_many(
@@ -988,7 +1032,7 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
                     svc.use_defaults_many(sub, watched)
                     word = "defaults"
                 token = _keep_undo(sub, "state", {"watches": before})
-                return done(back, word, n=plural(len(watched), "card"), undo=token)
+                return done(back, word, sub, n=len(watched), undo=token)
             if action == "list":
                 name = prices.clean_list_name(data.get("new_list") or data.get("list") or "")
                 before = svc.watch_state(sub, watched) if watched else []
@@ -1003,8 +1047,8 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
                 if owned_only:
                     svc.put_owned_in_list(sub, [x for xs in was.values() for x in xs], name)
                 token = _keep_undo(sub, "state", {"watches": before, "owned": was})
-                n = plural(len(watched) + len(owned_only), "card")
-                return done(back, "list" if name else "nolist", n=n, l=name, undo=token)
+                n = len(watched) + len(owned_only)
+                return done(back, "list" if name else "nolist", sub, n=n, name=name, undo=token)
             if action == "watch":
                 items = [
                     {
@@ -1018,19 +1062,19 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
                     if not r["watch_id"] and r["scryfall_id"]
                 ]
                 if not items:
-                    return failed(back, "Those cards are watched already.")
+                    return failed(back, "Those cards are watched already.", sub)
                 made = svc.watch_printings(sub, items)
                 token = _keep_undo(sub, "watch", made)
-                return done(back, "watch", n=plural(len(made), "card"), undo=token)
+                return done(back, "watch", sub, n=len(made), undo=token)
             if action == "unwatch":
                 if not watched:
-                    return failed(back, "None of those cards is watched.")
+                    return failed(back, "None of those cards is watched.", sub)
                 token, gone = svc.stop_watching(sub, watched)
                 keep = _keep_undo(sub, "unwatch", token)
-                return done(back, "unwatch", n=plural(len(gone), "card"), undo=keep)
-            return failed(back, "Choose what to do with the selected cards.")
+                return done(back, "unwatch", sub, n=len(gone), undo=keep)
+            return failed(back, "Choose what to do with the selected cards.", sub)
         except DeckError as exc:
-            return failed(back, str(exc))
+            return failed(back, str(exc), sub)
 
     @server.custom_route(SETTINGS, methods=["GET"], include_in_schema=False)
     async def settings_get(request: Request) -> Response:
@@ -1043,9 +1087,13 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
         qp = request.query_params
         notice = ""
         if qp.get("ok") == "settings":
-            notice = ui.notice(OK_WORDS["settings"].format(n=qp.get("n") or ""), "ok", role="status")
+            n = _count(qp.get("n"))
+            notice = ui.notice(
+                OK_WORDS["settings"].format(n=n) if n else "Watch settings saved.", "ok", role="status"
+            )
         elif qp.get("err"):
-            notice = ui.notice(qp.get("e") or "Those settings could not be saved.", "error", role="alert")
+            said = _read_note(sub, qp.get("m") or "")
+            notice = ui.notice(said or "Those settings could not be saved.", "error", role="alert")
         body = settings_html(svc.defaults_of(sub), svc.defaults_split(sub), _csrf(s, sid) or "", notice)
         return page("Watch settings", body, sub=sub, sid=sid)
 
@@ -1060,9 +1108,7 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
         raw = await read_limited(request, 8192)
         data = {k: v[0] for k, v in parse_qs((raw or b"").decode("utf-8", "replace")).items()}
         if raw is None or not csrf_form_ok(s, sid, data):
-            return RedirectResponse(
-                SETTINGS + "?" + urlencode({"err": "1", "e": "This form expired. Reload the page."}), 303
-            )
+            return RedirectResponse(SETTINGS + "?err=1", 303)  # the page's own words: not saved
         try:
             values = prices._alerts(
                 data.get("alert_pct"), None, None, data.get("alert_drop"), data.get("alert_rise")
@@ -1086,8 +1132,8 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
             svc.apply_defaults(sub)
             binder_library.forget(sub)
         except DeckError as exc:
-            return RedirectResponse(SETTINGS + "?" + urlencode({"err": "1", "e": str(exc)}), 303)
+            return RedirectResponse(
+                SETTINGS + "?" + urlencode({"err": "1", "m": _keep_note(sub, str(exc))}), 303
+            )
         follow, _own = svc.defaults_split(sub)
-        return RedirectResponse(
-            SETTINGS + "?" + urlencode({"ok": "settings", "n": plural(follow, "card")}), 303
-        )
+        return RedirectResponse(SETTINGS + "?" + urlencode({"ok": "settings", "n": str(follow)}), 303)

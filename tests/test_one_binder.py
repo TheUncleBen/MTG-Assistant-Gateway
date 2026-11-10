@@ -446,3 +446,53 @@ async def test_the_lists_hub_holds_the_archidekt_lists_only(stack: Stack, monkey
         assert "href='/binder'" in r.text  # back to the Binder
     finally:
         await b.aclose()
+
+
+async def test_a_binder_notice_never_shows_words_from_the_address(stack: Stack, monkeypatch) -> None:
+    """Audit AT2 (0.7.47): a link made elsewhere can't put its own words in a notice on the
+    Binder's pages. The address carries a code, a count in digits and a token for words kept on
+    the server for the member who made the change; the page words the notice itself."""
+    Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        _seed(stack)
+        planted = "Your account is locked call 555 0100"
+        for url in (
+            f"/binder?err=1&e={planted}",
+            f"/binder?ok=list&n=2&l={planted}",
+            f"/binder?ok=watch&n={planted}",
+            f"/binder?err=1&m={planted}",
+            f"/binder/settings?err=1&e={planted}",
+            f"/binder/settings?ok=settings&n={planted}",
+        ):
+            page = await b.http.get(url.replace(" ", "+"))
+            assert page.status_code == 200 and "locked" not in page.text, url
+        # the page's own words for a failure it has no kept words for
+        page = await b.http.get("/binder?err=1&e=x")
+        assert "That did not work. Try again." in page.text
+        # a real change: the list's name and the count come back from the server's side
+        r = await _post(b, "/binder", {"back": "/binder", "action": "newlist", "name": "Trade bait"})
+        loc = r.headers["location"]
+        assert "Trade" not in loc.split("?", 1)[1].replace("list=Trade+bait", ""), loc
+        page = await b.http.get(loc)
+        assert "List “Trade bait” made." in page.text
+        r = await _post(b, "/binder", {"back": "/binder", "action": "watch", "keys": "o:s3:nonfoil"})
+        assert "n=1" in r.headers["location"]
+        page = await b.http.get(r.headers["location"])
+        assert "1 card added to your watchlist." in page.text
+        # a failure's words are the server's, under a token
+        r = await _post(b, "/binder", {"back": "/binder", "action": "watch", "keys": ""})
+        assert "Select" not in r.headers["location"]
+        page = await b.http.get(r.headers["location"])
+        assert "Select at least one card first." in page.text
+        # another member can't read them back
+        other = r.headers["location"].split("m=")[1].split("&")[0]
+        from mtg_gateway import binder_hub
+
+        assert binder_hub._read_note("someone-else", other) is None
+        r = await _post(b, "/binder/settings", {"alert_drop": "abc"})
+        assert "abc" not in r.headers["location"]
+        page = await b.http.get(r.headers["location"])
+        assert "The drop percentage must be a number." in page.text
+    finally:
+        await b.aclose()

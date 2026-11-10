@@ -23,7 +23,7 @@
   function money(v) { return "$" + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function back() {
     var u = new URL(location.href);
-    ["ok", "err", "e", "n", "l", "undo", "t", "box", "from", "part"].forEach(function (k) { u.searchParams.delete(k); });
+    ["ok", "err", "m", "n", "undo", "t", "box", "from", "part"].forEach(function (k) { u.searchParams.delete(k); });
     return u.pathname + u.search;
   }
 

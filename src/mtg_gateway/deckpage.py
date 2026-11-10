@@ -2876,10 +2876,13 @@ html[data-card-size=s] .gf-c .kebab{display:none}
   background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
   user-select:none;-webkit-touch-callout:none;transition:transform .15s}
 .gf-card img{width:100%;height:100%;object-fit:cover;display:block}
+/* a card without a picture keeps its words inside the card at every size and text size: a word
+   wider than the card breaks rather than pushing the placeholder past the card (and, on the last
+   card of a row at 344 px with 200% text, past the window) */
 .gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;min-height:100%;padding:.35rem;
-  font-size:.78rem;text-align:left;line-height:1.2}
-.gf-card .ph .nm{overflow-wrap:break-word}
-.gf-card .ph .ty{color:var(--text);overflow-wrap:break-word}
+  font-size:.78rem;text-align:left;line-height:1.2;min-width:0;max-width:100%;box-sizing:border-box}
+.gf-card .ph .nm{min-width:0;overflow-wrap:anywhere}
+.gf-card .ph .ty{color:var(--text);min-width:0;overflow-wrap:anywhere}
 /* a placeholder tile (no picture) grows taller than the card's ratio when its words need it
    (200% text), instead of clipping them (final polish P-12) */
 .gf-card:has(> .ph){min-height:auto;overflow:visible;display:flex;flex-direction:column}
@@ -2914,6 +2917,14 @@ html[data-card-size=s] .gf-c .kebab{display:none}
   .gf-row{gap:4px;grid-template-columns:repeat(4,minmax(0,1fr))}
   html[data-card-size=s] .gf-row{grid-template-columns:repeat(7,minmax(0,1fr))}
   html[data-card-size=l] .gf-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+  /* a row with a card shown without its picture: the same 7, 4 or 3 a row at the usual text size,
+     fewer when the text is larger (200%), so the card's words keep whole syllables rather than two
+     letters a line */
+  .gf-row:has(.ph){grid-template-columns:repeat(auto-fill,minmax(max(calc((100% - 12px) / 4),4em),1fr))}
+  html[data-card-size=s] .gf-row:has(.ph){
+    grid-template-columns:repeat(auto-fill,minmax(max(calc((100% - 24px) / 7),2.6em),1fr))}
+  html[data-card-size=l] .gf-row:has(.ph){
+    grid-template-columns:repeat(auto-fill,minmax(max(calc((100% - 8px) / 3),5.5em),1fr))}
   .gf-card .ph{padding:3px;font-size:.6rem}
   .gf-size{margin-left:0;flex-basis:100%}
 }
@@ -3791,7 +3802,8 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 /* a tile without a picture: its name starts below the 38 px quantity corner (and clear of the
    30 px companion corner), and its type line sits above the owned dot and the finish badge in the
    bottom corners, at every card size (0.7.43: the dot sat on "Artifact") */
-.deckview .c .ph{position:relative;min-height:100%;display:flex;flex-direction:column;
+.deckview .c .ph{position:relative;min-height:100%;min-width:0;max-width:100%;box-sizing:border-box;
+  display:flex;flex-direction:column;
   justify-content:space-between;
   padding:max(12%,3.04em) 8% max(8%,2.33em);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
