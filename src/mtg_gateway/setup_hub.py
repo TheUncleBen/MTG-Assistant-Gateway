@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import segno
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
@@ -116,6 +117,7 @@ class Block:
     page: str = ""
     link: Link | None = None
     warn: str | None = None  # a warning under the block's text (a notice on the page)
+    css_class: str = ""  # another class on the card (the page only)
 
 
 @dataclass(frozen=True)
@@ -192,7 +194,8 @@ def _abs(href: str, public_url: str) -> str:
 
 def block_html(block: Block, heading: str | None, ctx: Context) -> str:
     h = block.title or heading
-    out = [f"<div class='card'>{f'<h2>{html.escape(h)}</h2>' if h else ''}"]
+    cls = f"card {block.css_class}".strip()
+    out = [f"<div class='{cls}'>{f'<h2>{html.escape(h)}</h2>' if h else ''}"]
     out += [f"<p>{inline_html(p, ctx.public_url)}</p>" for p in block.paras]
     if block.warn:
         out.append(f"<p class='notice warn stepnote'>{inline_html(block.warn, ctx.public_url)}</p>")
@@ -627,6 +630,7 @@ def _android(ctx: Context) -> Section:
         EXTRAS["android"],
         (
             intro,
+            *((_phone_code(ctx),) if ctx.page else ()),
             Block(
                 "Install",
                 page=app.get("facts_html", ""),
@@ -671,6 +675,28 @@ def _android(ctx: Context) -> Section:
                 ),
             ),
         ),
+    )
+
+
+def phone_code_svg(url: str) -> str:
+    """The QR code of ``url``, as inline SVG: dark on white in either theme, so any phone camera reads it."""
+    return segno.make_qr(url, error="m").svg_inline(scale=5, border=4, dark="#000", light="#fff")
+
+
+def _phone_code(ctx: Context) -> Block:
+    """0.7.47 (owner, 2026-11-10: installing as easy as possible): reading this page on a computer,
+    the phone's camera opens it on the phone instead of typing the address. Phones don't show it
+    (theme.py, .qr-desk), and the Markdown leaves it out."""
+    url = f"{ctx.public_url}/install?for=android"
+    code = phone_code_svg(url)
+    label = html.escape(f"QR code for {url}", quote=True)
+    return Block(
+        "On a computer?",
+        paras=(
+            "Point your Android phone's camera at this code to open this page on the phone, then sign in.",
+        ),
+        page=f"<div class='qr-code' role='img' aria-label='{label}'>{code}</div>",
+        css_class="qr-desk",
     )
 
 
