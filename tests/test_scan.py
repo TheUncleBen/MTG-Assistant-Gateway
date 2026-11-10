@@ -1316,6 +1316,21 @@ async def test_foil_on_a_nonfoil_only_printing_is_named_and_not_claimed(stack: S
     assert out["decklist_text"] == "1 Sol Ring (ltc) 284\n"
 
 
+async def test_a_saved_session_keeps_the_foil_it_was_given(stack: Stack) -> None:
+    """Live test 11-10: save_scan_session dropped each card's foil, so '*F*' came back as a
+    nonfoil line in decklist_text and an addition without a finish in changes."""
+    token = await mcp_token(stack.h)
+    saved = (
+        await call(stack.h, token, "save_scan_session", {"name": "Foil", "text": "1 Sol Ring *F*\n1 Island"})
+    )["structuredContent"]
+    sol, island = saved["items"]
+    assert sol["foil"] is True and island.get("foil") is not True
+    assert "1 Sol Ring (c21) 263 *F*" in saved["decklist_text"].splitlines()
+    assert {c["name"]: c.get("finish") for c in saved["changes"]}["Sol Ring"] == "foil"
+    again = (await call(stack.h, token, "get_scan_session", {"session": "Foil"}))["structuredContent"]
+    assert again["items"][0]["foil"] is True and again["decklist_text"] == saved["decklist_text"]
+
+
 async def test_card_printings_lists_released_paper_first_and_clear_counts(stack: Stack) -> None:
     token = await mcp_token(stack.h)
     out = (await call(stack.h, token, "card_printings", {"name": "Swamp", "limit": 2}))["structuredContent"]

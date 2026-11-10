@@ -119,6 +119,11 @@ before it adds one.
   card's back face or second half ("Insectile Aberration", "Ice") finds its card. An exact lookup
   with a set code keeps that set.
 - Anything a page marks as hidden stays hidden (the deck header's "Est unknown" showed anyway).
+- A scan session an assistant saves keeps each card's foil ("*F*"), so a deck or binder made
+  from it adds the foil copy.
+- A deck made or edited from a scan session says which scanned cards were left out because no
+  card was found for them yet.
+- A deck-size note says "1 card", not "1 cards".
 
 ## [0.7.46] - 2026-10-28
 

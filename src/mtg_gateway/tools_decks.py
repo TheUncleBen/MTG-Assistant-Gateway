@@ -416,13 +416,22 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         }
 
     def _scan_warnings(session: dict[str, Any]) -> list[str]:
-        """The scan session's cards that were matched by a corrected name: the user confirms them."""
+        """The scan session's cards that were matched by a corrected name (the user confirms them)
+        and the ones with no card yet, which are left out (the user picks or drops them)."""
         out = []
+        missing = []
         for it in session.get("items", []):
             card = it.get("card") or {}
             if card and it.get("status") == "fuzzy":
                 note = it.get("note") or f"“{card.get('name')}” was matched from a misspelt name"
                 out.append(f"{note}; confirm it with the user")
+            elif not card or it.get("status") == "conflict":
+                missing.append(f"{it.get('quantity', 1)} “{it.get('name') or 'unnamed'}”")
+        if missing:
+            out.append(
+                "left out because the scan has not matched them to a card yet: "
+                f"{', '.join(missing)}; ask the user which card each is (they can pick it on the Scan page)"
+            )
         return out
 
     async def _new_deck_args(
