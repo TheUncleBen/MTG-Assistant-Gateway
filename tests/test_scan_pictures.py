@@ -425,6 +425,26 @@ async def test_a_kept_picture_is_stored_as_a_plain_jpeg(stack: Stack) -> None:
     await b.aclose()
 
 
+async def test_a_kept_picture_is_never_larger_than_an_upload(stack: Stack) -> None:
+    """A small PNG of a fine pattern turns into a large JPEG (the audit saw 20 KB become 1.95 MB):
+    the kept picture is shrunk until it fits the upload limit."""
+    from PIL import Image
+
+    b = Browser(stack.h)
+    await b.login("/scan")
+    board = Image.new("1", (2000, 2000))
+    board.putdata([(x + y) % 2 for y in range(2000) for x in range(2000)])
+    png = io.BytesIO()
+    board.save(png, "PNG", optimize=True)
+    assert len(png.getvalue()) < pic.MAX_UPLOAD
+    r = await post_picture(b, "/scan/api/miss", png.getvalue(), kind="image/png")
+    assert r.status_code == 200, r.text
+    kept = stack.gw.scan.misses.picture(r.json()["id"])
+    assert len(kept) <= pic.MAX_UPLOAD, len(kept)
+    assert max(Image.open(io.BytesIO(kept)).size) <= pic.KEEP_SIDE
+    await b.aclose()
+
+
 async def test_the_hourly_purge_deletes_missed_pictures_past_30_days(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:

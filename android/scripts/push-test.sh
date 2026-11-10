@@ -149,14 +149,28 @@ connected() { [ "$(state connections)" -ge 1 ]; }
 # that never comes back from a reboot hung the CI step until its 30 minutes ran out.
 boot() {
   timeout "${PUSH_TEST_BOOT_WAIT:-240}" adb wait-for-device || return 1
-  until_ok '[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]' 300 || return 1
+  until_ok '[ "$(timeout 10 adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]' 300 || return 1
   adb reverse "tcp:$PORT" "tcp:$PORT"
+}
+# After adb reboot the emulator sometimes boots but adb never sees it again (CI run 42712220091:
+# "did not come back", then the job hung). One bounded retry: restart adb's server, which finds the
+# emulator's console port again, and wait once more, longer. What adb sees goes in the run's files.
+boot_after_reboot() {
+  boot && return 0
+  { echo "first wait failed at $(date -u +%T)"; adb devices -l; } >> "$OUT/reboot.txt" 2>&1
+  timeout 20 adb kill-server >/dev/null 2>&1
+  timeout 20 adb start-server >/dev/null 2>&1
+  PUSH_TEST_BOOT_WAIT=$(( ${PUSH_TEST_BOOT_WAIT:-240} * 3 / 2 )) boot && return 0
+  { echo "second wait failed at $(date -u +%T)"; adb devices -l; } >> "$OUT/reboot.txt" 2>&1
+  return 1
 }
 
 PUSH_TEST_KEY="$KEY" PUSH_TEST_KEEPALIVE=5 PUSH_TEST_STATIC="$ROOT/../src/mtg_gateway/static" python3 "$HERE/push_test_gateway.py" "$CERTS/leaf.pem" "$CERTS/leaf.key" "$PORT" \
   > "$OUT/gateway.log" 2>&1 &
 GW=$!
-trap 'kill $GW 2>/dev/null; adb logcat -d > "$OUT/logcat.txt" 2>/dev/null' EXIT
+# Bounded: with no device (an emulator that didn't come back) adb logcat waits for one for ever,
+# which held a failed run until the job's 30 minutes ran out.
+trap 'kill $GW 2>/dev/null; timeout 30 adb logcat -d > "$OUT/logcat.txt" 2>/dev/null' EXIT
 sleep 1
 boot || { echo "FAIL  start: the emulator did not start"; exit 1; }
 
@@ -337,7 +351,7 @@ if until_ok 'shows "After update"' 30; then result "message after an update" ok;
 # -- a restart of the phone
 before=$(state connects)
 adb reboot
-if ! boot; then
+if ! boot_after_reboot; then
   result "after a reboot" no "the emulator did not come back from the reboot"
   exit 1
 fi

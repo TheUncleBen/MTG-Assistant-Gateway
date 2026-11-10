@@ -199,12 +199,24 @@ def decode_picture(data: bytes, max_side: int = 2000) -> Any | None:
         return None
 
 
-def as_plain_jpeg(im: Any, quality: int = 85) -> bytes:
+KEEP_SIDE = 1000  # longest side of a kept missed picture (the page sends 488 x 680)
+
+
+def as_plain_jpeg(im: Any, *, max_side: int = KEEP_SIDE, max_bytes: int = MAX_UPLOAD) -> bytes:
     """A decoded picture saved again as a plain JPEG: no EXIF, GPS or other metadata from the
-    upload is kept, and what is stored is always the JPEG it is served as."""
-    out = BytesIO()
-    im.save(out, "JPEG", quality=quality)
-    return out.getvalue()
+    upload is kept, and what is stored is always the JPEG it is served as. It is never larger than
+    an upload may be: shrunk to ``max_side`` and saved at a lower quality until it fits (a small
+    PNG of a fine pattern can turn into a JPEG of 2 MB)."""
+    im = im.copy()
+    side = max_side
+    while True:
+        im.thumbnail((side, side))
+        for quality in (85, 70, 55, 40, 25):
+            out = BytesIO()
+            im.save(out, "JPEG", quality=quality)
+            if out.tell() <= max_bytes or side <= 64:
+                return out.getvalue()
+        side //= 2
 
 
 class PictureIndex:

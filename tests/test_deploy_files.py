@@ -372,6 +372,70 @@ def test_the_push_test_gives_up_on_an_emulator_that_never_comes_back(tmp_path: P
     assert time.monotonic() - started < 30
 
 
+def _push_test_boot(tmp_path: Path, adb: str) -> tuple[str, float, str]:
+    """Run push-test.sh's boot_after_reboot against a stand-in adb; its stdout, seconds, calls."""
+    import re
+    import subprocess
+    import time
+
+    script = (ROOT / "android/scripts/push-test.sh").read_text(encoding="utf-8")
+    parts = [
+        re.search(r"(?m)^until_ok\(\) .*$", script),
+        re.search(r"(?ms)^boot\(\) \{\n.*?^\}\n", script),
+        re.search(r"(?ms)^boot_after_reboot\(\) \{\n.*?^\}\n", script),
+    ]
+    assert all(parts)
+    fake = tmp_path / "bin"
+    fake.mkdir(exist_ok=True)
+    (fake / "adb").write_text(adb)
+    (fake / "adb").chmod(0o755)
+    run = f'PORT=1\nOUT={tmp_path}\nboot_after_reboot; echo "boot=$?"\n'
+    body = "\n".join(p.group(0) for p in parts) + "\n" + run
+    started = time.monotonic()
+    r = subprocess.run(
+        ["bash", "-c", body],
+        capture_output=True,
+        text=True,
+        timeout=90,
+        env={"PATH": f"{fake}:/usr/bin:/bin", "PUSH_TEST_BOOT_WAIT": "2", "T": str(tmp_path)},
+    )
+    calls = (tmp_path / "calls").read_text() if (tmp_path / "calls").exists() else ""
+    return r.stdout + r.stderr, time.monotonic() - started, calls
+
+
+def test_after_a_reboot_the_push_test_restarts_adb_once_and_waits_again(tmp_path: Path):
+    """An emulator that boots again but that adb no longer sees (CI run 42712220091: "did not come
+    back from the reboot") is found again by restarting adb's server, once; the run goes on."""
+    adb = (
+        "#!/usr/bin/env bash\n"
+        'echo "$1" >> "$T/calls"\n'
+        '[ "$1" = start-server ] && touch "$T/seen"\n'
+        '[ "$1" = wait-for-device ] && [ ! -f "$T/seen" ] && exec sleep 600\n'
+        '[ "$1" = shell ] && echo 1\n'
+        "exit 0\n"
+    )
+    out, took, calls = _push_test_boot(tmp_path, adb)
+    assert "boot=0" in out, out
+    assert calls.split().count("kill-server") == 1 and calls.split().count("start-server") == 1, calls
+    assert "first wait failed" in (tmp_path / "reboot.txt").read_text()
+    assert took < 30
+
+
+def test_after_a_reboot_the_push_test_gives_up_after_one_retry(tmp_path: Path):
+    """One retry only, each wait bounded: an emulator that is really gone is one FAIL line, and the
+    exit trap's logcat (which waits for a device for ever without one) is bounded too."""
+    adb = (
+        '#!/usr/bin/env bash\necho "$1" >> "$T/calls"\n[ "$1" = wait-for-device ] && exec sleep 600\nexit 0\n'
+    )
+    out, took, calls = _push_test_boot(tmp_path, adb)
+    assert "boot=1" in out, out
+    assert calls.split().count("wait-for-device") == 2, calls
+    assert "second wait failed" in (tmp_path / "reboot.txt").read_text()
+    assert took < 30
+    script = (ROOT / "android/scripts/push-test.sh").read_text(encoding="utf-8")
+    assert "timeout 30 adb logcat -d" in script and "if ! boot_after_reboot; then" in script
+
+
 def test_every_variable_the_gateway_reads_is_documented() -> None:
     """0.7.46 sweep B-10: each variable config.py reads is either passed by both stack files (and
     so listed in their examples, above) or, when only a test stack sets it, named in both example
