@@ -1,5 +1,6 @@
 """The UI matrix: every page of the site drawn on every kind of screen a member uses (a phone in
-the browser, the phone app, a folded and an open Fold, a tablet, a laptop and a wide desktop), in
+the browser, the phone app, a folded Fold, an open Fold at 600 to 984 px, a tablet, a laptop and a
+wide desktop), in
 the light and the dark theme, at 100% and 200% text, and measured against the UI standard.
 
 Two ways in:
@@ -91,6 +92,13 @@ DISPLAYS = [
     Display("phone", "Phone, browser (360)", 360, 780, True),
     Display("app", "Phone, app (412)", 412, 915, True, APP_UA),
     Display("fold-cover", "Fold folded, app (360)", 360, 764, True, FOLD_UA),
+    # an open Fold beside the app's rail, in split screen, and small tablets: 600 to 900 px wide
+    # (audit AU2: the matrix had nothing between 412 and 834)
+    Display("fold-600", "Fold open, split (600)", 600, 1000, True, FOLD_UA),
+    Display("fold-673", "Fold open, split (673)", 673, 1000, True, FOLD_UA),
+    Display("fold-720", "Fold open, split (720)", 720, 1000, True, FOLD_UA),
+    Display("fold-800", "Fold open, split (800)", 800, 1000, True, FOLD_UA),
+    Display("fold-884", "Fold open, app (884)", 884, 1000, True, FOLD_UA),
     Display("fold-open", "Fold open, app (984)", 984, 1016, True, FOLD_UA),
     Display("tablet", "Tablet (834)", 834, 1194, True, IPAD_UA),
     Display("laptop", "Laptop (1280)", 1280, 800, False),
@@ -343,9 +351,22 @@ CHECKS = (
     for (const r of inflow) if (r.right <= roomR) { L = Math.min(L, r.left); R = Math.max(R, r.right); }
     const leaves = main.querySelectorAll('h1,h2,h3,h4,p,li,a,button,input,select,textarea,img,table,'
       + 'summary,label,.row,section,article,[class*=card],[class*=tile],[class*=list] > *');
+    const TEXT = /^(H1|H2|H3|H4|P|LI|LABEL|SUMMARY)$/;
     for (const el of leaves) {
       if (!visible(el) || pinned(el)) continue;
-      const r = el.getBoundingClientRect();
+      // a heading or a paragraph is a block as wide as its parent: its words' own extent is what
+      // the eye sees (0.7.46's Assistants: a full-width h1 over a 40rem column at the left read as
+      // centred, audit AU1)
+      let r = el.getBoundingClientRect();
+      if (TEXT.test(el.tagName)) {
+        const rg = document.createRange();
+        rg.selectNodeContents(el);
+        const t = rg.getBoundingClientRect();
+        // within the element's own box: words cut off by an ellipsis or a hidden overflow
+        // reach past it in the range, not on the screen
+        const l = Math.max(t.left, r.left), rt = Math.min(t.right, r.right);
+        if (t.width > 0 && t.height > 0 && rt > l) r = {left: l, right: rt, width: rt - l};
+      }
       if (r.right <= 0 || r.left >= roomR || r.width >= roomR - room - 2) continue;
       if (inScroller(el)) continue;  // a chip row that scrolls sideways reaches past the edge by design
       L = Math.min(L, r.left); R = Math.max(R, r.right);

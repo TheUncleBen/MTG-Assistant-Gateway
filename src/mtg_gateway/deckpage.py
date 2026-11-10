@@ -4010,7 +4010,10 @@ html.cardview-open{overflow:hidden}
 .cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
   font-variant-numeric:tabular-nums}
 /* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
-.deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
+/* a column grows with the text (7.2em is under 170 px at the normal size), so at 200% a tile without
+   a picture still holds a one-word name ("Terramorphic") whole (884 px, audit AU2) */
+.deckview.grid .cards{display:grid;gap:1rem;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(170px,7.2em)),1fr))}
 @media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
   .deckview.stacks{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem} }
 /* a stack never widens its column past the window (its header's name ellipsises; 0.7.29 fix: at
@@ -4272,8 +4275,10 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   html:has(.editbar){scroll-padding-top:120px} }
 .editbar button{margin:0}
 .editbar .count{color:inherit;opacity:.85}
+/* one line while it fits, its words wrapped inside the bar when not (600 px at 200% text ran it
+   11 px out of the window, audit AU2) */
 .editbar .backup{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.9rem;
-  opacity:.9;white-space:nowrap}
+  opacity:.9;max-width:100%}
 .editbar .backup input{margin:0}
 .editbar .status{margin:0;flex-basis:100%}
 .editbar .status:empty{display:none}
@@ -4657,7 +4662,10 @@ html.printpick-open{overflow:hidden}
    narrower list, the count on a row of its own. The widths are in rem, so they grow with the
    text; at the normal text size neither applies where the rule above does not. */
 ul.erows{container-type:inline-size}
-@container (max-width:30rem){
+/* 38rem: the picture, the count, the category and the menu take about 28rem, which leaves the name
+   10rem at least; at 30rem an open Fold's 462 px list (600 px window) left it 61 px and every name
+   broke inside its words (audit AU2) */
+@container (max-width:38rem){
   .erow{grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}

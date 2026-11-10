@@ -444,4 +444,60 @@
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
   }
+
+  // Rows of buttons that wrap never leave one alone on its last line (audit AU2: at 600 px the deck
+  // page's More and a report's Delete… sat by themselves under three buttons). Laid out as they
+  // are, a row whose last line holds less than half of its first becomes an even grid: four
+  // buttons two and two. Measured again whenever the row's room or its text size changes. A row
+  // that is a grid of its own (the deck page's buttons on a phone) is left as it is.
+  var EVEN_ROWS = ".banner .controls .primary, .rv-page .rv-acts, [data-even-rows]";
+  function rowItems(row) {
+    var out = [];
+    Array.prototype.forEach.call(row.children, function (c) {
+      var cs = getComputedStyle(c);
+      if (cs.display === "contents") { out = out.concat(rowItems(c)); return; }
+      if (cs.display === "none" || cs.position === "absolute" || cs.position === "fixed" || !c.getClientRects().length) return;
+      out.push(c);
+    });
+    return out;
+  }
+  function evenRow(row) {
+    row.classList.remove("even-rows");
+    if (getComputedStyle(row).display !== "flex") return;
+    var items = rowItems(row);
+    if (items.length < 3) return;
+    var tops = items.map(function (c) { return Math.round(c.getBoundingClientRect().top); });
+    var firstTop = Math.min.apply(null, tops), lastTop = Math.max.apply(null, tops);
+    if (lastTop - firstTop < 4) return;
+    var lines = 1, seen = [firstTop];
+    tops.forEach(function (t) { if (seen.every(function (u) { return Math.abs(u - t) > 3; })) { seen.push(t); lines++; } });
+    var first = tops.filter(function (t) { return Math.abs(t - firstTop) <= 3; }).length;
+    var last = tops.filter(function (t) { return Math.abs(t - lastTop) <= 3; }).length;
+    if (last * 2 >= first) return;
+    row.style.setProperty("--even-cols", String(Math.ceil(items.length / lines)));
+    row.classList.add("even-rows");
+  }
+  if (window.ResizeObserver) {
+    var evenRO = new ResizeObserver(function (entries) {
+      var rows = [];
+      entries.forEach(function (e) {
+        var r = e.target.matches(EVEN_ROWS) ? e.target : e.target.querySelector(EVEN_ROWS);
+        if (r && rows.indexOf(r) < 0) rows.push(r);
+      });
+      rows.forEach(evenRow);
+    });
+    var watchRows = function () {
+      Array.prototype.forEach.call(document.querySelectorAll(EVEN_ROWS), function (row) {
+        if (row.__evenWatched) return;
+        row.__evenWatched = true;
+        evenRO.observe(row);
+        if (row.parentElement) evenRO.observe(row.parentElement);
+        evenRow(row);
+      });
+    };
+    watchRows();
+    // a row a script fills later (the deck page adds Test and play and More)
+    document.addEventListener("DOMContentLoaded", watchRows);
+    window.addEventListener("load", watchRows);
+  }
 })();

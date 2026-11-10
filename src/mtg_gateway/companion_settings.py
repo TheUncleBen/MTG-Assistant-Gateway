@@ -196,7 +196,10 @@ SETTINGS_CSS = """
 /* the box (or the themed select's button, or the suggest wrapper) takes the room, the button its
    own; at large text the button wraps under the box instead of leaving the window */
 .ds .ds-inline > *{flex:1 1 12rem;min-width:0}
-.ds .ds-inline > .btn,.ds .ds-inline > button{flex:0 0 auto;width:auto;margin:0;white-space:nowrap}
+/* as wide as its words, on one line while that fits its row; wider than the row, it wraps its
+   words instead of running out of the window (600 px at 200% text: 35 px, audit AU2) */
+.ds .ds-inline > .btn,.ds .ds-inline > button{flex:0 0 auto;width:auto;margin:0;max-width:100%;
+  white-space:normal}
 .ds .ds-inline .msel-btn,.ds .ui-row .ctl .msel-btn{max-width:100%}
 .ds ul.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .75rem;padding:0}
 .ds .follownote{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;margin:.75rem 0 0}

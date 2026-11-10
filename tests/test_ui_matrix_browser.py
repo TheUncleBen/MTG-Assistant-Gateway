@@ -1,11 +1,12 @@
 """The UI matrix's checks (tests/ui_matrix.py) in CI: every page and its opened states (the card
-viewer, the card menu, the filter sheets), on the phone app, an open Fold and a laptop, in the light
+viewer, the card menu, the filter sheets), on the phone app, an open Fold at 600, 884 and 984 px
+and a laptop, in the light
 and the dark theme, with the phone also at 200% text, and none may show a finding: content leaning
 to one side or lopsided, a hole beside a shorter panel, a control stranded on a line of its own, a
 blue link, text under 4.5:1, a browser-drawn control, a raw program value or a "1 cards", a touch
 target under 44 px, a word broken in two, or a box a phone could take for a payment card field.
 
-``python -m tests.ui_matrix OUT_DIR`` runs the whole matrix (seven screens) with screenshots before
+``python -m tests.ui_matrix OUT_DIR`` runs the whole matrix (twelve screens) with screenshots before
 a push; this is its CI share, split by screen so pytest-xdist runs the parts side by side. Skipped
 without a Chromium build."""
 
@@ -22,6 +23,8 @@ pytest.importorskip("playwright")
 
 SCREENS = {
     "app": ([d for d in M.DISPLAYS if d.key == "app"], (1, 2)),
+    "fold-600": ([d for d in M.DISPLAYS if d.key == "fold-600"], (1, 2)),
+    "fold-884": ([d for d in M.DISPLAYS if d.key == "fold-884"], (1, 2)),
     "fold-open": ([d for d in M.DISPLAYS if d.key == "fold-open"], (1,)),
     "laptop": ([d for d in M.DISPLAYS if d.key == "laptop"], (1,)),
 }
@@ -233,3 +236,36 @@ def test_the_menu_pass_finds_each_kind_of_misplaced_menu() -> None:
     ):
         assert want in got, (want, sorted(got))
     assert res.errors == []
+
+
+LEFT_HUG = """
+<!doctype html><html><head><meta name=viewport content='width=device-width'>
+<style>body{margin:0;font:16px sans-serif;background:#fff;color:#111}
+nav.rail{position:fixed;left:0;top:0;bottom:0;width:80px;background:#333}
+main{margin-left:80px;padding:0 14px} h1{margin:16px 0}
+.col{max-width:560px;margin:0} .card{background:#eee;border-radius:8px;padding:12px;margin:0 0 12px}
+</style></head><body><nav class=rail></nav><main><h1>Assistants</h1>
+<div class=col><div class=card>Default for new assistants</div><div class=card>Claude</div>
+<p>How much each assistant may change on Archidekt without asking you first.</p></div>
+</main></body></html>
+"""
+
+
+@pytest.mark.parametrize("width", [800, 984])
+def test_off_centre_sees_a_column_at_the_left_under_a_full_width_heading(width: int) -> None:
+    """0.7.46's Assistants (audit AU1): a 40rem column (560 px at the site's 14 px text) held at the
+    left beside the rail, under an h1
+    as wide as the page. The h1's block box spans the room, so measured by boxes the page read as
+    centred; measured by its words, the column's lean shows."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        page = browser.new_page(viewport={"width": width, "height": 900})
+        page.set_content(LEFT_HUG)
+        kinds = {f["kind"] for f in page.evaluate(M.CHECKS, {"touch": True, "text": 1})}
+        browser.close()
+    assert "off-centre" in kinds, kinds

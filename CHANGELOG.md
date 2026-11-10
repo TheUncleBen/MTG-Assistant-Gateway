@@ -77,6 +77,14 @@ placeholders showed, and no blue links.
 - Assistants' Guided setup and Disconnect all assistants span the column, as Sign out does on
   Account.
 - In Deck stats, Lands only lines up with the row above when large text wraps it to its own line.
+- On an open Fold, a small tablet or a split screen (600 to 900 px):
+  - A row of buttons no longer leaves one alone on its last line. The deck page's buttons and a
+    report's Markdown, HTML page, Copy and Delete… sit two and two.
+  - The deck editor's card rows stack, so a card's name is never squeezed until it breaks inside
+    a word.
+  - At large text, the editor's "Also keep a backup copy" and the buttons in Deck settings wrap
+    their words instead of running past the window.
+  - In the grid view at large text, the tiles grow with the text, so a long card name stays whole.
 - At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
   cover the sheet's last control (the card size).
 - Long names break between their parts instead of inside a word (a member's name, a printing's
