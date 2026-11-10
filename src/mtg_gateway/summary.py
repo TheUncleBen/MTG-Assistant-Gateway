@@ -64,6 +64,10 @@ class Summaries:
             cards.append(
                 {
                     "name": w["name"],
+                    # which printing: a watchlist can hold one card's printings several times
+                    "watch_id": w.get("watch_id"),
+                    "set": w.get("set"),
+                    "collector_number": w.get("collector_number"),
                     "finish": w["finish"],
                     "currency": view["currency"],
                     "from": before,
@@ -197,10 +201,12 @@ def text(s: dict[str, Any]) -> str:
     elif s["cards"]:
         moves = [c for c in s["cards"] if c["change_pct"]]
         lines.append(f"Watched cards: {len(s['cards'])}, {len(moves)} changed price {span}.")
+        twice = _names_twice(s["cards"])
         for c in s["cards"][:5]:
             if c["change_pct"]:
                 lines.append(
-                    f"- {c['name']}{'' if c['finish'] == 'nonfoil' else ' (' + c['finish'] + ')'}: "
+                    f"- {c['name']}{_which(c) if c['name'] in twice else ''}"
+                    f"{'' if c['finish'] == 'nonfoil' else ' (' + c['finish'] + ')'}: "
                     f"{money(c['from'], c['currency'])} to {money(c['to'], c['currency'])} "
                     f"({_signed(c['change_pct'])})"
                 )
@@ -214,6 +220,21 @@ def text(s: dict[str, Any]) -> str:
     lines.append(f"Deck reports finished: {n}.")
     lines.append(f"Proposals waiting for you: {s['proposals_waiting']}. Applied: {s['proposals_applied']}.")
     return "\n".join(lines)
+
+
+def _names_twice(cards: list[dict[str, Any]]) -> set[str]:
+    """Names watched more than once (several printings or finishes of one card)."""
+    seen: dict[str, int] = {}
+    for c in cards:
+        seen[c["name"]] = seen.get(c["name"], 0) + 1
+    return {n for n, k in seen.items() if k > 1}
+
+
+def _which(c: dict[str, Any]) -> str:
+    """ " SLD 2526" for a watched printing, " cheapest printing" for a watch that follows it."""
+    if c.get("set") and c.get("collector_number"):
+        return f" {str(c['set']).upper()} {c['collector_number']}"
+    return " cheapest printing"
 
 
 def short_text(s: dict[str, Any]) -> str:

@@ -5006,6 +5006,8 @@ class DeckService:
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "deck_id": deck.id})
         out = self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
         note = _with_warnings(self._rules_note(changes, rows, legality), names_note)
+        if not_made := await self._finishes_not_made(changes):
+            note = _with_warnings(note, {"finish_not_made": not_made, "warnings": not_made})
         return {**out, **note, "deck_after": after}
 
     async def _judge_rules(
@@ -8545,6 +8547,73 @@ class DeckService:
         self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
+    async def _printings_at_once(
+        self, sub: str, cards: list[dict[str, Any]]
+    ) -> dict[tuple[str, str, str], dict[str, Any]]:
+        """A new deck's Archidekt printings found in bulk, by row_key: one Scryfall collection
+        lookup names each row's printing (its set and number when the list gives them, else
+        Scryfall's printing for the name), then Archidekt answers for 60 Scryfall ids a request.
+        The owner, 10 Nov 2026: a 100-card new deck took 143 s to apply, nearly all of it one
+        paced card search per card. A name-only card whose Scryfall printing is not out yet is
+        left to the one-at-a-time search (it never lands as a preview copy), and so is any row
+        either lookup misses or that fails: nothing here refuses a card."""
+        if self.card_collection is None or not cards:
+            return {}
+        idents: dict[tuple[str, str, str], dict[str, str]] = {}
+        for c in cards:
+            code = str(c.get("set_code") or "").strip().lower()
+            number = str(c.get("collector_number") or "").strip()
+            if code and number:
+                idents.setdefault(row_key(c), {"set": code, "collector_number": number})
+            elif code:
+                idents.setdefault(row_key(c), {"name": str(c["name"]), "set": code})
+            else:
+                idents.setdefault(row_key(c), {"name": str(c["name"])})
+        try:
+            got, _missing = await self.card_collection(list(idents.values()))
+        except Exception:
+            logger.warning(
+                "bulk printing lookup for a new deck failed; looking up one at a time", exc_info=True
+            )
+            return {}
+        today = datetime.datetime.now(datetime.UTC).date().isoformat()
+        names = {row_key(c): str(c["name"]) for c in cards}
+        uid_of: dict[tuple[str, str, str], str] = {}
+        for key, ident in idents.items():
+            want = front_face(names[key]).casefold()
+            for card in got:
+                if not isinstance(card, dict) or not card.get("id"):
+                    continue
+                same_name = front_face(str(card.get("name") or "")).casefold() == want
+                if "collector_number" in ident:
+                    hit = (
+                        str(card.get("set") or "").lower() == ident["set"]
+                        and str(card.get("collector_number") or "").casefold()
+                        == ident["collector_number"].casefold()
+                        and same_name
+                    )
+                elif "set" in ident:
+                    hit = same_name and str(card.get("set") or "").lower() == ident["set"]
+                else:
+                    hit = same_name and str(card.get("released_at") or "")[:10] <= today
+                if hit:
+                    uid_of[key] = str(card["id"]).lower()
+                    break
+        if not uid_of:
+            return {}
+        wanted = {uid: names[key] for key, uid in uid_of.items()}
+        try:
+            by_uid = await self._call(sub, lambda token, *_: self.client.printings_by_uids(token, wanted))
+        except DeckError:
+            logger.warning("bulk Archidekt printing lookup failed; looking up one at a time", exc_info=True)
+            return {}
+        out: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for key, uid in uid_of.items():
+            if uid in by_uid:
+                # a row with a set was asked for that printing; a name-only row was not
+                out[key] = {**by_uid[uid], "exact_printing": bool(idents[key].get("set"))}
+        return out
+
     async def _apply_create(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
         spec = row["changes"]
         _token, link = self._token(sub)
@@ -8568,9 +8637,14 @@ class DeckService:
         printing_notes: list[str] = []
         found: dict[tuple[str, str, str], dict[str, Any]] = {}  # each printing looked up once
         progress["resolved_cards"], progress["of_cards"] = 0, len(cards)
+        # most printings in a few requests (one Scryfall lookup, one Archidekt request per 60
+        # cards); a card that misses goes the one-at-a-time way below, as before
+        ready = await self._printings_at_once(sub, cards)
         for c in cards:  # resolve every printing before creating anything
             card = found.get(row_key(c))
             repeat = card is not None
+            if card is None and row_key(c) in ready:
+                card = found[row_key(c)] = ready[row_key(c)]
             leave_out = may_leave_out and not c.get("set_code")
             if leave_out and c["name"] in gone:
                 progress["resolved_cards"] += 1
@@ -9351,6 +9425,55 @@ class DeckService:
             carried = self.db.set_hold(pid, sub, str(held["status_reason"])) or carried
         return {**out, **self.describe(sub, pid)} if carried else out
 
+    async def _finishes_not_made(self, changes: list[Change]) -> list[str]:
+        """Each pinned printing a change asks for in a finish it is not made in, in words ("LEA 161
+        (Lightning Bolt) is not made in etched; it comes nonfoil."), from one Scryfall collection
+        lookup. Archidekt would take the row in a finish that printing never had. A lookup that
+        fails names nothing (nothing is refused for it)."""
+        wanted = [
+            c
+            for c in changes
+            if c.action in ("add", "set_printing", "set_finish")
+            and c.pinned
+            and (c.finish or "").casefold() in ("foil", "etched")
+        ]
+        if not wanted or self.card_collection is None:
+            return []
+        idents = list(
+            {
+                (str(c.set_code).lower(), str(c.collector_number)): {
+                    "set": str(c.set_code).lower(),
+                    "collector_number": str(c.collector_number),
+                }
+                for c in wanted
+            }.values()
+        )[:75]
+        try:
+            found, _missing = await self.card_collection(idents)
+        except Exception:
+            logger.warning("printing lookup for a plan's finishes failed", exc_info=True)
+            return []
+        made = {
+            (str(card.get("set") or "").lower(), str(card.get("collector_number") or "")): list(
+                card.get("finishes") or []
+            )
+            for card in found
+            if isinstance(card, dict)
+        }
+        out: list[str] = []
+        for c in wanted:
+            key = (str(c.set_code).lower(), str(c.collector_number))
+            finishes = made.get(key)
+            want = (c.finish or "").casefold()
+            if finishes and want not in finishes:
+                line = (
+                    f"{key[0].upper()} {key[1]} ({c.card_name}) is not made in {want}; it comes "
+                    f"{', '.join(finishes)}."
+                )
+                if line not in out:
+                    out.append(line)
+        return out
+
     async def check_plan(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
         """A planned deck edit checked before it is proposed, so the assistant fixes it or
         amends a waiting note instead of drawing a card for a proposal it then redoes. Saves
@@ -9413,6 +9536,15 @@ class DeckService:
                     "message": no_card_called(unknown, in_deck=True, meant=meant),
                     "unknown_cards": unknown,
                     **({"did_you_mean": meant} if meant else {}),
+                }
+            )
+        if changes and (not_made := await self._finishes_not_made(changes)):
+            problems.append(
+                {
+                    "error": "finish_not_made",
+                    "message": " ".join(not_made)
+                    + " Ask for a finish the printing has, or another printing.",
+                    "finish_not_made": not_made,
                 }
             )
         if missing:
@@ -13084,7 +13216,7 @@ def _next_step(
         else:
             why = " (their approval mode asks every time)" if mode == "manual" else ""
         return (
-            f"The user decides on the card shown with this result{why}, and you are told the outcome: "
+            f"The user decides on the proposal's card in the chat{why}, and you are told the outcome: "
             "say the change in one line, don't repeat the list, and don't call apply_proposal."
         )
     if state == "pending" and risk in modes.MEMBER_ONLY:

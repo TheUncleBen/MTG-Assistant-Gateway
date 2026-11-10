@@ -385,7 +385,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag7`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag8`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it from
 the base image `main` pins. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -539,8 +539,8 @@ rules, precon and solo test tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
 Upstream code is unchanged apart from fourteen patches in
-`docker/mystic-forge/patches/`, which is where the `-mag7` in the image tag
-`1.3.2-mag7` comes from:
+`docker/mystic-forge/patches/`, which is where the `-mag8` in the image tag
+`1.3.2-mag8` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -640,7 +640,7 @@ What to know about it:
   Commander Spellbook and Archidekt's public deck API (never logged in to
   Archidekt). The rules tools check Wizards of the Coast for a newer
   Comprehensive Rules at most once a day.
-- **Where and how big.** The stack file fixes its image, `1.3.2-mag7`, and Swarm may run it on
+- **Where and how big.** The stack file fixes its image, `1.3.2-mag8`, and Swarm may run it on
   any node. Memory is capped at 512 MB. After loading
   the rules index it used about 115 MB on an amd64 test machine, and about
   170 MB as an arm64 container under emulation in CI (emulation adds

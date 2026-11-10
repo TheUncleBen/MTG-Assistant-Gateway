@@ -134,7 +134,7 @@ def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str,
     def clean(rows: list[dict[str, Any]] | None) -> list[tuple[str, str]]:
         out = []
         for r in rows or []:
-            r = {k: v for k, v in r.items() if k not in ("guessed_from", "missing", "unchecked")}
+            r = {k: v for k, v in r.items() if k not in ("guessed_from", "missing", "unchecked", "breaks")}
             out.append((row_line(r), _in_words(r)))
         return out
 

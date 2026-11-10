@@ -16,9 +16,13 @@ and a wide desktop, one column where two left holes, plain words where program v
 placeholders showed, and no blue links.
 
 ### Upgrade notes
-- Nothing to do: no new settings, environment variables or database steps.
+- **The research image is `1.3.2-mag8`.** The example stack and compose files name it; change it
+  if you pinned the image yourself. No new settings, environment variables or database steps.
 
 ### Changed
+- **A new deck is made in seconds.** Applying a new deck looked its cards up on Archidekt one at a
+  time, which took over two minutes for a 100-card deck. The printings now come from one card
+  lookup and one Archidekt request per 60 cards; a card those miss is still looked up on its own.
 - **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
   shows one line until it has checked that it is the newest card of a change that still waits.
   Only that card draws its list, pictures and buttons; a card for a change that was updated,
@@ -65,6 +69,23 @@ placeholders showed, and no blue links.
   and its status line says the turn and the library (each zone's heading has its own count).
 
 ### Fixed
+- A list line marked `*E*` (etched) keeps its etched finish in `resolve_cards`, scan sessions and
+  new decks, and says so when the printing has no etched finish.
+- A set and collector number that are no printing of the named card are flagged in
+  `resolve_cards` instead of quietly matching another printing.
+- `check_deck_changes` suggests the card it means for a misspelled name, as `resolve_cards` does,
+  and names an asked finish (foil or etched) that the printing is not made in; a proposal with
+  one says so too.
+- `validate_decklist` names a split card as the list did ("Fire // Ice", not "Fire").
+- An error page from the research service reads as one plain sentence, and a precon file name
+  that doesn't exist says so and points to `precon_search`.
+- `scryfall_price_list` passes over a newest printing that has no price yet; `edhrec_combos` says
+  its deck counts are across all of EDHREC.
+- `get_summary` says which printing of a watched card it means when two are watched, and
+  `watch_card` says that a watch by name follows the cheapest printing.
+- An amended proposal's "what changed" no longer lists a row as both added and dropped when only
+  its rule warning changed.
+- A proposal's next step reads as one plain sentence.
 - At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
   cover the sheet's last control (the card size).
 - Long names break between their parts instead of inside a word (a member's name, a printing's

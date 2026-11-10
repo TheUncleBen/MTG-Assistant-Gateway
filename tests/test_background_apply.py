@@ -102,7 +102,8 @@ async def test_a_new_deck_shows_how_many_cards_were_looked_up(stack: Stack) -> N
     seen = {"n": 0}
 
     def second_card(r: httpx.Request) -> bool:
-        if r.url.path.startswith("/api/cards/v2/"):
+        # the one-card searches (the bulk uids= lookup before them finds none of these here)
+        if r.url.path.startswith("/api/cards/v2/") and "uids" not in r.url.params:
             seen["n"] += 1
         return seen["n"] == 2
 

@@ -214,6 +214,19 @@ def test_overlap_lines_name_both_sides() -> None:
     assert board.what_changed(
         [{"kind": "add", "name": "Opt", "qty": 1}], [{"kind": "add", "name": "Opt", "qty": 1}]
     ) == ("the same changes")
+    # live 2026-11-10: taking out an off-color card left "now 5 -> 6 Island; no longer 5 -> 6
+    # Island (breaks the deck's rules ...)" for a row that did not change; only its rule note did
+    island = {"kind": "change", "name": "Island", "before": 5, "after": 6}
+    assert (
+        board.what_changed(
+            [
+                {**island, "breaks": ["the deck would have 101 cards, not 100"]},
+                {"kind": "add", "name": "Bolt", "qty": 1},
+            ],
+            [island],
+        )
+        == "no longer adds Bolt"
+    )
 
 
 async def test_every_tool_that_changes_something_is_refused_to_a_read_only_token(stack: Stack) -> None:

@@ -17,7 +17,7 @@ import pytest
 from mtg_gateway import decks as decks_mod
 
 from . import fake_archidekt as FA
-from .conftest import Stack
+from .conftest import AUTO, Stack
 from .test_decks_and_proxy import Browser, call, linked_user, structured
 from .track_a_helpers import press_approve
 
@@ -304,3 +304,49 @@ async def test_a_429_while_a_new_deck_is_written_is_waited_out_and_the_write_res
         (c["card"]["oracleCard"]["name"], tuple(c.get("categories") or [])) for c in made["cards"]
     )
     assert max(names.values()) == 1, names  # no card twice
+
+
+@pytest.mark.parametrize("stack_options", [AUTO.but(scryfall=True)])
+async def test_a_new_deck_s_printings_come_in_a_few_requests_not_one_per_card(
+    stack: Stack, big_list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owner, 10 Nov 2026: a 100-card new deck took 143 s to apply, nearly all of it one
+    paced Archidekt card search per card. Archidekt's uids= takes a comma-separated list of
+    Scryfall ids (60 a page), so with one Scryfall lookup naming each card's printing, the 120
+    different cards take a few card requests. A card neither lookup finds still goes alone."""
+    h = stack.h
+    for n in range(CARDS):
+        uid = f"00000000-0000-4000-8000-{90000 + n:012d}"
+        monkeypatch.setitem(
+            FA.CARD_DB,
+            f"test card {n}",
+            {"id": 80000 + n, "uid": uid, "oracleCard": {"name": f"Test Card {n}"}, "options": ["Normal"]},
+        )
+        stack.sf.cards.append(
+            {
+                "object": "card",
+                "id": uid,
+                "name": f"Test Card {n}",
+                "set": "tst",
+                "collector_number": str(n),
+                "released_at": "2020-01-01",
+            }
+        )
+    # one card Scryfall does not know: it is looked up alone, as before
+    stack.sf.cards = [c for c in stack.sf.cards if c["name"] != "Test Card 7"]
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Big brew", "cards": big_list}))
+    assert p["ok"], p
+    since = len(stack.ark.calls)
+    out = await press_approve(h, token, p["proposal_id"])
+    assert out["ok"] and out["state"] == "applied", out
+    calls = _calls(stack, since)
+    print("120-card new deck with bulk printings, Archidekt requests:", dict(calls))
+    # 119 cards in two uids= requests (60 + 59), Test Card 7 in one or two searches of its own
+    assert [len(u) for u in stack.ark.uid_lookups] == [60, 59]
+    assert calls["card lookups"] <= 4
+    assert sum(calls.values()) <= 12
+    made = stack.ark.decks[int(out["result"]["deck_id"])]
+    assert sum(c["quantity"] for c in made["cards"]) == 125
+    assert {c["card"]["id"] for c in made["cards"]} == {80000 + n for n in range(CARDS)}
+    assert out["result"]["verified"] is True and not out["result"]["printing_notes"]
