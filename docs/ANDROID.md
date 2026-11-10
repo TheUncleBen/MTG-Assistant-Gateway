@@ -46,7 +46,8 @@ Open your gateway in the phone's browser, sign in, go to **Account**, then
 **Get the Android app** (the Android section of the setup page,
 `/install?for=android`; `/app` leads there). It shows the version, the SHA-256
 of the file, the SHA-256 fingerprint of the app's signing certificate, and one
-download button. Then:
+download button. Reading that page on a computer, it also shows a QR code: point the phone's camera
+at it to open the page on the phone. Then:
 
 1. Compare the signing certificate SHA-256 on that page with the one published in
    the project's GitHub release for that version (in the release notes and in

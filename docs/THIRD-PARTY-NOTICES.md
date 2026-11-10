@@ -75,6 +75,7 @@ licence file is in its installed distribution in the image.
 | `cryptography` | 50.0.2 | Apache-2.0 or BSD-3-Clause |
 | `uvicorn` | 0.54.0 | BSD-3-Clause |
 | `pillow` | 12.3.0 | MIT-CMU (more below) |
+| `segno` | 1.6.6 | BSD-3-Clause |
 
 ## Image decoding (scan)
 

@@ -404,6 +404,9 @@ ul.plain{list-style:none;margin:0;padding:0}
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
 .panel h2,.card h2{font-size:min(1.5rem,7vw)}
+/* the install page's QR code: dark on white in both themes; not on a phone, which is already there */
+.qr-code svg{display:block;background:#fff;border-radius:var(--radius)}
+@media (hover:none) and (pointer:coarse){.qr-desk{display:none}}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
 code{font-size:.92em;background:var(--surface-2);padding:.1rem .4rem;border-radius:3px;overflow-wrap:anywhere}
 pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(--border-soft);

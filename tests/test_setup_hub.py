@@ -5,6 +5,7 @@ were."""
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import re
 from pathlib import Path
@@ -45,7 +46,10 @@ async def test_page_and_markdown_come_from_one_step_list(harness: Harness) -> No
             ctx = setup_hub.Context(GATEWAY, "MTG Assistant Gateway", app={"cert_sha256": "ab" * 32})
             sec = setup_hub.section(key, ctx)
             assert f"## {sec.heading}" in md, key
+            # a block the page alone carries (the QR code) is not in the Markdown
+            md_blocks = setup_hub.section(key, dataclasses.replace(ctx, page=False)).blocks
             for block in sec.blocks:
+                in_md = block in md_blocks
                 if block.steps:
                     # the same number of numbered steps in each
                     ol = page.split(f"<h2>{html.escape(block.title or sec.heading)}</h2>", 1)[1]
@@ -53,10 +57,10 @@ async def test_page_and_markdown_come_from_one_step_list(harness: Harness) -> No
                     assert ol.count("<li>") == len(block.steps), (key, block.title)
                 for n, step in enumerate(block.steps, 1):
                     assert setup_hub.inline_html(step.text, GATEWAY) in page, (key, step.text)
-                    assert f"{n}. {step.text}" in md, (key, step.text)
+                    assert not in_md or f"{n}. {step.text}" in md, (key, step.text)
                 for para in block.paras:
                     assert setup_hub.inline_html(para, GATEWAY) in page, (key, para)
-                    assert para in md, (key, para)
+                    assert not in_md or para in md, (key, para)
     finally:
         await b.aclose()
 
@@ -290,3 +294,26 @@ async def test_app_mode_hides_android_choice(harness: Harness) -> None:
         assert "href='/install?for=android'" in web
     finally:
         await b.aclose()
+
+
+def test_a_computer_shows_a_qr_code_that_opens_the_android_section_on_the_phone() -> None:
+    """0.7.47 (owner, 2026-11-10: installing should be as easy as possible): the Android section
+    carries a QR code of its own address, so a phone's camera opens it there. The page only: phones
+    hide it (theme.py) and the Markdown leaves it out."""
+    from mtg_gateway import theme
+
+    url = "https://mtg.example.com"
+    app = {"facts_html": "", "cert_sha256": "ab" * 32}
+    ctx = setup_hub.Context(url, "MTG", app=app)
+    page = setup_hub.section_html(setup_hub.section("android", ctx), ctx)
+    want = setup_hub.phone_code_svg(f"{url}/install?for=android")
+    assert want.startswith("<svg") and want in page
+    assert "<div class='card qr-desk'><h2>On a computer?</h2>" in page
+    assert f"aria-label='QR code for {url}/install?for=android'" in page
+    assert page.index("qr-desk") < page.index("Download the app (APK)")
+    md_ctx = setup_hub.Context(url, "MTG", app=app, page=False)
+    md = setup_hub.section_md(setup_hub.section("android", md_ctx), md_ctx)
+    assert "On a computer?" not in md and "<svg" not in md
+    css = Path(theme.__file__).read_text(encoding="utf-8")
+    assert "@media (hover:none) and (pointer:coarse){.qr-desk{display:none}}" in css
+    assert ".qr-code svg{display:block;background:#fff" in css
