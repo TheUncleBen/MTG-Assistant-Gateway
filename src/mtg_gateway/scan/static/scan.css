@@ -279,11 +279,11 @@ body.picker-open{overflow:hidden}
 @media (max-width:420px){ .scan .cam-ctl .ctl{grid-template-columns:auto minmax(0,1fr) 3.4rem var(--ctl)} .scan .cam-ctl .lbl{display:none} }
 /* on phones the sliders must fit between the preview and the sticky capture bar */
 @media (max-width:699px){
-  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(.cam-ctl:not([hidden])) .cam-hint{display:none}
+  .scan .cam-panel:not(.pictures):has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
+  .scan .cam-panel:not(.pictures):has(.cam-ctl:not([hidden])) .cam-hint{display:none}
   /* while Auto scanning the preview shrinks so the add toast and Undo sit clear of the shutter bar */
-  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .cam-hint{display:none}
+  .scan .cam-panel:not(.pictures):has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
+  .scan .cam-panel:not(.pictures):has(#auto-switch[aria-checked=true]) .cam-hint{display:none}
 }
 
 /* match result: the confirm or fix step (the status pill carries the colour) */
@@ -421,14 +421,45 @@ body.picker-open{overflow:hidden}
 .scan .tally[hidden]{display:none}
 .scan .tally:hover{background:var(--navbar-bg);color:var(--navbar-text)}
 
-/* picture scanning (0.7.47): the mode switch, the folded Set and foil options, the movable scan
-   area, zoom chips, and the check sheet for a card found by its picture */
-.scan .scan-mode{display:flex;width:100%;margin:0}
-.scan .scan-mode > button{flex:1 1 0;min-width:0;white-space:normal;line-height:1.2;padding-block:.35rem}
-.scan details.scan-more{margin:0}
-.scan details.scan-more > summary{width:max-content;max-width:100%}
-.scan details.scan-more[open] > summary{margin-bottom:.5rem}
-.scan details.scan-more:not([open]) > :not(summary){display:none}
+/* picture scanning (0.7.47): the movable scan area, zoom chips, and the sheet for a card found by
+   its picture */
+/* the camera takes the screen (fitCamera sets its height); only small icons sit on its corners */
+.scan .cam-panel.pictures{gap:.5rem}
+.scan .camera.pictures{aspect-ratio:auto;width:100%;max-height:none;height:min(70vh,640px)}
+.scan .cam-settings-btn{position:absolute;right:.5rem;top:.5rem;z-index:2;width:var(--ctl);height:var(--ctl);min-width:var(--ctl);
+  padding:0;border-radius:50%;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);
+  display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.scan .cam-settings-btn:hover{background:var(--navbar-bg);color:var(--navbar-text)}
+.scan .camera.pictures .torch{right:calc(.5rem + var(--ctl) + .4rem)}
+/* the added bar: the last card added with Change and Undo, or what to do; one thin row */
+.scan .added-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .5rem;min-height:var(--ctl);padding:.3rem .5rem;
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.scan .added-bar .txt{flex:1 1 10rem;min-width:0}
+.scan .added-bar .what{font-size:.95rem;line-height:1.3}
+.scan .added-bar .what .lead{color:var(--text-muted)}
+.scan .added-bar .what .name{font-weight:700}
+.scan .added-bar .what .where{margin-left:.4rem;color:var(--text-muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.scan .added-bar #cam-status{margin:0;font-size:.85rem}
+.scan .added-bar #cam-status:empty{display:none}
+.scan .added-bar .check{display:inline-block;width:auto;height:auto;min-width:0;min-height:0;margin:.15rem 0 0;padding:0 .45rem;
+  border-radius:9px;background:var(--orange);color:var(--on-orange);font-weight:700;font-size:.8rem;line-height:1.5}
+.scan .added-bar .check[hidden],.scan .added-bar button[hidden]{display:none}
+.scan .added-bar button{flex:none;min-height:var(--ctl);padding-inline:.7rem}
+.scan .cam-settings .cam-ctl .ctl{grid-template-columns:minmax(0,1fr) auto var(--ctl);grid-template-areas:"lbl lbl lbl" "in out reset";row-gap:0}
+.scan .cam-settings .cam-ctl .ico{display:none}
+.scan .cam-settings .cam-ctl .lbl{display:block;grid-area:lbl;color:var(--text);font-weight:700}
+.scan .cam-settings .cam-ctl input[type=range]{grid-area:in}
+.scan .cam-settings .cam-ctl output{grid-area:out;min-width:3.4rem}
+.scan .cam-settings .cam-ctl .reset{grid-area:reset}
+/* Camera settings: brightness, saturation, Set and Foil, a photo or a typed name */
+.scan .cam-settings-scrim[hidden]{display:none}
+.scan .cam-settings{display:flex;flex-direction:column;gap:.75rem}
+.scan .cam-settings h2{margin:0}
+.scan .cam-settings .set-acts{display:flex;flex-wrap:wrap;gap:.5rem}
+.scan .cam-settings .set-acts > *{display:inline-flex;align-items:center;gap:.4rem;min-height:var(--ctl)}
+.scan .cam-settings .acts{display:flex;justify-content:flex-end}
+.scan .change-sheet{max-height:calc(100dvh - 2rem);overflow:auto}
+.scan .change-sheet .result.found{margin:0;border:0;box-shadow:none;padding:0}
 .scan .camera .guide .grip{display:none;position:absolute;right:-14px;bottom:-14px;width:28px;height:28px;border-radius:50%;
   background:var(--orange);border:2px solid var(--surface);box-shadow:var(--shadow);cursor:nwse-resize}
 .scan .camera.editing .guide{pointer-events:auto;cursor:move;border-style:dashed;border-color:var(--orange)}

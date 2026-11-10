@@ -404,8 +404,9 @@ than a browser can, then hands it to that page, which keeps running underneath:
    focuses. Controls, each shown only when
    the camera reports it (the app uses CameraX, Google's camera library, and
    asks it what the camera can do):
-   - **Torch** on/off (the button reads *Torch: On* or *Torch: Off*).
-   - **Torch brightness** slider. Shown when CameraX reports adjustable
+   - **Flash** on/off (the button reads *Flash: On* or *Flash: Off*; called
+     Torch before 0.7.47).
+   - **Flash brightness** slider. Shown when CameraX reports adjustable
      torch strength, which it does on Android 15 or later for cameras with more
      than one level. Earlier Android versions can only set torch strength while
      no app has the camera open, so with the preview running the slider isn't

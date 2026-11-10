@@ -73,6 +73,7 @@ SCAN_ICONS = (
     "scan",
     "drag",
     "check",
+    "settings",
 )
 SCAN_CSP = (
     "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "

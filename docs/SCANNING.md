@@ -59,20 +59,24 @@ What's on it:
   hold a card inside the frame and keep it still for a moment. The page
   finds the card's outline, straightens it and sends that picture (a JPEG of
   about 50 KB) to the gateway, which compares its artwork with every
-  printing's. **Check each card** (the default) shows each card found to
-  confirm: its printing, with the printings that share its artwork one tap
-  away and **Other printings** for the rest, the finish (Non-foil or Foil),
-  the quantity, **Add**, and **Not this card** with the next closest cards.
-  **Add right away** adds the cards the gateway is sure of, with **Undo**,
-  and shows the rest. The same card isn't sent again until it has left the
-  frame. Printings that share one artwork (reprints) are told apart by the
-  set and number at the bottom left of the card, read on the phone among
-  those printings only; the **Set** box picks too, and when neither can,
-  the card asks which one and **Add by name** keeps the card without a
-  printing. **Detect now** looks at the frame at once, outline or not. Zoom
-  chips (0.6×, 1×, 2× and so on, where the camera reports a zoom range) and
-  two fingers on the viewfinder zoom; **Scan area** moves the frame (drag)
-  and resizes it (its corner), kept on the device. When no card matches, the
+  printing's. The card is added at once, with no button to press. The bar
+  under the camera shows the card added, its printing and finish, with
+  **Change** (its printing, with the printings that share its artwork one tap
+  away and **Other printings** for the rest, the finish, the quantity, and
+  **Not this card** with the next closest cards) and **Undo**. A card the
+  gateway isn't sure of is added too, marked **Check it**. The same card
+  isn't sent again until it has left the frame. Printings that share one
+  artwork (reprints) are told apart by the set and number at the bottom left
+  of the card, read on the phone among those printings only; the **Set** box
+  picks too, and when neither can, the card is kept by name and marked
+  **Check it**. The camera takes the screen: over its corners only the
+  running count, **Flash**, **Camera settings**, **Scan area** and zoom.
+  Zoom chips (0.6×, 1×, 2× and so on, where the camera reports a zoom range)
+  and two fingers on the viewfinder zoom; **Scan area** moves the frame (drag)
+  and resizes it (its corner), kept on the device. **Camera settings** holds
+  brightness (where the camera reports it), **Saturation** (applied by the
+  page to the preview and to the picture sent, kept on the device), Set,
+  Foil, **Scan a photo** and **Type a name**. When no card matches, the
   page tries the title, and failing that offers **Keep this picture for the
   admin**: the picture goes to Admin › Card scanner for 30 days. Until the
   gateway has learned the pictures, the camera reads titles as described
@@ -115,8 +119,8 @@ What's on it:
   Until then, and against an older gateway, the orange shutter and the viewfinder open the phone's own camera panel, with its
   torch brightness, zoom and exposure, and **Auto** opens it scanning on its
   own (see [ANDROID.md](ANDROID.md#3-scanning-with-the-phone-camera)).
-- **Torch, zoom and brightness.** A Torch button turns the phone's flash
-  on, zoom chips appear over the viewfinder and a Brightness slider under
+- **Flash, zoom and brightness.** A Flash button (called Torch before
+  0.7.47) turns the phone's flash light on, zoom chips appear over the viewfinder and a Brightness slider under
   it, each only when the camera reports it. Chrome on Android usually offers all three; iOS Safari has no
   torch and offers zoom from Safari 17 (going by the browsers' published
   capabilities, not tested on every phone).

@@ -4,11 +4,13 @@ The camera is a canvas stream showing a card on a table, so the page's own edge 
 card outline; the gateway's answer to /scan/api/identify is stood in for (picture.py and the
 service have their own tests in test_scan_pictures.py), so these test the page's rules:
 
-- the card is sent once it holds still, and not again while it stays in view;
-- "Check each card" shows every card; "Add right away" adds sure cards only, with Undo;
+- the card is sent once it holds still, added at once (no button), and not again while it stays
+  in view; an unsure card is added marked Check it;
+- Change fixes the finish, count, printing or card; Undo takes it back;
 - printings that share the artwork are told apart by the set and number line among those
-  printings only, and the sheet asks when that line can't be read;
-- the finish, the printing and "Not this card" can be changed before Add;
+  printings only;
+- Camera settings hold saturation, Set and Foil, off the camera;
+- the camera fills the screen at phone, Fold and desktop sizes, and everything fits;
 - a miss offers "Keep this picture for the admin", worded for an admin or a member;
 - the scan area moves and resizes, and is kept on the device.
 
@@ -18,6 +20,7 @@ Skipped without a Chromium build.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import pytest
@@ -116,12 +119,22 @@ def _chromium() -> str:
     return exe  # type: ignore[return-value]
 
 
-def _page(p, exe, srv: Server, *, answers: list[dict], admin: bool = False, width: int = 412, init: str = ""):
+def _page(
+    p,
+    exe,
+    srv: Server,
+    *,
+    answers: list[dict],
+    admin: bool = False,
+    width: int = 412,
+    height: int = 915,
+    init: str = "",
+):
     """The scan page with picture scanning on (the config says the index is ready), the camera
     showing a card, and /scan/api/identify answering from ``answers`` in turn (the last one
     repeats). Sent pictures and kept misses are recorded on ``calls``."""
     browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-    ctx = browser.new_context(viewport={"width": width, "height": 915}, is_mobile=True, has_touch=True)
+    ctx = browser.new_context(viewport={"width": width, "height": height}, is_mobile=True, has_touch=True)
     ctx.add_cookies([{"name": "mtg_session", "value": srv.sign_in(), "url": srv.base}])
     ctx.add_init_script(_card_camera() + init)
     page = ctx.new_page()
@@ -180,95 +193,96 @@ def test_in_the_app_the_page_is_the_scanner_once_pictures_are_ready(server: Serv
         browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21)], init=APP_BRIDGE)
         assert page.evaluate("() => window.__scan.ownCamera") is True
         page.wait_for_function("() => (document.querySelector('#camera video') || {}).videoWidth > 0")
-        assert page.locator("#open-phone-camera").count() == 0
-        assert page.locator("#shutter").get_attribute("aria-label") == "Detect now"
-        page.wait_for_selector("#found", timeout=15000)
+        assert page.locator("#open-phone-camera, #shutter").count() == 0
+        page.wait_for_function("() => window.__scan.state.items.length === 1", timeout=15000)
         assert page.evaluate("() => window.__calls") == []
         assert errors == []
         browser.close()
 
 
-def test_a_card_held_still_is_found_shown_to_check_and_sent_once(server: Server) -> None:  # noqa: F811
+def test_a_card_held_still_is_added_at_once_and_only_once(server: Server) -> None:  # noqa: F811
+    """Ben (2026-11-10): automatic like TCGplayer. A card held still is added with no tap: no
+    capture button, no mode switch; the bar under the camera says what was added. The same card
+    still in view is not sent again; once it has left and comes back it counts again."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21)])
-        # the mode switch and Detect now replace Auto and the shutter's Scan card
-        assert page.locator(".scan-mode [aria-checked=true]").text_content() == "Check each card"
-        assert page.locator("#shutter").get_attribute("aria-label") == "Detect now"
-        assert page.locator("#auto-switch").count() == 0
-        page.wait_for_selector("#found", timeout=15000)
+        assert page.locator("#shutter, .scan-mode, #auto-switch, #scan-more").count() == 0
+        assert "Hold a card inside the frame." in page.locator("#added-bar").text_content()
+        page.wait_for_function("() => window.__scan.state.items.length === 1", timeout=15000)
         assert calls["identify"][0]["type"] == "image/jpeg"
         assert 2_000 < calls["identify"][0]["size"] < 400_000
-        sheet = page.locator("#found")
-        assert sheet.locator("h3").text_content() == "Sol Ring"
-        assert "C21 263" in sheet.locator(".sheet-row.printing").text_content()
-        assert sheet.locator(".status").text_content() == "Found by its picture"
-        # Finish: Foil, then Add: the list keeps the exact printing in foil
-        sheet.locator("[data-finish=foil]").click()
-        page.locator("#add-card").click()
+        bar = page.locator("#added-bar")
+        assert "Added Sol Ring" in bar.text_content() and "C21 263" in bar.text_content()
+        assert bar.locator(".check").is_hidden()
         items = page.evaluate("() => window.__scan.state.items")
-        assert len(items) == 1 and items[0]["status"] == "printing" and items[0]["foil"] is True, items
-        assert items[0]["card"]["scryfall_id"] == "c21-263"
-        # the card is still in view: it is not sent again
+        assert items[0]["status"] == "printing" and items[0]["card"]["scryfall_id"] == "c21-263", items
+        assert page.locator("#found").count() == 0  # nothing to confirm
         sent = len(calls["identify"])
         page.wait_for_timeout(1500)  # fixed wait: a negative check (nothing more is sent)
         assert len(calls["identify"]) == sent
-        # once it has left the frame and comes back, it is looked at again
         page.evaluate("() => { window.__noCard = true; }")
         page.wait_for_function("() => !window.__scan.state.holdUntilGone", timeout=10000)
         page.evaluate("() => { window.__noCard = false; }")
-        page.wait_for_selector("#found", timeout=15000)
+        page.wait_for_function("() => window.__scan.state.items[0].quantity === 2", timeout=15000)
         assert len(calls["identify"]) == sent + 1
         assert errors == []
         browser.close()
 
 
-def test_add_right_away_adds_sure_cards_with_undo_and_shows_unsure_ones(server: Server) -> None:  # noqa: F811
+def test_change_fixes_the_finish_and_count_and_undo_takes_it_back(server: Server) -> None:  # noqa: F811
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
     with sync_playwright() as p:
-        init = "try { localStorage.setItem('mtg-scan-mode', 'auto'); } catch (e) {}"
-        browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21)], init=init)
-        assert page.locator(".scan-mode [aria-checked=true]").text_content() == "Add right away"
+        browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21)])
         page.wait_for_function("() => window.__scan.state.items.length === 1", timeout=15000)
-        assert page.locator("#found").count() == 0
-        toast = page.locator("#auto-toast")
-        assert not toast.is_hidden() and "Added Sol Ring (C21 263)" in toast.text_content()
-        toast.locator(".undo").click()
+        page.locator("#change-card").click()
+        sheet = page.locator(".change-sheet #found")
+        sheet.wait_for(state="visible")
+        assert page.evaluate("() => window.__scan.state.changing") is True  # the camera waits
+        assert "C21 263" in sheet.locator(".sheet-row.printing").text_content()
+        assert "$1.50 each" in sheet.text_content()
+        sheet.locator("[data-finish=foil]").click()
+        page.locator(".change-sheet .stepper .plus, .change-sheet button[aria-label*='more' i]").first.click()
+        page.locator(".change-sheet #add-card", has_text="Save").click()
+        assert page.locator(".change-sheet").count() == 0
+        items = page.evaluate("() => window.__scan.state.items")
+        assert len(items) == 1 and items[0]["foil"] is True and items[0]["quantity"] == 2, items
+        assert "Foil" in page.locator("#added-bar").text_content()
+        # Undo takes the corrected line back off, and the card in view is not added again
+        page.locator("#undo-card").click()
         assert page.evaluate("() => window.__scan.state.items.length") == 0
-        # undone, the card is not added again while it stays in view
+        assert "Hold a card" in page.locator("#added-bar").text_content()
         page.wait_for_timeout(1500)  # fixed wait: a negative check (nothing is added)
         assert page.evaluate("() => window.__scan.state.items.length") == 0
         assert errors == []
         browser.close()
 
 
-def test_an_unsure_answer_waits_for_the_looks_to_agree_and_is_never_added_on_its_own(
-    server: Server,  # noqa: F811
-) -> None:
+def test_an_unsure_card_is_added_marked_check_and_can_be_swapped(server: Server) -> None:  # noqa: F811
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
     with sync_playwright() as p:
-        init = "try { localStorage.setItem('mtg-scan-mode', 'auto'); } catch (e) {}"
-        browser, page, errors, calls = _page(
-            p, exe, server, answers=[answer(MIND_STONE, sure=False)], init=init
-        )
-        page.wait_for_selector("#found", timeout=15000)
-        # two looks that agree show the card; it is not added, and the sheet says to check it
+        browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21, sure=False)])
+        page.wait_for_function("() => window.__scan.state.items.length === 1", timeout=15000)
+        # two looks that agree before it is added; it says Check
         assert len(calls["identify"]) == 2
-        assert page.evaluate("() => window.__scan.state.items.length") == 0
-        assert page.locator("#found .status").text_content() == "Best match: check it"
-        # Not this card: the next closest cards, and Type the name
-        page.locator("#found button", has_text="Not this card").click()
-        page.locator("#found .others button", has_text="Mind Stone (C21)").click()
-        assert page.locator("#found .status").text_content() == "Chosen by hand"
-        page.locator("#add-card").click()
+        assert page.locator("#added-bar .check").is_visible()
+        assert page.evaluate("() => window.__scan.state.items[0].note") == "found by its picture; check it"
+        page.locator("#change-card").click()
+        sheet = page.locator(".change-sheet #found")
+        assert sheet.locator(".status").text_content() == "Best match: check it"
+        sheet.locator("button", has_text="Not this card").click()
+        sheet.locator(".others button", has_text="Mind Stone (C21)").click()
+        assert page.locator(".change-sheet .status").text_content() == "Chosen by hand"
+        page.locator(".change-sheet #add-card").click()
         items = page.evaluate("() => window.__scan.state.items")
-        assert [i["card"]["name"] for i in items] == ["Mind Stone"] and items[0]["status"] == "printing"
+        assert [i["card"]["name"] for i in items] == ["Mind Stone"] and items[0]["quantity"] == 1, items
+        assert page.locator("#added-bar .check").is_hidden()
         assert errors == []
         browser.close()
 
@@ -283,12 +297,10 @@ def test_printings_that_share_the_art_are_told_apart_by_the_set_and_number_line(
         same = [SOL_FRC, SOL_C21]
         browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21, same=same)])
         page.evaluate("() => { window.__i = '0021 U\\nFRC • EN'; }")
-        page.wait_for_selector("#found", timeout=15000)
-        sheet = page.locator("#found")
-        assert "FRC 21" in sheet.locator(".sheet-row.printing").text_content()
-        assert sheet.locator(".same-art [aria-pressed=true]").text_content() == "FRC 21"
-        assert page.locator("#add-card").text_content() == "Add"
-        # the line unread: the sheet asks, and Add keeps the card by name only
+        page.wait_for_function("() => window.__scan.state.items.length === 1", timeout=15000)
+        assert page.evaluate("() => window.__scan.state.items[0].card.scryfall_id") == "frc-21"
+        assert "FRC 21" in page.locator("#added-bar").text_content()
+        # the line unread: the printing is not settled, so the card is kept by name and marked Check
         out = page.evaluate(
             """async ([a]) => { window.__i = '';
                  const flat = {canvas: document.createElement('canvas')};
@@ -317,6 +329,7 @@ def test_a_miss_offers_to_keep_the_picture_for_the_admin(server: Server, admin: 
         page.evaluate("() => { window.__scanOcrOverride = null; window.__scan.state.ocrState = 'failed'; }")
         page.wait_for_selector("#miss", timeout=20000)
         assert len(calls["identify"]) == 2  # two looks in a row that found nothing
+        assert page.evaluate("() => window.__scan.state.items.length") == 0  # never added
         assert "whoever runs" not in page.content()
         page.locator("#keep-miss").click()
         kept = page.locator("#miss .kept")
@@ -370,27 +383,84 @@ def test_the_scan_area_moves_resizes_and_is_kept_on_the_device(server: Server) -
         browser.close()
 
 
-@pytest.mark.parametrize("width", [344, 412, 1280])
+def test_camera_settings_hold_saturation_set_and_foil_and_stay_off_the_camera(server: Server) -> None:  # noqa: F811
+    """Brightness, saturation, Set, Foil, a photo and a typed name live in Camera settings, not over
+    or under the camera; the saturation is applied to the preview and kept on the device."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, calls = _page(p, exe, server, answers=[answer(SOL_C21)])
+        page.evaluate("() => { window.__noCard = true; }")
+        assert page.locator("#cam-settings").is_hidden()
+        page.locator("#settings-btn").click()
+        sheet = page.locator("#cam-settings .cam-settings")
+        sheet.wait_for(state="visible")
+        assert page.evaluate("() => window.__scan.state.changing") is True
+        for part in ("#saturation", "#set-lock", "#foil-switch", "label[for=photo-file]"):
+            assert sheet.locator(part).count() == 1, part
+        page.locator("#saturation").fill("1.5")
+        page.locator("#saturation").dispatch_event("change")
+        assert page.evaluate("() => document.querySelector('#camera video').style.filter") == "saturate(1.5)"
+        assert page.evaluate("() => localStorage.getItem('mtg-scan-saturation')") == "1.5"
+        page.keyboard.press("Escape")
+        assert page.locator("#cam-settings").is_hidden()
+        assert page.evaluate("() => window.__scan.state.changing") is False
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width,height", [(344, 882), (412, 915), (673, 841), (1280, 800)])
 @pytest.mark.parametrize("text", ["100%", "200%"])
-def test_the_check_sheet_fits_at_any_width_and_text_size(server: Server, width: int, text: str) -> None:  # noqa: F811
+def test_the_camera_fills_the_screen_and_everything_fits(
+    server: Server,  # noqa: F811
+    width: int,
+    height: int,
+    text: str,
+) -> None:
+    """The camera takes the room (Ben: the old bottom panel covered the card on an unfolded Fold);
+    the bar, the change sheet and the settings fit at phone, Fold and desktop sizes at 100% and
+    200% text, and every control is a 44 px target."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
     with sync_playwright() as p:
         same = [SOL_FRC, SOL_C21]
         browser, page, errors, calls = _page(
-            p, exe, server, answers=[answer(SOL_C21, same=same)], width=width
+            p, exe, server, answers=[answer(SOL_C21, same=same, sure=False)], width=width, height=height
         )
         page.evaluate(f"() => {{ document.documentElement.style.fontSize = '{text}'; }}")
-        page.wait_for_selector("#found", timeout=15000)
-        assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth + 1")
-        small = page.evaluate(
-            """() => [...document.querySelectorAll('#found button, .scan-mode button, #shutter, #area-btn')]
-                 .filter((b) => b.offsetParent)
+        page.wait_for_function("() => window.__scan.state.items.length === 1", timeout=15000)
+        page.evaluate("() => window.dispatchEvent(new Event('resize'))")
+        shots = os.environ.get("SCAN_SHOTS")  # screenshots only on request, as in test_cards_browser.py
+        name = f"{width}-{text.rstrip('%')}"
+        if shots:
+            page.screenshot(path=f"{shots}/camera-{name}.png")
+        cam = page.locator("#camera").bounding_box()
+        bar = page.locator("#added-bar").bounding_box()
+        # at 200% text the bars grow too: the camera keeps at least a usable 260 px
+        assert cam["height"] >= (0.42 * height if text == "100%" else 259), (cam, height)
+        assert cam["y"] >= 0 and cam["y"] + cam["height"] <= height, cam  # all of it in view
+        assert bar["y"] >= cam["y"] + cam["height"] - 1  # under the camera, never over it
+        fits = "() => document.documentElement.scrollWidth <= window.innerWidth + 1"
+        small = """(sel) => [...document.querySelectorAll(sel)].filter((b) => b.offsetParent)
                  .map((b) => { const r = b.getBoundingClientRect();
-                               return [b.textContent.trim(), r.width, r.height]; })
+                   return [b.textContent.trim() || b.getAttribute('aria-label'), r.width, r.height]; })
                  .filter(([, w, h]) => w < 43.5 || h < 43.5)"""
-        )
-        assert small == [], small
+        assert page.evaluate(fits)
+        assert page.evaluate(small, "#added-bar button, #settings-btn, #area-btn, #torch") == []
+        page.locator("#change-card").click()
+        page.locator(".change-sheet #found").wait_for(state="visible")
+        if shots:
+            page.screenshot(path=f"{shots}/change-{name}.png")
+        assert page.evaluate(fits)
+        assert page.evaluate(small, ".change-sheet #found button") == []
+        page.keyboard.press("Escape")
+        page.locator("#settings-btn").click()
+        page.locator("#cam-settings .cam-settings").wait_for(state="visible")
+        if shots:
+            page.screenshot(path=f"{shots}/settings-{name}.png")
+        assert page.evaluate(fits)
+        assert page.evaluate(small, "#cam-settings button, #cam-settings label.btn") == []
         assert errors == []
         browser.close()

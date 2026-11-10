@@ -44,16 +44,19 @@ before it adds one.
   frame and keep it still for a moment: the page sends the straightened card to the gateway,
   which compares its artwork with every printing's (in a test on 8,474 printings with made-up
   phone photos, the right card 99 times in 100; real phones still to be measured). No title
-  reading, no shutter, and the same scanner in the browser and the Android app (the big button
-  that opened a separate camera is gone once the pictures are learned). **Check each card** (the default) shows each card to
-  confirm; **Add right away** adds the cards the gateway is sure of, with Undo, and shows the
-  rest. Printings that share one artwork (reprints) are told apart by the set and number at the
-  bottom left of the card; when that can't be read, the card asks which one, and the set lock
-  still picks it. Before you add, swap the printing, the finish (Non-foil or Foil) or the card
-  ("Not this card" lists the next closest ones). Zoom chips (where the camera reports a zoom
-  range) and two fingers on the viewfinder zoom; **Scan area** moves and resizes the frame for
-  where your phone's camera sits, kept on the device; **Detect now** is there for anyone who
-  prefers a button. Title reading stays for photos the picture can't place.
+  reading, no button to press, and the same scanner in the browser and the Android app (the big
+  button that opened a separate camera is gone once the pictures are learned). Each card found is
+  added at once; the bar under the camera shows it, with **Change** (the printing, the finish,
+  the count, or another card: "Not this card" lists the next closest ones) and **Undo**. A card
+  the gateway isn't sure of is added too, marked **Check it**. Printings that share one artwork
+  (reprints) are told apart by the set and number at the bottom left of the card, or the set
+  lock; when neither can, the card is kept by name and marked **Check it**. The camera takes the
+  screen: only the count, **Flash** (was Torch), **Camera settings**, **Scan area** and zoom sit
+  on its corners. Zoom chips (where the camera reports a zoom range) and two fingers on the
+  viewfinder zoom; **Scan area** moves and resizes the frame, kept on the device. Camera settings
+  holds brightness (where the camera reports it), **Saturation** (applied by the page, kept on
+  the device), Set, Foil, a photo from your pictures, and typing a name. Title reading stays for
+  photos the picture can't place.
 - **A card the scanner can't find can be kept for the admin** ("Keep this picture for the
   admin") instead of a message asking you to send photos to whoever runs the gateway. The new
   **Admin › Card scanner** page shows the pictures kept, who kept them and when, with Delete, and

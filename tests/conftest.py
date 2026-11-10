@@ -900,3 +900,14 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if tr is not None:
         tr.write_line("\n".join(lines), red=True)
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def guard_ready_for_tap(page) -> None:
+    """Before a test's unlocking tap on a guarded page (static/clickguard.js): the page has focus
+    (the guard ignores input while document.hasFocus() is false, which a loaded runner can leave
+    so), and the guard is re-locked so the tap is the first interaction it sees (a loaded headless
+    Chromium can emit a mouse move of its own after a late layout, which would otherwise count as
+    the unlocking one). CI on 98a3ec99: the tap's "unlocking" look was missing."""
+    page.bring_to_front()
+    page.wait_for_function("() => document.hasFocus() && document.visibilityState === 'visible'")
+    page.evaluate("() => window.dispatchEvent(new Event('blur'))")
