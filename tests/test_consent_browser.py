@@ -29,7 +29,15 @@ from mtg_gateway.app import create_app
 from mtg_gateway.db import Database
 from mtg_gateway.oidc import OIDCClient, pkce_pair
 
-from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, FakeIdP, make_settings
+from .conftest import (
+    CLIENT_ID,
+    CLIENT_SECRET,
+    IDP,
+    FakeIdP,
+    guard_page_focused,
+    guard_ready_for_tap,
+    make_settings,
+)
 from .test_cimd import CLIENT_URL, DocHost, document
 from .test_scan_browser import _free_port, _serve
 
@@ -239,6 +247,7 @@ def test_consent_click_guard_defeats_a_double_click_swap(server: Server) -> None
             # slow runner the click below came more than the dwell time later; the click itself
             # then counted as the person's move, and the buttons unlocked during the wait (CI;
             # reproduced by waiting 500 ms before the click).
+            guard_page_focused(page)
             page.evaluate(
                 "() => { window.dispatchEvent(new Event('blur')); window.__swappedAt = performance.now(); }"
             )
@@ -328,7 +337,7 @@ def test_consent_on_a_phone_unlocks_with_a_first_tap(server: Server) -> None:
             # Re-lock first: a loaded headless Chromium can emit a mouse move of its own after a
             # late layout, which would count as the unlocking interaction instead of the tap
             # (seen in CI; the next test does the same). The clocks restart from here.
-            page.evaluate("() => window.dispatchEvent(new Event('blur'))")
+            guard_ready_for_tap(page)
             # fixed wait: past the guard's 800 ms dwell again after the re-lock (its own timer, not shown)
             page.wait_for_timeout(1000)
             page.locator(APPROVE).scroll_into_view_if_needed()  # the panel is taller than 720 px
@@ -367,6 +376,7 @@ def test_consent_unlocking_tap_is_swallowed_even_when_its_click_comes_late(serve
             # guard is re-locked first, in the same script so nothing can slip in between: a
             # loaded headless Chromium can emit a mouse move of its own after a late layout, and
             # that would count as the unlocking interaction instead of the touch (seen in CI).
+            guard_page_focused(page)
             page.evaluate(
                 "(sel) => { window.dispatchEvent(new Event('blur'));"
                 " const b = document.querySelector(sel);"

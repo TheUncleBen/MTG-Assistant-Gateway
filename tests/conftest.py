@@ -908,6 +908,12 @@ def guard_ready_for_tap(page) -> None:
     so), and the guard is re-locked so the tap is the first interaction it sees (a loaded headless
     Chromium can emit a mouse move of its own after a late layout, which would otherwise count as
     the unlocking one). CI on 98a3ec99: the tap's "unlocking" look was missing."""
+    guard_page_focused(page)
+    page.evaluate("() => window.dispatchEvent(new Event('blur'))")
+
+
+def guard_page_focused(page) -> None:
+    """Wait until a guarded page has focus and is visible, for a test that re-locks the guard in
+    its own script (see guard_ready_for_tap)."""
     page.bring_to_front()
     page.wait_for_function("() => document.hasFocus() && document.visibilityState === 'visible'")
-    page.evaluate("() => window.dispatchEvent(new Event('blur'))")
