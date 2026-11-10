@@ -107,7 +107,7 @@ from .decklist import (
     parse_decklist,
     to_text,
 )
-from .timing import add_time, archidekt_time
+from .timing import add_time, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
 
@@ -7166,22 +7166,26 @@ class DeckService:
 
             return await account_lists.apply(self, sub, row, progress)
         changes = parse_changes(row["changes"], row_flags=True)  # stored: flags only from the deck page
-        deck = await self._current_deck_for(sub, row)
+        times = _StepTimes()
+        async with times.step("read"):
+            deck = await self._current_deck_for(sub, row)
         progress["read_rows"] = deck.rows_fingerprint()  # _deck_as_before: did a failed write land?
-        changes, left_out = await self._left_out(sub, row, deck, changes)
+        async with times.step("card_lookups"):
+            changes, left_out = await self._left_out(sub, row, deck, changes)
         _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
         recategorise, _cat_lines = category_plan(deck, changes)
         # Every printing is looked up before anything is written or backed up, so a printing
         # that does not exist (or is another card) refuses the proposal with nothing changed.
-        (
-            resolve,
-            modifiers,
-            pinned,
-            new_cats,
-            side_cats,
-            side_pinned,
-            side_modifiers,
-        ) = await self._resolve_adds(sub, deck, changes, after, after_side)
+        async with times.step("card_lookups"):
+            (
+                resolve,
+                modifiers,
+                pinned,
+                new_cats,
+                side_cats,
+                side_pinned,
+                side_modifiers,
+            ) = await self._resolve_adds(sub, deck, changes, after, after_side)
         payload = build_payload(
             deck,
             after,
@@ -7201,13 +7205,16 @@ class DeckService:
             row_counts(deck, target_rows(deck, changes)),
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
-        payload += await self._printing_entries(sub, deck, specs)
+        async with times.step("card_lookups"):
+            payload += await self._printing_entries(sub, deck, specs)
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
-        backup = await self._backup_shared(sub, row, deck, snapshot_id)
+        async with times.step("backup"):
+            backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         if not self._unchanged_since_read(backup):
-            await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+            async with times.step("read_again"):
+                await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
         if (kept := one_click.get()) is not None:
             kept["base"] = pickle.dumps(deck)  # the deck the write was worked out on (api.edit_deck)
         for r in row.get("rows") or []:
@@ -7219,8 +7226,10 @@ class DeckService:
                 )
         # A write Archidekt may have taken without answering does not end the apply here: the
         # read below says what the deck has now (0.7.46 audit PA-3)
-        unanswered = await _unless_unanswered(self._send(sub, deck.id, payload, progress))
-        verified = await _read_after(self.get_deck(sub, deck.id), unanswered)
+        async with times.step("write"):
+            unanswered = await _unless_unanswered(self._send(sub, deck.id, payload, progress))
+        async with times.step("read_back"):
+            verified = await _read_after(self.get_deck(sub, deck.id), unanswered)
         if (kept := one_click.get()) is not None:
             kept["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it (D-01)
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
@@ -7246,6 +7255,7 @@ class DeckService:
             "after_fingerprint": verified.fingerprint(),  # Undo: did the deck change since?
             **({"left_out": left_out} if left_out else {}),
             **({"answer_lost": True} if unanswered is not None else {}),
+            "seconds": times.result(),
         }
         if mismatches:
             progress.update(result)  # apply() records it with the error
@@ -8636,10 +8646,12 @@ class DeckService:
         modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
         found: dict[tuple[str, str, str], dict[str, Any]] = {}  # each printing looked up once
+        times = _StepTimes()
         progress["resolved_cards"], progress["of_cards"] = 0, len(cards)
         # most printings in a few requests (one Scryfall lookup, one Archidekt request per 60
         # cards); a card that misses goes the one-at-a-time way below, as before
-        ready = await self._printings_at_once(sub, cards)
+        async with times.step("card_lookups"):
+            ready = await self._printings_at_once(sub, cards)
         for c in cards:  # resolve every printing before creating anything
             card = found.get(row_key(c))
             repeat = card is not None
@@ -8655,15 +8667,16 @@ class DeckService:
                         NOT_ON_ARCHIDEKT
                     ):
                         raise DeckError("not_found", ".")
-                    card = await self._call(
-                        sub,
-                        lambda token, *_, c=c: self.client.resolve_card(
-                            token,
-                            c["name"],
-                            set_code=c.get("set_code") or None,
-                            collector_number=c.get("collector_number") or None,
-                        ),
-                    )
+                    async with times.step("card_lookups"):
+                        card = await self._call(
+                            sub,
+                            lambda token, *_, c=c: self.client.resolve_card(
+                                token,
+                                c["name"],
+                                set_code=c.get("set_code") or None,
+                                collector_number=c.get("collector_number") or None,
+                            ),
+                        )
                 except DeckError as exc:
                     if not (leave_out and exc.kind == "not_found"):
                         raise
@@ -8734,11 +8747,13 @@ class DeckService:
                     sub,
                     lambda token, *_, f=f: self.client.create_category(token, created.id, {**f, "id": None}),
                 )
-            await self._send_batched(sub, created.id, entries, progress)
+            async with times.step("write"):
+                await self._send_batched(sub, created.id, entries, progress)
         finally:
             self._being_made.pop(str(created.id), None)
             lock.release()
-        verified = await self.get_deck(sub, created.id)
+        async with times.step("read_back"):
+            verified = await self.get_deck(sub, created.id)
         want_folder = spec.get("folder_id")
         if want_folder is not None and verified.parent_folder != want_folder:
             # the create request names the folder as archidekt.com's form does; when the deck is not
@@ -8788,6 +8803,7 @@ class DeckService:
             "deck_url": f"https://archidekt.com/decks/{created.id}",
             "printing_notes": printing_notes,
             "sent_entries": len(entries),
+            "seconds": times.result(),
             "verified": not mismatches,
             "mismatched_cards": mismatches,
             **package_read,
@@ -12489,6 +12505,34 @@ TRY_AGAIN_STEP = (
 NOTHING_WRITTEN = frozenset(
     {"invalid", "forbidden", "not_found", "not_linked", "writes_disabled", "rate_limited", "stale"}
 )
+
+
+class _StepTimes:
+    """Where an apply's time went, step by step, for its result: each step's seconds and, of
+    them, the time spent waiting for a turn in the shared Archidekt pacer (the rest is
+    Archidekt answering, plus the gateway's own work). The owner, 10 Nov 2026: a two-card edit
+    took 34 s live and nothing said which step took it."""
+
+    def __init__(self) -> None:
+        self.started = time.monotonic()
+        self.steps: dict[str, float] = {}
+        self.waited = 0.0
+
+    @asynccontextmanager
+    async def step(self, name: str) -> AsyncIterator[None]:
+        began, wait0 = time.monotonic(), pacer_time.get()
+        try:
+            yield
+        finally:
+            self.steps[name] = round(self.steps.get(name, 0.0) + time.monotonic() - began, 1)
+            self.waited += pacer_time.get() - wait0
+
+    def result(self) -> dict[str, float]:
+        return {
+            **self.steps,
+            "total": round(time.monotonic() - self.started, 1),
+            "waiting_for_a_turn": round(self.waited, 1),
+        }
 
 
 async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any:

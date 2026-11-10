@@ -18,7 +18,7 @@ from .test_history_page import store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
-from .waits import redrawn, settled
+from .waits import redrawn, settled, sideways
 
 pytest.importorskip("playwright")
 
@@ -69,7 +69,6 @@ def _page(browser, server: Server, sid: str, width: int, *, touch: bool = True, 
 
 
 ZOOMS = {"root": ROOT_200, "text": TEXT_200}
-SCROLLS = "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
 
 
 # -- Account: the Look rows at large text ----------------------------------------------------------
@@ -107,7 +106,7 @@ def test_account_rows_keep_label_and_value_apart_at_200_percent(chromium, server
         # Lists (its value: Binder) joined the rows with a value when the lists moved to Binder
         assert [r["label"] for r in rows] == ["Lists", "Theme", "Layout"]
         assert all(not r["overlap"] and r["fits"] and r["inside"] for r in rows), rows
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
 
 
 # -- the review page's facts at large text on the Fold's cover screen --------------------------------
@@ -139,7 +138,7 @@ def test_the_review_facts_stay_inside_the_page_at_344_px_and_200_percent(chromiu
         page.goto(f"{server.base}/proposals/{pid}", wait_until="networkidle")
         page.evaluate(ZOOMS[zoom])
         redrawn(page)
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
         assert all(page.evaluate(FACTS))
 
 
@@ -165,7 +164,7 @@ def test_reports_strips_scroll_inside_and_never_the_page(chromium, server, width
         page.goto(f"{server.base}/reports", wait_until="networkidle")
         page.evaluate(ZOOMS[zoom])
         redrawn(page)
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
         strips = page.evaluate(STRIPS)
         assert all(s["inside"] and (s["scrolls"] or not s["wider"]) for s in strips), strips
 
@@ -206,7 +205,7 @@ def test_forge_seats_fit_the_table_at_large_text(chromium, server, width, zoom) 
         if zoom != "100":
             page.evaluate(ZOOMS[zoom])
         redrawn(page)
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
         rows = page.evaluate(SEATS)
         assert len(rows) == 4 and all(r["inside"] and r["room"] for r in rows), rows
 
@@ -255,7 +254,7 @@ def test_compare_lists_my_decks_on_a_cold_start_and_wraps_a_long_name(chromium, 
         assert page.locator(".cmp-mine [data-pick-src]").count() == 0
         assert page.locator(".cmp-mine h3", has_text="My decks").count() == 1
         settled(page)
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
         chip.click()
         page.wait_for_url(re.compile(r"/decks/42/compare\?with=44$"))
 
@@ -307,7 +306,7 @@ def test_the_scan_result_card_keeps_room_for_the_name_at_large_text(chromium, se
         got = page.evaluate(RESULT)
         assert got["name"] >= 1.5 * got["img"] and got["name"] >= got["card"] * 0.4, got
         assert got["img"] <= got["card"] / 3 + 1, got
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
 
 
 # Text recognition that takes a moment to get ready, then reads "Sol Ring" from any picture. It is

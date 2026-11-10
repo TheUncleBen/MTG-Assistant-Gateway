@@ -14,6 +14,7 @@ import pytest
 from .test_card_search_filters_browser import CONTRAST
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import sideways
 
 pytest.importorskip("playwright")
 
@@ -105,9 +106,7 @@ def test_review_pages_fit_and_offer_only_what_works(
                 page.goto(f"{server.base}/proposals/{pid}", wait_until="networkidle")
                 if big:
                     page.add_style_tag(content="html{font-size:200% !important}")
-                over = page.evaluate(
-                    "document.documentElement.scrollWidth - document.documentElement.clientWidth"
-                )
+                over = sideways(page)
                 assert over <= 0, (pid, over)
                 if pid == "del1":
                     assert page.locator("button", has_text="Delete this deck on Archidekt").count() == 1

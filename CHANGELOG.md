@@ -23,6 +23,8 @@ placeholders showed, and no blue links.
 - **A new deck is made in seconds.** Applying a new deck looked its cards up on Archidekt one at a
   time, which took over two minutes for a 100-card deck. The printings now come from one card
   lookup and one Archidekt request per 60 cards; a card those miss is still looked up on its own.
+- An applied proposal's result says where its time went (`seconds`: card lookups, the backup
+  copy, the write, the read-back, and the time spent waiting for a turn to ask Archidekt).
 - **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
   shows one line until it has checked that it is the newest card of a change that still waits.
   Only that card draws its list, pictures and buttons; a card for a change that was updated,

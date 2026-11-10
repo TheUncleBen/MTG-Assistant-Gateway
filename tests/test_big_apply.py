@@ -350,3 +350,28 @@ async def test_a_new_deck_s_printings_come_in_a_few_requests_not_one_per_card(
     assert sum(c["quantity"] for c in made["cards"]) == 125
     assert {c["card"]["id"] for c in made["cards"]} == {80000 + n for n in range(CARDS)}
     assert out["result"]["verified"] is True and not out["result"]["printing_notes"]
+
+
+async def test_an_apply_says_where_its_time_went(stack: Stack, big_list) -> None:
+    """The owner, 10 Nov 2026: a two-card edit took 34 s live and nothing said which step took
+    it. Each apply's result names its steps' seconds and the time spent waiting for a turn."""
+    h = stack.h
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Timed", "cards": big_list[:10]}))
+    made = await press_approve(h, token, p["proposal_id"])
+    assert made["state"] == "applied", made
+    took = made["result"]["seconds"]
+    assert {"card_lookups", "write", "read_back", "total", "waiting_for_a_turn"} <= set(took), took
+    assert took["total"] >= took["write"] >= 0
+    e = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "name": "Island", "quantity": 1}]},
+        )
+    )
+    done = structured(await call(h, token, "apply_proposal", {"proposal_id": e["proposal_id"]}))
+    assert done["state"] == "applied", done
+    took = done["result"]["seconds"]
+    assert {"read", "backup", "write", "read_back", "total", "waiting_for_a_turn"} <= set(took), took

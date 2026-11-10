@@ -14,11 +14,11 @@ import pytest
 from .test_notify_app import APP_UA
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import sideways
 
 pytest.importorskip("playwright")
 
 SNAP = "snapdeleted01"
-WIDE = "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
 
 
 @pytest.fixture
@@ -83,14 +83,14 @@ def test_make_a_new_deck_shows_and_opens_its_review(server: Server, width, schem
             button = page.locator("button:visible", has_text="Make a new deck from this").first
             assert button.is_visible()
             assert page.locator("text=Restore (review first)").locator("visible=true").count() == 0
-            assert page.evaluate(WIDE) <= 0
+            assert sideways(page) <= 0
             box = button.bounding_box()
             assert box and box["x"] >= 0 and box["x"] + box["width"] <= width + 1, box
             button.click()
             page.wait_for_load_state("networkidle")
             assert "/proposals/" in page.url, page.url
             assert "Gone But Kept" in page.content()
-            assert page.evaluate(WIDE) <= 0
+            assert sideways(page) <= 0
             assert not [d for d in server.ark.decks.values() if d.get("name") == "Gone But Kept"]
         finally:
             browser.close()

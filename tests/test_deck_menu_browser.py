@@ -28,7 +28,7 @@ from mtg_gateway.oidc import OIDCClient
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, make_settings
 from .fake_archidekt import FakeArchidekt
 from .test_scan_browser import _chromium_path, _free_port, _serve
-from .waits import expect, quiet, settled
+from .waits import expect, quiet, settled, sideways
 
 pytest.importorskip("playwright")
 
@@ -157,7 +157,7 @@ def _chromium() -> None:
 
 
 def _overflow(page) -> int:
-    return page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    return sideways(page)  # once the page has settled (tests/waits.py)
 
 
 @pytest.mark.parametrize(("width", "view"), [(390, "text"), (1366, "grid")])
