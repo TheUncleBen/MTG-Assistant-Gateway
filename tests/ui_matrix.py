@@ -858,18 +858,16 @@ def _menu_pass(page, path: str, d: Display, theme: str, text: int, res: Sweep, k
             continue
         # what opened slides or fades in, and a drop-down's own script moves it inside the
         # window on its toggle event: measured where it comes to rest
-        page.wait_for_timeout(100)
+        page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
         page.evaluate(
             "() => Promise.race([Promise.all(document.getAnimations().filter(a => a.playState === 'running'"
             " && isFinite(a.effect && a.effect.getComputedTiming().endTime)).map(a => a.finished.catch(() => 0))),"
             " new Promise(r => setTimeout(r, 800))])"
         )
-        got = None
-        for _ in range(5):
-            got = page.evaluate(MENU_CHECK, i)
-            if got:
-                break
-            page.wait_for_timeout(150)
+        try:  # a menu built after a fetch opens a moment later
+            got = page.wait_for_function(f"(i) => ({MENU_CHECK})(i)", arg=i, timeout=750).json_value()
+        except Exception:  # noqa: BLE001
+            got = None
         if got is None:
             found = [{"kind": "menu-none", "el": label, "msg": "opened nothing"}]
         elif not got.get("gone"):
@@ -891,7 +889,12 @@ def _menu_pass(page, path: str, d: Display, theme: str, text: int, res: Sweep, k
         try:
             page.keyboard.press("Escape")
             page.evaluate(MENU_CLOSE, i)
-            page.wait_for_timeout(120)
+            # gone, and its Back (static/layers.js) landed: no menu, scrim or open drop-down left
+            page.wait_for_function(
+                "() => !document.querySelector('.ctxmenu, .cs-scrim, .msel-scrim, details.dd[open]')"
+                " && !(window.MtgLayers && (window.MtgLayers.backPending() || window.MtgLayers.isOpen()))",
+                timeout=1_000,
+            )
         except Exception:  # noqa: BLE001
             pass
         if page.url.split("#")[0] != url.split("#")[0]:

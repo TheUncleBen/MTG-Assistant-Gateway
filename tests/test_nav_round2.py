@@ -344,7 +344,8 @@ def test_the_deck_pills_share_one_row_on_a_phone() -> None:
 
 def test_menu_icons_read_at_3_to_1_on_the_light_menu() -> None:
     """The bright orange was 1.8:1 on the light menu's #dedede; --orange-text (#944b00) is 4:1."""
-    assert ".ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange-text);" in theme.CSS
+    rule = theme.CSS.split(".ctxmenu .ic,.ctxmenu .i{", 1)[1].split("}", 1)[0]
+    assert "color:var(--orange-text);" in rule
     assert ".mtgbox .tree svg{width:18px;height:18px;flex:none;color:var(--orange-text);" in theme.CSS
 
 
