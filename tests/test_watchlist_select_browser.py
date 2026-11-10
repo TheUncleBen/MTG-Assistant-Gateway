@@ -269,11 +269,12 @@ def test_every_surface_fits_at_100_and_200_percent_text(
             assert b and b["x"] >= 0 and b["x"] + b["width"] <= width and b["height"] >= 44, (i, b)
         pins_val = '.lp-hubrows a[href="/collection/wants"] .val'
         page.wait_for_function(f"() => /^\\d+$/.test(document.querySelector('{pins_val}').textContent)")
-        assert page.locator(".lp-hub .wlrow .lbl span").all_inner_texts() == ["Meren wants"]
+        # One Binder (0.7.47): the watchlist's lists are on the Binder page
+        assert page.locator(".lp-hub .wlrow").count() == 0
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
-        # the switch names the page and counts the cards; Select is a real control everywhere
-        assert page.locator(".hubseg a[aria-current=page]").inner_text().startswith("Watchlist")
-        assert page.locator(".hubseg a[aria-current=page] .cn").inner_text() == "3"
+        # the heading names the page and counts the cards; Select is a real control everywhere
+        assert page.locator(".ui-head h1").inner_text().startswith("Watchlist")
+        assert page.locator(".ui-head h1 .cn").inner_text() == "3"
         page.locator("button.w-select").click()
         bar = page.locator(".ui-bar[aria-label='Selected cards']")
         assert bar.is_visible() and bar.locator(".count").inner_text() == "3 selected"
@@ -286,49 +287,26 @@ def test_every_surface_fits_at_100_and_200_percent_text(
         browser.close()
 
 
-def test_a_watchlist_list_row_opens_its_menu_from_a_right_click_and_a_hold(server: Server) -> None:
-    """Binder › Lists: a watchlist list's row has the same menu from a right-click (a mouse) and
-    a press and hold (a phone) as from its ⋮ (review 2, M7; R-228), without leaving the page."""
+def test_a_list_on_the_binder_page_has_rename_and_delete_in_its_menu(server: Server) -> None:
+    """One Binder (0.7.47): a list is a row of the Binder page's library; opened, its List menu has
+    Rename list… and Delete list…, each a box on the page."""
     from playwright.sync_api import sync_playwright
 
     sid = seed(server)
     exe = _exe()
     with sync_playwright() as p:
         browser, page, errors = _open(p, server, sid, width=1280, height=900, theme="light", exe=exe)
-        page.goto(f"{server.base}/collection/lists", wait_until="networkidle")
-        row = page.locator(".lp-hub .yrow.wlrow", has_text="Meren wants")
-        row.locator("a.lbl").click(button="right")
-        _menu(page)
-        assert _items(page) == ["Rename list…", "Delete list…"]
-        assert page.locator(".ctxmenu .head").inner_text().strip() == "Meren wants"
-        page.keyboard.press("Escape")
-        expect(page.locator(".ctxmenu")).to_have_count(0)
-        quiet(page)
-        assert page.locator(".ctxmenu").count() == 0 and page.url.endswith("/collection/lists")
-        row.locator("summary.kebab").click()
-        _menu(page)
-        assert _items(page) == ["Rename list…", "Delete list…"]
-        page.keyboard.press("Escape")
-        browser.close()
-        # a phone: the hold, as Chrome on Android sends it (the touch, then its contextmenu)
-        browser, page, errors = _open(p, server, sid, width=375, height=812, theme="dark", exe=exe, ua=APP_UA)
-        page.goto(f"{server.base}/collection/lists", wait_until="networkidle")
-        row = page.locator(".lp-hub .yrow.wlrow", has_text="Meren wants")
-        row.scroll_into_view_if_needed()
-        b = row.locator("a.lbl").bounding_box()
-        x, y = b["x"] + 30, b["y"] + b["height"] / 2
-        cdp = page.context.new_cdp_session(page)
-        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-        page.locator(".ctxmenu").first.wait_for(timeout=3000)  # held: the hold opened the menu
-        cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
-        row.locator("a.lbl").evaluate(
-            """(a, xy) => a.dispatchEvent(new MouseEvent("contextmenu",
-                {bubbles: true, cancelable: true, clientX: xy[0], clientY: xy[1]}))""",
-            [x, y],
-        )
-        _menu(page)
-        assert _items(page) == ["Rename list…", "Delete list…"]
-        assert page.url.endswith("/collection/lists")
+        page.goto(f"{server.base}/binder", wait_until="networkidle")
+        with page.expect_navigation(wait_until="networkidle"):
+            page.locator(".bn-lib a.yrow", has_text="Meren wants").click()
+        assert page.locator("#bn-title").inner_text() == "Meren wants"
+        page.locator(".bn-listmenu > summary").click()
+        items = page.locator(".bn-listmenu .menu a").all_inner_texts()
+        assert [t.strip() for t in items] == ["Rename list…", "Delete list…"]
+        page.locator(".bn-listmenu .menu a", has_text="Rename list…").click()
+        box = page.locator("#bn-rename")
+        expect(box).to_be_visible()
+        assert box.locator("input[name=new_name]").input_value() == "Meren wants"
         page.keyboard.press("Escape")
         assert errors == [], errors
         browser.close()

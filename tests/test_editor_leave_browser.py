@@ -156,7 +156,7 @@ def test_close_editor_with_pending_edits_asks_in_the_page(
 
             # a link out of the editor elsewhere on the page (the tab bar or rail, else the top bar)
             nav = page.locator(
-                ".tabbar > a[href='/collection']:visible, .topbar nav.site a[href='/collection']:visible"
+                ".tabbar > a[href='/binder']:visible, .topbar nav.site a[href='/binder']:visible"
             )
             nav.first.click()
             bar.wait_for(state="visible", timeout=3000)

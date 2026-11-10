@@ -90,6 +90,14 @@ def _pick_view(page, label: str) -> None:
         layout.select_option(label=label)
 
 
+def _to_collection(page) -> None:
+    """Binder in the site's own links, then its Archidekt collection row (One Binder, 0.7.47)."""
+    _nav(page, "/binder")
+    if not page.url.rstrip("/").endswith("/collection"):
+        with page.expect_navigation(wait_until="networkidle"):
+            page.locator(".bn-lib a.yrow[href='/collection']").click()
+
+
 def _nav(page, href: str) -> None:
     """Follow the site's own link to ``href`` (tab bar on a phone, top bar on a desktop)."""
     link = page.locator(f".tabbar > a[href='{href}']:visible, .topbar nav.site a[href='{href}']:visible")
@@ -126,7 +134,7 @@ def test_view_as_is_remembered_after_leaving_and_coming_back(server: Server, wid
         page.locator("#listform .segc.view label[title=List]").click()
         page.wait_for_selector("ul.decklist.list")
         page.wait_for_load_state("networkidle")
-        _nav(page, "/collection")
+        _to_collection(page)
         _nav(page, "/decks")
         assert page.url == f"{server.base}/decks", page.url
         assert page.locator("ul.decklist.list").count() == 1, "the deck list went back to Grid"
@@ -136,11 +144,11 @@ def test_view_as_is_remembered_after_leaving_and_coming_back(server: Server, wid
         assert page.locator("#cards.deckview.stacks").count() == 1
 
         # the collection: List picked, away and back
-        _nav(page, "/collection")
+        _to_collection(page)
         with page.expect_navigation(wait_until="networkidle"):
             page.locator(".rbar .segc.view label", has_text="List").click()
         _nav(page, "/decks")
-        _nav(page, "/collection")
+        _to_collection(page)
         assert page.url == f"{server.base}/collection"
         assert page.locator(".rbar .segc.view input[value=list]").is_checked()
         assert "value='list' checked>" in page.request.get(f"{server.base}/collection").text()

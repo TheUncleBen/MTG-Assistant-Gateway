@@ -55,7 +55,7 @@ OK_WORDS = {
     "defaults": "{n} now use your defaults.",
     "list": "Moved {n} to {l}.",
     "nolist": "Took {n} out of their lists.",
-    "watch": "Watching {n}.",
+    "watch": "{n} added to your watchlist.",
     "unwatch": "Stopped watching {n}.",
     "undone": "Undone.",
     "newlist": "List {l} made.",
@@ -157,7 +157,7 @@ def library_html(
         )
         for s, ic, sub in (
             ("all", "layers", ""),
-            ("owned", "collection", "Your Archidekt collection"),
+            ("owned", "collection", "Cards in your binder"),
             ("want", "eye", "Cards you watch for a price"),
             ("alerts", "bell", "Past their alert price now"),
         )
@@ -202,7 +202,7 @@ def library_html(
         f"<input id='bn-q' name='q' type='search' placeholder='Search your binder' value='{esc(view.q)}' "
         "autocomplete='off' enterkeyhint='search'></form>"
         f"<section class='ygrp'><h2>Cards</h2><div class='rows'>{cards}</div></section>"
-        f"<section class='ygrp'><h2>My lists</h2><div class='rows'>{''.join(mine)}</div></section>"
+        f"<section class='ygrp'><h2>Lists</h2><div class='rows'>{''.join(mine)}</div></section>"
         f"<section class='ygrp'><h2>More</h2><div class='rows'>{more}</div></section>"
         "</div>"
     )
@@ -517,7 +517,7 @@ def boxes_html(
             "<input type='hidden' name='do' value='remove'><input type='hidden' name='next'"
             f" value='{esc(back)}'>"
             "<input type='hidden' name='sel' value=''><p class='bn-count'></p>"
-            "<p class='ui-hint'>They are removed from your Archidekt collection. Undo puts them back.</p>"
+            "<p class='ui-hint'>They are removed from your binder on Archidekt. Undo puts them back.</p>"
             "</form>"
         ),
         actions=[

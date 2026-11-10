@@ -81,36 +81,39 @@ def test_an_upgrade_saves_a_checked_owner_only_copy_first(tmp_path: Path) -> Non
     assert len(upgrade_backup.copies(folder)) == 1
 
 
-def test_the_step_to_22_saves_a_schema_21_copy_and_going_back_puts_it_back(
+def test_the_step_to_23_saves_a_schema_22_copy_and_going_back_puts_it_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The newest step (21 to 22, the bell's ``gateway_alerts``): the copy is saved first and
-    named for schema 21, and a build at schema 21 started on the upgraded database goes back to it."""
+    """The newest step (22 to 23, One Binder's ``list_cards``): the copy is saved first and
+    named for schema 22, and a build at schema 22 started on the upgraded database goes back to it."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 21)
+    _old_database(path, 22)
     db = Database(path, upgrade_dir=folder)
     try:
         assert db.schema_version == dbmod.SCHEMA_VERSION == 23
-        db.add_gateway_alert("u1", "prices", "Sol Ring fell below $10", "Sol Ring is $9.50.", "/watchlist")
-        assert [r["title"] for r in db.gateway_alerts("u1")] == ["Sol Ring fell below $10"]
+        with db.tx() as c:
+            c.execute(
+                "INSERT INTO list_cards (sub, scryfall_id, finish, name, list_name, added_at) "
+                "VALUES ('u1', 's1', 'nonfoil', 'Sol Ring', 'Trade', 0)"
+            )
     finally:
         db.close()
     ((copy, schema),) = upgrade_backup.copies(folder)
-    assert schema == 21 and copy.name.endswith("-schema21.sqlite")
-    assert _read(copy, "PRAGMA user_version") == [(21,)]
-    assert _read(copy, "SELECT name FROM sqlite_master WHERE name = 'gateway_alerts'") == []
-    with monkeypatch.context() as m:  # a build with steps 1 to 21
-        m.setattr(dbmod, "MIGRATIONS", dbmod.MIGRATIONS[:21])
+    assert schema == 22 and copy.name.endswith("-schema22.sqlite")
+    assert _read(copy, "PRAGMA user_version") == [(22,)]
+    assert _read(copy, "SELECT name FROM sqlite_master WHERE name = 'list_cards'") == []
+    with monkeypatch.context() as m:  # a build with steps 1 to 22
+        m.setattr(dbmod, "MIGRATIONS", dbmod.MIGRATIONS[:22])
         old = Database(path, upgrade_dir=folder)
         try:
-            assert old.schema_version == 21
+            assert old.schema_version == 22
             assert [r[0] for r in old._conn.execute("SELECT sub FROM users")] == ["u1"]
-            gone = "SELECT name FROM sqlite_master WHERE name = 'gateway_alerts'"
+            gone = "SELECT name FROM sqlite_master WHERE name = 'list_cards'"
             assert old._conn.execute(gone).fetchone() is None
         finally:
             old.close()
     ((aside, schema),) = upgrade_backup.copies(folder, upgrade_backup.SET_ASIDE_PREFIX)
-    assert schema == 22 and _read(aside, "SELECT title FROM gateway_alerts") == [("Sol Ring fell below $10",)]
+    assert schema == 23 and _read(aside, "SELECT list_name FROM list_cards") == [("Trade",)]
 
 
 def test_a_new_database_and_one_already_current_get_no_copy(tmp_path: Path) -> None:
@@ -158,7 +161,7 @@ def test_an_upgrade_happens_whole_or_not_at_all(tmp_path: Path, monkeypatch: pyt
     _newer(monkeypatch, _add_table, broken)
     with pytest.raises(sqlite3.OperationalError):
         Database(path)
-    assert _version(path) == 22
+    assert _version(path) == 23
     conn = sqlite3.connect(path)
     try:
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'newer_thing'").fetchone() is None
@@ -184,11 +187,11 @@ def test_the_newest_three_copies_are_kept(tmp_path: Path) -> None:
 
 def test_an_older_version_goes_back_to_its_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     with monkeypatch.context() as m:
         _newer(m, _add_table)
         newer = Database(path, upgrade_dir=folder)
-        assert newer.schema_version == 23
+        assert newer.schema_version == 24
         newer._conn.execute(
             "INSERT INTO users (sub, groups_json, first_login_at, last_login_at) VALUES ('u2', '[]', 3, 3)"
         )
@@ -203,7 +206,7 @@ def test_an_older_version_goes_back_to_its_copy(tmp_path: Path, monkeypatch: pyt
     finally:
         db.close()
     ((aside, schema),) = upgrade_backup.copies(folder, upgrade_backup.SET_ASIDE_PREFIX)
-    assert schema == 23 and stat.S_IMODE(aside.stat().st_mode) == 0o600
+    assert schema == 24 and stat.S_IMODE(aside.stat().st_mode) == 0o600
     conn = sqlite3.connect(aside)
     try:
         # nothing is lost: the newer database, with the change made since the upgrade
@@ -218,17 +221,17 @@ def test_an_older_version_goes_back_to_its_copy(tmp_path: Path, monkeypatch: pyt
 
 def test_without_its_copy_an_older_version_refuses(tmp_path: Path) -> None:
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     folder.mkdir()
     # a copy of another schema is no use, nor is a damaged one
     (folder / "mtg-gateway-before-upgrade-20260101T000000Z-schema14.sqlite").write_bytes(b"")
-    (folder / "mtg-gateway-before-upgrade-20260102T000000Z-schema22.sqlite").write_bytes(b"junk" * 1000)
+    (folder / "mtg-gateway-before-upgrade-20260102T000000Z-schema23.sqlite").write_bytes(b"junk" * 1000)
     conn = sqlite3.connect(path)
-    conn.execute("PRAGMA user_version = 23")
+    conn.execute("PRAGMA user_version = 24")
     conn.close()
     with pytest.raises(DatabaseUpgradeError, match="newer than this gateway supports .*has no copy"):
         Database(path, upgrade_dir=folder)
-    assert _version(path) == 23
+    assert _version(path) == 24
     assert not upgrade_backup.copies(folder, upgrade_backup.SET_ASIDE_PREFIX)
 
 
@@ -309,7 +312,7 @@ def test_going_back_keeps_members_disabled_unlinked_and_deleted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     conn = sqlite3.connect(path)
     for sub in ("u2", "u3"):
         conn.execute(
@@ -360,7 +363,7 @@ def test_going_back_changes_the_database_in_one_step(tmp_path: Path, monkeypatch
     """The copy is made ready (sign-ins ended) in a work file before it goes in with one backup, so
     a failure while it is made ready leaves the newer database in use exactly as it was."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     with monkeypatch.context() as m:
         _newer(m, _add_table)
         Database(path, upgrade_dir=folder).close()
@@ -372,7 +375,7 @@ def test_going_back_changes_the_database_in_one_step(tmp_path: Path, monkeypatch
         m.setattr(upgrade_backup, "_carry_forward", crash)
         with pytest.raises(DatabaseUpgradeError, match="Nothing was changed"):
             Database(path, upgrade_dir=folder)
-    assert _version(path) == 23
+    assert _version(path) == 24
     conn = sqlite3.connect(path)
     try:
         assert conn.execute("SELECT revoked FROM tokens").fetchone()[0] == 0
@@ -382,14 +385,14 @@ def test_going_back_changes_the_database_in_one_step(tmp_path: Path, monkeypatch
     # the next start goes back, signed out
     db = Database(path, upgrade_dir=folder)
     try:
-        assert db.schema_version == 22 and db._conn.execute("SELECT revoked FROM tokens").fetchone()[0] == 1
+        assert db.schema_version == 23 and db._conn.execute("SELECT revoked FROM tokens").fetchone()[0] == 1
     finally:
         db.close()
 
 
 def test_a_start_that_keeps_failing_saves_one_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
 
     def broken(conn: sqlite3.Connection) -> None:
         raise sqlite3.OperationalError("step failed")
@@ -459,14 +462,14 @@ def test_an_unlink_a_disable_and_delete_my_data_reach_every_copy(
     """Members are told an unlink, a disable and "Delete my data" end their Archidekt session and
     data at once: the copies saved at upgrades (before-upgrade and set-aside) are no exception."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     _members(path, "u2", "u3", "u4", "u5")
     with monkeypatch.context() as m:
         _newer(m, _add_table)
         newer = Database(path, upgrade_dir=folder)
         try:
             ((before, _),) = upgrade_backup.copies(folder)
-            aside = folder / "mtg-gateway-set-aside-20260101T000000Z-schema22.sqlite"
+            aside = folder / "mtg-gateway-set-aside-20260101T000000Z-schema23.sqlite"
             aside.write_bytes(before.read_bytes())
             aside.chmod(0o600)
             assert newer.revoke_link("u2")  # Unlink (the member's or an admin's)
@@ -482,7 +485,7 @@ def test_an_unlink_a_disable_and_delete_my_data_reach_every_copy(
         assert ("u4",) not in _read(copy, "SELECT sub FROM users")
         assert _read(copy, "SELECT count(*) FROM proposals WHERE owner_sub = 'u4'") == [(0,)]
         assert stat.S_IMODE(copy.stat().st_mode) == 0o600
-        assert _read(copy, "PRAGMA user_version") == [(22,)]
+        assert _read(copy, "PRAGMA user_version") == [(23,)]
     # a refresh that fails (the session expired) is not an unlink, and changes no copy
     db = Database(tmp_path / "other.sqlite", upgrade_dir=folder)
     try:
@@ -497,7 +500,7 @@ def test_an_unlink_a_disable_and_delete_my_data_reach_every_copy(
 def test_a_copy_that_can_t_be_changed_is_deleted_rather_than_kept(tmp_path: Path) -> None:
     folder = tmp_path / "before-upgrade"
     folder.mkdir()
-    junk = folder / "mtg-gateway-before-upgrade-20260101T000000Z-schema22.sqlite"
+    junk = folder / "mtg-gateway-before-upgrade-20260101T000000Z-schema23.sqlite"
     junk.write_bytes(b"not a database" * 100)
     db = Database(tmp_path / "g.sqlite", upgrade_dir=folder)
     try:
@@ -513,8 +516,8 @@ def test_the_copies_are_kept_no_longer_than_the_nightly_backups(tmp_path: Path) 
     names = [
         "mtg-gateway-before-upgrade-20260101T000000Z-schema14.sqlite",
         "mtg-gateway-before-upgrade-20260110T000000Z-schema14.sqlite",
-        "mtg-gateway-set-aside-20260102T000000Z-schema23.sqlite",
-        "mtg-gateway-set-aside-20260120T000000Z-schema23.sqlite",
+        "mtg-gateway-set-aside-20260102T000000Z-schema24.sqlite",
+        "mtg-gateway-set-aside-20260120T000000Z-schema24.sqlite",
     ]
     for name in names:
         (folder / name).write_bytes(b"")
@@ -571,7 +574,7 @@ def test_going_back_keeps_the_member_s_current_archidekt_link_and_phone_key(
     from mtg_gateway import notify
 
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     _members(path, "u2", "u3")
     d = Database(path, upgrade_dir=folder)
     try:
@@ -620,7 +623,7 @@ def test_going_forward_again_with_the_set_aside_copy_ends_every_sign_in(
     """The set-aside copy put back by hand (docs/UPGRADING.md) holds the sign-ins from before
     going back: the newer version ends them all at its first start on it, once."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     with monkeypatch.context() as m:
         _newer(m, _add_table)
         newer = Database(path, upgrade_dir=folder)
@@ -639,7 +642,7 @@ def test_going_forward_again_with_the_set_aside_copy_ends_every_sign_in(
         _newer(m, _add_table)
         newer = Database(path, upgrade_dir=folder)
         try:
-            assert newer.schema_version == 23
+            assert newer.schema_version == 24
             assert newer._conn.execute("SELECT revoked FROM tokens").fetchone()[0] == 1
             assert newer.get_browser_session("sid-1") is None
             assert upgrade_backup.last_event["kind"] == "went-forward"
@@ -666,7 +669,7 @@ def test_a_repeated_copy_keeps_the_newest_date(tmp_path: Path, monkeypatch: pyte
     bytes again. The new one is kept (and the old one goes), so the age-out right after counts
     from now and going back stays possible."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
 
     def broken(conn: sqlite3.Connection) -> None:
         raise sqlite3.OperationalError("step failed")
@@ -676,7 +679,7 @@ def test_a_repeated_copy_keeps_the_newest_date(tmp_path: Path, monkeypatch: pyte
         with pytest.raises(sqlite3.OperationalError):
             Database(path, upgrade_dir=folder)
     ((first, _),) = upgrade_backup.copies(folder)
-    old = folder / "mtg-gateway-before-upgrade-20200101T000000Z-schema22.sqlite"
+    old = folder / "mtg-gateway-before-upgrade-20200101T000000Z-schema23.sqlite"
     first.rename(old)
     with monkeypatch.context() as m:
         _newer(m, _add_table)
@@ -687,17 +690,17 @@ def test_a_repeated_copy_keeps_the_newest_date(tmp_path: Path, monkeypatch: pyte
         finally:
             db.close()
     ((kept, schema),) = upgrade_backup.copies(folder)
-    assert schema == 22 and kept != old and not old.exists()
+    assert schema == 23 and kept != old and not old.exists()
 
 
 def test_the_age_out_removes_what_a_crash_left(tmp_path: Path) -> None:
     folder = tmp_path / "before-upgrade"
     folder.mkdir()
     now = upgrade_backup._stamp()
-    hot = folder / f"mtg-gateway-before-upgrade-{now}-schema22.sqlite"
+    hot = folder / f"mtg-gateway-before-upgrade-{now}-schema23.sqlite"
     hot.write_bytes(b"")
     Path(f"{hot}-journal").write_bytes(b"rows from before a change")  # a change cut short
-    fresh = folder / f"mtg-gateway-set-aside-{now}-schema23.sqlite"
+    fresh = folder / f"mtg-gateway-set-aside-{now}-schema24.sqlite"
     fresh.write_bytes(b"")
     orphan = folder / "mtg-gateway-before-upgrade-20200101T000000Z-schema14.sqlite-journal"
     orphan.write_bytes(b"x")
@@ -715,7 +718,7 @@ def test_a_set_aside_copy_put_back_and_upgraded_doesn_t_bring_its_mark_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     conn = sqlite3.connect(path)
     conn.execute(
         "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (1, NULL, NULL, ?, '{}')",
@@ -742,7 +745,7 @@ def test_going_back_works_when_the_newer_audit_log_can_t_take_the_mark(
         conn.execute("CREATE TABLE audit_log (id INTEGER PRIMARY KEY, at INTEGER, must TEXT NOT NULL)")
 
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     with monkeypatch.context() as m:
         _newer(m, other_log)
         Database(path, upgrade_dir=folder).close()
@@ -759,19 +762,19 @@ def test_delete_my_data_deletes_a_set_aside_copy_of_a_newer_schema(
 ) -> None:
     """A newer version's tables may hold more of the member than this version knows to delete."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     with monkeypatch.context() as m:
         _newer(m, _add_table)
         Database(path, upgrade_dir=folder).close()
-    db = Database(path, upgrade_dir=folder)  # back on this version: a set-aside copy of schema 23
+    db = Database(path, upgrade_dir=folder)  # back on this version: a set-aside copy of schema 24
     try:
         ((aside, schema),) = upgrade_backup.copies(folder, upgrade_backup.SET_ASIDE_PREFIX)
-        assert schema == 23
+        assert schema == 24
         db.revoke_link("u1")  # an unlink only blanks one column: the copy is changed, not deleted
         assert aside.exists()
         db.delete_member_data("u1")
         assert not aside.exists()
-        assert upgrade_backup.copies(folder)  # the before-upgrade copy (schema 22) is changed
+        assert upgrade_backup.copies(folder)  # the before-upgrade copy (schema 23) is changed
     finally:
         db.close()
 
@@ -781,7 +784,7 @@ def test_the_copies_are_brought_in_line_at_start(tmp_path: Path, monkeypatch: py
     the next start: deleted members forgotten, unlinked or replaced sessions blanked, disabled
     members' identity-provider tokens deleted. A relink now also blanks the replaced session."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     _members(path, "u2", "u3", "u4", "u5")
     with monkeypatch.context() as m:
         _newer(m, _add_table)
@@ -841,7 +844,7 @@ async def test_disconnect_my_phones_reaches_every_copy(
     from mtg_gateway.notify import account_action
 
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     _members(path, "u2")
     _phone(path, "u1", "old-key-1")
     _phone(path, "u2", "key-2")
@@ -850,7 +853,7 @@ async def test_disconnect_my_phones_reaches_every_copy(
         newer = Database(path, upgrade_dir=folder)
         try:
             ((before, _),) = upgrade_backup.copies(folder)
-            aside = folder / "mtg-gateway-set-aside-20260101T000000Z-schema22.sqlite"
+            aside = folder / "mtg-gateway-set-aside-20260101T000000Z-schema23.sqlite"
             aside.write_bytes(before.read_bytes())
             aside.chmod(0o600)
             state = SimpleNamespace(db=newer, notifier=None)
@@ -868,7 +871,7 @@ def test_at_start_a_phone_key_the_database_no_longer_holds_is_blanked_in_the_cop
 ) -> None:
     """Disconnected under 0.7.37, or in a change cut short: the next start blanks it."""
     path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
-    _old_database(path, 22)
+    _old_database(path, 23)
     _members(path, "u2")
     _phone(path, "u1", "old-key-1")
     _phone(path, "u2", "key-2")
@@ -885,18 +888,18 @@ def test_at_start_a_phone_key_the_database_no_longer_holds_is_blanked_in_the_cop
     assert dict(_read(before, "SELECT sub, ntfy_topic FROM notify_prefs")) == {"u1": None, "u2": "key-2"}
 
 
-UPGRADED = "mtg-gateway-before-upgrade-20260301T000000Z-schema22.sqlite"  # 2026-03-01: the upgrade
+UPGRADED = "mtg-gateway-before-upgrade-20260301T000000Z-schema23.sqlite"  # 2026-03-01: the upgrade
 AFTER_UPGRADE = 1775000000  # 2026-04-01, a sign-in after it
 
 
 def _set_aside(tmp_path: Path, name: str, *, record: bool = True) -> tuple[Database, Path]:
-    """A live database (schema 22, member u1 only) that went back from a newer one, and the
+    """A live database (schema 23, member u1 only) that went back from a newer one, and the
     set-aside copy named ``name``: u1, u2 (there at the upgrade, deleted since) and u9 (joined
     after the upgrade), each with an Archidekt session and identity-provider tokens."""
     folder = tmp_path / "before-upgrade"
     folder.mkdir()
     src = tmp_path / "aside.sqlite"
-    _old_database(src, 22)
+    _old_database(src, 23)
     _members(src, "u2", "u9")
     conn = sqlite3.connect(src)
     conn.execute("UPDATE users SET first_login_at = ? WHERE sub = 'u9'", (AFTER_UPGRADE,))
@@ -910,12 +913,12 @@ def _set_aside(tmp_path: Path, name: str, *, record: bool = True) -> tuple[Datab
     aside.write_bytes(src.read_bytes())
     aside.chmod(0o600)
     live_path = tmp_path / "g.sqlite"
-    _old_database(live_path, 22)
+    _old_database(live_path, 23)
     db = Database(live_path, upgrade_dir=folder)
     if record:
         db._conn.execute(
             "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (1, NULL, NULL, ?, ?)",
-            ("database_went_back", json.dumps({"copy": UPGRADED, "set_aside": name, "from_schema": 23})),
+            ("database_went_back", json.dumps({"copy": UPGRADED, "set_aside": name, "from_schema": 24})),
         )
     return db, aside
 
@@ -924,7 +927,7 @@ def test_at_start_a_member_deleted_since_is_forgotten_in_the_set_aside_copy(tmp_
     """A set-aside copy also holds those who joined after the upgrade: they stay (going forward
     with it, they sign in and relink), but a member who was there at the upgrade and is gone now
     is forgotten, and no member who is gone or new keeps identity-provider tokens."""
-    name = "mtg-gateway-set-aside-20260501T000000Z-schema22.sqlite"
+    name = "mtg-gateway-set-aside-20260501T000000Z-schema23.sqlite"
     db, aside = _set_aside(tmp_path, name)
     try:
         assert db.reconcile_upgrade_copies() == 1
@@ -942,7 +945,7 @@ def test_a_set_aside_copy_that_can_t_be_brought_in_line_is_deleted(tmp_path: Pat
     """Holding a member who is gone, in a newer schema this version doesn't know every table of;
     or with no record left of when the upgrade was, so the members it holds who aren't here can't
     be told apart from those who are gone."""
-    schema = 23 if record else 22
+    schema = 24 if record else 23
     name = f"mtg-gateway-set-aside-20260501T000000Z-schema{schema}.sqlite"
     db, aside = _set_aside(tmp_path, name, record=record)
     try:

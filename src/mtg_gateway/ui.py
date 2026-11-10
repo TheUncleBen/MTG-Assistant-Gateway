@@ -445,7 +445,7 @@ def binder_head(
         cn = f" <span class='cn'>{n:,}</span>" if n else ""
         return (
             f"<p class='bn-up'><a class='bn-back' href='/binder'>{icon('back')}Binder</a></p>"
-            f"<div class='ui-head phead'><h1>{esc(name)}{cn}</h1>{acts}</div>{line}"
+            f"<div class='ui-head phead bnhead'><h1>{esc(name)}{cn}</h1>{acts}</div>{line}"
         )
     switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
     return (

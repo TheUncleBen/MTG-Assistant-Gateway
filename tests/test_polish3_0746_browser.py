@@ -167,7 +167,7 @@ def test_the_binder_with_tags_the_strip_and_the_menu_fits_each_surface(
         for b in ("button[value=import_resume]", "button[value=import_done]"):
             assert strip.locator(b).bounding_box()["height"] >= (44 if touch else 36), b
         # the head: More (Export CSV and Clear binder…) and Add cards, nothing else
-        head = page.locator(".ui-head.hubhead .acts")
+        head = page.locator(".ui-head.phead .acts")
         assert head.locator("> *").count() == 2
         more_btn = head.locator("details.colmore > summary")
         assert more_btn.is_visible() and more_btn.bounding_box()["height"] >= (44 if touch else 36)
