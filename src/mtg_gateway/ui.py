@@ -437,10 +437,15 @@ def binder_head(
         for href, text, _ic in binder_pages()
     )
     if theme.WATCHLISTS:
-        # One Binder (0.7.47): these pages open from the Binder page, so the head is the way back
+        # One Binder (0.7.47): these pages open from the Binder page, so the head is the way back,
+        # then the page's own name (the Binder's word for it) with its count
+        name = title.removeprefix("Binder: ")
+        name = {"Cards": "Archidekt collection", "Lists": "Archidekt lists"}.get(name, name)
+        n = counts.get(current)
+        cn = f" <span class='cn'>{n:,}</span>" if n else ""
         return (
             f"<p class='bn-up'><a class='bn-back' href='/binder'>{icon('back')}Binder</a></p>"
-            f"<div class='ui-head phead'><h1>{esc(title)}</h1>{acts}</div>{line}"
+            f"<div class='ui-head phead'><h1>{esc(name)}{cn}</h1>{acts}</div>{line}"
         )
     switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
     return (

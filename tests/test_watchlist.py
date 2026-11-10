@@ -782,7 +782,7 @@ async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:
         page = (await b.http.get("/decks")).text
         assert "data-watchlist" in page and "href='/watchlist'" not in page  # not a More item (C8)
         binder = (await b.http.get("/collection")).text
-        assert "href='/watchlist'" in binder  # Binder's switch: Cards | Wants | Watchlist
+        assert "href='/binder'" in binder  # One Binder (0.7.47): back to the Binder page
         assert (await b.http.get("/watchlist")).status_code == 200
     finally:
         await b.aclose()

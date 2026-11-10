@@ -330,7 +330,7 @@ THREE = [ADDED[0], ADDED[1], ADDED[4]]
 
 
 def _counts(text: str) -> dict[str, int]:
-    """Every count the Binder page shows of its entries: the Cards tab, the At a glance line, the
+    """Every count the Binder page shows of its entries: the heading's count, the At a glance line, the
     Entries tile, the results bar and the Load more line."""
     import re
 
@@ -340,7 +340,7 @@ def _counts(text: str) -> dict[str, int]:
         return int(next(g for g in m.groups() if g is not None).replace(",", ""))
 
     return {
-        "tab": one(r"<a href='/collection' aria-current=page>Cards<span class='cn'>([\d,]+)</span>"),
+        "tab": one(r"<h1>Archidekt collection <span class='cn'>([\d,]+)</span></h1>"),
         "glance": one(r"<span>([\d,]+) entries</span><span>\d+ added this week</span>"),
         "tile": one(r"Entries</span><span class='big'>([\d,]+)</span>"),
         "bar": one(r"id='col-count' aria-live='polite'>([\d,]+) entries</h2>"),

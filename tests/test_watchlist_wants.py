@@ -168,7 +168,7 @@ async def test_alert_defaults_are_the_members_own_once_saved(stack: Stack, monke
         assert "data-open" in box.split(">")[0]
         assert "name='alert_drop' inputmode='decimal' maxlength='10' value='10'" in box  # not "10.0"
         assert (
-            "Price alert: Drops 10% below the price when added · rises 20% above the price when added · "
+            "Price alert: Drops 10% below the price when added, rises 20% above the price when added, "
             "moves under $0.50 ignored (your defaults)." in page
         )
         r = await _post(
@@ -449,12 +449,10 @@ async def test_a_box_in_the_address_draws_open_and_the_way_back_is_kept(stack: S
         assert arch.count("<a class='yrow' href=") == 6 and "lp-tabs" not in arch
         assert "<div class='rows lp-hubrows' data-counts='/lists/api/counts'>" in arch
         assert "href='/collection/wants'" in arch and "Pinned cards" in arch
-        rows = hub.split("<h2>Watchlist lists</h2>")[1].split("</section>")[0]
-        assert "<span>Soon</span>" in rows and "<span>Later</span>" in rows
-        assert "href='/watchlist?list=Soon'" in rows and "aria-label='Menu for the list Soon'" in rows
-        assert "href='/watchlist?box=rename&amp;list=Soon'" in rows and "Delete list…" in rows
-        assert "New list…" in rows and "data-box-open='wl-new'" in rows
-        assert "Not in a list" not in rows  # nothing watched outside a list yet
+        # One Binder (0.7.47): the gateway's own lists are on the Binder page, not on this hub
+        assert "Watchlist lists" not in hub
+        binder = (await b.http.get("/binder")).text
+        assert "Soon" in binder and "Later" in binder and "New list…" in binder
     finally:
         await b.aclose()
 

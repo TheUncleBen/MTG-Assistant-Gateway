@@ -110,8 +110,8 @@ async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
     }
     for slug, (label, names, extra) in want.items():
         page = (await member.http.get(_page_of(slug))).text
-        # every list is one of Binder's Lists: the switch lights Lists, the tab names the list
-        assert "<a href='/collection/lists' aria-current=page>Lists</a>" in page, slug
+        # every list is one of Binder's Archidekt lists: "‹ Binder" back, the tab names the list
+        assert "<a class='bn-back' href='/binder'>" in page, slug
         assert f"<a href='{_page_of(slug)}' aria-current='page'>{label}" in page, slug
         assert f"<title>Binder: {label}" in page and extra in page, slug
         for n in names:

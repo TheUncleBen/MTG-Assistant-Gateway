@@ -2083,7 +2083,7 @@ async def details_html(
         _yrow(
             "Price alert defaults",
             "tag",
-            href="/watchlist?box=defaults",
+            href="/binder/settings",
             value=_alert_defaults_value(state, sub),
         ),
         row("choices"),
@@ -2200,13 +2200,14 @@ def _notifications_value(state: Any, sub: str) -> str:
 
 def _alert_defaults_value(state: Any, sub: str) -> str:
     """The Price alert defaults row's value, short enough for one line beside its label
-    (independent review 2, L10): "10% drop", "5% move · Below $2.00"; the box says it in full."""
+    (independent review 2, L10): "10% under, 20% over", "5% move, Below $2.00"; the box says it
+    in full. Commas, not dots: the row wraps at 320 px and a dot may not end or start a line."""
     from . import prefs, watchlist_page
 
     alerts = prefs.alert_defaults(state.db, sub)
     parts = [
         f"{alerts[k]:g}% {word}"
-        for k, word in (("drop", "drop"), ("rise", "rise"), ("pct", "move"))
+        for k, word in (("drop", "under"), ("rise", "over"), ("pct", "move"))
         if alerts.get(k) is not None
     ]
     parts += [
@@ -2214,7 +2215,7 @@ def _alert_defaults_value(state: Any, sub: str) -> str:
         for k, word in (("above", "Above"), ("below", "Below"))
         if alerts.get(k) is not None
     ]
-    return " · ".join(parts) or "None"
+    return ", ".join(parts) or "None"
 
 
 def _writes_fold(on: bool) -> str:

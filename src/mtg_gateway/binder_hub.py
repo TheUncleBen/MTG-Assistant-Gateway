@@ -32,7 +32,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from . import account_hub, binder_library, prefs, prices, ui
 from .decks import DeckError
-from .pages import _csrf, browser_session, csrf_form_ok, login_redirect_here, read_limited
+from .pages import _csrf, browser_session, csrf_form_ok, login_redirect_here, read_limited, section_href
 from .prices import money
 from .theme import esc, icon, plural, render, stylesheet_link
 
@@ -521,7 +521,7 @@ def boxes_html(
             "</form>"
         ),
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep them", cancel=True),
             ui.box_button("Remove", kind="danger-solid", form="bn-remove-f"),
         ],
     )
@@ -568,7 +568,7 @@ def boxes_html(
                 PATH,
             ),
             actions=[
-                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Keep it", cancel=True),
                 ui.box_button("Delete list", kind="danger-solid", form="bn-delete-f"),
             ],
         )
@@ -618,7 +618,11 @@ def settings_html(d: dict[str, float], split: tuple[int, int], csrf: str, notice
         + "</p></div></section>"
         "<section class='ygrp'><h2>Alerts</h2><div class='rows'>"
         + _row_label(
-            "/account/notifications", "bell", "Phone notifications", "", "Set in Account › Notifications"
+            section_href("notifications"),
+            "bell",
+            "Push notifications",
+            "",
+            "Set in Account › Push notifications",
         )
         + "</div></section>"
         "<div class='bn-save'><button class='btn primary' type='submit'>Save</button></div></form></div>"
@@ -631,7 +635,7 @@ CSS = """
 .bn-find{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0 0 1rem;padding:0 .75rem;
   border:1px solid var(--control-border);border-radius:10px;background:var(--surface);color:var(--text-muted)}
 .bn-find svg.i{width:18px;height:18px;flex:none}
-.bn-find input{flex:1;min-width:0;border:0;background:transparent;min-height:42px;padding:0;font:inherit;
+.bn-find input{flex:1;min-width:0;border:0;background:transparent;min-height:44px;padding:0;font:inherit;
   color:var(--text)}
 .bn-find input:focus{outline:none}
 .bn-find:focus-within{outline:2px solid var(--focus);outline-offset:2px}
@@ -659,6 +663,13 @@ CSS = """
 .bn-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 .5rem;padding:.6rem .9rem;
   align-items:center}
 .bn-row + .bn-row{border-top:1px solid var(--border-soft)}
+/* a narrow list (a phone at large text): the price goes under the name, so a name keeps its words */
+.bn-rows{container-type:inline-size}
+@container (max-width:22em){
+  .bn-open{grid-template-columns:auto minmax(0,1fr)}
+  .bn-open .pr{grid-column:2;flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 .5rem}
+  .bn-rows .bn-row .meta{padding-left:0}
+}
 .bn-row.sel{background:var(--orange-tint)}
 .bn-row .tick{display:none;align-items:center;justify-content:center;width:44px;height:44px;
   margin:-.4rem 0 -.4rem -.6rem;

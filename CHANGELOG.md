@@ -13,12 +13,37 @@ Proposal cards in Claude and ChatGPT no longer fill the chat: only the newest ca
 that still waits draws in full. Signing in to the Android app comes back to the app by itself
 after Continue, and every page in the app can be pulled down to refresh. Every page reads as one app on every screen: centred on a laptop
 and a wide desktop, one column where two left holes, plain words where program values or
-placeholders showed, and no blue links.
+placeholders showed, and no blue links. The Binder is one page for every card you own or want,
+with lists for both, Select for bulk changes, price alerts that follow your own defaults, and no
+watch limit.
 
 ### Upgrade notes
-- Nothing to do: no new settings, environment variables or database steps.
+- **The database goes to schema 23** at the first start (the gateway saves a copy first, as in
+  [docs/UPGRADING.md](docs/UPGRADING.md)): lists can hold cards you own, and each watched card
+  knows whether it follows your price alert defaults. Cards whose alerts match the default they
+  were given follow the new defaults (10% under and 20% over the price when added); cards with
+  alerts of their own keep them.
+- **The card watch limit is off by default.** The **Cards one member may watch** setting
+  (Settings › Watchlists and prices) now means "no limit" at 0 and is 0 unless you saved a
+  number; a number you saved stays. To turn watching
+  off, use the **Watchlists** switch.
+- No new environment variables.
 
 ### Changed
+- **One Binder.** Binder opens one page for every card you own or want: All cards, Owned, Want,
+  Price alerts and your lists beside one list of rows (side by side on a computer or an open
+  Fold, one at a time on a phone). A printing you own and watch is one row with its price, its
+  move over a week, the copies you own, its alert prices and its list. **Select** ticks rows for
+  Price alerts, Add to list, Watch, Stop watching, Tag on Archidekt (adds a binder tag; the
+  others stay) and Remove from binder, each with Undo. The Archidekt collection page, Archidekt
+  lists, Decks I watch and Watch settings are under More, and their pages lead back with
+  "‹ Binder".
+- **Lists hold cards you own and cards you want.** Archidekt's binder tags stay Archidekt's and
+  are a filter on the Binder.
+- **Price alerts by default: 10% under and 20% over the price when added, moves under $0.50
+  ignored**, so a cheap card does not alert on a few cents. **Watch settings** shows what your
+  defaults mean in dollars, and cards that use them change when you save new ones.
+- **No watch limit by default**; the owner can still set one.
 - **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
   shows one line until it has checked that it is the newest card of a change that still waits.
   Only that card draws its list, pictures and buttons; a card for a change that was updated,

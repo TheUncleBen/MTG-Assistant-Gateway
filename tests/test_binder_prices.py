@@ -424,7 +424,7 @@ async def test_the_watchlist_page_reads_a_fixed_number_of_queries_whatever_its_s
         _seed_watches(stack, 300)
         many, page = await _queries(stack, b, "/watchlist")
         assert many == few, (few, many)
-        assert "You may watch up to 5000 cards and 100 decks" in page or "5,000" in page
+        assert "You may watch as many cards as you like and up to 100 decks." in page
         # 25 rows a screen; the decks have their own Load more
         assert page.count("class='tr' id='wr-w_") == 25
         assert page.count("id='wr-d") == 25 and "Load more decks" in page
@@ -608,7 +608,7 @@ async def test_the_watch_form_remembers_finish_and_alert_and_menus_use_them(
             headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
         )
         assert r.status_code == 200, r.text
-        assert r.json()["watch"]["alerts"] == {"pct": 15, "drop": 10}
+        assert r.json()["watch"]["alerts"] == {"pct": 15, "drop": 10, "rise": 20}
     finally:
         await b.aclose()
 

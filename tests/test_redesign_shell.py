@@ -112,7 +112,7 @@ def test_the_rail_markup_is_four_places_a_line_the_rest_and_alerts_at_the_foot(s
     assert items == [
         ("a", "/", "", ""),
         ("a", "/decks", "", ""),
-        ("a", "/collection", "", ""),
+        ("a", "/binder", "", ""),
         ("a", "/proposals", "", ""),
         ("span", "", "rail-sep railonly", ""),
         ("a", "/scan", "", "railonly"),
@@ -231,7 +231,7 @@ def test_the_open_fold_rail_holds_every_page_without_scrolling(
     assert got["order"] == [
         "/",
         "/decks",
-        "/collection",
+        "/binder",
         "/proposals",
         "rail-sep",
         "/scan",
@@ -280,7 +280,7 @@ def test_the_phone_keeps_its_tab_bar_and_more_sheet(chromium, server: Server, ap
     with _page(chromium, server, 375, 812, touch=True, app=app) as page:
         page.goto(f"{server.base}/decks", wait_until="load")
         got = page.evaluate(RAIL)
-        assert got["order"] == ["/", "/decks", "/collection", "/proposals", "dd"], got
+        assert got["order"] == ["/", "/decks", "/binder", "/proposals", "dd"], got
         assert got["more"] and got["moreItems"] == [
             "/search",
             "/precons",

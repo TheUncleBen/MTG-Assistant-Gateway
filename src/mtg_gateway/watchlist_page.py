@@ -231,9 +231,12 @@ def alert_text(
         parts.append(f"above {money(alerts['above'], currency)}")
     if alerts.get("below") is not None:
         parts.append(f"below {money(alerts['below'], currency)}")
+    long = added is None and any(k in alerts and alerts[k] is not None for k in ("drop", "rise"))
     if parts and floor and added is None:
         parts.append(f"moves under {money(floor, currency)} ignored")
-    text = " · ".join(parts)
+        long = True
+    # the long phrases wrap in a narrow box, and a "·" may not end or start a line: commas there
+    text = (", " if long else " · ").join(parts)
     return text[:1].upper() + text[1:]
 
 

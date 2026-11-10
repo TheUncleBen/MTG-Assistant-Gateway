@@ -1496,6 +1496,8 @@ main.wrap.ui-wide{max-width:1200px}
 .bn-back{display:inline-flex;align-items:center;gap:.2rem;min-height:44px;color:var(--orange-text);font-weight:700;
   text-decoration:none}
 .bn-back svg.i{width:18px;height:18px}
+.bn-up + .ui-head > .acts{white-space:nowrap}  /* its buttons wrap below the heading, not inside */
+.bn-up + .ui-head h1 .cn{font-size:.55em;font-weight:600;color:var(--text-muted);vertical-align:middle}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
 /* its parts never shrink under their words: when they are wider than the screen (large text on a
