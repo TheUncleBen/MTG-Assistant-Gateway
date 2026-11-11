@@ -749,7 +749,7 @@ async def test_my_card_models_lists_only_the_members_own_and_removes_with_a_conf
             and "role='dialog'" not in page.text.split("mm-page", 1)[1].split("mm-rm-f")[0]
         )
         assert "How is it different from looking up a card?" in page.text
-        assert "<details class='mm-q'><summary>What is a card model?" in page.text  # closed: they keep some
+        assert "<details class='mm-q' open><summary>What is a card model?" in page.text  # open: AY2
         rows = page.text.split("<ul class='mm-list'", 1)[1].split("</ul><p class='muted mm-none'", 1)[0]
         assert rows.count("<li class='mm-item'") == 2 and "Arcane Signet" not in page.text
         assert "id='m-sol-ring'" in rows and "class='btn btn-plain cardlink' data-card='Sol Ring'" in rows

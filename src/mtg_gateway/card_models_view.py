@@ -29,14 +29,15 @@ from .theme import esc, icon
 TITLE = "Card models"
 PAGE = "/history/models"
 REMOVE_ACTION = "/history/models/remove"
-SUB_TEXT = "Notes that teach your quick solo test what a card does, so your results count it."
+SUB_TEXT = "Notes that teach the solo test, which plays your deck by itself, what a card does."
 # What a card model is, for a member who has never heard the words (Ben, 2026-11-11: "what's the
-# difference between a card model and just looking up a card?"). Open on the page while the member
-# keeps none; the report and the card viewer link here.
+# difference between a card model and just looking up a card?"). The first answer stays open on
+# the page; the report and the card viewer link here.
 EXPLAIN: tuple[tuple[str, str], ...] = (
     (
         "What is a card model?",
-        "A short note that tells the quick solo test what one card does. For example, a card "
+        "A short note that tells the quick solo test (the test that plays your deck by itself, "
+        "hundreds of times, to see how it draws and casts) what one card does. For example, a card "
         "says “When this enters, draw two cards”. If the solo test can't read that card, it casts "
         "it and nothing happens, so your report never counts those two cards. A card model for "
         "it says just “When it enters: draw 2 cards”, and from then on your quick solo tests "
@@ -47,8 +48,8 @@ EXPLAIN: tuple[tuple[str, str], ...] = (
         "How is it different from looking up a card?",
         "Looking up a card shows it to you: its text, picture, rulings and prices. A card model "
         "teaches it to the quick solo test, so the test plays it. It doesn't change the card, "
-        "your deck on Archidekt, or Forge games, which play nearly every card by its real "
-        "rules.",
+        "your deck on Archidekt, or full games against opponents (Forge, where your gateway has "
+        "it), which play nearly every card by its real rules.",
     ),
     (
         "How do I add one?",
@@ -184,10 +185,10 @@ def _item(m: dict[str, Any]) -> str:
     )
 
 
-def explain_html(*, open_first: bool = False) -> str:
-    """What a card model is, as grouped questions; the first one open while the member keeps none."""
+def explain_html() -> str:
+    """What a card model is, as grouped questions; the first, with its example, always open (audit AY2)."""
     rows = "".join(
-        f"<details class='mm-q'{' open' if open_first and i == 0 else ''}><summary>{esc(q)}"
+        f"<details class='mm-q'{' open' if i == 0 else ''}><summary>{esc(q)}"
         f"{icon('chev', cls='i chev')}</summary><p>{esc(a)}</p></details>"
         for i, (q, a) in enumerate(EXPLAIN)
     )
@@ -199,7 +200,7 @@ def page_html(models: list[dict[str, Any]], *, csrf: str, remove: str = "", noti
     saved and what can be done with it (Open card, change through the assistant, Remove). One
     hidden form removes (its card filled in by the press); ``remove`` names a card whose confirm
     box is drawn open (the no-script path)."""
-    body = [ui.page_head(TITLE, SUB_TEXT), notice_html, explain_html(open_first=not models)]
+    body = [ui.page_head(TITLE, SUB_TEXT), notice_html, explain_html()]
     if models:
         n = len(models)
         body.append(

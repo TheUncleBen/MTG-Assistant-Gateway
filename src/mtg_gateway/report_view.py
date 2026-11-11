@@ -1063,8 +1063,9 @@ APPROX_HEADING = "Shortcuts the solo test takes"
 # always shown above the shortcuts (Ben 2026-11-11 did not follow "which way it can push the
 # numbers"): what a shortcut is and what its label means, in one line; Details has the example
 APPROX_LEAD = (
-    "To play fast, the solo test bends a few rules. Each one says whether it may make your results "
-    "look better or worse than real games."
+    "To play fast, the solo test bends a few rules, such as letting a mana creature tap for mana "
+    "the turn it arrives. Each one says whether it may make your results look better or worse "
+    "than real games."
 )
 APPROX_TEXT = (
     "To play hundreds of games quickly, the solo test bends a few rules. For example, it lets a "

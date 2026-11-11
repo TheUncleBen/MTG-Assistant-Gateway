@@ -108,3 +108,21 @@ def test_every_word_of_the_vocabulary_has_plain_words() -> None:
         )
         for line in describe(model):
             assert not snake.search(line), line
+
+
+def test_what_a_card_model_is_stays_open_with_models_kept() -> None:
+    """Audit AY2 (Ben 2026-11-11 still did not follow what a card model is): the first answer, with
+    its example, is open on the page whether or not the member keeps models, and the words a
+    newcomer can't know (the quick solo test, Forge) are said plainly the first time they appear."""
+    from mtg_gateway import card_models_view as cmv
+
+    model = clean_model({"name": "Opt", "inert": True}, card="Opt")
+    for models in ([], [{"name": "Opt", "model": model, "updated_at": 0}]):
+        html = cmv.page_html(models, csrf="x")
+        first = re.search(r"<details class='mm-q'( open)?><summary>What is a card model\?", html)
+        assert first and first.group(1) == " open", models
+        assert html.count("<details class='mm-q' open>") == 1
+    first_answer = cmv.EXPLAIN[0][1]
+    assert "plays your deck by itself" in first_answer  # what the quick solo test is
+    forge = next(a for _, a in cmv.EXPLAIN if "Forge" in a)
+    assert "full games" in forge.split("Forge")[0]  # what Forge is, before its name
