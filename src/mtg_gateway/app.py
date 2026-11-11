@@ -1451,20 +1451,21 @@ def _notify_events(state: AppState) -> None:
             key = assistants.assistant_key(state.db, client_id)
         return next((a for a in assistants.connected(state.db, sub) if a.key == key), None)
 
-    def new_assistant(sub: str, key: str) -> None:
+    def new_assistant(sub: str, key: str, family: str = "") -> None:
         # read once the sign-in's tokens are saved (the send runs after this call returns)
         async def go() -> None:
             a = assistant_named(sub, key)
             name = a.name if a else "An assistant"
-            mode = assistants.mode_label(state.decks.mode_of(sub))
+            own = state.db.assistant_mode(sub, key)
+            mode = assistants.mode_label(own if own else state.decks.mode_of(sub))
             await notifier.send(
                 sub,
                 "account",
                 notify.push_title("account", name),
-                f"“{name}” can now use your account. It starts with your default: {mode}.",
+                f"“{name}” can now use your account. Its approval mode: {mode}.",
                 a.href if a else assistants.PAGE,
                 subject=name,
-                ukey=f"assistant-{key}"[:120],
+                ukey=assistants.alert_ukey(key, family),
                 retry=True,
             )
 

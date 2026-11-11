@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import httpx
 
-from mtg_gateway import alerts_page, notify
+from mtg_gateway import alerts_page, assistants, notify
 
 from .conftest import Stack, stack_with
 from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structured
@@ -283,8 +283,9 @@ async def test_a_new_assistant_is_one_alert_and_its_home_notice_dismisses_for_go
         alerts = stack.h.db.gateway_alerts(SUB, kinds=("account",))
         assert alerts and all(a["title"].startswith("New assistant · ") for a in alerts)
         before = len(alerts)
-        await mcp_token(stack.h)  # the same app again: no second alert for it
-        assert len(stack.h.db.gateway_alerts(SUB, kinds=("account",))) <= before + 1
+        await mcp_token(stack.h)  # another connection: its own alert, Home still shows one notice
+        await stack.gw.notifier.drain()
+        assert len(stack.h.db.gateway_alerts(SUB, kinds=("account",))) >= before
         home = (await b.http.get("/")).text
         assert "data-dismissable" in home and "action='/home/dismiss'" in home
         key = home.split("name='key' value='", 1)[1].split("'", 1)[0]
@@ -293,10 +294,9 @@ async def test_a_new_assistant_is_one_alert_and_its_home_notice_dismisses_for_go
             "/home/dismiss", data={"csrf": csrf, "what": "assistant", "key": key}, follow_redirects=False
         )
         assert r.status_code == 303
-        mine = [
-            a for a in stack.h.db.gateway_alerts(SUB, kinds=("account",)) if a["ukey"] == f"assistant-{key}"
-        ]
-        assert all(a["read_at"] is not None for a in mine)
+        prefix = assistants.alert_prefix(key)
+        mine = [a for a in _account(stack)[0] if str(a["ukey"]).startswith(prefix)]
+        assert mine and all(a["read_at"] is not None for a in mine)
         assert f"value='{key}'" not in (await b.http.get("/")).text  # gone after a reload too
     finally:
         await b.aclose()
@@ -326,26 +326,56 @@ async def test_an_assistant_reads_the_gateways_alerts_too(stack: Stack) -> None:
     assert "id" not in mine and "path" not in mine
 
 
+def _account(stack: Stack) -> tuple[list[dict], list[dict]]:
+    alerts = stack.h.db.gateway_alerts(SUB, kinds=("account",))
+    return alerts, [m for m in stack.ntfy.published if m.get("tags") == ["account"]]
+
+
 async def test_a_token_refresh_is_never_a_new_assistant(stack: Stack) -> None:
-    """The coordinator's 0.7.47 check: an assistant renews its access every hour. Only its first
-    connection is a New assistant alert (and push); a refresh, or a second sign-in of the same
-    app, keeps and sends nothing."""
+    """The coordinator's 0.7.47 check: an assistant renews its access every hour. Its connection
+    is a New assistant alert (and push); a refresh keeps and sends nothing."""
     b, _key = await _member(stack)
     try:
         h = stack.h
         client = await h.register()
         tokens = await h.tokens_for(client)
         await stack.gw.notifier.drain()
-        first = [a for a in h.db.gateway_alerts(SUB, kinds=("account",))]
-        pushed = [m for m in stack.ntfy.published if m.get("tags") == ["account"]]
+        first, pushed = _account(stack)
         assert len(first) >= 1 and len(pushed) == len(first)
         for _ in range(3):
             r = await h.token(client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
             assert r.status_code == 200, r.text
             tokens = r.json()
-        await h.tokens_for(client)  # the same app signs in again
         await stack.gw.notifier.drain()
-        assert h.db.gateway_alerts(SUB, kinds=("account",)) == first
-        assert [m for m in stack.ntfy.published if m.get("tags") == ["account"]] == pushed
+        assert _account(stack) == (first, pushed)
+    finally:
+        await b.aclose()
+
+
+async def test_a_reconnect_after_a_disconnect_is_a_new_assistant_again(stack: Stack) -> None:
+    """0.7.47 audit (security): the alert follows the connection, not the assistant. An assistant
+    disconnected and connected again (by the member, or by someone holding their sign-in) is a
+    New assistant alert and push again, even after the first one was dismissed."""
+    b, _key = await _member(stack)
+    try:
+        h = stack.h
+        client = await h.register()
+        await h.tokens_for(client)
+        await stack.gw.notifier.drain()
+        first, pushed = _account(stack)
+        assert first and len(pushed) == len(first)
+        h.db.dismiss_gateway_alerts(SUB, [a["id"] for a in first])
+        assert h.db.revoke_client_for_user(SUB, client["client_id"]) > 0  # disconnected
+        tokens = await h.tokens_for(client)  # connected again
+        await stack.gw.notifier.drain()
+        again, pushed_again = _account(stack)
+        assert len(again) == 1 and again[0]["title"].startswith("New assistant · "), again
+        assert again[0]["dismissed_at"] is None and again[0]["read_at"] is None
+        assert len(pushed_again) == len(pushed) + 1
+        # its refresh still sends nothing
+        r = await h.token(client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
+        assert r.status_code == 200, r.text
+        await stack.gw.notifier.drain()
+        assert _account(stack) == (again, pushed_again)
     finally:
         await b.aclose()

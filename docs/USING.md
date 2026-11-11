@@ -577,7 +577,7 @@ type:
 | Deck reports | A test or deck report finished | Report ready · Atraxa |
 | Price alerts | A watched card crossed your alert | Price drop · Sol Ring |
 | From Archidekt | A comment, a reply, a new follower or news in your Archidekt alerts | Archidekt · Forum reply |
-| New assistant | An assistant connected to your account for the first time | New assistant · Claude |
+| New assistant | An assistant connected to your account (every new connection; renewing its access is not one) | New assistant · Claude |
 | Summaries | Your daily or weekly summary | Summary · This week |
 | Gateway (admins) | A newer gateway release, or a nightly backup that failed (admins only) | Gateway · Update 0.7.48 |
 

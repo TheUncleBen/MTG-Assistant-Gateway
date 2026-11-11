@@ -473,7 +473,10 @@
   function closeable() {
     var main = document.querySelector("main") || document.body;
     Array.prototype.forEach.call(main.querySelectorAll(".notice[role=status], .notice[role=alert]"), function (n) {
-      if (n.querySelector(":scope > .close") || n.hasAttribute("data-dismissable") || n.closest(".mtgbox")) return;
+      // a notice with a close of its own (the Binder's strips: .nx, [data-dismiss]; the update
+      // strip's form.nx) keeps that one: a second × would sit over its words or its Undo
+      if (n.querySelector(":scope > .close, :scope > .nx, :scope > form.nx, [data-dismiss]") ||
+          n.hasAttribute("data-dismissable") || n.closest(".mtgbox")) return;
       n.classList.add("once");
       var x = document.createElement("button");
       x.type = "button";

@@ -129,16 +129,36 @@ def chosen_mode(db: Any, sub: str, client_id: str | None) -> str | None:
     return mode if modes.valid_mode(mode) else None
 
 
-def note_sign_in(db: Any, sub: str, client_id: str) -> None:
-    """An app signed in (new tokens): remember its assistant, which starts at the member's default."""
+def note_sign_in(db: Any, sub: str, client_id: str, family: str | None = None) -> None:
+    """An app signed in (new tokens): remember its assistant, which starts at the member's default.
+
+    Every new connection (``family``: a sign-in's token family never saved before) is the member's
+    New assistant alert (``db.on_new_assistant``, app._notify_events): the first one, a reconnect
+    after a disconnect, and a second sign-in beside a live one alike, since each is a new grant of
+    access. A refresh keeps its family and is never one (0.7.47 audit: the alert follows the
+    connection, not the assistant)."""
     key = assistant_key(db, client_id)
-    if key is not None and db.note_assistant(sub, key, client_id):
-        hook = getattr(db, "on_new_assistant", None)  # the member's alert (app._notify_events)
-        if hook is not None:
-            try:
-                hook(sub, key)
-            except Exception:  # noqa: BLE001 - an alert never stops a sign-in
-                logging.getLogger(__name__).exception("new assistant alert failed")
+    if key is None:
+        return
+    new_row = db.note_assistant(sub, key, client_id)
+    if not (new_row if family is None else not db.family_known(family)):
+        return
+    hook = getattr(db, "on_new_assistant", None)  # the member's alert (app._notify_events)
+    if hook is not None:
+        try:
+            hook(sub, key, family or "")
+        except Exception:  # noqa: BLE001 - an alert never stops a sign-in
+            logging.getLogger(__name__).exception("new assistant alert failed")
+
+
+def alert_ukey(key: str, family: str = "") -> str:
+    """The key of an assistant's New assistant alert: one per connection (its token family)."""
+    return f"{alert_prefix(key)}{hashlib.sha256(family.encode()).hexdigest()[:16]}"
+
+
+def alert_prefix(key: str) -> str:
+    """What every New assistant alert of the assistant ``key`` starts with (Home's ×)."""
+    return f"assistant-{hashlib.sha256(key.encode()).hexdigest()[:16]}-"
 
 
 @dataclass

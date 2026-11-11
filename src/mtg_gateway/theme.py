@@ -2385,16 +2385,17 @@ BELL_CSS = """
 .al-card{padding:0;overflow:hidden}
 .al-card > .notice{margin:.75rem}
 .al-head{flex-wrap:wrap;gap:.5rem 1rem}
-.al-acts{display:flex;flex-wrap:wrap;gap:.5rem}
+/* the three actions sit in one row or one above the other, never two and one alone (0.7.47
+   audit): the row needs --al-row (about 26em of their own text size, with room to spare), so
+   200% text stacks them sooner */
+.al-acts{--al-row:29em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
+  flex-wrap:wrap;gap:.5rem}
+.al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
 .al-acts form{margin:0;display:flex}
 .al-acts .btn,.al-acts button{margin:0;min-height:44px;display:inline-flex;align-items:center;gap:.4rem;
-  white-space:nowrap}
+  width:100%;justify-content:center;text-align:center}
 .al-linknote{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 .75rem}
 .al-linknote p{margin:0}
-@media (max-width:599.98px){
-  .al-acts{width:100%;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9.5em),1fr))}
-  .al-acts .btn,.al-acts button{width:100%;justify-content:center}
-}
 .bell-badge{display:inline-grid;place-items:center;min-width:20px;min-height:20px;border-radius:10px;white-space:nowrap;
   background:var(--orange);color:var(--on-orange);font-size:.75rem;font-weight:900;padding:0 5px;
   vertical-align:middle;margin-left:.3rem;line-height:1}

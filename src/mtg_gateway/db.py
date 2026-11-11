@@ -1321,7 +1321,7 @@ class Database:
         self._atomic_thread: int | None = None  # the thread inside atomic(), if any
         self._anonymous_audit_inserts = 0
         # an assistant new to a member signed in (assistants.note_sign_in): their alert (app.py)
-        self.on_new_assistant: Callable[[str, str], None] | None = None
+        self.on_new_assistant: Callable[[str, str, str], None] | None = None
         self.price_days = PRICE_RETENTION_DAYS
         # Snapshots kept per deck; None means SNAPSHOTS_KEEP_PER_DECK (the app wires the live
         # setting in, snapshots_keep()).
@@ -1893,6 +1893,11 @@ class Database:
                 }
             )
         return out
+
+    def family_known(self, family: str) -> bool:
+        """Whether a token of this sign-in (its token family) was ever saved: False for a new
+        connection, True for a refresh of one."""
+        return self._one("SELECT 1 AS x FROM tokens WHERE family = ? LIMIT 1", (family,)) is not None
 
     def revoke_client_for_user(self, sub: str, client_id: str | None = None) -> int:
         """Revoke the tokens ``sub`` gave one connected app (or every app when ``client_id`` is

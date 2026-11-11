@@ -155,3 +155,31 @@ def test_the_alerts_page_reads_and_works_at_every_size(server: Server, width: in
             assert errors == []
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize("width,scale", [(320, 1), (480, 1), (600, 2), (673, 2), (768, 2), (1280, 1)])
+def test_the_page_actions_sit_in_one_row_or_stacked(server: Server, width: int, scale: int) -> None:
+    """0.7.47 audit: at 600 px with 200% text, Mark all read sat alone on its line above the other
+    two. Mark all read, Clear all and Settings share one row, or each has a row of its own."""
+    from playwright.sync_api import sync_playwright
+
+    from .ui_matrix import TEXT_200
+
+    sid = server.sign_in()
+    _alerts(server)
+    exe = _exe()
+    with sync_playwright() as p:
+        browser, page, errors = _browser(p, server, sid, width, "light", exe)
+        try:
+            page.goto(f"{server.base}/notifications")
+            if scale == 2:
+                page.evaluate(TEXT_200)
+            tops = page.evaluate(
+                "[...document.querySelectorAll('.al-acts button, .al-acts a')]"
+                ".map(e => Math.round(e.getBoundingClientRect().top))"
+            )
+            assert len(tops) == 3
+            assert len(set(tops)) in (1, 3), tops
+            assert errors == []
+        finally:
+            browser.close()

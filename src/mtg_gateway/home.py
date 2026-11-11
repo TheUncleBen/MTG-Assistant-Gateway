@@ -383,7 +383,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             ids = [
                 a["id"]
                 for a in state.db.gateway_alerts(sub, kinds=("account",))
-                if a["ukey"] == f"assistant-{key}"
+                if str(a["ukey"] or "").startswith(assistants.alert_prefix(key))
             ]
             if ids:
                 state.db.set_gateway_alerts_read(sub, ids)

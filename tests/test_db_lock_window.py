@@ -165,6 +165,9 @@ async def test_a_refresh_caught_by_the_lock_keeps_the_member_signed_in(
     assert (await gw.mcp(t2["access_token"], "tools/list")).status_code == 200
     t3 = await _refresh(gw, client, t2["refresh_token"])
     assert t3.status_code == 200, t3.text
+    # the sign-in's New assistant alert is kept in the background, and may still be waiting for
+    # the holders' lock on a busy machine (the full suite): done first, then nothing holds it
+    await gw.app.state.gateway.notifier.drain()
     assert db.write_free()
 
 
