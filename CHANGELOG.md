@@ -63,7 +63,6 @@ odd input gets a plain answer instead of an error page, and a connected app read
   line instead of sitting alone at half width.
 - On a desktop, Card size sits beside its switch in the deck editor's bar, and Mark all read on
   Alerts stays on one line.
-- The Forge service no longer counts a job cancelled while it waited toward its queue limit.
 - The docs name all five Docker secrets.
 
 ### Security
