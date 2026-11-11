@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from .decklist import clean_text
 from .decks import DeckError
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -59,7 +60,7 @@ def record_tag_ids(rec: dict[str, Any]) -> list[int]:
     out: list[int] = []
     for t in rec.get("tags") or []:
         tid = t.get("id") if isinstance(t, dict) else t
-        if isinstance(tid, str) and tid.isdigit():
+        if isinstance(tid, str) and is_digits(tid):
             tid = int(tid)
         if isinstance(tid, int) and not isinstance(tid, bool) and tid not in out:
             out.append(tid)
@@ -74,7 +75,7 @@ def record_tag_names(rec: dict[str, Any], by_id: dict[int, dict[str, Any]]) -> l
             name = clean_text(str(t["name"]))
         else:
             tid = t.get("id") if isinstance(t, dict) else t
-            tid = int(tid) if isinstance(tid, str) and tid.isdigit() else tid
+            tid = int(tid) if isinstance(tid, str) and is_digits(tid) else tid
             hit = by_id.get(tid) if isinstance(tid, int) else None
             name = hit["name"] if hit else ""
         if name and name not in names:
@@ -131,7 +132,7 @@ def clean_names(raw: Any) -> list[str]:
 def user_id(decks: DeckService, sub: str) -> str:
     link = decks.db.get_link(sub)
     uid = str((link or {}).get("archidekt_user_id") or "")
-    if not uid.isdigit():
+    if not is_digits(uid):
         raise DeckError("not_linked", "No Archidekt account is linked. Link one on the Account page first.")
     return uid
 

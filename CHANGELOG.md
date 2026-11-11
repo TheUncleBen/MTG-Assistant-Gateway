@@ -7,6 +7,68 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.48] - 2026-11-11
+
+A review round over the pages, the assistant tools and the write path. Days in History and
+Reports are your own days instead of the server's, page intros are two lines at most on a phone,
+odd input gets a plain answer instead of an error page, and a connected app reads less about you.
+
+### Upgrade notes
+- **Nothing to do.** No new settings and no database change.
+- **Days follow each member's browser.** The pages set a small cookie, `mtg_tzo`, that holds the
+  browser's offset from UTC in minutes and nothing else. Without it the days are UTC days, as before.
+- **A connected app sees less through the REST routes.** With an app's token, `/api/v1/me`
+  answers with the member's name, account and how it signed in, and `/api/v1/activity` lists
+  only that app's own entries. A member signed in with the browser sees what they saw before.
+  [docs/API.md](docs/API.md) has both.
+
+### Changed
+- History and Reports group and filter by your own day, and the Watchlist's last check is a
+  date like the others in the list.
+- The intros of My activity, History, Proposals, Reports, Search decks, Cards, Alerts, the
+  Archidekt lists and custom cards are two lines at most on a phone.
+- Every choice in the Watchlist's order menu says it is the order ("Sort: Name").
+- In the Reports list, a report without Forge games reads "Forge no games" instead of "Won no Forge".
+- Deck stats leave cards in a category marked Not in price out of the price total, and say how
+  many were left out.
+- The list of scan sessions says when it shows only the newest 50, and an older session is
+  still found by its name.
+- A weekly summary whose Monday was missed goes out the next day. The first one after you turn
+  it on still waits for a Monday.
+
+### Fixed
+- **The row limit of an approval mode counts what assistants already applied by themselves in
+  the last 24 hours**, so many small changes cannot add up past it.
+- An edit that was not a commander change can no longer end with a new commander: the read-back
+  after the apply reports it.
+- A block page or an unreadable answer when the Archidekt sign-in is renewed no longer unlinks
+  the member.
+- An apply cut off by a shutdown keeps its apply time, so the read-back afterwards still knows
+  what to compare.
+- A Binder removal older than the newest 1,000 records can be removed: it keeps the card name.
+- The card text reader reads the gateway's own decklist text: a category in brackets is not a
+  set (unless it is two to six capital letters alone, which still reads as a set code), finish and commander markers are not part of the name, and a line it cannot read is
+  named instead of dropped.
+- Odd input gets a plain answer: numbers written in other scripts or thousands of digits long,
+  a skip past the end of a list, a picture that declares too many pixels, a deck check without
+  a deck, and a list where a name is expected. A tool that fails inside the gateway answers in
+  plain words with what to do next.
+- A research source that fails is reported in the gateway's own words, the same ones every
+  other outage uses, with no time promised.
+- An approval mode's 24-hour count leaves out a package's heading row, as the proposal's own
+  count does.
+- On a proposal page on a phone with very large text, the Apply box sits in the page instead of
+  covering the proposal.
+- At very large text on a phone, the third button of the Decks and Binder headings fills its
+  line instead of sitting alone at half width.
+- On a desktop, Card size sits beside its switch in the deck editor's bar, and Mark all read on
+  Alerts stays on one line.
+- The docs name all five Docker secrets.
+
+### Security
+- A flood of app sign-in pages from one network cannot push out another member's sign-in.
+- A connected app's token reads only what the consent page says (see the upgrade notes).
+
 ## [0.7.47] - 2026-11-11
 
 Proposal cards in Claude and ChatGPT no longer fill the chat: only the newest card of a change

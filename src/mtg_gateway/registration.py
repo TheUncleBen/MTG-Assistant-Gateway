@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .archidekt import Deck, DeckCard
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -111,7 +112,7 @@ def fields(deck: Deck, details: dict[str, Any], sort: str) -> dict[str, Any]:
     if sort not in SORTS:
         raise _err(f"sort must be one of: {', '.join(SORTS)}.")
     dci = _text(details.get("dci_number"), "The DCI number", DCI_MAX).replace(" ", "")
-    if dci and not dci.isdigit():
+    if dci and not is_digits(dci):
         raise _err("The DCI number is digits only.")
     last = _text(details.get("last_name"), "Last name")
     main, side = split(deck)

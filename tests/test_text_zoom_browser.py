@@ -337,3 +337,69 @@ def test_names_and_headings_keep_whole_words_at_200_percent_on_narrow_phones(ser
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 80 else ""
     assert problems == [], "\n".join(problems[:80]) + more
+
+
+def test_the_apply_box_leaves_the_foot_of_a_phone_when_large_text_makes_it_tall(server: Server) -> None:  # noqa: F811
+    """On a phone Apply and Reject are pinned to the foot of the screen. At 200% text the box grew
+    to almost half the screen and covered the proposal it is about (0.7.48 review): it now sits in
+    the page under the proposal. At the normal size it stays pinned."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, pending = _seed(server)
+    box = """() => { const c = document.querySelector('.apply form.guarded .choice');
+      const r = c.getBoundingClientRect();
+      return {position: getComputedStyle(c).position, share: r.height / innerHeight,
+              notNow: getComputedStyle(c.querySelector('.btn-plain')).display}; }"""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 412, "height": 915}, has_touch=True, is_mobile=True)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/proposals/{pending}", wait_until="networkidle")
+        normal = page.evaluate(box)
+        assert normal["position"] == "fixed" and normal["share"] < 1 / 3 and normal["notNow"] == "none", (
+            normal
+        )
+        page.evaluate(TEXT_200)
+        page.wait_for_function(
+            "() => getComputedStyle(document.querySelector('.apply form.guarded .choice')).position"
+            " === 'static'"
+        )
+        large = page.evaluate(box)
+        assert large["position"] == "static" and large["notNow"] != "none", large
+        browser.close()
+
+
+def test_the_decks_heading_buttons_never_leave_one_alone_at_half_width(server: Server) -> None:  # noqa: F811
+    """New deck, New folder, New package on a phone: three in a row at the normal size; at 200%
+    text two fit a line, and the third then takes its whole line instead of half of it."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, _pending = _seed(server)
+    widths = """() => { const a = document.querySelector('.ui-head.hubhead .acts');
+      const row = a.getBoundingClientRect().width;
+      return [...a.children].map(c => { const r = c.getBoundingClientRect();
+        return [Math.round(r.top), Math.round(100 * r.width / row)]; }); }"""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 412, "height": 915}, has_touch=True, is_mobile=True)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        normal = page.evaluate(widths)
+        assert len({top for top, _ in normal}) == 1 and all(28 <= share <= 36 for _, share in normal), normal
+        page.evaluate(TEXT_200)
+        redrawn(page)
+        large = page.evaluate(widths)
+        lines: dict[int, list[int]] = {}
+        for top, share in large:
+            lines.setdefault(top, []).append(share)
+        for shares in lines.values():  # every line is filled: no button at half width beside nothing
+            assert sum(shares) >= 95, large
+        browser.close()

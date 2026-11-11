@@ -128,6 +128,7 @@ class _Leg:
     app_return: str | None
     fresh: bool
     expires: float
+    source: str = ""  # the network that asked for it (auth_provider.login_source), "" if unknown
 
 
 class AppSignins:
@@ -143,17 +144,28 @@ class AppSignins:
         self._codes: dict[str, _Pending] = {}
         self._legs: dict[str, _Leg] = {}
 
-    def start_leg(self, challenge: str, next_path: str, app_return: str | None, fresh: bool) -> str:
+    def start_leg(
+        self, challenge: str, next_path: str, app_return: str | None, fresh: bool, source: str = ""
+    ) -> str:
         """Keep a leg until the person presses Continue (or Cancel) on the page; the token goes in
-        the page's form and in this browser's cookie, and ``take_leg`` wants both."""
+        the page's form and in this browser's cookie, and ``take_leg`` wants both. Anyone can ask
+        for a leg without signing in, so when the table is full the room is made by the network
+        that holds the most legs (its oldest goes), as the pending-login table does: one address
+        asking for hundreds cannot push out a member's leg waiting for its Continue."""
         token = secrets.token_urlsafe(32)
         now = self._clock()
         with self._lock:
             for k in [k for k, v in self._legs.items() if v.expires <= now]:
                 del self._legs[k]
             while len(self._legs) >= MAX_PENDING:
-                del self._legs[next(iter(self._legs))]
-            self._legs[self._key(token)] = _Leg(challenge, next_path, app_return, fresh, now + self._leg_ttl)
+                held: dict[str, int] = {}
+                for v in self._legs.values():
+                    held[v.source] = held.get(v.source, 0) + 1
+                most = max(held, key=lambda k: held[k])
+                del self._legs[next(k for k, v in self._legs.items() if v.source == most)]
+            self._legs[self._key(token)] = _Leg(
+                challenge, next_path, app_return, fresh, now + self._leg_ttl, source
+            )
         return token
 
     def take_leg(self, token: str, cookie: str | None) -> _Leg | None:

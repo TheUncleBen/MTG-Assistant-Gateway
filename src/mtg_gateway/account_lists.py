@@ -25,6 +25,7 @@ from . import refusals
 from .archidekt_account import CUSTOM_CARD_FIELDS, HEX_COLOR_RE
 from .decklist import clean_text
 from .decks import DeckError, _row, needs_look_error
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -980,7 +981,7 @@ async def apply(  # noqa: C901, PLR0912, PLR0915
 def _owner(decks: DeckService, sub: str) -> int:
     link = decks.db.get_link(sub)
     uid = str((link or {}).get("archidekt_user_id") or "")
-    if not uid.isdigit():
+    if not is_digits(uid):
         if link is None:
             raise DeckError("not_linked", refusals.not_linked(decks.settings.public_url))
         raise DeckError("not_linked", refusals.no_user_id(decks.settings.public_url))
@@ -1141,6 +1142,9 @@ def _redraw(raw: bytes, crop: tuple[int, int, int, int] | None) -> bytes:
         with Image.open(io.BytesIO(raw)) as probe:
             fmt = probe.format
             w, h = probe.size
+    except Image.DecompressionBombError as exc:
+        # a header that declares more pixels than Pillow will open: refused before any decoding
+        raise _err("The picture has too many pixels. Choose a smaller one.") from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise _err("That file is not a picture the gateway can read. Use JPEG, PNG or WebP.") from exc
     if fmt not in PICTURE_FORMATS:

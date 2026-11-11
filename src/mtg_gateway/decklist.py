@@ -26,6 +26,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
+from .digits import is_digits
+
 LINE = re.compile(
     r"^\s*(?:(?P<sb>SB:)\s*)?(?:(?P<qty>\d{1,3})\s*[xX]?\s+)?(?P<name>[^(\[\^*]+?)"
     r"(?:\s+\((?P<set>[A-Za-z0-9]{2,6})\)(?:\s+(?P<num>[A-Za-z0-9★-]+))?)?"
@@ -119,7 +121,7 @@ def _header(line: str) -> str | None:
     s = re.sub(r"\s*\(\d+(?:\s+cards?)?\)$", "", s, flags=re.I)
     if s.lower() in HEADER_WORDS:
         return s
-    if level >= 2 and s and not s[0].isdigit():
+    if level >= 2 and s and not is_digits(s[0]):
         return s
     if line.strip().endswith(":") and " " not in s and s:
         return s

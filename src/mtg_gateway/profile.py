@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from .archidekt import plain_text
 from .decklist import clean_text
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -216,7 +217,7 @@ def landed(body: dict[str, Any], now: dict[str, Any]) -> bool:
 def user_id(decks: DeckService, sub: str) -> int:
     _token, link = decks._token(sub)
     uid = str(link.get("archidekt_user_id") or "")
-    if not uid.isdigit():
+    if not is_digits(uid):
         from .decks import DeckError
 
         raise DeckError(
@@ -284,15 +285,15 @@ def notification_url(n: dict[str, Any]) -> str | None:
     kind = str(n.get("notificationType") or "")
     link = n.get("linkId")
     own = n.get("selfId") if n.get("selfId") is not None else link
-    if kind in ("ForumThread", "Global", "Sticky", "Features") and str(own).isdigit():
+    if kind in ("ForumThread", "Global", "Sticky", "Features") and is_digits(str(own)):
         return f"https://archidekt.com/forum/thread/{own}"
-    if kind in ("Deck", "DeckThread", "DeckUserEditorLink") and str(link).isdigit():
+    if kind in ("Deck", "DeckThread", "DeckUserEditorLink") and is_digits(str(link)):
         return f"https://archidekt.com/decks/{link}"
-    if kind == "News" and str(link).isdigit():
+    if kind == "News" and is_digits(str(link)):
         return f"https://archidekt.com/news/{link}"
     if kind == "Profile" and isinstance(link, str | int) and str(link).strip():
         return f"https://archidekt.com/user/{link}"
-    if kind == "Contest" and str(link).isdigit():
+    if kind == "Contest" and is_digits(str(link)):
         return f"https://archidekt.com/contest/discussion/{link}"
     return None
 
@@ -361,6 +362,9 @@ def _clean_avatar(raw: bytes) -> tuple[bytes, str]:
         with Image.open(io.BytesIO(raw)) as probe:
             fmt = probe.format
             w, h = probe.size
+    except Image.DecompressionBombError as exc:
+        # a header that declares more pixels than Pillow will open: refused before any decoding
+        raise _err("The picture has too many pixels. Choose a smaller one.") from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise _err("That file is not a picture the gateway can read. Use JPEG or PNG.") from exc
     if fmt not in AVATAR_FORMATS:

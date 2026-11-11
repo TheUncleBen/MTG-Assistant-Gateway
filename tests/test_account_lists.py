@@ -272,7 +272,7 @@ async def test_history_lists_a_lists_change_with_the_copy_from_just_before(stack
         # narrowed to the lists, it is the one entry; the chips count it
         mine = (await b.http.get("/history?deck_id=lists")).text
         assert "Changed your Archidekt lists" in mine
-        assert "the changes applied to them and to your Archidekt lists" in history
+        assert "tests of your decks and lists" in history
     finally:
         await b.aclose()
 

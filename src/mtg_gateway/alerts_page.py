@@ -32,6 +32,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import alerts_push, notify, prefs, profile_page, ui
 from .decks import DeckError
+from .digits import is_digits
 from .pages import (
     browser_session,
     csrf_form_ok,
@@ -47,8 +48,7 @@ BOX_ROWS = 8  # rows the bell's box shows; the page shows them all
 SHOW_CHOICES = (("", "All"), ("unread", "Unread"))
 ACTIONS = ("read", "unread", "dismiss", "undo", "read_all", "clear_all")
 FOOT = (
-    "Alerts from Archidekt are read from Archidekt: marking them read or dismissing them here "
-    "doesn't change them on archidekt.com. Dismissed alerts are kept 30 days for Undo."
+    "What you read or dismiss here stays as it is on archidekt.com. Dismissed alerts stay 30 days for Undo."
 )
 # where the kinds of Archidekt's own alerts are chosen (the gateway's are under Settings)
 ARK_CHOICE = "<a class='btn btn-plain' href='/account/details/email'>Email and alerts on Archidekt</a>"
@@ -281,7 +281,7 @@ def _ids(raw: Any) -> list[int]:
     out = []
     for v in raw if isinstance(raw, list) else []:
         s = str(v).strip()
-        if s.isdigit() and len(s) <= 12:
+        if is_digits(s) and len(s) <= 12:
             out.append(int(s))
     return out[:500]
 
@@ -411,8 +411,8 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             f"{tools_html(csrf_in, any_unread=any_unread, any_rows=kept_any) if not cross_site else ''}</div>"
             "<p class='ui-sub'>What needs you and what happened, from this gateway and from Archidekt.</p>"
             f"{note}{tools}{link_note}<div class='card al-card' data-al-page>{body_list}</div>"
-            f"<p class='muted small bell-foot'>{esc(FOOT)} Choose which alerts Archidekt sends you under "
-            f"Email and alerts on Archidekt.</p><p class='al-ark'>{ARK_CHOICE}</p></div>",
+            # the button under it says where Archidekt's own alerts are chosen: not said twice
+            f"<p class='muted small bell-foot'>{esc(FOOT)}</p><p class='al-ark'>{ARK_CHOICE}</p></div>",
             sub=sub,
             sid=sid,
             current="/notifications",
@@ -426,7 +426,7 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = request.path_params.get("alert_id", "")
         if not sub:
             return login_redirect_here(request, f"/notifications/open/{raw}")
-        if not str(raw).isdigit() or len(str(raw)) > 12:
+        if not is_digits(str(raw)) or len(str(raw)) > 12:
             return RedirectResponse("/notifications", 303)
         a = state.db.gateway_alert(sub, int(raw))
         if a is None:

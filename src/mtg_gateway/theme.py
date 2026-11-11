@@ -30,7 +30,7 @@ from urllib.parse import quote
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, card_models, update_check
+from . import __version__, card_models, localday, update_check
 from .mana import SPRITE
 from .menus import MENUS_CSS
 
@@ -932,9 +932,15 @@ details.raw{margin:.5rem 0 0}
     border:1px solid var(--card-border);border-radius:var(--radius-lg);box-shadow:var(--shadow)}
   body:not(.has-tabbar) .apply form.guarded .choice{bottom:calc(.5rem + env(safe-area-inset-bottom))}
   .apply form.guarded .choice .btn-plain{display:none}  /* Not now: the tab bar and Back lead out */
+  /* very large text: the bar would cover a third of the screen and the proposal with it, so it
+     sits in the page instead (static/clickguard.js marks the form) */
+  .apply form.guarded.tall .choice{position:static;margin:.9rem 0 0;padding:0;background:none;border:0;
+    box-shadow:none}
+  .apply form.guarded.tall .choice .btn-plain{display:inline-flex}
   /* the page's last lines scroll above the bar */
-  main.wrap:has(.apply form.guarded){padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
-  .has-tabbar main.wrap:has(.apply form.guarded){
+  main.wrap:has(.apply form.guarded:not(.tall)){
+    padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
+  .has-tabbar main.wrap:has(.apply form.guarded:not(.tall)){
     padding-bottom:calc(5.5rem + 9rem + env(safe-area-inset-bottom))} }
 /* Locked (until the click guard unlocks them), Apply and Reject keep their own look: the orange
    and the red, not faded, not outlined (a dashed outline read as disabled, re-audit N16); the lock
@@ -2403,9 +2409,10 @@ BELL_CSS = """
 .al-card > .notice{margin:.75rem}
 .al-head{flex-wrap:wrap;gap:.5rem 1rem}
 /* the three actions sit in one row or one above the other, never two and one alone (0.7.47
-   audit): the row needs --al-row (about 26em of their own text size, with room to spare), so
-   200% text stacks them sooner */
-.al-acts{--al-row:29em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
+   audit): the row needs --al-row (three equal shares, each wide enough for "Mark all read" with
+   its icon on one line: at 29em it wrapped inside its button on a desktop), so 200% text stacks
+   them sooner */
+.al-acts{--al-row:33em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
   flex-wrap:wrap;gap:.5rem}
 .al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
 .al-acts form{margin:0;display:flex}
@@ -2923,7 +2930,7 @@ def time_html(ts: int | float | None, *, day: bool = True) -> str:
     return f"<time datetime='{iso}'{'' if day else ' data-fmt=time'}>{shown}</time>"
 
 
-_NUMBERS = re.compile(r"(\d+)")
+_NUMBERS = re.compile(r"([0-9]+)")  # plain digits only: "²" and "٣" sort as text
 
 
 @functools.lru_cache(maxsize=16384)
@@ -2932,7 +2939,9 @@ def natural_key(text: str | None) -> tuple[str | int, ...]:
     the rest without regard to case. Every key alternates text and numbers from the first
     character, so any two compare. Kept for the last names asked about: a Watchlist at the cap
     sorts 5,000 names on every view."""
-    return tuple(int(p) if p.isdigit() else p.casefold() for p in _NUMBERS.split(text or ""))
+    # split() with one group alternates text, number, text ...: the place decides, so two keys always
+    # hold the same kind at the same place. Python converts at most 4300 digits.
+    return tuple(int(p[:4000]) if i % 2 else p.casefold() for i, p in enumerate(_NUMBERS.split(text or "")))
 
 
 def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
@@ -3556,6 +3565,7 @@ class ThemeMiddleware:
             return
         value = None
         layout = None
+        tz = None
         app = False
         app_ver = ""
         for k, v in scope.get("headers", []):
@@ -3566,6 +3576,8 @@ class ThemeMiddleware:
                         value = val.strip()
                     elif name == LAYOUT_COOKIE:
                         layout = val.strip()
+                    elif name == localday.TZ_COOKIE:
+                        tz = val
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
                 m = _APP_VERSION_RE.search(v.decode("latin-1", "replace"))
@@ -3577,9 +3589,11 @@ class ThemeMiddleware:
         atoken = _app.set(app)
         vtoken = _app_version.set(app_ver)
         ctoken = _card_size.set((card_size_page(path), {}))
+        ztoken = localday.set_offset(localday.offset_from_cookie(tz))
         try:
             await self.app(scope, receive, send)
         finally:
+            localday.reset_offset(ztoken)
             _card_size.reset(ctoken)
             _theme.reset(token)
             _layout.reset(ltoken)

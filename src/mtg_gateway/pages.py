@@ -38,7 +38,7 @@ from . import (
 )
 from . import decks as decks_mod
 from .archidekt import PATIENCE_SPENT, page_turn
-from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
+from .auth_provider import BROWSER_COOKIE, BROWSER_KEY, LoginError, cookie_name, login_source
 from .avatars import initials_svg
 from .busy import outage
 from .clickguard import GUARD_DWELL_MS, GUARD_SETTLE_MS, form_stamp, guarded_form, submitted_too_soon
@@ -58,6 +58,7 @@ from .decks import (
     row_line,
     tag_change_text,
 )
+from .digits import is_digits
 from .formatting import DOC_CSS, doc_html
 from .membership import session_holder
 from .proposals_view import PROPOSALS_CSS
@@ -207,7 +208,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 return small("Sign-in failed", smallpage.signin_failed(login_href(nxt)), status=400)
             # Any app on the phone can open this address: a page first, and only its Continue goes
             # on to the identity provider (app_continue).
-            token = state.app_signins.start_leg(challenge, nxt, back, fresh)  # type: ignore[attr-defined]
+            holder = BROWSER_KEY.get()
+            source = login_source(holder.get("client_ip") if holder else None) or ""
+            token = state.app_signins.start_leg(  # type: ignore[attr-defined]
+                challenge, nxt, back, fresh, source
+            )
             resp = small(
                 "Sign in to the app?",
                 app_signin.confirm_body(s.server_name, token),
@@ -1178,7 +1183,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 sub=sub,
                 sid=sid,
             )
-        after_at = int(data["after"]) if (data.get("after") or "").isdigit() else 0
+        after_at = int(data["after"]) if is_digits(data.get("after") or "") else 0
         current_client.set(BROWSER_CLIENT_ID)
         if data.get("action") == "undo":
             if submitted_too_soon(s.session_secret, f"undo:{sub}:{snapshot_id}", data.get("shown")):
@@ -1277,7 +1282,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             query["show"] = "all"  # a closed one is in the All list, not under Waiting
         others = (
             [r for r in state.db.pending_board(sub, str(p["deck_id"])) if r["id"] != pid]
-            if p["state"] == "pending" and str(p.get("deck_id") or "").isdigit()
+            if p["state"] == "pending" and is_digits(str(p.get("deck_id") or ""))
             else []
         )
         if p["state"] == "replaced":
@@ -1290,7 +1295,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # a failed one keeps its number while no change waiting on the deck took it (heading_no)
         live = (
             state.db.pending_board(sub, str(p["deck_id"]))
-            if p["state"] == "failed" and p.get("board_no") and str(p.get("deck_id") or "").isdigit()
+            if p["state"] == "failed" and p.get("board_no") and is_digits(str(p.get("deck_id") or ""))
             else others
         )
         number = heading_no(p, live)
@@ -1382,7 +1387,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             else:
                 seen = data.get("version") or ""
                 row = state.db.get_proposal(pid, sub)
-                if not seen.isdigit() and row is not None and row.get("state") == "pending":
+                if not is_digits(seen) and row is not None and row.get("state") == "pending":
                     # Apply refuses a change that is not the version the page showed; a form
                     # without one (an old page, or one made by hand) is refused the same way
                     return RedirectResponse(f"/proposals/{pid}?err=changed", status_code=303)
@@ -1391,10 +1396,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     sub,
                     pid,
                     via=REVIEW_PAGE,
-                    version=int(seen) if seen.isdigit() else None,
+                    version=int(seen) if is_digits(seen) else None,
                     # a page drawn before the status field was added sends none: as before
                     shown_status=str(data["seen_status"])[:20] if "seen_status" in data else None,
-                    shown_status_at=int(at) if at.isdigit() and len(at) < 16 else None,
+                    shown_status_at=int(at) if is_digits(at) and len(at) < 16 else None,
                     # a person is at the page: a short wait, then the progress, which updates itself
                     wait=decks_mod.BROWSER_APPLY_WAIT_SECONDS,
                 )
@@ -1798,7 +1803,7 @@ async def read_limited(request: Request, limit: int) -> bytes | None:
     """The request body, or None once it is longer than ``limit`` bytes. Stops reading at the
     limit instead of buffering the whole body first."""
     declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > limit:
+    if is_digits(declared) and int(declared) > limit:
         return None
     buf = bytearray()
     async for chunk in request.stream():
@@ -3300,7 +3305,7 @@ def _delete_deck_box(p: dict[str, Any]) -> str:
     whatever the backups setting: decks.DELETE_KEEPS_NO_COPY)."""
     name = str(p.get("deck_name") or "this deck")
     changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
-    size = f" ({plural(int(changes['cards']), 'card')})" if str(changes.get("cards") or "").isdigit() else ""
+    size = f" ({plural(int(changes['cards']), 'card')})" if is_digits(str(changes.get("cards") or "")) else ""
     body = (
         f"<p>This deletes <strong>“{html.escape(name)}”</strong>{size} from your Archidekt account. "
         "The gateway keeps a snapshot of it under History first and checks that the deck is unchanged "
@@ -3965,7 +3970,7 @@ def _picked_versions(data: dict[str, str], picks: list[str]) -> dict[str, int]:
     out = {}
     for pid in picks:
         v = data.get(f"v_{pid}") or ""
-        if v.isdigit() and 0 < int(v) < 10_000:
+        if is_digits(v) and 0 < int(v) < 10_000:
             out[pid] = int(v)
     return out
 
@@ -3985,7 +3990,7 @@ def _picked_shown(data: dict[str, str], picks: list[str]) -> dict[str, dict[str,
         at = data.get(f"t_{pid}") or ""
         out[pid] = {
             "status": str(data[f"s_{pid}"])[:20],
-            "status_at": int(at) if at.isdigit() and len(at) < 16 else None,
+            "status_at": int(at) if is_digits(at) and len(at) < 16 else None,
         }
     return out
 

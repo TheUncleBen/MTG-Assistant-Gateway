@@ -56,6 +56,7 @@ from .decks import (
     no_card_called,
     reloading,
 )
+from .digits import is_digits
 from .pages import (
     BROWSER_CLIENT_ID,
     NO_STORE,
@@ -626,7 +627,7 @@ class CollectionService:
         if link is None:
             raise CollectionError("not_linked", refusals.not_linked(self.decks.settings.public_url))
         uid = link.get("archidekt_user_id")
-        if not uid or not str(uid).isdigit():
+        if not uid or not is_digits(str(uid)):
             raise CollectionError("not_linked", refusals.no_user_id(self.decks.settings.public_url))
         return str(uid)
 
@@ -1311,7 +1312,7 @@ class CollectionService:
 
 def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     qty = raw.get("quantity", 1)
-    if isinstance(qty, str) and qty.strip().isdigit():
+    if isinstance(qty, str) and is_digits(qty.strip()):
         qty = int(qty)
     if not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > MAX_QUANTITY:
         raise CollectionError(
@@ -1570,7 +1571,7 @@ def _finish_label(f: str) -> str:
 
 def _rid(value: Any) -> int:
     s = str(value or "").strip()
-    if not s.isdigit() or len(s) > 12:
+    if not is_digits(s) or len(s) > 12:
         raise CollectionError("invalid", "That is not a collection record ID.")
     return int(s)
 
@@ -2979,7 +2980,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         rows: list[tuple[int, str]] = []
         for line in (data.get("sel") or "").split("\n"):
             rid, _, name = line.strip().partition(" ")
-            if rid.isdigit() and 0 < int(rid) < 10**12:
+            if is_digits(rid) and 0 < int(rid) < 10**12:
                 rows.append((int(rid), _clean(name, 200)))
         return rows
 
@@ -3871,7 +3872,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 qty = str(data.get("quantity", "1")).strip()
                 # Copies up to MAX_QUANTITY (the text's own reader stops at 999); a count typed
                 # before the name ("3 Sol Ring") counts when Copies is left at 1
-                copies = min(MAX_QUANTITY, max(1, int(qty))) if qty.isdigit() else 1
+                copies = min(MAX_QUANTITY, max(1, int(qty))) if is_digits(qty) else 1
                 parsed = parse_text(text) if text else []
                 if not parsed:
                     return RedirectResponse(
@@ -4567,8 +4568,12 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             return _result({"ok": False, "error": exc.kind, "message": str(exc)})
         try:
             if text:
-                from .scan.service import parse_text
+                from .scan.service import ScanError, parse_text
 
+                try:
+                    read = parse_text(text)
+                except ScanError as exc:  # too many lines or characters: a refusal, like resolve_cards
+                    raise CollectionError(exc.kind, f"{exc} Nothing was changed.") from exc
                 items += [
                     {
                         "name": c.name,
@@ -4577,7 +4582,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                         "quantity": c.quantity,
                         "foil": c.foil is True,
                     }
-                    for c in parse_text(text)
+                    for c in read
                 ]
             if scan_session:
                 if service.scan is None:

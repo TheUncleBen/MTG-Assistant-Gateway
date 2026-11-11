@@ -23,7 +23,7 @@ flowchart LR
       forge["Forge<br/>simulations, on by default, not published"]
     end
     data[("data/ (SQLite)<br/>backups/")]
-    secrets[["Docker secrets<br/>4 files"]]
+    secrets[["Docker secrets<br/>5 files"]]
   end
 
   idp["Your OIDC identity provider<br/>Authentik, Keycloak, ..."]
@@ -56,7 +56,7 @@ Claude / ChatGPT / Android app / browser
   mtg-gateway :8080 ──MCP──▶ Mystic Forge :8000 ──▶ Scryfall, EDHREC, Spellbook, rules
         │   ├─ SQLite in data/, nightly copies in backups/
         │   ├─ ntfy (members' notifications) and Forge (simulations, on by default), both private
-        │   ├─ 4 Docker secrets (encryption key, cookie key, OIDC client secret, ntfy token)
+        │   ├─ 5 Docker secrets (encryption key, cookie key, OIDC client secret, identity provider token, ntfy token)
         │   ├─ sign-in ──▶ your OIDC identity provider
         │   └─ deck reads and edits ──▶ archidekt.com (as the signed-in user)
 ```

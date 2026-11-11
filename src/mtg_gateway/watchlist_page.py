@@ -35,6 +35,7 @@ from urllib.parse import quote, urlencode
 
 from . import ui
 from .deckpage import image_url
+from .digits import is_digits
 from .history_view import _trend_svg
 from .prices import ALERT_KINDS, MAX_LIST_NAME, NO_LIST, alert_band, money
 from .reports_page import PHONE_WIDGETS_CSS
@@ -50,11 +51,13 @@ CHIPS = (
     ("decks", "Decks"),
 )
 SORTS = (
+    # every choice says it is the order: the box has no label beside it, and a bare "Price" beside
+    # "Any finish" read as a filter once it was chosen
     ("", "Sort: Name"),
-    ("price", "Price"),
-    ("d1", "Change, 1 day"),
-    ("d7", "Change, 7 days"),
-    ("d30", "Change, 30 days"),
+    ("price", "Sort: Price"),
+    ("d1", "Sort: Change, 1 day"),
+    ("d7", "Sort: Change, 7 days"),
+    ("d30", "Sort: Change, 30 days"),
 )
 CHANGE_KEYS = (("1 day", "change_1d_pct"), ("7 days", "change_7d_pct"), ("30 days", "change_30d_pct"))
 SHORT_DAYS = 30
@@ -170,6 +173,17 @@ class Query:
 
 
 # -- words ------------------------------------------------------------------------------------
+def _check_moment(day: str, hhmm: str) -> int | None:
+    """The moment of the daily price check of ``day`` (a UTC day, "2026-10-12") at ``hhmm`` UTC."""
+    import calendar
+
+    try:
+        y, m, d = (int(x) for x in day.split("-"))
+        return int(calendar.timegm((y, m, d, int(hhmm[:2]), 0, 0)))
+    except (ValueError, OverflowError):
+        return None
+
+
 def day_text(day: str | None, today: str) -> str:
     """A price's day as list dates write it: "today", else "Oct 12" (with the year when not this one)."""
     if not day:
@@ -1119,7 +1133,7 @@ def stop_words(ok: str, said: dict[str, str] | None) -> str:
             head, _, last = names.rpartition(", ")
             names = f"{head} and {last}"
         return f"{names} {'are' if many else 'is'} {tail}"
-    if said.get("n", "").isdigit():
+    if is_digits(said.get("n", "")):
         n = int(said["n"])
         return f"1 card is {tail}" if n == 1 else f"{n} cards are {tail}"
     return OK_NOTES[ok]
@@ -1180,7 +1194,9 @@ def watchlist_page_html(
     at = data["checked_daily_at_utc"]
     days = [v["day"] for v in data["cards"] + data["decks"] if v.get("day")]
     last = max(days) if days else ""
-    checked = f"{day_text(last, today)} at {at} UTC" if last else ""
+    # the list date every page uses, which the page draws in the member's own time zone: a clock
+    # time in UTC told a member nothing about their own day
+    checked = ui.when(_check_moment(last, at), now=now) if last else ""
     cards = data["cards"]
     query, _shown, body, pager = card_rows_html(cards, ids, csrf_in, today, query, card_history, lists=lists)
     # the list the address shows: its own chips' counts and total (L4), every card without one

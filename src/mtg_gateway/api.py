@@ -34,6 +34,7 @@ from .decks import (
     scopes_allow_writes,
     split_label,
 )
+from .digits import is_digits
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
 from .views import deck_brief, deck_out
 
@@ -189,6 +190,17 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/me", "GET")
     async def me(_request: Request, who: Caller) -> Response:
         user = state.db.get_user(who.sub) or {}
+        if who.via == "api":
+            # A connected app gets what the whoami tool gives it and no more: the consent page and
+            # whoami both say nothing else about the account is shared with it.
+            names = [str(v) for v in (user.get("name"), user.get("preferred_username")) if v]
+            return ok(
+                {
+                    "name": next((v for v in names if "@" not in v), None),
+                    "account": decks.status(who.sub),
+                    "via": who.via,
+                }
+            )
         return ok(
             {
                 "sub": who.sub,
@@ -262,7 +274,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     async def _deck_or_snapshot(sub: str, ref: str) -> Any:
         from .archidekt import parse_deck
 
-        if ref.startswith("snap_") or (not ref.isdigit() and "/" not in ref and "." not in ref):
+        if ref.startswith("snap_") or (not is_digits(ref) and "/" not in ref and "." not in ref):
             return parse_deck(decks.snapshot(sub, ref.removeprefix("snap_"))["deck"])
         return await decks.get_any_deck(sub, ref)
 
@@ -306,11 +318,16 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+
         # the page's view, grouping and sort (a quick add draws its new card in place: each
         # touched row then carries its markup and the stack it belongs in)
-        draw = data.get("view") if data.get("view") in VIEWS else None
-        grouping = data.get("group") if data.get("group") in GROUPS else "category"
-        sorting = data.get("sort") if data.get("sort") in SORTS else "name"
+        def choice(key: str, allowed: Any, default: str | None) -> str | None:
+            value = data.get(key)  # only text can be one of the choices (a list is not hashable)
+            return value if isinstance(value, str) and value in allowed else default
+
+        draw = choice("view", VIEWS, None)
+        grouping = choice("group", GROUPS, "category")
+        sorting = choice("sort", SORTS, "name")
 
         def view(deck: Any, touched: set[str], *, stale: bool) -> dict[str, Any]:
             """The rows of the touched cards and the page fragments, from one read of the deck."""
@@ -834,8 +851,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     # -- my activity ----------------------------------------------------------
     @route("/activity", "GET")
     async def activity(request: Request, who: Caller) -> Response:
-        rows = state.db.audit_for_user(who.sub, parse_limit(request.query_params.get("limit"), 50, 1000))
-        return ok({"events": rows})
+        limit = parse_limit(request.query_params.get("limit"), 50, 1000)
+        if who.via == "api":  # a connected app sees what it did itself, never the member's other apps
+            rows = [r for r in state.db.audit_for_user(who.sub, 1000) if r.get("client_id") == who.actor]
+            return ok({"events": rows[:limit]})
+        return ok({"events": state.db.audit_for_user(who.sub, limit)})
 
 
 __all__ = ["Caller", "add_api_routes", "caller_for", "fail", "json_body"]

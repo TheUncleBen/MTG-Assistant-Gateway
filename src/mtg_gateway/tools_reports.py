@@ -21,6 +21,7 @@ from .decks import (
     _clean_deck_id,
     deck_to_text,
 )
+from .digits import is_digits
 from .report_view import MORE_DID_NOT_START
 from .reports import PAIR_UNREAD, SOURCE_COMPARE, SOURCE_LIST, _sentence, list_deck, sim_mode
 from .schemas import (
@@ -172,7 +173,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         """A pasted decklist rather than a deck id, URL or snapshot id: more than one line, or a
         count in front of a name."""
         ref = str(ref or "").strip()
-        if not ref or ref.isdigit() or ref.startswith("snap_") or "archidekt.com" in ref.lower():
+        if not ref or is_digits(ref) or ref.startswith("snap_") or "archidekt.com" in ref.lower():
             return False
         return "\n" in ref or bool(re.match(r"\d+x?\s", ref))
 
@@ -180,7 +181,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         """The member's own snapshot named by ``ref`` (as list_snapshots returns it, with or without
         a ``snap_`` prefix), or None when ``ref`` is not one."""
         sid = ref[5:] if ref.startswith("snap_") else ref
-        if not sid or sid.isdigit():  # deck ids are numbers; snapshot ids never are
+        if not sid or is_digits(sid):  # deck ids are numbers; snapshot ids never are
             return None
         snap = state.db.get_snapshot(sid, sub)
         return parse_deck(snap["deck"]) if snap else None

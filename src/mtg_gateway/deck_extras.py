@@ -29,6 +29,7 @@ from .archidekt import FORMAT_NAMES, Deck, DeckCard, format_label
 from .busy import busy_json_response, busy_response
 from .deckpage import deck_title, folder_options_html
 from .decks import DeckError, current_client, split_label
+from .digits import is_digits
 from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect_here, read_limited
 from .theme import esc, icon
 
@@ -1176,8 +1177,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             except DeckError as exc:
                 return await back_with(request, sub, sid, deck_id, "reportcard", exc, values)
         elif kind == "comment":
-            params["comment_id"] = int(values["comment_id"]) if values["comment_id"].isdigit() else None
-            params["page"] = int(values["page"]) if values["page"].isdigit() else 1
+            params["comment_id"] = int(values["comment_id"]) if is_digits(values["comment_id"]) else None
+            params["page"] = int(values["page"]) if is_digits(values["page"]) else 1
         try:
             p = await decks.propose_action(sub, "report", **params)
         except DeckError as exc:

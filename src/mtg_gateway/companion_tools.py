@@ -37,6 +37,7 @@ from .deckpage import (
     precon_by_label,
 )
 from .decks import DeckError, current_client, is_busy, is_outside_category, split_label
+from .digits import is_digits
 from .history_view import DELETED_NOTICES
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -711,12 +712,12 @@ def add_deck_tool_routes(
                 status=403,
             )
         other = str(data.get("with") or "").strip()
-        query = f"?with={other}" if other.isdigit() else ""
+        query = f"?with={other}" if is_digits(other) else ""
         back = f"<a class='btn' href='/decks/{_esc(deck_id)}/compare{query}'>Back to the comparison</a>"
         current_client.set(BROWSER_CLIENT_ID)
         hold = None
         try:
-            if not other.isdigit():
+            if not is_digits(other):
                 raise DeckError("invalid", "Pick the other deck on the Compare page first.")
             # both decks' games start or wait, or neither: the room for both is checked and kept in
             # one step, before either deck is read, so presses at once can't both take it

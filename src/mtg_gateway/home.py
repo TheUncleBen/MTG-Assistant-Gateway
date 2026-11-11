@@ -27,6 +27,7 @@ from .companion import DECK_CSP
 from .companion_decks import NEW_DECK_CSS, NEW_DECK_SCRIPTS, new_deck_box_html
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError, is_busy
+from .digits import is_digits
 from .pages import _csrf, browser_session, login_redirect_here
 from .theme import SPINNER, icon, render
 
@@ -101,7 +102,7 @@ def proposals_line(rows: list[dict[str, Any]], *, now: float) -> str:
     "6 on 4 decks, 2 not tied to a deck · oldest 6 days · next expires in 20 h · 1 needs a look"."""
     if not rows:
         return "Nothing is waiting."
-    tied = [r for r in rows if str(r.get("deck_id") or "").isdigit()]
+    tied = [r for r in rows if is_digits(str(r.get("deck_id") or ""))]
     decks = len({str(r["deck_id"]) for r in tied})
     loose = len(rows) - len(tied)
     if tied:

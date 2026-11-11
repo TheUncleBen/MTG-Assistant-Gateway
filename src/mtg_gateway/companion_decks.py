@@ -1013,7 +1013,12 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"signed_in": False}, status_code=401, headers={"Cache-Control": "no-store"})
-        found = await decks.page_check(sub, request.path_params["deck_id"], wait=25.0)
+        try:
+            found = await decks.page_check(sub, request.path_params["deck_id"], wait=25.0)
+        except DeckError:  # an address that names no deck: nothing to check, as for a deck not found
+            return JSONResponse(
+                {"changed": False, "failed": False}, status_code=404, headers={"Cache-Control": "no-store"}
+            )
         return JSONResponse(
             found or {"changed": False, "failed": False}, headers={"Cache-Control": "no-store"}
         )

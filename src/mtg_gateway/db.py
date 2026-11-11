@@ -3212,7 +3212,7 @@ class Database:
             args.append(int(until))
         order = "ASC" if oldest_first else "DESC"
         sql += f" ORDER BY created_at {order}, rowid {order} LIMIT ? OFFSET ?"
-        args += [max(0, int(limit)), max(0, int(offset))]
+        args += [min(max(0, int(limit)), 10**9), min(max(0, int(offset)), 10**12)]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
@@ -3325,6 +3325,26 @@ class Database:
             "binder": int(copies or 0),
             "newest": int(newest or 0),
         }
+
+    def assistant_applied_rows(self, owner_sub: str, deck_id: str, since: int) -> int:
+        """How many review rows the member's assistants applied to this deck by themselves (the
+        apply came from apply_proposal or the API, not from the member's press on a card or a
+        page) since ``since``: what an approval mode's row limit is counted against, so one big
+        edit split into small proposals is still one big edit."""
+        row = self._one(
+            # a package's heading row is not a card row (decks._over_the_window leaves it out too)
+            "SELECT COALESCE(SUM((SELECT COUNT(*) FROM json_each(p.rows_json) j "
+            "WHERE json_type(j.value) = 'object' "
+            "AND COALESCE(json_extract(j.value, '$.kind'), '') != 'package')), 0) FROM proposals p "
+            "WHERE p.owner_sub = ? AND p.deck_id = ? AND p.state = 'applied' AND p.applied_at >= ? "
+            "AND p.rows_json IS NOT NULL AND json_valid(p.rows_json) AND EXISTS ("
+            "SELECT 1 FROM audit_log a WHERE a.sub = p.owner_sub AND a.event = 'proposal_applied' "
+            "AND a.at >= ? AND json_valid(a.detail_json) "
+            "AND json_extract(a.detail_json, '$.proposal_id') = p.id "
+            "AND json_extract(a.detail_json, '$.via') IN ('mcp', 'api'))",
+            (owner_sub, deck_id, int(since), int(since)),
+        )
+        return int(row[0] or 0) if row else 0
 
     def applied_via(self, owner_sub: str, proposal_id: str) -> str | None:
         """Where a proposal's apply was called from (``via`` of its ``proposal_applied`` audit row),
@@ -4058,7 +4078,10 @@ class Database:
             # the new result; a null mark is dropped (json_patch).
             c.execute(
                 "UPDATE proposals SET state = ?, "
-                "applied_at = CASE WHEN ? = 'applying' THEN applied_at ELSE ? END, "
+                # an apply cut off (a shutdown) keeps its claim time, as fail_interrupted_applies
+                # does, so the read-back after the restart finds it by when it ran
+                "applied_at = CASE WHEN ? = 'applying' OR (? = 'failed' AND ? = 'interrupted') "
+                "THEN applied_at ELSE ? END, "
                 "snapshot_id = COALESCE(?, snapshot_id), "
                 "result_json = CASE WHEN ? = 'pending' AND ? IS NOT NULL THEN json_patch(?, json_object("
                 "'no_backup_copy', CASE WHEN json_extract(result_json, '$.no_backup_copy') "
@@ -4067,6 +4090,8 @@ class Database:
                 (
                     state,
                     state,
+                    state,
+                    str((result or {}).get("error") or "") if isinstance(result, dict) else "",
                     int(time.time()) if state == "applied" else None,
                     snapshot_id,
                     state,
@@ -4197,7 +4222,7 @@ class Database:
             sql += " AND taken_at < ?"
             args.append(int(until))
         sql += " ORDER BY taken_at DESC, rowid DESC LIMIT ? OFFSET ?"
-        args += [max(0, int(limit)), max(0, int(offset))]
+        args += [min(max(0, int(limit)), 10**9), min(max(0, int(offset)), 10**12)]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         return [
@@ -5038,7 +5063,7 @@ class Database:
                 "SELECT card_key, name, added_by, added_at, updated_at, "
                 "length(CAST(model_json AS BLOB)) AS size FROM card_models "
                 "ORDER BY updated_at DESC, card_key, added_by LIMIT ? OFFSET ?",
-                (max(0, int(limit)), max(0, int(offset))),
+                (min(max(0, int(limit)), 10**9), min(max(0, int(offset)), 10**12)),
             ).fetchall()
         return [dict(r) for r in rows]
 
