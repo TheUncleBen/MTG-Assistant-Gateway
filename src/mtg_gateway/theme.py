@@ -2409,9 +2409,10 @@ BELL_CSS = """
 .al-card > .notice{margin:.75rem}
 .al-head{flex-wrap:wrap;gap:.5rem 1rem}
 /* the three actions sit in one row or one above the other, never two and one alone (0.7.47
-   audit): the row needs --al-row (about 26em of their own text size, with room to spare), so
-   200% text stacks them sooner */
-.al-acts{--al-row:29em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
+   audit): the row needs --al-row (three equal shares, each wide enough for "Mark all read" with
+   its icon on one line: at 29em it wrapped inside its button on a desktop), so 200% text stacks
+   them sooner */
+.al-acts{--al-row:33em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
   flex-wrap:wrap;gap:.5rem}
 .al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
 .al-acts form{margin:0;display:flex}
