@@ -116,7 +116,7 @@ KINDS: dict[str, Kind] = {
             "New assistant",
             "shield",
             "push",
-            "An assistant connected to your account for the first time.",
+            "An assistant connected to your account: each new connection, never a renewal of its access.",
         ),
         Kind("summary", "Summaries", "Summary", "clock", "push", "Your daily or weekly summary."),
         Kind(

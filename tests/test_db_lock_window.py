@@ -175,8 +175,9 @@ async def test_a_refresh_caught_by_the_lock_keeps_the_member_signed_in(
     t3 = await _refresh(gw, client, t2["refresh_token"])
     assert t3.status_code == 200, t3.text
     # nothing is left holding the lock: the holders are gone and the refreshes left no
-    # transaction open. Waited for briefly, not asked once: the gateway's own background work (a
-    # worker thread's short write) may hold it at that very moment on a busy machine, then lets go
+    # transaction open. Waited for briefly, not asked once: the sign-in's New assistant alert is
+    # kept on a worker thread (Notifier.send, db.add_gateway_alert), and on a busy machine that
+    # short write may hold the lock at that very moment, then lets go (0.7.47 audit AX1)
     assert await asyncio.to_thread(db.wait_write_free, 5.0)
 
 

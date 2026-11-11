@@ -76,7 +76,7 @@ object Push {
         "report" -> "A test or deck report finished."
         "price" -> "A watched card crossed your price alert."
         "archidekt" -> "A comment, a reply, a new follower or news in your Archidekt alerts."
-        "account" -> "An assistant connected to your account for the first time."
+        "account" -> "An assistant connected to your account: each new connection, never a renewal of its access."
         "summary" -> "Your daily or weekly summary."
         "gateway" -> "A newer gateway release, or a nightly backup that failed."
         else -> ""
