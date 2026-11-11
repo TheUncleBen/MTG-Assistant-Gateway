@@ -82,7 +82,7 @@ OWNER_NOTES: dict[str, str] = {
     "with the same options (annotations, combos, seed, until_turn, opponents, mulligan) and stores the "
     "report; compare_decks with simulate=true is the paired A/B of two decks",
     "get_deck": "the gateway's deck reader: any Archidekt deck by ID or link, include_text for rules text, "
-    "archidekt_text to export in Archidekt's import syntax",
+    "view 'export' for Archidekt's import syntax",
     "search_decks": "public decks by name, commander, format, colors or owner; owner plus order_by "
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
     "deck_stats": "legality, structural checks, bracket, curve, colors and price from one read",
