@@ -223,7 +223,9 @@ async def test_mystic_forge_calls_take_flat_or_wrapped_arguments(stack: Stack) -
 async def test_mystic_forge_upstream_failure_is_flagged_as_an_error(stack: Stack) -> None:
     token = await mcp_token(stack.h)
     out = await call(stack.h, token, "precon_search", {"query": "Aesi"})
-    assert out.get("isError") is True and "ProxyError" in json.dumps(out), out
+    said = json.dumps(out)
+    assert out.get("isError") is True and "UPSTREAM_ERROR" in said, out
+    assert "ProxyError" not in said and "nothing was changed" in said, out  # the gateway's own words
 
 
 async def test_research_service_argument_refusals_are_flagged_and_structured(stack: Stack) -> None:
@@ -965,3 +967,28 @@ async def test_a_commander_search_through_the_proxy_asks_for_paper_cards() -> No
     assert out.content[0].text == "query=t:angel id<=w game:arena"
     out = await proxy.call("scryfall_search", {"query": "t:angel"})
     assert out.content[0].text == "query=t:angel"
+
+
+async def test_an_upstream_failure_is_said_in_the_gateways_own_words() -> None:
+    """The research service's failure text ("Scryfall API error (503) ... <html>", "Unexpected
+    error: ProxyError") is not passed on: the result says which source did not answer, that
+    nothing was changed and what to do next."""
+    from mcp import types
+
+    from mtg_gateway.mf_proxy import _rewrite_result
+
+    for raw, service in [
+        ("Scryfall API error (503): Service Unavailable <html>upstream</html>", "Scryfall"),
+        ("Unexpected error: ProxyError: 403 Forbidden", "The research service"),
+        ("Request to EDHRec timed out.", "EDHREC"),
+        ("Rate limited by Scryfall", "Scryfall"),
+    ]:
+        got = _rewrite_result(types.CallToolResult(content=[types.TextContent(type="text", text=raw)]))
+        assert got.is_error is True
+        out = got.structured_content
+        assert out["ok"] is False and out["error_code"] == "UPSTREAM_ERROR" and out["next_step"]
+        said = got.content[0].text
+        for banned in ("API", "<html", "ProxyError", "Unexpected error", "503"):
+            assert banned not in said, (raw, said)
+        assert out["message"].startswith(service), out
+        assert "nothing was changed" in out["message"]

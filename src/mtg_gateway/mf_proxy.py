@@ -387,8 +387,43 @@ def _rewrite_result(result: types.CallToolResult) -> types.CallToolResult:
     if result.structured_content is not None:
         update["structured_content"] = _rewrite_strings(result.structured_content)
     if upstream_failed(result):
-        update["is_error"] = True  # so the assistant sees a failure, not an answer
+        return upstream_refusal(result)
     return result.model_copy(update=update)
+
+
+_UPSTREAM_NAMES = {"edhrec": "EDHREC"}
+
+
+def upstream_refusal(result: types.CallToolResult) -> types.CallToolResult:
+    """A lookup whose source failed, in the gateway's own words: which source did not answer,
+    that nothing was changed, and what to do next. The source's own text (a status line, an
+    exception's name, sometimes a page of HTML) is not passed on: it is not written for a member
+    and is not the gateway's to vouch for."""
+    text = result.content[0].text.lstrip() if result.content else ""
+    m = UPSTREAM_FAILURE.match(text)
+    named = m.group(2) if m and m.group(2) else ""
+    if not named:
+        about = re.match(r"^(?:Request to ([A-Za-z ]+?) timed out\.|Rate limited by (\w+))", text)
+        named = (about.group(1) or about.group(2) or "") if about else ""
+    service = _UPSTREAM_NAMES.get(named.lower(), named) or "The research service"
+    if text.startswith("Rate limited"):
+        words = f"{service} asked the gateway to slow down."
+    elif "timed out" in text[:80]:
+        words = f"{service} didn't answer in time."
+    else:
+        words = f"{service} had a problem answering."
+    out = {
+        "ok": False,
+        "error": "unavailable",
+        "error_code": "UPSTREAM_ERROR",
+        "message": f"{words} This lookup returned nothing, and nothing was changed.",
+        "next_step": "Try again in a few minutes. Do not answer from memory in its place.",
+    }
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=json.dumps(out, separators=(",", ":")))],
+        structured_content=out,
+        isError=True,
+    )
 
 
 def _validation_checks(result: types.CallToolResult, arguments: Any) -> types.CallToolResult:
