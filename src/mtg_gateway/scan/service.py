@@ -301,8 +301,34 @@ class Resolution:
                 self.note = f"{self.note}; {msg}" if self.note else msg
 
 
-def parse_text(text: str) -> list[CardInput]:
-    """Parse a free-text decklist (one card per line) into inputs."""
+# What a line of the gateway's own decklist_text (decklist.py) carries beside the card: the
+# finish (*F*, *E*), the commander marker, Archidekt's ^label^, an "SB:" prefix and the row's
+# categories in brackets ("[Ramp{top},Draw]"). None of it is part of the name.
+_MARKERS = re.compile(r"\s*(\*(?:F|E|CMDR)\*|\^[^^]*\^)", re.I)
+_SB = re.compile(r"^\s*SB:\s*", re.I)
+_BRACKETS = re.compile(r"\s*\[([^\]]*)\]\s*$")
+_SET_CODE = re.compile(r"^[A-Z0-9]{2,6}$")
+_PRINTING = re.compile(r"\([A-Za-z0-9]{2,6}\)")
+_FOOTER = re.compile(r"^\s*total\s*:?\s*\d+", re.I)
+
+
+def _card_part(line: str) -> tuple[str, str]:
+    """(the line without what is not the card, its finish marker: "F" foil, "E" etched or "")."""
+    marked = re.search(r"\*([FE])\*", line, re.I)
+    finish = marked.group(1).upper() if marked else ""
+    line = _SB.sub("", _MARKERS.sub("", line))
+    m = _BRACKETS.search(line)
+    # "[APC]" alone is a set (MTGO's way); after a "(set)" printing, or in any other shape
+    # ("[Ramp]", "[Ramp{top},Draw]"), brackets hold the row's categories
+    if m and (_PRINTING.search(line[: m.start()]) or not _SET_CODE.match(m.group(1))):
+        line = line[: m.start()]
+    return line.strip(), finish
+
+
+def parse_text(text: str, unread: list[str] | None = None) -> list[CardInput]:
+    """Parse a free-text decklist (one card per line) into inputs. A line that is not a card and
+    not a header or footer is added to ``unread`` when the caller passes one, so it can be named
+    instead of dropped."""
     if len(text) > MAX_TEXT:
         raise ScanError("invalid", "text is too long.")
     out: list[CardInput] = []
@@ -311,10 +337,17 @@ def parse_text(text: str) -> list[CardInput]:
         raise ScanError("invalid", f"At most {MAX_LINES} lines.")
     for raw in lines:
         line = raw.strip()
-        if len(line) > MAX_LINE or _SKIP.match(line):
+        if _SKIP.match(line) or _FOOTER.match(line):
             continue
-        m = _LINE.match(line)
+        if len(line) > MAX_LINE:
+            if unread is not None:
+                unread.append(line[:80])
+            continue
+        card, finish = _card_part(line)
+        m = _LINE.match(card)
         if not m or not m.group("name"):
+            if unread is not None:
+                unread.append(line[:80])
             continue
         qty = int(m.group("qty") or 1)
         out.append(
@@ -324,8 +357,8 @@ def parse_text(text: str) -> list[CardInput]:
                 collector_number=_clean_number(m.group("num") or ""),
                 quantity=max(1, min(qty, 999)),
                 raw=line,
-                foil=True if m.group("finish") == "F" else None,
-                etched=m.group("finish") == "E",
+                foil=True if finish == "F" else None,
+                etched=finish == "E",
             )
         )
     return out

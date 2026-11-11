@@ -166,7 +166,8 @@ def add_scan_tools(
         text: str | None = None,
     ) -> CallToolResult:
         try:
-            inputs = parse_cards(cards) if cards else parse_text(text or "")
+            unread: list[str] = []
+            inputs = parse_cards(cards) if cards else parse_text(text or "", unread)
             if not inputs:
                 raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
             waited: list[float] = []
@@ -176,6 +177,8 @@ def add_scan_tools(
             return with_card(_err(exc), None)
         described = service.describe(results)
         out = {"ok": True, **_for_assistant(described)}
+        if unread:  # lines of the text that were not cards: named, so none is lost silently
+            out["unread_lines"] = unread[:20]
         if waited and waited[0] >= 1:  # it waited for the account's other card lookup (AT-38)
             out["waited_seconds"] = round(waited[0])
         return with_card(out, {"rows": _picker_rows(described["cards"])} if links is not None else None)
@@ -331,7 +334,8 @@ def add_scan_tools(
         name: str, cards: list[dict[str, Any] | str] | None = None, text: str | None = None
     ) -> dict[str, Any]:
         try:
-            inputs = parse_cards(cards) if cards else parse_text(text or "")
+            unread: list[str] = []
+            inputs = parse_cards(cards) if cards else parse_text(text or "", unread)
             if not inputs:
                 raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
             results = await service.resolve(inputs, owner=_sub())
@@ -354,7 +358,7 @@ def add_scan_tools(
             session = service.new_session(_sub(), name, items, source="assistant")
         except ScanError as exc:
             return _err(exc)
-        return {"ok": True, **_for_assistant(session)}
+        return {"ok": True, **_for_assistant(session), **({"unread_lines": unread[:20]} if unread else {})}
 
     @server.tool(
         name="list_scan_sessions",
