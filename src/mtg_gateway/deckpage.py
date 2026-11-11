@@ -3852,6 +3852,16 @@ html.cardview-open{overflow:hidden}
 .cardview .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
 .cardview .cardtext{overflow:auto;min-height:0;padding-right:.25rem;overscroll-behavior:contain}
+/* "In this test" (a report's card: report_page.py _ctx, cardview.js ctxBlock) */
+.cardview .cv-ctx{border:1px solid var(--border-soft);border-left:3px solid var(--orange);
+  border-radius:var(--radius);background:var(--surface-2);padding:.6rem .8rem;margin:0 0 .75rem}
+.cardview .cv-ctx p{margin:0;overflow-wrap:anywhere}
+.cardview .cv-ctx .k{font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--text-muted)}
+.cardview .cv-ctx .t{font-weight:700;margin:.1rem 0 .2rem}
+.cardview .cv-ctx .d{color:var(--text-muted);font-size:.93rem;line-height:1.45}
+.cardview .cv-ctx .d+.d{margin-top:.35rem}
+.cardview .cv-ctx .btn{margin:.5rem 0 0;min-height:44px}
 .cardview h4{margin:.9rem 0 .2rem;font-size:1.05rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .cardview .face:first-child h4{margin-top:0}
 .cardview .typeline{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:0 0 .5rem;

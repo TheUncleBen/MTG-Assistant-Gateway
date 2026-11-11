@@ -760,7 +760,15 @@ ADMIN_CSS = """
 /* Card models */
 .amo .ui-tools .f{flex:0 0 auto;width:13rem}
 @media (max-width:599.98px){.amo .ui-tools .f{width:9.5rem}}
-.amo .ui-table .tr.model .title .t{font-weight:700}
+.amo .ui-table .tr.model .title .t{font-weight:700;overflow-wrap:break-word}
+/* a narrow table (a phone, or large text): the card's name takes the whole first line, the ⋮
+   beside the line under it, so a long name never breaks inside a word */
+@container (max-width:20em){
+  .amo .ui-table .tr.model .title{display:contents}
+  .amo .ui-table .tr.model .title .t{grid-column:1/-1}
+  .amo .ui-table .tr.model .title>:not(.t){grid-column:1}
+  .amo .ui-table .tr.model .act{grid-column:2;grid-row:2}
+}
 """
 ADMIN_HEAD = f"<style>{ADMIN_CSS}</style><script src='/static/admin.js' defer></script>"
 
@@ -2097,7 +2105,7 @@ def _models_body(
     member_opts = [("", "Every member")] + [(r["added_by"], who(r["added_by"])) for r in by_member]
     tools = ui.toolbar(
         path,
-        search_label="Search card models",
+        search_label="Search models",  # "card" reads as a payment field to a phone
         placeholder="Name",
         q=q,
         filters=[ui.filter_select("member", "Member", member_opts, member)],

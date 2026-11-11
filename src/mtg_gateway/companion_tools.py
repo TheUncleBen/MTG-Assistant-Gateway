@@ -635,20 +635,16 @@ def add_deck_tool_routes(
                 forge_solo = newest(sub, str(deck.id))
             except Exception:  # noqa: BLE001 - a report problem never breaks the goldfish
                 forge_solo = None
-        # My card models: the member's own saved descriptions, a box opened from the solo line
-        # (card_models_view); the notice after a Remove that came back here
-        models_html, extra = "", ""
+        # Card models: the page's button by the solo line (card_models_view), and the notice
+        # after a Remove that came back here
+        extra = ""
         if getattr(getattr(reports, "models", None), "available", False):
             from .report_view import MODEL_NOTICES
 
-            back = f"/decks/{deck.id}/goldfish"
             note = MODEL_NOTICES.get(request.query_params.get("models") or "", "")
             kind = "error" if request.query_params.get("models") == "error" else "ok"
             extra = (ui.notice(note, kind, role="status") if note else "") + (
                 f"<div class='gf-models'>{card_models_view.opener()}</div>"
-            )
-            models_html = card_models_view.box_html(
-                reports.models.mine(sub), csrf=_csrf(s, sid) or "", back=back
             )
         return page(
             f"Goldfish: {deck_title(deck)}",
@@ -658,8 +654,7 @@ def add_deck_tool_routes(
                 forge_solo=forge_solo if isinstance(forge_solo, dict) else None,
                 csrf=_csrf(s, sid),
                 extra_head=_checking(deck, how) + extra,
-            )
-            + models_html,
+            ),
             sub=sub,
             sid=sid,
             two_pane=True,
@@ -669,7 +664,7 @@ def add_deck_tool_routes(
             heading=False,
             deck_css=True,  # the card viewer's styles
             extra_css=GOLDFISH_CSS + card_models_view.CSS,
-            extra_scripts=("goldfish.js", "cardmodels.js"),
+            extra_scripts=("goldfish.js",),
         )
 
     @server.custom_route("/goldfish/guide", methods=["POST"], include_in_schema=False)

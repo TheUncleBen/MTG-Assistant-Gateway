@@ -39,7 +39,7 @@
 <div class='card'>
 <h2>Quick solo test (300 games, no opponents)</h2>
 <p class='muted small'>Each solo test game is played alone, with no opponent to interact: the deck draws, plays lands, casts what it can and attacks. The numbers say how fast the deck does its own thing, not how it fares against interaction, so they usually look faster than the deck plays at a table.</p>
-<p class='notice warn'>Not recognized by Scryfall, skipped: Elbrus, the Binding Blade, Enduring Angel</p>
+<p class='notice warn'>Not found on Scryfall, so the solo test played without them: Elbrus, the Binding Blade, Enduring Angel</p>
 <div class='tiles wide'>
 <div class='tile'>
 <b>Turn 5</b>
@@ -555,7 +555,7 @@
 <div class='group unmodeled'>
 <h3>Played without their effect <small>32 of 98 cards (33% of the deck)</small>
 </h3>
-<p>The solo test found these cards and their exact text, but has no description yet of what they do, so it drew and cast them without their effect. Whatever they would do in a real game is missing from the numbers above. Your assistant may be able to describe some of them from their exact text, in a form the solo test can play. Many cards need things the solo test does not model, such as opponents to interact with. The Forge solo test above played them with their real rules, except any it lists under “Cards Forge left out”.</p>
+<p>The solo test found these cards and their exact text, but has no card model for them (a short description of what a card does, in the solo test's own terms), so it drew and cast them without their effect. Whatever they would do in a real game is missing from the numbers above. Your assistant may be able to write card models for some of them from their exact text. Many cards need things the solo test does not model, such as opponents to interact with. The Forge solo test above played them with their real rules, except any it lists under “Cards Forge left out”.</p>
 <ul class='names'>
 <li>Aegis of the Gods <i>drawn 11%</i>
 </li>
@@ -701,21 +701,27 @@
 </ul>
 </div>
 <div class='group'>
-<h3>Shortcuts the model takes</h3>
-<p>Simplifications applied to these cards; they play a little better or worse than in a real game.</p>
+<h3>Shortcuts the solo test takes</h3>
+<p>To play hundreds of games quickly, the solo test simplifies some rules. Each shortcut says which of your cards it touched and which way it can push the numbers above.</p>
 <dl class='meta approx'>
-<dt>Treated as producing any color</dt>
-<dd>Lotus Field, Opaline Unicorn, Transguild Promenade</dd>
-<dt>Mana creatures can tap for mana the turn they arrive</dt>
-<dd>Opaline Unicorn</dd>
-<dt>Equipment text beyond its bonus is ignored</dt>
-<dd>Leather Armor, Plate Armor</dd>
-<dt>Fetch lands find a land that enters tapped, in your main phase</dt>
-<dd>Evolving Wilds</dd>
-<dt>Hybrid and Phyrexian costs paid with one color</dt>
-<dd>Norn&#x27;s Annex</dd>
-<dt>Extra card text ignored</dt>
-<dd>Black Dragon Gate, Dungeon Map, Leechridden Swamp, Lotus Field, Nephalia Academy, Orzhov Keyrune, The Soul Stone, Transguild Promenade, Vault of the Archangel</dd>
+<dt>Treated as producing any color <small>(Can make the deck look better)</small>
+</dt>
+<dd>They can pay for any spell, so the deck casts on curve more often than it might at a table. Lotus Field, Opaline Unicorn, Transguild Promenade</dd>
+<dt>Mana creatures can tap for mana the turn they arrive <small>(Can make the deck look better)</small>
+</dt>
+<dd>They tap for mana the turn they arrive, a turn earlier than the real rules allow without haste. Opaline Unicorn</dd>
+<dt>Equipment text beyond its bonus is ignored <small>(Can make the deck look worse)</small>
+</dt>
+<dd>Only the bonus counts; anything else the Equipment does is missing. Leather Armor, Plate Armor</dd>
+<dt>Extra card text ignored <small>(Can make the deck look worse)</small>
+</dt>
+<dd>Only the parts the solo test understands are played; the rest of the card&#x27;s text does nothing. Black Dragon Gate, Dungeon Map, Leechridden Swamp, Lotus Field, Nephalia Academy, Orzhov Keyrune, The Soul Stone, Transguild Promenade, Vault of the Archangel</dd>
+<dt>Fetch lands find a land that enters tapped, in your main phase <small>(Small push either way)</small>
+</dt>
+<dd>Close to a real fetch, but the land always arrives tapped. Evolving Wilds</dd>
+<dt>Hybrid and Phyrexian costs paid with one color <small>(Small push either way)</small>
+</dt>
+<dd>Paid with one of the colors only, never with life or the other color. Norn&#x27;s Annex</dd>
 </dl>
 </div>
 </div>
@@ -759,10 +765,6 @@
 <span class='muted unpriced'>unknown</span>
 </b>
 <span>Price</span>
-</div>
-<div class='tile'>
-<b>–</b>
-<span>Archidekt&#x27;s estimate</span>
 </div>
 <div class='tile'>
 <b>0</b>

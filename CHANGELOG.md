@@ -67,10 +67,33 @@ placeholders showed, and no blue links.
   line and no filter stretches alone across one; Goldfish's buttons share their lines on a phone,
   and its status line says the turn and the library (each zone's heading has its own count).
 
+- **Card models explained, and yours to review.** Card models (in the navigation) is now a page
+  of its own: what a card model is, how it differs from looking a card up, how to add, change and
+  remove one, and who sees them. Each of your card models opens to what your solo tests do with it
+  in plain words ("When it enters: draw 2 cards."), the exact saved data, **Open card**, **Ask your
+  assistant to change it** (a request to paste into Claude or ChatGPT that holds what is saved
+  now) and **Remove**; its menu (right-click, press and hold, ⋮) has the same. A model saved for
+  an older version of the solo test says so. The report page and the Goldfish page link to it.
+- **Shortcuts the solo test takes** (was "Shortcuts the model takes") on a report: each shortcut
+  says which way it can push the numbers (can make the deck look better, worse, or a small push
+  either way) and why, with its cards as names you can tap, the ones that can flatter the deck
+  first. The summary above the groups says how many cards a shortcut touched. Markdown and HTML
+  exports list the same.
+- **A card tapped in a report says what the test did with it**: played without its effect, needs
+  opponents, never mattered, or which shortcut, and for a card played without its effect, a link to
+  its card model or to what card models are.
+- A report's validation says its verdict once (the label), with the cards listed under the line
+  that names them; the solo test's warning reads "Not found on Scryfall, so the solo test played
+  without them"; the deck statistics leave out the bracket when none is set or estimated (no bare
+  dash); the solo test's seven numbers share the last line instead of leaving one alone.
+
 ### Fixed
 - Activity no longer shows “An assistant connected” each time an assistant renews its access,
   about once an hour. A renewal is listed as “An assistant renewed its access”, shown only when
   you pick it by name.
+- **A card tapped in a report opened as bare text under the page** (its name twice, a boxed ×,
+  unstyled rows). The report page and Card models now load the card viewer's styles, as the
+  deck pages do.
 - **Menus open at their buttons.** A ⋮ menu, and the deck page's Test and play and Deck tools
   menus, open just under their button, or just over it near the bottom of the window. Before,
   they were pushed up over the button.

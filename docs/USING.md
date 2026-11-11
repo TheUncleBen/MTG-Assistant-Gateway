@@ -172,6 +172,21 @@ One deck:
   free one, 20 life, on the play, sideboard left out. A Commander-format
   deck without a card in its Commander category, or a smaller deck without
   one, gets no solo test and the report says why.
+- A report's **What the quick solo test leaves out** lists the cards the solo
+  test played without their effect, those that need opponents, those that
+  never mattered, and **Shortcuts the solo test takes**: each rule it
+  simplifies, which way it can push the numbers, and the cards it touched.
+  Tap a card in any of them and the card's panel says what the test did with
+  it.
+- A **card model** is a short description of one card's effect, in the solo
+  test's own terms, that your assistant writes and the gateway checks
+  (**Copy a request for your assistant** under the cards played without their
+  effect). Your later solo tests then play that card with its effect. Looking
+  a card up changes nothing; a card model changes only how your own solo
+  tests play it, never the card, your deck or Forge games. **Card models**
+  (in the navigation) explains them and lists yours: open one to see what
+  your solo tests do with it in plain words and exactly what is saved, ask
+  your assistant to change it, or remove it.
 - When the gateway runs Forge, a Commander deck's report also has Forge
   games against three precons. They are picked for the bracket set on the
   deck in Archidekt, or, when none is set, for Archidekt's estimate from
