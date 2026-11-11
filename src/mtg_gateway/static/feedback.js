@@ -236,6 +236,24 @@
     }
   };
   window.MtgText = MtgText;
+  // The lists that group and filter by day ("Today", "Yesterday", the When filters) are worked out
+  // on the server, which knows only UTC: the page tells it how far this clock is from UTC (minutes
+  // east, no place name; localday.py). A page that shows days is loaded once more when the server
+  // did not know yet, so the first History of a new browser is right too.
+  (function () {
+    try {
+      var east = String(-new Date().getTimezoneOffset());
+      var had = (document.cookie.match(/(?:^|; )mtg_tzo=(-?\d+)/) || [])[1];
+      if (had === east) return;
+      document.cookie = "mtg_tzo=" + east + "; path=/; max-age=31536000; SameSite=Lax" +
+        (location.protocol === "https:" ? "; Secure" : "");
+      if (east !== "0" && document.querySelector("[data-local-days]") && window.sessionStorage &&
+          sessionStorage.getItem("mtg_tzo_reload") !== east && document.cookie.indexOf("mtg_tzo=" + east) >= 0) {
+        sessionStorage.setItem("mtg_tzo_reload", east);
+        location.reload();
+      }
+    } catch (e) { /* no cookies or storage: days stay UTC days */ }
+  })();
   // Every <time datetime> the server rendered in UTC is shown in the viewer's time zone.
   // data-fmt=rel (ui.when): the list date, with the full local date and time as its tooltip,
   // kept current while the page stays open.

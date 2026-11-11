@@ -171,6 +171,17 @@ class Query:
 
 
 # -- words ------------------------------------------------------------------------------------
+def _check_moment(day: str, hhmm: str) -> int | None:
+    """The moment of the daily price check of ``day`` (a UTC day, "2026-10-12") at ``hhmm`` UTC."""
+    import calendar
+
+    try:
+        y, m, d = (int(x) for x in day.split("-"))
+        return int(calendar.timegm((y, m, d, int(hhmm[:2]), 0, 0)))
+    except (ValueError, OverflowError):
+        return None
+
+
 def day_text(day: str | None, today: str) -> str:
     """A price's day as list dates write it: "today", else "Oct 12" (with the year when not this one)."""
     if not day:
@@ -1181,7 +1192,9 @@ def watchlist_page_html(
     at = data["checked_daily_at_utc"]
     days = [v["day"] for v in data["cards"] + data["decks"] if v.get("day")]
     last = max(days) if days else ""
-    checked = f"{day_text(last, today)} at {at} UTC" if last else ""
+    # the list date every page uses, which the page draws in the member's own time zone: a clock
+    # time in UTC told a member nothing about their own day
+    checked = ui.when(_check_moment(last, at), now=now) if last else ""
     cards = data["cards"]
     query, _shown, body, pager = card_rows_html(cards, ids, csrf_in, today, query, card_history, lists=lists)
     # the list the address shows: its own chips' counts and total (L4), every card without one

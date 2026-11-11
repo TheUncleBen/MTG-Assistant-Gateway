@@ -7276,6 +7276,7 @@ class DeckService:
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
         mismatches = edit_mismatches(deck, changes, verified, specs)
         mismatches += label_mismatches(changes, deck, verified)
+        mismatches += commander_surprise(row, deck, verified)
         if unanswered is not None and mismatches:
             if not progress.get("sent_entries") and verified.rows_fingerprint() == progress["read_rows"]:
                 # the deck read again is as it was: the write did not land (the rule
@@ -12949,6 +12950,24 @@ def _unanswered_note(
         "This change may have reached Archidekt before it stopped answering, so check the deck "
         "before trying it again."
     )
+
+
+def commander_surprise(row: dict[str, Any], before: Deck, now: Deck) -> list[str]:
+    """["which cards are the commanders"] when an edit the gateway judged to leave the commanders
+    alone (no commander row in its review rows) is read back with a commander it did not have before,
+    else []. The risk tiers are worked out from the deck's own categories; should Archidekt file a
+    card into the commander zone some other way (a category new to the deck that takes a Premier flag from the
+    member's category templates: not confirmed either way), the apply ends as a mismatch with its
+    snapshot named, instead of reading as done."""
+    rows = row.get("rows")
+    if not isinstance(rows, list) or any(isinstance(r, dict) and r.get("kind") == "commander" for r in rows):
+        return []  # a commander change the member was shown (modes.risk_of), or nothing to judge by
+
+    def names(deck: Deck) -> set[str]:
+        return {c.name for c in deck.cards if deck.in_deck(c) and deck.is_commander(c)}
+
+    # only a card that became a commander: one that left is a count or category change the rows show
+    return ["which cards are the commanders"] if names(now) - names(before) else []
 
 
 def edit_mismatches(

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-from . import ui
+from . import localday, ui
 from .bracket_view import ESTIMATE_LABEL, bracket_name
 from .theme import esc, icon
 
@@ -136,7 +136,7 @@ def in_chip(row: dict[str, Any], chip: str) -> bool:
 
 def _since(when: str, now: float) -> float | None:
     if when == "today":
-        return now - now % 86400  # the start of today (UTC)
+        return localday.day_start(now)  # the start of the member's today
     if when in ("7", "30"):
         return now - int(when) * 86400
     return None
@@ -523,7 +523,9 @@ def reports_page_html(
             empty = "No reports match. Clear the search or the filters to see them all."
         body = f"<div class='tr rp-empty'><p>{empty}</p></div>"
     table = (
-        ui.table_open(*(("minmax(0,1fr) auto",) * 3), cls="rp-t ui-rows", label="Reports") + body + "</div>"
+        ui.table_open(*(("minmax(0,1fr) auto",) * 3), cls="rp-t ui-rows", label="Reports")
+        + body
+        + "</div><i hidden data-local-days></i>"
     )
     # Load more (the standard's button; reports.js adds the next rows in place), never a pager
     shown_to = min(query.offset + PAGE, total)

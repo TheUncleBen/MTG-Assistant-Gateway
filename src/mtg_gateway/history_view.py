@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlencode
 
-from . import ui
+from . import localday, ui
 from .decks import actor_label, without_tabs_note
 from .reports_page import source_label_html
 from .theme import esc as _esc
@@ -99,15 +99,16 @@ def is_filtered(query: dict[str, Any]) -> bool:
 
 
 def when_since(when: str, *, now: int | None = None) -> int | None:
-    """The start (epoch seconds, inclusive) of a "When" preset's window: midnight UTC of the
-    first of its days, or 1 January for "year"; ``None`` for "Any time" or an unknown value."""
+    """The start (epoch seconds, inclusive) of a "When" preset's window: midnight of the first of
+    its days, or 1 January for "year", by the member's own clock (localday); ``None`` for "Any
+    time" or an unknown value."""
     now = int(time.time()) if now is None else now
     if when == "year":
-        return int(calendar.timegm((time.gmtime(now).tm_year, 1, 1, 0, 0, 0)))
+        return localday.year_start(now)
     days = WHEN_DAYS.get(when)
     if not days:
         return None
-    return (now // 86400 - (days - 1)) * 86400
+    return localday.day_start(now, days - 1)
 
 
 def query_string(query: dict[str, Any], **override: Any) -> str:
@@ -545,6 +546,7 @@ def events_html(
     newest entry and each deck's rows newest first."""
     query = query or {}
     now = int(time.time()) if now is None else now
+    # data-local-days: the page loads once more when the server did not know the member's clock yet
     out = [ui.table_open(*COLS, cls="hy-table ui-rows", label="History")]
     if group == "deck":
         order: list[str] = []
@@ -572,18 +574,18 @@ def events_html(
             )
             out += [_row_html(e, query, now=now) for e in rows]
     else:
-        today = time.strftime("%Y-%m-%d", time.gmtime(now))
-        yesterday = time.strftime("%Y-%m-%d", time.gmtime(now - 86400))
+        today = localday.day_of(now)  # the member's days, not UTC's
+        yesterday = localday.day_of(now - 86400)
         days: list[tuple[str, list[dict[str, Any]]]] = []
         for e in events:
-            day = time.strftime("%Y-%m-%d", time.gmtime(e["ts"]))
+            day = localday.day_of(e["ts"])
             if not days or days[-1][0] != day:
                 days.append((day, []))
             days[-1][1].append(e)
         for day, rows in days:
             out.append(ui.day_row(f"{_day_label(day, today, yesterday)} · {len(rows)}"))
             out += [_row_html(e, query, now=now) for e in rows]
-    out.append("</div>")
+    out.append("</div><i hidden data-local-days></i>")
     return "".join(out)
 
 

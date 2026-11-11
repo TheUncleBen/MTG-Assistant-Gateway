@@ -184,7 +184,9 @@ Nothing changes on Archidekt until the proposal is applied, and an apply to one 
 Server-rendered pages behind the identity provider sign-in (and `MTG_REQUIRED_GROUP`), laid out the way
 Archidekt lays out its own (top bar, bottom tab bar on phones, deck banner, toolbar, text / stacks /
 grid views). Light, Dark or System is a per-browser choice under Look on the Account page (the `mtg_theme`
-cookie, set by `POST /theme`); internal links never open a new tab.
+cookie, set by `POST /theme`); internal links never open a new tab. The pages also keep a `mtg_tzo` cookie:
+how many minutes the browser's clock is ahead of UTC (no place name), so "Today", "Yesterday" and the
+"When" filters on History and Reports are the member's own days. Without it they are UTC days.
 
 | Path | Page |
 |---|---|

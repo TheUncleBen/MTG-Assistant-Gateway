@@ -30,7 +30,7 @@ from urllib.parse import quote
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, card_models, update_check
+from . import __version__, card_models, localday, update_check
 from .mana import SPRITE
 from .menus import MENUS_CSS
 
@@ -3558,6 +3558,7 @@ class ThemeMiddleware:
             return
         value = None
         layout = None
+        tz = None
         app = False
         app_ver = ""
         for k, v in scope.get("headers", []):
@@ -3568,6 +3569,8 @@ class ThemeMiddleware:
                         value = val.strip()
                     elif name == LAYOUT_COOKIE:
                         layout = val.strip()
+                    elif name == localday.TZ_COOKIE:
+                        tz = val
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
                 m = _APP_VERSION_RE.search(v.decode("latin-1", "replace"))
@@ -3579,9 +3582,11 @@ class ThemeMiddleware:
         atoken = _app.set(app)
         vtoken = _app_version.set(app_ver)
         ctoken = _card_size.set((card_size_page(path), {}))
+        ztoken = localday.set_offset(localday.offset_from_cookie(tz))
         try:
             await self.app(scope, receive, send)
         finally:
+            localday.reset_offset(ztoken)
             _card_size.reset(ctoken)
             _theme.reset(token)
             _layout.reset(ltoken)
