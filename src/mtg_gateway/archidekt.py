@@ -1771,14 +1771,19 @@ class ArchidektClient(AccountRequests):
         """Trade a refresh token for a new access token: POST /rest-auth/token/refresh/
         {"refresh"} -> {"access", "access_token_expiration"} (verified live 2026-10-05; the
         refresh token is not rotated). A rejected refresh token (400 or 401) is ``auth``: the
-        link is dead and the user has to sign in again."""
+        link is dead and the user has to sign in again. Any other refusal is ``unavailable``."""
         try:
             body = await self._request(
                 "POST", "/rest-auth/token/refresh/", json_body={"refresh": refresh_token}
             )
         except ArchidektError as exc:
-            if exc.kind in ("auth", "forbidden", "contract"):
+            # Only Archidekt's own "this token is no good" (401, or 400 for the refresh field)
+            # ends the link. A 403 block page, a 408 or a body that is not JSON says nothing
+            # about the token: the link is kept and the member is told to try again later.
+            if exc.kind == "auth" or (exc.kind == "contract" and getattr(exc, "status", None) == 400):
                 raise ArchidektError("auth", "Archidekt rejected the stored refresh token; relink.") from exc
+            if exc.kind in ("forbidden", "contract"):
+                raise ArchidektError("unavailable", outage("failing"), retryable=True) from exc
             raise
         if not isinstance(body, dict):
             raise ArchidektError("contract", "Unexpected token refresh response shape.")

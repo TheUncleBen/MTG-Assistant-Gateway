@@ -270,3 +270,36 @@ async def test_a_dropped_link_is_named_when_the_read_without_it_works(stack: Sta
     finally:
         await b.aclose()
     assert "no longer accepts the stored session" in page
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(403, text="<html>Attention Required!</html>"),
+        httpx.Response(200, text="<html>Just a moment...</html>"),
+        httpx.Response(408, text="timeout"),
+    ],
+    ids=["403-block-page", "200-not-json", "408"],
+)
+async def test_a_refusal_that_says_nothing_about_the_token_keeps_the_link(
+    stack: Stack, answer: httpx.Response
+) -> None:
+    """Only a 400 or 401 at the refresh ends the link. A block page in front of Archidekt, a 408
+    or a body that is not JSON would otherwise unlink every member as their token runs out."""
+    from .test_decks_and_proxy import call, linked_user, structured
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.expire_access_tokens()
+    real = ark.handle
+
+    def blocked(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/rest-auth/token/refresh/":
+            return answer
+        return real(request)
+
+    ark.transport.handler = blocked
+    out = structured(await call(h, token, "list_my_decks"))
+    assert out["ok"] is False
+    assert h.db.get_link("user-1") is not None  # still linked: nothing to type again
+    assert "relink" not in str(out).lower()
