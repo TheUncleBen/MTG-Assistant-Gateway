@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from ..cards import CardLinks
 
 # card_printings' note, true whether or not the app shows the printings card
+LISTED_SESSIONS = 50  # list_scan_sessions shows this many; up to 500 are kept
+
 PRINTINGS_NOTE = (
     "In an app that shows cards, every printing with its picture is on the card in the chat, where the "
     "user can tap the one they mean. Otherwise ask which set, then call again with set_code."
@@ -370,7 +372,16 @@ def add_scan_tools(
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def list_scan_sessions() -> dict[str, Any]:
-        return {"ok": True, "sessions": service.list_sessions(_sub())}
+        rows = service.store.list(_sub(), LISTED_SESSIONS + 1)
+        if len(rows) <= LISTED_SESSIONS:
+            return {"ok": True, "sessions": rows}
+        return {
+            "ok": True,
+            "sessions": rows[:LISTED_SESSIONS],
+            "has_more": True,
+            "note": f"The newest {LISTED_SESSIONS} are listed. An older one is still read by its name or ID "
+            "with get_scan_session.",
+        }
 
     @server.tool(
         name="get_scan_session",

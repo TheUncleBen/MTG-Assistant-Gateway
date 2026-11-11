@@ -35,7 +35,7 @@ from .scryfall import (
     same_name,
     summarize,
 )
-from .store import ScanStore
+from .store import MAX_SESSIONS_PER_USER, ScanStore
 
 logger = logging.getLogger(__name__)
 
@@ -1698,7 +1698,7 @@ class ScanService:
         ref = ref.strip()
         row = self.store.get(ref, sub) if ref.startswith("scan_") else None
         if row is None:
-            for r in self.store.list(sub):
+            for r in self.store.list(sub, MAX_SESSIONS_PER_USER):  # every kept one, not the newest 50
                 if r["name"].lower() == ref.lower():
                     row = self.store.get(r["id"], sub)
                     break
