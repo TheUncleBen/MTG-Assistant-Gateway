@@ -3326,6 +3326,23 @@ class Database:
             "newest": int(newest or 0),
         }
 
+    def assistant_applied_rows(self, owner_sub: str, deck_id: str, since: int) -> int:
+        """How many review rows the member's assistants applied to this deck by themselves (the
+        apply came from apply_proposal or the API, not from the member's press on a card or a
+        page) since ``since``: what an approval mode's row limit is counted against, so one big
+        edit split into small proposals is still one big edit."""
+        row = self._one(
+            "SELECT COALESCE(SUM(json_array_length(p.rows_json)), 0) FROM proposals p "
+            "WHERE p.owner_sub = ? AND p.deck_id = ? AND p.state = 'applied' AND p.applied_at >= ? "
+            "AND p.rows_json IS NOT NULL AND json_valid(p.rows_json) AND EXISTS ("
+            "SELECT 1 FROM audit_log a WHERE a.sub = p.owner_sub AND a.event = 'proposal_applied' "
+            "AND a.at >= ? AND json_valid(a.detail_json) "
+            "AND json_extract(a.detail_json, '$.proposal_id') = p.id "
+            "AND json_extract(a.detail_json, '$.via') IN ('mcp', 'api'))",
+            (owner_sub, deck_id, int(since), int(since)),
+        )
+        return int(row[0] or 0) if row else 0
+
     def applied_via(self, owner_sub: str, proposal_id: str) -> str | None:
         """Where a proposal's apply was called from (``via`` of its ``proposal_applied`` audit row),
         or None when the audit log no longer has the row."""

@@ -177,6 +177,8 @@ current_client: ContextVar[str | None] = ContextVar("current_client", default=No
 # The plan-first hint (DeckService.propose_linked): from the PLAN_FIRST_AFTER-th deck edit one app
 # sends for one deck within PLAN_WINDOW_SECONDS.
 PLAN_FIRST_AFTER = 3
+# An approval mode's row limit counts the rows assistants applied by themselves this long back.
+AUTO_WINDOW_SECONDS = 86400
 PLAN_WINDOW_SECONDS = 300
 PLAN_FIRST_TEXT = (
     "Your app has sent {n} changes to this deck in the last {minutes} minutes. Finish the review "
@@ -4683,7 +4685,34 @@ class DeckService:
         )
         if mode == "auto" and wait and risk not in modes.MEMBER_ONLY:
             why = wait  # what the assistant is told: why auto mode still waits for the user
-        return risk, why, mode, modes.assistant_may_apply(mode, risk, auto_wait=wait)
+        allowed = modes.assistant_may_apply(mode, risk, auto_wait=wait)
+        if allowed and row.get("state") == "pending":
+            over = self._over_the_window(sub, row, mode)
+            if over:
+                return risk, over, mode, False
+        return risk, why, mode, allowed
+
+    def _over_the_window(self, sub: str, row: dict[str, Any], mode: str) -> str | None:
+        """Why this proposal waits although it is small enough by itself, or None: with the rows
+        the member's assistants already applied to the same deck by themselves in the last
+        ``AUTO_WINDOW_SECONDS``, it would pass the mode's row limit. A big edit split into small
+        proposals is still a big edit; a member's own press is not counted."""
+        rows = row.get("rows")
+        if not isinstance(rows, list):
+            return None
+        limit = int(self.live.get("auto_big_edit_rows" if mode == "auto" else "auto_apply_max_rows"))
+        own = len([r for r in rows if isinstance(r, dict) and r.get("kind") != "package"])
+        if own > limit:
+            return None  # too big by itself: the tiers have said so already
+        earlier = self.db.assistant_applied_rows(
+            sub, str(row.get("deck_id") or ""), int(time.time()) - AUTO_WINDOW_SECONDS
+        )
+        if not earlier or earlier + own <= limit:
+            return None
+        return (
+            f"would bring the rows assistants applied here without your press in 24 hours to "
+            f"{earlier + own}, more than {limit}"
+        )
 
     def press_reason(self, sub: str, row: dict[str, Any]) -> str | None:
         """Why this waiting note needs the member's own press in every mode, or None: a hold and a
