@@ -32,6 +32,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import alerts_push, notify, prefs, profile_page, ui
 from .decks import DeckError
+from .digits import is_digits
 from .pages import (
     browser_session,
     csrf_form_ok,
@@ -281,7 +282,7 @@ def _ids(raw: Any) -> list[int]:
     out = []
     for v in raw if isinstance(raw, list) else []:
         s = str(v).strip()
-        if s.isdigit() and len(s) <= 12:
+        if is_digits(s) and len(s) <= 12:
             out.append(int(s))
     return out[:500]
 
@@ -426,7 +427,7 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = request.path_params.get("alert_id", "")
         if not sub:
             return login_redirect_here(request, f"/notifications/open/{raw}")
-        if not str(raw).isdigit() or len(str(raw)) > 12:
+        if not is_digits(str(raw)) or len(str(raw)) > 12:
             return RedirectResponse("/notifications", 303)
         a = state.db.gateway_alert(sub, int(raw))
         if a is None:

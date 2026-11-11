@@ -32,6 +32,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from . import account_hub, binder_library, prefs, prices, ui
 from .decks import DeckError
+from .digits import is_digits
 from .pages import _csrf, browser_session, csrf_form_ok, login_redirect_here, read_limited, section_href
 from .prices import money
 from .theme import esc, icon, plural, render, stylesheet_link
@@ -114,7 +115,7 @@ def _read_note(sub: str, token: str) -> str | None:
 def _count(raw: str | None, word: str = "card") -> str:
     """``n`` from the address, worded here: digits only, anything else says nothing."""
     raw = (raw or "").strip()
-    return plural(min(int(raw), 10_000_000), word) if raw.isdigit() else ""
+    return plural(min(int(raw), 10_000_000), word) if is_digits(raw) else ""
 
 
 class View:
