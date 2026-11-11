@@ -318,8 +318,10 @@ def compute(deck: Deck) -> dict[str, Any]:
         if c.rarity:
             rarities[c.rarity] += c.quantity
 
+    # a card whose category the member marked "Not in price" (proxies, cards already owned) is left out
     priced = [c for c in cards if c.price is not None]
-    price_total = sum(c.price * c.quantity for c in priced if c.price is not None)
+    left_out = [c for c in priced if not deck.counts_in_price(c)]
+    price_total = sum(c.price * c.quantity for c in priced if c.price is not None and c not in left_out)
 
     # Card legality comes from deck_checks, the one legality engine (archidekt.com's rules: the
     # sideboard where the format counts it, restricted cards judged by their copies).
@@ -343,6 +345,7 @@ def compute(deck: Deck) -> dict[str, Any]:
         "keyword_counts": counts_of(cards, "keywords"),
         "price_total": _round(price_total),
         "priced_cards": len(priced),
+        **({"not_in_price_cards": len(left_out)} if left_out else {}),
         "price_source": PRICE_SOURCE,
         "format": deck.format,
         "legality_unknown": int((checks.get("legality") or {}).get("unknown") or 0),
