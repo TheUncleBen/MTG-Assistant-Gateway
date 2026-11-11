@@ -47,8 +47,7 @@ GROUPS = (("day", "Group by day"), ("deck", "Group by deck"))
 DEFAULTS = {"type": "all", "group": "day"}
 # plain words: the Proposals tab is in the switch right above (C-FINDINGS F13)
 PAGE_SUB_TEXT = (
-    "Your decks' timeline: the changes applied to them and to your Archidekt lists, their snapshots and "
-    "their tests. Changes still waiting for you are under Proposals."
+    "Applied changes, snapshots and tests of your decks and lists. Waiting changes are under Proposals."
 )
 # a snapshot's Details: one explanation, then its buttons in one row
 SNAPSHOT_WORDS = (

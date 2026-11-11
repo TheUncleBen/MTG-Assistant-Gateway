@@ -52,11 +52,8 @@ CHIPS = (
 WHEN = (("", "Any time"), ("today", "Today"), ("7", "Last 7 days"), ("30", "Last 30 days"))
 # Forge games that ended without a game played
 FORGE_NOT_RUN = frozenset({"failed", "timeout", "cancelled", "lost"})
-QUEUE_NOTE = "Your Forge games play one report at a time, in the order you ran them."
-SUB_LINE = (
-    "Every deck report you or your assistants ran, newest first. The gateway keeps your newest 200; "
-    "History lists them too."
-)
+QUEUE_NOTE = "Forge games play one report at a time."
+SUB_LINE = "Every deck report you or your assistants ran. The newest 200 are kept; History lists them too."
 
 
 @dataclass(frozen=True)
@@ -539,8 +536,8 @@ def reports_page_html(
     else:
         pager = ui.load_more("", done=ui.all_shown(total, "report"))
     note = (
-        f"<p class='ui-note'>{QUEUE_NOTE} To run a report, open one of your decks and press "
-        "<strong>Run test</strong>, or ask your assistant to test a deck.</p>"
+        f"<p class='ui-note'>{QUEUE_NOTE} To run one, open a deck and press "
+        "<strong>Run test</strong>, or ask your assistant.</p>"
     )
     return (
         "<div class='reports-page gb-dash'>"

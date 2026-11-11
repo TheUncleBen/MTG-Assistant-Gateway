@@ -88,15 +88,11 @@ NOT_APPLIED = "Could not be applied"
 # a reason typed on the card's Reject, as much of it as the list's line shows
 REASON_SHOWN = 80
 
-PAGE_SUB = (
-    "Every change your assistants proposed, waiting and past. Past proposals stay here for 30 days "
-    "(at most 100), and applied ones for a year."
-)
+PAGE_SUB = "Every change your assistants proposed. Past ones stay 30 days (at most 100), applied ones a year."
 PAGER_NOTE = "past proposals are kept 30 days (at most 100), applied ones a year"
 WAITING_NOTE = (
-    "Check the changes to apply or reject, on any decks and in any order. They are applied oldest "
-    "first, each checked against the deck as it is just before it is sent; one that would now do "
-    "something else is not sent and waits as Needs a look."
+    "Check the changes to apply or reject. One that no longer fits its deck is not sent and waits "
+    "as Needs a look."
 )
 NOTHING_WAITING = (
     "Nothing is waiting for your approval. Ask your assistant to propose a deck change and it will "

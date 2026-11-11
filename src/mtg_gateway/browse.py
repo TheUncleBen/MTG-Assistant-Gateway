@@ -811,11 +811,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
             body += (
                 "<div id='s-results'><section class='panel'><h2>Browse public decks</h2>"
-                "<p class='muted'>Search every public deck on "
-                "Archidekt by name, commander, owner, format and "
-                "colors, sorted the way the site sorts them. Open "
-                "a deck to see it on the gateway, with the same "
-                "views, stats and export as your own; clone it to your account from its page.</p>"
+                "<p class='muted'>Search Archidekt's public decks. Open one for its stats, or to "
+                "clone it.</p>"
                 f"<div class='popular'>{popular}"
                 f"<a class='precons' href='/precons'>{icon('box')} Preconstructed decks by set</a></div>"
                 "</section></div>"
