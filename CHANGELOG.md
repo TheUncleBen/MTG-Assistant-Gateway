@@ -85,6 +85,9 @@ placeholders showed, and no blue links.
   - At large text, the editor's "Also keep a backup copy" and the buttons in Deck settings wrap
     their words instead of running past the window.
   - In the grid view at large text, the tiles grow with the text, so a long card name stays whole.
+- Deck settings shows its list of sections only when there is room for it on both sides of the
+  settings. In a narrower window or at large text the settings are one centred column, instead of
+  being pushed to the right by the list.
 - At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
   cover the sheet's last control (the card size).
 - Long names break between their parts instead of inside a word (a member's name, a printing's

@@ -251,12 +251,13 @@ main{margin-left:80px;padding:0 14px} h1{margin:16px 0}
 """
 
 
+@pytest.mark.parametrize("text", [1, 2])
 @pytest.mark.parametrize("width", [800, 984])
-def test_off_centre_sees_a_column_at_the_left_under_a_full_width_heading(width: int) -> None:
+def test_off_centre_sees_a_column_at_the_left_under_a_full_width_heading(width: int, text: int) -> None:
     """0.7.46's Assistants (audit AU1): a 40rem column (560 px at the site's 14 px text) held at the
     left beside the rail, under an h1
     as wide as the page. The h1's block box spans the room, so measured by boxes the page read as
-    centred; measured by its words, the column's lean shows."""
+    centred; measured by its words, the column's lean shows. At 200% text too (audit AW1)."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -266,6 +267,36 @@ def test_off_centre_sees_a_column_at_the_left_under_a_full_width_heading(width: 
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": width, "height": 900})
         page.set_content(LEFT_HUG)
-        kinds = {f["kind"] for f in page.evaluate(M.CHECKS, {"touch": True, "text": 1})}
+        kinds = {f["kind"] for f in page.evaluate(M.CHECKS, {"touch": True, "text": text})}
         browser.close()
     assert "off-centre" in kinds, kinds
+
+
+CONTROL_ROW = """
+<!doctype html><html><head><meta name=viewport content='width=device-width'>
+<style>body{margin:0;font:28px sans-serif;background:#fff;color:#111}
+main{max-width:900px;margin:0 auto;padding:0 16px}
+.row{display:flex;gap:12px} .row > *{min-width:240px;min-height:44px;background:#eee;border:1px solid #999}
+</style></head><body><main><h1>Cover image</h1>
+<div class=row><button>Automatic (Archidekt picks)</button><button class=btn>Set cover</button></div>
+</main></body></html>
+"""
+
+
+@pytest.mark.parametrize("text", [1, 2])
+def test_off_centre_leaves_a_row_of_controls_at_the_left(text: int) -> None:
+    """A picker and its button start at the left like any form row. Their faces are not a lopsided
+    row of panels (deck settings' cover row at 200% text, audit AW1)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.set_content(CONTROL_ROW)
+        found = page.evaluate(M.CHECKS, {"touch": False, "text": text})
+        found = [f for f in found if f["kind"] == "off-centre"]
+        browser.close()
+    assert not found, found

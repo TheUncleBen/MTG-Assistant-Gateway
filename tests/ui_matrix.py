@@ -274,7 +274,7 @@ CHECKS = (
     "(opts) => {"
     + _COMMON
     + r"""
-  const touch = opts.touch, big = opts.text > 1;
+  const touch = opts.touch;
   const main = document.querySelector('main') || document.body;
   if (document.documentElement.scrollWidth > vw + 1)
     add('overflow', null, 'page scrolls sideways by ' + (document.documentElement.scrollWidth - vw) + 'px');
@@ -327,8 +327,9 @@ CHECKS = (
         Math.round(br.left - cl) + 'px from its left)');
     }
   }
-  // --- off-centre: the content's union box against the room beside the side rail, on wide screens
-  if (vw >= 600 && !big) {
+  // --- off-centre: the content's union box against the room beside the side rail, on wide screens,
+  // at every text size (a column held at the left is as wrong at 200% text: audit AW1)
+  if (vw >= 600) {
     let room = 0;  // the right edge of a rail pinned to the left
     for (const el of document.querySelectorAll('body > *, body > * > nav')) {
       const cs = getComputedStyle(el);
@@ -388,6 +389,9 @@ CHECKS = (
       if (kids.length < 2) continue;
       const rs = kids.map(k => k.getBoundingClientRect());
       if (rs.some(r => r.width < 200)) continue;
+      // a row of controls (a picker and its button, a field and Add) starts at the left like any
+      // form row; its buttons have a face but are not panels (deck settings at 200% text, AW1)
+      if (kids.some(k => k.matches('button, select, input, textarea, .btn'))) continue;
       // panels are boxes (a face or a border); a form's row of controls starts at the left by design
       if (!kids.every(k => { const s = getComputedStyle(k);
         return s.backgroundColor !== 'rgba(0, 0, 0, 0)' || parseFloat(s.borderTopWidth) > 0; })) continue;
