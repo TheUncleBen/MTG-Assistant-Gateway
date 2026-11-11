@@ -1,4 +1,4 @@
-"""The Alerts page and one-time notices in Chromium (0.7.47, Ben's notifications redesign): a
+"""The Alerts page and one-time notices in Chromium (0.7.47, the owner's notifications redesign): a
 saved form's notice is gone after a reload (the app's pull to refresh is one) and its × takes it
 away; each alert's ⋮ marks it read or dismisses it in place, with Undo; Mark all read and Clear
 all act on every row; on a phone, an open Fold and a laptop, light and dark, nothing runs off the

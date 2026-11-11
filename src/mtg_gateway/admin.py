@@ -1069,7 +1069,7 @@ def _overview_body(state: Any, now: float | None = None) -> str:
     ]
     # the System panel: every row as today, the same wording
     if not sysd["backups_enabled"]:
-        # plain words, no setting names (0.7.47 polish: Ben, no env var names in the UI); the
+        # plain words, no setting names (0.7.47 polish: the owner, no env var names in the UI); the
         # deployment guide names the setting
         backup: Any = "Off: no backup folder is set up"
     elif sysd["last_backup_at"]:

@@ -441,7 +441,7 @@
       ? h('button', { type: 'button', class: 'phone-cam', id: 'open-phone-camera', onclick: () => openPhoneCamera(false) },
         h('span', { class: 'cap' }, cameraIcon(), 'Open the phone camera'))
       : h('video', { playsinline: true, autoplay: true, muted: true });
-    // "Flash" (Ben, 2026-11-10): the phone's flash light, kept on while the camera is open.
+    // "Flash" (the owner, 2026-11-10): the phone's flash light, kept on while the camera is open.
     const torch = h('button', { type: 'button', class: 'torch', id: 'torch', hidden: true, 'aria-pressed': 'false',
       'aria-label': 'Flash', title: 'Flash',
       onclick: () => setTorch(!getTorch()).then(() => torch.setAttribute('aria-pressed', getTorch() ? 'true' : 'false')) },
@@ -500,7 +500,7 @@
     else if (state.miss) showMiss(state.miss);
   }
 
-  /* Picture scanning (Ben, 2026-11-10): the camera takes the screen and works on its own. Over its
+  /* Picture scanning (the owner, 2026-11-10): the camera takes the screen and works on its own. Over its
      corners only the count, Flash, Camera settings, Scan area and zoom; under it one thin bar with
      the last card added (Change, Undo), or what to do. The rest (brightness, saturation, Set, Foil,
      Photo, Type) is in Camera settings, so nothing sits over the card. */
@@ -1537,7 +1537,7 @@
     if (!out.card) return pictureMiss(blob, flat);
     const res = await pictureResult(out, flat, sure, opts);
     if (state.tab !== 'camera') return 'gone';
-    // Every card found is added at once (Ben, 2026-11-10: like TCGplayer, no tap per card); one the
+    // Every card found is added at once (the owner, 2026-11-10: like TCGplayer, no tap per card); one the
     // gateway wasn't sure of, or whose printing the card couldn't settle, is marked Check, and the
     // added bar's Change fixes the printing, art, finish or count.
     const check = !sure || res.printingDoubt || !!res.note;

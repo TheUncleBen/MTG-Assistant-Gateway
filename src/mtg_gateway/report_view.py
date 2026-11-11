@@ -1060,7 +1060,7 @@ LOW_IMPACT_TEXT = (
     "a real table."
 )
 APPROX_HEADING = "Shortcuts the solo test takes"
-# always shown above the shortcuts (Ben 2026-11-11 did not follow "which way it can push the
+# always shown above the shortcuts (the owner 2026-11-11 did not follow "which way it can push the
 # numbers"): what a shortcut is and what its label means, in one line; Details has the example
 APPROX_LEAD = (
     "To play fast, the solo test bends a few rules, such as letting a mana creature tap for mana "

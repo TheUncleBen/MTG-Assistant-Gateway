@@ -93,7 +93,7 @@ _LIGHT = """
     --seg-track:var(--surface-3); --seg-on:var(--surface); /* a switch's track and its chosen part */
     --seg-muted:#4c4c4c; /* a softer word on the track (a tab's count): 4.8:1 on --surface-3 */
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
-    /* links are the text colour, underlined in running text (no blue links: Ben, 0.7.46 checklist) */
+    /* links are the text colour, underlined in running text (no blue links: the owner, 0.7.46 checklist) */
     --text:#383838; --link:#383838;
     /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
     --text-muted:#5e5e5e;
@@ -1564,11 +1564,11 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
 .hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
-/* a place's switch with no actions beside it sits in the middle, as the Assistant's does (Ben's UI
+/* a place's switch with no actions beside it sits in the middle, as the Assistant's does (the owner's UI
    principles: a switch is centred or full width, never leaving empty space to one side) */
 .ui-head.hubhead:not(:has(> .acts)){justify-content:center}
 /* a page of grouped lists (Account, Account details, Assistants, Binder › Lists) is one centred
-   column; its heading and switch line up with the column instead of the wider page (Ben, 0.7.46
+   column; its heading and switch line up with the column instead of the wider page (the owner, 0.7.46
    checklist: everything shifted to the left on a desktop) */
 main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .wide main.wrap:has(> .yhub, > .acc, > .lp-col){max-width:calc(42rem + 2rem)}

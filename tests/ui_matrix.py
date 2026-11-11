@@ -187,7 +187,7 @@ STATES = {
         ".ctxmenu, .mtgmenu",
     ),
     "filters": ("document.querySelector('.sp-open').click()", ".spanel.open, .spanel:not(.folded)"),
-    # a report's card name (0.7.46 opened an unstyled card panel under the page: Ben, Fold open)
+    # a report's card name (0.7.46 opened an unstyled card panel under the page: the owner, Fold open)
     "rvcard": (
         "document.querySelector('#rv-g-unmodeled button.cardlink[data-card]').click()",
         ".cardview.open, .cardview[open], .cardview",

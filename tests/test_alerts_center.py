@@ -1,4 +1,4 @@
-"""The Alerts page as the one place for every alert (0.7.47, Ben's notifications redesign).
+"""The Alerts page as the one place for every alert (0.7.47, the owner's notifications redesign).
 
 Each push names its type and what it is about ("Price drop · Sol Ring"), carries the kind as its
 tag (the phone's channel) and opens through the Alerts page, which marks it read. Read and

@@ -161,7 +161,7 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
     app = in_app()
     sub_line = ui.facts([linked, f"Default approval: {mode}" if mode else ""], html=True)
     # one centred column of grouped lists on every screen, as iOS Settings draws them: two columns
-    # side by side left a hole under the shorter one on a desktop (Ben, 0.7.46 checklist)
+    # side by side left a hole under the shorter one on a desktop (the owner, 0.7.46 checklist)
     gs = sorted(groups(csrf, admin=admin, app=app))
     return (
         "<div class='yhub'>"

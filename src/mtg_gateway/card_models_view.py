@@ -30,7 +30,7 @@ TITLE = "Card models"
 PAGE = "/history/models"
 REMOVE_ACTION = "/history/models/remove"
 SUB_TEXT = "Notes that teach the solo test, which plays your deck by itself, what a card does."
-# What a card model is, for a member who has never heard the words (Ben, 2026-11-11: "what's the
+# What a card model is, for a member who has never heard the words (the owner, 2026-11-11: "what's the
 # difference between a card model and just looking up a card?"). The first answer stays open on
 # the page; the report and the card viewer link here.
 EXPLAIN: tuple[tuple[str, str], ...] = (

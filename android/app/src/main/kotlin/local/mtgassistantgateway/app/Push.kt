@@ -33,7 +33,7 @@ object Push {
 
     /**
      * Every kind of alert the gateway sends (its message's tag), with how loud it is and what a
-     * group of them is called. Ben's choice (0.7.47): what waits for you and a new assistant pop
+     * group of them is called. The owner's choice (0.7.47): what waits for you and a new assistant pop
      * up; price alerts, reports, Archidekt's alerts, applied changes and the gateway's own make a
      * sound; summaries are quiet. Each is a channel the member can change in Android's settings.
      */

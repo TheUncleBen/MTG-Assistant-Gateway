@@ -1,4 +1,4 @@
-"""The Alerts page: the one place for every alert (0.7.47, Ben's notifications redesign).
+"""The Alerts page: the one place for every alert (0.7.47, the owner's notifications redesign).
 
 The bell in the top bar and Alerts on the rail open it. It lists, newest first, what waits for
 the member's press now (read live, one row per deck: those rows leave once the changes are

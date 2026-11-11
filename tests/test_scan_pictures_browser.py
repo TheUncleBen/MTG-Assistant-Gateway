@@ -201,7 +201,7 @@ def test_in_the_app_the_page_is_the_scanner_once_pictures_are_ready(server: Serv
 
 
 def test_a_card_held_still_is_added_at_once_and_only_once(server: Server) -> None:  # noqa: F811
-    """Ben (2026-11-10): automatic like TCGplayer. A card held still is added with no tap: no
+    """The owner (2026-11-10): automatic like TCGplayer. A card held still is added with no tap: no
     capture button, no mode switch; the bar under the camera says what was added. The same card
     still in view is not sent again; once it has left and comes back it counts again."""
     from playwright.sync_api import sync_playwright
@@ -418,7 +418,7 @@ def test_the_camera_fills_the_screen_and_everything_fits(
     height: int,
     text: str,
 ) -> None:
-    """The camera takes the room (Ben: the old bottom panel covered the card on an unfolded Fold);
+    """The camera takes the room (the owner: the old bottom panel covered the card on an unfolded Fold);
     the bar, the change sheet and the settings fit at phone, Fold and desktop sizes at 100% and
     200% text, and every control is a 44 px target."""
     from playwright.sync_api import sync_playwright

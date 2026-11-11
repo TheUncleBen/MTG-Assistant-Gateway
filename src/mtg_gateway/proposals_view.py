@@ -1072,7 +1072,7 @@ PROPOSALS_CSS = """
 .ui-drawer .apply .choice{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 .25rem}
 .ui-drawer .apply .choice button,.ui-drawer .apply .choice .btn{margin:0}
 /* when the three answers wrap (a Fold, 200% text) each line fills the row: no Apply alone above a
-   shorter Reject and Not now (0.7.47 UI sweep; Ben: a proposal's buttons stranded on a Fold) */
+   shorter Reject and Not now (0.7.47 UI sweep; the owner: a proposal's buttons stranded on a Fold) */
 .ui-drawer .apply .choice > button,.ui-drawer .apply .choice > .btn,.ui-drawer .apply .choice > form,
 .ui-drawer .apply .choice > details{flex:1 1 auto}
 .ui-drawer .apply .choice > form > button{width:100%}

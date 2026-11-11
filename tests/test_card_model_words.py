@@ -111,7 +111,7 @@ def test_every_word_of_the_vocabulary_has_plain_words() -> None:
 
 
 def test_what_a_card_model_is_stays_open_with_models_kept() -> None:
-    """Audit AY2 (Ben 2026-11-11 still did not follow what a card model is): the first answer, with
+    """Audit AY2 (the owner 2026-11-11 still did not follow what a card model is): the first answer, with
     its example, is open on the page whether or not the member keeps models, and the words a
     newcomer can't know (the quick solo test, Forge) are said plainly the first time they appear."""
     from mtg_gateway import card_models_view as cmv

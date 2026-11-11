@@ -47,7 +47,7 @@ async def _new_deck(stack: Stack, token: str, name: str) -> dict:
 
 
 async def test_the_third_quick_new_deck_says_check_first_and_amend(stack: Stack) -> None:
-    """0.7.47 (Ben's v39 feedback, card spam): an assistant that withdrew its new deck and
+    """0.7.47 (the owner's v39 feedback, card spam): an assistant that withdrew its new deck and
     proposed it again under another name, five times in one turn, drew five cards in the chat.
     From the third new deck one app proposes within PLAN_WINDOW_SECONDS, the result says each
     one drew a card and how to change a waiting one instead."""

@@ -507,7 +507,7 @@
   }
 })();
 
-/* One-time notices (0.7.47, Ben: "refresh does not get rid of the temporary notifications"): a
+/* One-time notices (0.7.47, the owner: "refresh does not get rid of the temporary notifications"): a
    page shows a form's result from its address (?ok=, ?err=, ?done=, ?deleted=, ?saved=). Shown
    once: a reload (also the app's pull to refresh) or a Back to such a page loads it again without
    that part of the address, so the notice is gone; every other part stays (a filter, ?connect=1).

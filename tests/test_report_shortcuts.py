@@ -1,4 +1,4 @@
-"""The report page's "Shortcuts the solo test takes" and its card names (Ben, 2026-11-11: the
+"""The report page's "Shortcuts the solo test takes" and its card names (the owner, 2026-11-11: the
 shortcuts need the most care; a card tapped in the report opened a bare, unstyled panel).
 
 Each shortcut is a row: what it does, which way it can push the numbers, why, and its cards as

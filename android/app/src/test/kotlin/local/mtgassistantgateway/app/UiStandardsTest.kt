@@ -63,7 +63,7 @@ class UiStandardsTest {
     }
 
     @Test fun togglesSayTheirStateInWordsAndNeverTakeTheOrange() {
-        // Flash (Ben, 2026-11-10; was Torch) and Auto read "Flash: On" / "Flash: Off" and "Auto: On" / "Auto: Off" (NEW-WORDING 28)
+        // Flash (the owner, 2026-11-10; was Torch) and Auto read "Flash: On" / "Flash: Off" and "Auto: On" / "Auto: Off" (NEW-WORDING 28)
         val s = strings()
         val byId = elements("layout/camera_panel.xml", "ToggleButton").associateBy { it.getAttribute("android:id") }
         val torch = byId.getValue("@+id/torch_toggle")

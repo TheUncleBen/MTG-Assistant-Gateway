@@ -518,7 +518,7 @@ def banner_html(
         f"<span class='sm'>{plural(size, 'card')}</span>"
         "</div><div class='row'>"
         f"<span class='lg'>Size: {size}</span>"
-        # no card priced yet: the cost is left out rather than shown as "Est unknown" (Ben, 0.7.46
+        # no card priced yet: the cost is left out rather than shown as "Est unknown" (the owner, 0.7.46
         # checklist: every display of information cleaned up); the page's script shows it once a
         # price arrives
         f"<span class='cost'{'' if stats.get('priced_cards') else ' hidden'}>"
@@ -4702,7 +4702,7 @@ ul.erows{container-type:inline-size}
 /* The phone's one-row save bar wraps with large text rather than run off the screen. */
 .editor{container-type:inline-size}
 @container (max-width:17rem){ .editbar{flex-wrap:wrap} .editbar .review{flex:1 1 auto} }
-/* The card viewer's actions and links as grouped lists, the Account page's iOS rows (Ben, 0.7.46
+/* The card viewer's actions and links as grouped lists, the Account page's iOS rows (the owner, 0.7.46
    checklist: the menu a tap on a card opens "needs a revision with all of our current UI
    standards"): Printings, then the deck's actions (Copies − n +, Move to…, Add to binder, Edit in
    deck editor, Remove from deck last in red), then Rulings, Price history and the sites. Each row

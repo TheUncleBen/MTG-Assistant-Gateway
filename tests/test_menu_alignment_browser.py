@@ -1,4 +1,4 @@
-"""0.7.47 menu and layout alignment (Ben, 2026-11-10: "menus being misaligned"): the UI matrix's
+"""0.7.47 menu and layout alignment (the owner, 2026-11-10: "menus being misaligned"): the UI matrix's
 menu pass and loose-button check (tests/ui_matrix.py) on the pages where they found each class, on
 a phone in the browser and a laptop, at 100% and 200% text. Each failed before its fix:
 

@@ -1,4 +1,4 @@
-"""0.7.47, no card spam in the chat (Ben's v39 feedback: ChatGPT drew ten or more full proposal
+"""0.7.47, no card spam in the chat (the owner's v39 feedback: ChatGPT drew ten or more full proposal
 cards, most for changes already withdrawn or updated, and the chat lagged). A proposal card drawn
 waiting draws one line, with no list, no pictures and no buttons, until its first read says it is
 still the newest card of a change that still waits. So a chat with many cards loads the pictures
@@ -129,7 +129,7 @@ def test_a_read_that_never_answers_draws_the_card_whole_after_a_short_wait() -> 
 
 
 def test_ten_cards_in_one_chat_load_the_pictures_of_the_one_that_still_waits() -> None:
-    """Ben's chat: one turn drew many cards for one deck; only the newest still waits."""
+    """The owner's chat: one turn drew many cards for one deck; only the newest still waits."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_or_skip()

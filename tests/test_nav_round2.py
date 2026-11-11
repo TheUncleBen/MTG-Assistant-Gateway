@@ -132,7 +132,7 @@ def test_a_closed_drop_down_takes_no_room() -> None:
 
 
 def test_the_account_hub_is_one_centred_column_on_every_screen() -> None:
-    """Two columns side by side left a hole under the shorter one on a desktop (Ben, 0.7.46
+    """Two columns side by side left a hole under the shorter one on a desktop (the owner, 0.7.46
     checklist: "that spacing"): the groups are one centred column, in their own order, as iOS
     Settings draws them."""
     css = account_hub.HUB_CSS
