@@ -190,6 +190,17 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/me", "GET")
     async def me(_request: Request, who: Caller) -> Response:
         user = state.db.get_user(who.sub) or {}
+        if who.via == "api":
+            # A connected app gets what the whoami tool gives it and no more: the consent page and
+            # whoami both say nothing else about the account is shared with it.
+            names = [str(v) for v in (user.get("name"), user.get("preferred_username")) if v]
+            return ok(
+                {
+                    "name": next((v for v in names if "@" not in v), None),
+                    "account": decks.status(who.sub),
+                    "via": who.via,
+                }
+            )
         return ok(
             {
                 "sub": who.sub,
@@ -840,8 +851,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     # -- my activity ----------------------------------------------------------
     @route("/activity", "GET")
     async def activity(request: Request, who: Caller) -> Response:
-        rows = state.db.audit_for_user(who.sub, parse_limit(request.query_params.get("limit"), 50, 1000))
-        return ok({"events": rows})
+        limit = parse_limit(request.query_params.get("limit"), 50, 1000)
+        if who.via == "api":  # a connected app sees what it did itself, never the member's other apps
+            rows = [r for r in state.db.audit_for_user(who.sub, 1000) if r.get("client_id") == who.actor]
+            return ok({"events": rows[:limit]})
+        return ok({"events": state.db.audit_for_user(who.sub, limit)})
 
 
 __all__ = ["Caller", "add_api_routes", "caller_for", "fail", "json_body"]
