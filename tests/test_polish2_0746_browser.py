@@ -16,7 +16,7 @@ from .test_history_page import store_report
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
-from .waits import redrawn
+from .waits import redrawn, sideways
 
 pytest.importorskip("playwright")
 
@@ -25,7 +25,6 @@ LONG_CATS = [
     "Card draw and card advantage engines for the long game ahead",
 ]
 ZOOMS = {"100": "() => {}", "root": ROOT_200, "text": TEXT_200}
-SCROLLS = "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
 
 
 @pytest.fixture(scope="module")
@@ -96,7 +95,7 @@ def test_a_rows_menu_button_sits_at_the_right_of_its_title_line(chromium, server
         got = page.evaluate(KEBABS, table)
         assert len(got) >= 3, got
         assert all(g["firstLine"] and g["right"] and g["inside"] for g in got), got
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
 
 
 # -- Reports: Load more ---------------------------------------------------------------------------------
@@ -150,7 +149,7 @@ def test_the_grid_view_keeps_a_long_category_name_inside_the_screen(chromium, se
         page.goto(f"{server.base}/decks/50?view=grid", wait_until="networkidle")
         page.evaluate(ZOOMS[zoom])
         redrawn(page)
-        assert page.evaluate(SCROLLS) == 0
+        assert sideways(page) == 0
         heads = page.locator(".deckview .stackhead .title")
         assert heads.count() >= 2
         assert page.evaluate(

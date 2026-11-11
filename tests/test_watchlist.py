@@ -897,3 +897,40 @@ async def test_a_watched_deck_with_no_read_date_is_read_and_the_check_goes_on(
         assert asked == ["45"], "a deck with no read date was not read"
     finally:
         await b.aclose()
+
+
+async def test_summary_says_which_printing_when_a_card_is_watched_twice(stack: Stack, monkeypatch) -> None:
+    """Live 0.7.46: get_summary listed "Lightning Greaves" five times with nothing to tell the
+    rows apart (no set, number or watch_id), so an assistant could not say which one moved."""
+    clock = Clock(monkeypatch)
+    b = await _browser(stack, link=True)
+    try:
+        await _opt_in(b)
+        assert (await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")).status_code == 303
+        assert (await _watch(b, name="Sol Ring", set_code="c21", collector_number="263")).status_code == 303
+    finally:
+        await b.aclose()
+    frc = next(c for c in stack.sf.cards if c["name"] == SOL_RING and c["set"] == "frc")
+    c21 = next(c for c in stack.sf.cards if c["name"] == SOL_RING and c["set"] == "c21")
+    jobs = prices.DailyJobs(stack.gw.prices, stack.gw.summaries, hour_utc=6)
+    for usd in ("1.40", "1.60"):
+        clock.next_day()
+        stack.sf.prices[frc["id"]] = {"usd": usd}
+        stack.sf.prices[c21["id"]] = {"usd": str(float(usd) + 1)}
+        await jobs.run_due()
+    s = structured(await call(stack.h, await mcp_token(stack.h), "get_summary", {"period": "week"}))
+    rows = {(c["set"], c["collector_number"]) for c in s["cards"]}
+    assert rows == {("frc", "21"), ("c21", "263")}, s["cards"]
+    assert all(c["watch_id"] for c in s["cards"])
+    assert "- Sol Ring FRC 21: " in s["text"] and "- Sol Ring C21 263: " in s["text"], s["text"]
+
+
+async def test_watch_card_says_a_watch_by_name_follows_the_cheapest_printing(stack: Stack) -> None:
+    """The description said a watch by name "follows Scryfall's printing for the name"; the watch
+    follows the cheapest printing in the finish (live 0.7.46: Island watched as M10 #234)."""
+    from .test_decks_and_proxy import sse_json
+
+    r = await stack.h.mcp(await mcp_token(stack.h), "tools/list")
+    tool = next(t for t in sse_json(r)["result"]["tools"] if t["name"] == "watch_card")
+    assert "Scryfall's printing for the name" not in tool["description"]
+    assert "cheapest printing" in tool["description"]

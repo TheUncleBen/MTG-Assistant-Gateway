@@ -17,7 +17,7 @@ from .test_cardsearch_browser import PNG
 from .test_deck_categories import _give_categories
 from .test_menus_browser import _exe, _seed_rows, _server
 from .test_text_zoom_browser import TEXT_200
-from .waits import redrawn
+from .waits import redrawn, sideways
 
 pytest.importorskip("playwright")
 
@@ -134,9 +134,7 @@ def test_every_row_list_reads_at_200_percent_text_on_a_phone(tmp_path: Path, app
                 page.goto(f"{server.base}{path}", wait_until="networkidle")
                 page.evaluate(TEXT_200)
                 redrawn(page)
-                over = page.evaluate(
-                    "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
-                )
+                over = sideways(page)
                 assert over <= 0, (path, over)
                 rows = page.evaluate(ROWS, [sel, NAMES])
                 assert rows, (path, rows)

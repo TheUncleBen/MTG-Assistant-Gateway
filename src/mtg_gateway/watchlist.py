@@ -470,7 +470,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         title="Watch a card's price",
         description=(
             "Add a card to the member's watchlist, or change a watched one's list or named alerts "
-            "(others kept). By name it follows Scryfall's printing for the name; set_code and "
+            "(others kept). By name: the cheapest printing in the finish (printing_now); set_code and "
             "collector_number: one printing. Alerts: alert_pct, alert_above, alert_below (dollars, or "
             "euros with no dollar price) and alert_drop; a new watch with none gets the member's "
             "defaults. Checked daily; alerts are push notifications. Changes only gateway data. "

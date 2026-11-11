@@ -22,7 +22,7 @@ from mtg_gateway.oidc import OIDCClient
 
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, make_settings
 from .test_scan_browser import _chromium_path, _free_port, _serve
-from .waits import frame, settled
+from .waits import frame, settled, sideways
 
 pytest.importorskip("playwright")
 
@@ -97,7 +97,7 @@ def _page(p, server: Server, sid: str, width: int):
 
 
 def _overflow(page) -> int:
-    return page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    return sideways(page)  # once the page has settled (tests/waits.py)
 
 
 def test_contents_topic_old_anchor_search_and_drawer(server: Server) -> None:

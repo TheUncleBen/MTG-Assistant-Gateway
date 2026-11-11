@@ -1,0 +1,144 @@
+Subject: price list stand-ins have a price; combo deck counts are EDHREC-wide
+
+Found on the live 0.7.46 gateway, 2026-11-10 (connector ledger).
+
+scryfall_price_list priced "2 Island" (no set named) at SLD #2755, a Secret
+Lair printing released the day before with no price yet, so the line was
+left out of the total. A line that names no set is now priced at the newest
+released paper printing that HAS a price in the finish asked for; with no
+priced printing at all it is as before. Only the price list asks for this
+(_default_printing(priced=True)); format_archidekt and scryfall_named keep the
+newest printing out on paper.
+
+edhrec_combos printed EDHREC's per-combo deck counts (Hullbreaker Horror +
+Sol Ring: 367,460 decks) under a commander with 17,420 decks, with nothing
+saying the count is site-wide. A line under the header now says so.
+
+diff --git a/server.py b/server.py
+index 0ab5175..8fb6198 100644
+--- a/server.py
++++ b/server.py
+@@ -402,7 +402,8 @@ def _good_default(card: dict, finish: Optional[str] = None) -> bool:
+             and (not finish or not card.get("finishes") or finish in card["finishes"]))
+ 
+ 
+-async def _default_printing(card: dict, finish: Optional[str] = None) -> tuple[dict, list[str]]:
++async def _default_printing(card: dict, finish: Optional[str] = None,
++                            priced: bool = False) -> tuple[dict, list[str]]:
+     """The printing to use for a line that named no set, and every finish the
+     card comes in.
+ 
+@@ -414,7 +415,15 @@ async def _default_printing(card: dict, finish: Optional[str] = None) -> tuple[d
+     printing is no good.
+     """
+     finishes = sorted(card.get("finishes") or [])
+-    if _good_default(card, finish):
++
++    def good(c: dict, want: Optional[str]) -> bool:
++        # priced (scryfall_price_list): a printing just out often has no price for a few days
++        # (a basic Island from a Secret Lair released the day before), so the newest released
++        # paper printing WITH a price in the finish stands in, rather than an unpriced line.
++        return _good_default(c, want) and (
++            not priced or _price_for_finish(c, want or "nonfoil") is not None)
++
++    if good(card, finish):
+         return card, finishes
+     faces = card.get("card_faces") or [{}]
+     oracle_id = card.get("oracle_id") or faces[0].get("oracle_id")
+@@ -429,9 +438,14 @@ async def _default_printing(card: dict, finish: Optional[str] = None) -> tuple[d
+     prints = [c for c in data.get("data", []) if isinstance(c, dict)]
+     finishes = sorted({f for c in prints for f in c.get("finishes") or []} | set(finishes))
+     for want in ([finish, None] if finish else [None]):
+-        pick = next((c for c in prints if _good_default(c, want)), None)
++        pick = next((c for c in prints if good(c, want)), None)
+         if pick is not None:
+             return pick, finishes
++    if priced:  # no printing has a price: the newest released paper one, as without `priced`
++        for want in ([finish, None] if finish else [None]):
++            pick = next((c for c in prints if _good_default(c, want)), None)
++            if pick is not None:
++                return pick, finishes
+     return card, finishes
+ 
+ 
+@@ -1062,7 +1076,7 @@ async def scryfall_price_list(params: PriceListInput) -> str:
+             continue
+         card = _lookup_entry(name_index, entry)
+         if card is not None:
+-            defaults[key] = (await _default_printing(card, entry.finish))[0]
++            defaults[key] = (await _default_printing(card, entry.finish, priced=True))[0]
+ 
+     sections = _build_price_sections(
+         entries, _index_collection_results(found_cards + name_cards), not_found, unchecked,
+@@ -1079,7 +1093,7 @@ async def scryfall_price_list(params: PriceListInput) -> str:
+         parts.append("")
+ 
+     if sections["defaulted"]:
+-        parts.append("**No printing specified — newest printing out on paper used:**")
++        parts.append("**No printing specified — newest printing out on paper with a price used:**")
+         parts.extend(f"- {line}" for line in sections["defaulted"])
+         parts.append("")
+ 
+@@ -1484,9 +1498,13 @@ async def edhrec_combos(params: CommanderInput) -> str:
+ 
+     parts: list[str] = []
+     parts.append(f"# {data.get('header', f'Combos for {params.name}')}")
+-    parts.append("")
+-
+     cardlists = data.get("container", {}).get("json_dict", {}).get("cardlists", [])
++    if cardlists:
++        # EDHREC's count is every deck on the site that runs the combo (Hullbreaker Horror + Sol
++        # Ring: 367,460 decks, on a commander with 17,420), never this commander's alone.
++        parts.append("Deck counts are across all of EDHREC (every commander's decks with the "
++                     "combo), not this commander's decks only.")
++    parts.append("")
+ 
+     def decks_of(cl: dict) -> Optional[int]:
+         found = re.search(r"\((\d+)decks?\)", cl.get("tag", ""))
+diff --git a/tests/test_default_printing.py b/tests/test_default_printing.py
+index 5045cdd..37799c7 100644
+--- a/tests/test_default_printing.py
++++ b/tests/test_default_printing.py
+@@ -122,7 +122,7 @@ async def test_price_list_defaults_to_a_released_paper_printing(scryfall):
+     assert "- 1x Sol Ring (FRC #21, nonfoil) — $1.48 ea → $1.48" in out
+     assert "- 1x Swamp (FDN #281, nonfoil) — $0.10 ea → $0.10" in out
+     assert "- 1x Sol Ring (C21 #263, foil) — $9.00 ea → $9.00" in out
+-    assert "MDD" not in out and "newest printing out on paper used" in out
++    assert "MDD" not in out and "newest printing out on paper with a price used" in out
+     posts = [c[1] for c in scryfall if c[0] == "post"]
+     assert posts[0] == [{"set": "ltc", "collector_number": "284"}]  # pinned lines asked apart
+ 
+@@ -143,3 +143,19 @@ async def test_price_still_says_no_results_for_a_printing_that_does_not_exist(sc
+     out = await server.scryfall_price(server.PriceInput(
+         name="Sol Ring", set_code="ltc", collector_number="999", finish="foil"))
+     assert out.startswith("No results found.")
++
++
++async def test_price_list_passes_over_a_new_printing_with_no_price_yet(scryfall):
++    """Live 0.7.46: "2 Island" was priced at SLD #2755, released the day before with no price yet,
++    so the line was left out of the total. The newest released paper printing with a price stands in."""
++    island = "b2c6aa39-2d2a-459c-a555-fb48ba993373"
++    CARDS[:0] = [
++        _card("Island", island, "sld", "2755", "2026-10-10", ["paper"], ["nonfoil", "foil"]),
++        _card("Island", island, "fdn", "279", "2024-11-15", ["paper"], ["nonfoil", "foil"], "0.12"),
++    ]
++    try:
++        out = await server.scryfall_price_list(server.PriceListInput(decklist="2 Island"))
++    finally:
++        del CARDS[:2]
++    assert "- 2x Island (FDN #279, nonfoil) — $0.12 ea → $0.24" in out, out
++    assert "No price in the requested finish" not in out, out
+diff --git a/tests/test_research_wording.py b/tests/test_research_wording.py
+index 3bb0f8b..aceacfd 100644
+--- a/tests/test_research_wording.py
++++ b/tests/test_research_wording.py
+@@ -38,6 +38,9 @@ async def test_combos_most_played_first(monkeypatch):
+     out = await server.edhrec_combos(server.CommanderInput(name="Krenko, Mob Boss"))
+     assert out.index("20960 decks") < out.index("17485 decks") < out.index("(? decks)")
+     assert "**Combo 1** (20960 decks)" in out
++    # the counts are EDHREC-wide, never this commander's alone (live 0.7.46: 367,460 decks
++    # for a combo on a commander with 17,420)
++    assert "Deck counts are across all of EDHREC" in out
+ 
+ 
+ async def test_top_cards_lands_by_count_and_period_note(monkeypatch):

@@ -70,3 +70,22 @@ def test_the_scan_sees_a_wait_and_its_marker(tmp_path: Path) -> None:
         "page.wait_for_timeout(300)",
         "time.sleep(1)  # not a marker",
     ]
+
+
+# A page's sideways scroll measured straight after a click or a zoom can catch a transition
+# halfway (goldfish's card size at 200% text: 2 px in a full parallel run, 0 alone). A test
+# measures it through waits.sideways, which waits for the page to settle first. A composite
+# measure (several numbers from one script) is left alone: it is one line of a larger script.
+BARE_SIDEWAYS = re.compile(
+    r'^\s*(?:\w+ = |.*page\.evaluate\(\s*)"(?:\(\) => )?document\.documentElement\.scrollWidth - '
+    r'document\.documentElement\.clientWidth"'
+)
+
+
+def test_sideways_scroll_is_measured_once_the_page_has_settled() -> None:
+    found = []
+    for path in sorted(TESTS.glob("test_*.py")):
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            if BARE_SIDEWAYS.search(line):
+                found.append(f"{path.name}:{i + 1}: {line.strip()}")
+    assert not found, "measure sideways scrolling with waits.sideways(page):\n" + "\n".join(found)

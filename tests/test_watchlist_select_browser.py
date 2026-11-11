@@ -21,7 +21,7 @@ from .test_menus_browser import _items, _menu, _pick
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
-from .waits import expect, quiet, redrawn
+from .waits import expect, quiet, redrawn, sideways
 
 pytest.importorskip("playwright")
 
@@ -29,7 +29,6 @@ APP_UA = (
     "Mozilla/5.0 (Linux; Android 14; SM-F946B) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/130.0 Mobile Safari/537.36 MTGAssistant/0.7.46"
 )
-OVERFLOW = "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
 
 
 def _exe() -> str | None:
@@ -118,7 +117,7 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
     with sync_playwright() as p:
         browser, page, errors = _open(p, server, sid, width=375, height=800, theme="dark", exe=exe)
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
-        assert page.evaluate(OVERFLOW) == 0
+        assert sideways(page) == 0
         # the first watched card, on the first screen
         first = page.locator(".w-t .tr[id^='wr-']").first
         box = first.bounding_box()
@@ -233,7 +232,7 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
             [x, y],
         )
         _menu(page)
-        assert "Stop watching" in _items(page) and page.evaluate(OVERFLOW) == 0
+        assert "Stop watching" in _items(page) and sideways(page) == 0
         page.keyboard.press("Escape")
         page.wait_for_selector(".ctxmenu", state="detached", timeout=3000)
         assert errors == [], errors
@@ -255,10 +254,10 @@ def test_every_surface_fits_at_100_and_200_percent_text(
         browser, page, errors = _open(p, server, sid, width=width, height=height, theme=theme, exe=exe, ua=ua)
         for path in ("/watchlist", "/watchlist?box=add", "/collection/lists", "/collection/wants"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
-            assert page.evaluate(OVERFLOW) == 0, (path, width)
+            assert sideways(page) == 0, (path, width)
             page.evaluate(TEXT_200)
             redrawn(page)
-            assert page.evaluate(OVERFLOW) == 0, (path, width, "200%")
+            assert sideways(page) == 0, (path, width, "200%")
         # Binder › Lists: the five Archidekt lists stacked as rows, each whole on the screen, their
         # counts filled by the script; the watchlist's lists under them
         page.goto(f"{server.base}/collection/lists", wait_until="networkidle")
@@ -278,7 +277,7 @@ def test_every_surface_fits_at_100_and_200_percent_text(
         page.locator("button.w-select").click()
         bar = page.locator(".ui-bar[aria-label='Selected cards']")
         assert bar.is_visible() and bar.locator(".count").inner_text() == "3 selected"
-        assert page.evaluate(OVERFLOW) == 0
+        assert sideways(page) == 0
         page.locator("#wr-w_one .title").click(button="right")
         _menu(page)
         assert "Move to list…" in _items(page)

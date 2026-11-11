@@ -612,3 +612,59 @@ async def test_compare_decks_says_which_side_it_could_not_read(stack: Stack) -> 
         out = structured(await call(stack.h, token, "compare_decks", args))
         assert out["ok"] is False and out["error"] == "not_found", out
         assert out["message"].startswith(f"Deck {side}: "), out
+
+
+async def test_check_deck_changes_suggests_what_resolve_cards_would_find(stack: Stack) -> None:
+    """Live 0.7.46: check_deck_changes called "Sol Rnig" unknown with no did_you_mean, while
+    resolve_cards placed it (Scryfall's fuzzy match gives up on the swapped letters)."""
+    stack.h.app.state.gateway.scan.names.set_names(["Opt", "Lightning Bolt", "Sol Ring"])
+    token = await linked_user(stack)
+    out = structured(
+        await call(
+            stack.h,
+            token,
+            "check_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "name": "Sol Rnig"}]},
+        )
+    )
+    unknown = next(p for p in out["problems"] if p["error"] == "unknown_cards")
+    assert unknown["did_you_mean"] == {"Sol Rnig": "Sol Ring"}, unknown
+
+
+async def test_a_finish_the_printing_is_not_made_in_is_named_before_the_proposal(stack: Stack) -> None:
+    """Live 2026-11-10: check_deck_changes passed an etched copy of a printing that only comes
+    nonfoil, and Archidekt would have taken the row in a finish that printing never had. The
+    check names it, and a proposal made anyway carries it as a warning."""
+    stack.sf.cards.append({**BOLT, "finishes": ["nonfoil", "foil"]})
+    token = await linked_user(stack)
+    change = {"action": "add", "name": "Lightning Bolt", "set_code": "m10", "collector_number": "146"}
+    out = structured(
+        await call(
+            stack.h,
+            token,
+            "check_deck_changes",
+            {"deck_id": "42", "changes": [{**change, "finish": "etched"}]},
+        )
+    )
+    bad = next((p for p in out.get("problems") or [] if p["error"] == "finish_not_made"), None)
+    assert bad is not None, out
+    assert bad["finish_not_made"] == [
+        "M10 146 (Lightning Bolt) is not made in etched; it comes nonfoil, foil."
+    ]
+    assert "Ask for a finish the printing has" in bad["message"]
+    fine = structured(
+        await call(
+            stack.h, token, "check_deck_changes", {"deck_id": "42", "changes": [{**change, "finish": "foil"}]}
+        )
+    )
+    assert not any(p["error"] == "finish_not_made" for p in fine.get("problems") or []), fine
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{**change, "finish": "etched"}]},
+        )
+    )
+    assert p["ok"], p
+    assert "is not made in etched" in " ".join(p.get("warnings") or []), p

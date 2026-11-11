@@ -1336,3 +1336,53 @@ async def test_card_printings_lists_released_paper_first_and_clear_counts(stack:
     assert one["matching_total"] == 1 and one["returned_count"] == 1 and one["truncated"] is False
     assert {s["set"] for s in one["sets"]} == {"fdn", "mdd", "ea1"} and one["sets_truncated"] is False
     assert len(one["sets"]) == 3  # every set of the card, whatever the filter
+
+
+# -- live connector test 2026-11-10 (0.7.46) ------------------------------------
+def test_parse_text_reads_the_etched_marker() -> None:
+    """ "1 Opt (xln) 65 *E*" came back not found: the whole line was taken as the name."""
+    cards = parse_text("1 Opt (xln) 65 *E*\n2 Sol Ring *E*\n1 Fire // Ice (dmr) 215 *F*")
+    assert [(c.name, c.set_code, c.collector_number, c.etched, c.foil) for c in cards] == [
+        ("Opt", "xln", "65", True, None),
+        ("Sol Ring", "", "", True, None),
+        ("Fire // Ice", "dmr", "215", False, True),
+    ]
+
+
+async def test_etched_lines_keep_the_finish_or_say_it_is_missing(stack: Stack) -> None:
+    etched = dict(stack.sf.by_print("msc", "172"))
+    etched.update(id="00000000-0000-4000-8000-0000000e7c4e", set="tst", collector_number="1")
+    etched["finishes"] = ["nonfoil", "etched"]
+    stack.sf.extra_cards.append(etched)
+    token = await mcp_token(stack.h)
+    out = (
+        await call(
+            stack.h, token, "resolve_cards", {"text": "1 Cultivate (tst) 1 *E*\n1 Cultivate (msc) 172 *E*"}
+        )
+    )["structuredContent"]
+    first, second = out["cards"]
+    assert first["status"] == "printing" and first["finish"] == "etched", first
+    assert "finish_unavailable" not in first
+    assert second.get("finish") is None and second["finish_unavailable"] is True, second
+    assert "no etched finish" in second["note"]
+    assert out["needs_review"] == [1]
+    assert "1 Cultivate (tst) 1 *E*" in out["decklist_text"].splitlines()
+    assert {
+        "action": "add",
+        "name": "Cultivate",
+        "quantity": 1,
+        "finish": "etched",
+    } in out["changes"], out["changes"]
+
+
+async def test_a_set_and_number_that_is_no_printing_is_flagged_not_exact(stack: Stack) -> None:
+    """ "1 Sol Ring (CMR) 9999" came back status exact on CMR 472 with no word that 9999 is no card."""
+    token = await mcp_token(stack.h)
+    out = (await call(stack.h, token, "resolve_cards", {"text": "1 Command Tower (frc) 9999"}))[
+        "structuredContent"
+    ]
+    (card,) = out["cards"]
+    assert card["card"]["collector_number"] == "22"
+    assert card["printing_not_found"] is True
+    assert "FRC 9999 is no printing of Command Tower; matched FRC 22 instead" in card["note"]
+    assert out["needs_review"] == [0]

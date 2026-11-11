@@ -17,6 +17,7 @@ import pytest
 
 from .test_deck_menu_browser import Server, _chromium
 from .test_deck_views_browser import _error, _menu_page, _open_menu
+from .waits import sideways
 
 pytest.importorskip("playwright")
 
@@ -137,9 +138,7 @@ def test_deck_page_notes_after_instant_saves(
         assert wb is not None and wb["height"] >= (44 if width < 900 else 32)
         top = pinned.bounding_box()
         assert top is not None and top["y"] >= 0
-        assert (
-            page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
-        )
+        assert sideways(page) <= 0
         if SHOTS:
             page.screenshot(
                 path=str(Path(SHOTS) / f"deck-toasts-{width}-{scheme}{'-z200' if big else ''}.png")

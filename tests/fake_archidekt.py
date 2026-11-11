@@ -118,6 +118,7 @@ class FakeArchidekt:
             ),
         }
         self.calls: list[tuple[str, str]] = []
+        self.uid_lookups: list[list[str]] = []  # each uids= card lookup's Scryfall ids
         self.collection_posts: list[dict[str, Any]] = []  # the bodies of collection creates, as sent
         self.collection_queries: list[dict[str, str]] = []  # each collection listing's query, as sent
         # Answers given before the normal handling, one per request, in order: an int status (with
@@ -1063,7 +1064,12 @@ class FakeArchidekt:
             uids = request.url.params.get("uids")
             edition = request.url.params.get("edition")
             if uids is not None:
-                return httpx.Response(200, json={"results": [p for p in PRINTINGS if p["uid"] == uids]})
+                # a comma-separated list, at most 60 a page, as the live site answers (2026-11-10)
+                asked = uids.split(",")
+                self.uid_lookups.append(asked)
+                pool = PRINTINGS + [v for v in CARD_DB.values() if "uid" in v]
+                hits = [p for u in asked for p in pool if p["uid"] == u]
+                return httpx.Response(200, json={"count": len(hits), "results": hits[: min(page, 60)]})
             if edition is not None:  # live: lower-case set codes only; name stays a substring match
                 number = request.url.params.get("collectorNumber")
                 hits = [

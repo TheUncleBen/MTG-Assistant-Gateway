@@ -24,7 +24,7 @@ from mcp.server.context import CallNext, ServerRequestContext
 
 from . import dbwait, deck_stats
 from .busy import AGAIN, outage
-from .decklist import front_faces
+from .decklist import _FACE_SPLIT, front_faces
 from .decks import DeckError
 from .report_view import found_not_verified
 from .schemas import compact_schema, flatten_params
@@ -625,6 +625,75 @@ def _front_face_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# An upstream service's error page pasted into a research answer: "MTGJSON API error (404):
+# <!DOCTYPE html>…" (live 0.7.46, precon_decklist with a fileName MTGJSON doesn't have).
+_ERROR_PAGE = re.compile(r"(API error \((\d{3})\)):?\s*<(?:!doctype|html)\b.*", re.I | re.S)
+
+
+def _plain_error_page(result: types.CallToolResult, name: str, arguments: Any) -> types.CallToolResult:
+    """``result`` with an upstream HTML error page cut to one plain sentence, and for a precon
+    fileName that does not exist, where the right one comes from."""
+    params = arguments.get("params") if isinstance(arguments, dict) and "params" in arguments else arguments
+    file_name = params.get("file_name") if isinstance(params, dict) else None
+
+    def plain(text: str) -> str:
+        m = _ERROR_PAGE.search(text)
+        if not m:
+            return text
+        if m.group(2) == "404" and name in ("precon_decklist", "precon_export") and file_name:
+            said = f"No precon has the fileName “{file_name}”: precon_search lists each precon's fileName."
+        elif m.group(2) == "404":
+            said = "Not found."
+        else:
+            said = "The service answered with an error page; try again later."
+        return text[: m.start()] + f"{m.group(1)}: {said}"
+
+    if not any(isinstance(c, types.TextContent) and _ERROR_PAGE.search(c.text) for c in result.content):
+        return result
+    content = [
+        c.model_copy(update={"text": plain(c.text)}) if isinstance(c, types.TextContent) else c
+        for c in result.content
+    ]
+    update: dict[str, Any] = {"content": content}
+    structured = result.structured_content
+    if isinstance(structured, dict) and isinstance(structured.get("result"), str):
+        update["structured_content"] = {**structured, "result": plain(structured["result"])}
+    return result.model_copy(update=update)
+
+
+def _full_face_names(result: types.CallToolResult, sent: Any) -> types.CallToolResult:
+    """validate_decklist's answer with each two-part card named as the caller named it: the list
+    goes to the research service by front faces (_front_face_arguments), so "Fire // Ice" came back
+    as "Fire (has R)", a card the caller never listed."""
+    decklist = sent.get("decklist") if isinstance(sent, dict) else None
+    if result.is_error or not isinstance(decklist, str) or " // " not in decklist:
+        return result
+    full: dict[str, str] = {}
+    for line in decklist.splitlines():
+        m = _FACE_SPLIT.match(line.strip())
+        if m and " // " in m.group(2):
+            whole = m.group(2).strip()
+            full.setdefault(whole.split(" // ", 1)[0].strip(), whole)
+
+    def named(text: str) -> str:
+        return re.sub(
+            r"^(\s*- )(.+?)( \(has )",
+            lambda m: m.group(1) + full.get(m.group(2), m.group(2)) + m.group(3),
+            text,
+            flags=re.M,
+        )
+
+    content = [
+        c.model_copy(update={"text": named(c.text)}) if isinstance(c, types.TextContent) else c
+        for c in result.content
+    ]
+    update: dict[str, Any] = {"content": content}
+    structured = result.structured_content
+    if isinstance(structured, dict) and isinstance(structured.get("result"), str):
+        update["structured_content"] = {**structured, "result": named(structured["result"])}
+    return result.model_copy(update=update)
+
+
 def _waited_note(result: types.CallToolResult, waited: float) -> types.CallToolResult:
     """``result`` with a first line saying the call waited its turn (``waited`` seconds, a second
     or more), so the assistant knows it was queued rather than slow."""
@@ -832,6 +901,7 @@ class MysticForgeProxy:
             self._in_flight[owner] = self._in_flight.get(owner, 0) + 1
             started = time.monotonic()
             self._started.setdefault(owner, []).append(started)
+        sent_names = arguments
         if name == "validate_decklist" and isinstance(arguments, dict):
             # Scryfall's collection lookup (how the research service reads a list) knows a
             # double-faced or split card by its front face only, as reports already send it.
@@ -855,8 +925,9 @@ class MysticForgeProxy:
                 else:
                     return _not_ready()  # never sent in a shape that may be wrong
             result = research_refusal(_rewrite_result(await self._forward(name, arguments)))
+            result = _plain_error_page(result, name, arguments)
             if name == "validate_decklist":
-                result = _validation_checks(result, arguments)
+                result = _full_face_names(_validation_checks(result, arguments), sent_names)
             return _waited_note(result, waited)
         finally:
             if owner is not None:

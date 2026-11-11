@@ -28,7 +28,7 @@ from mtg_gateway.oidc import OIDCClient
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, make_settings
 from .fake_archidekt import FakeArchidekt
 from .test_scan_browser import _chromium_path, _free_port, _serve
-from .waits import expect, quiet, settled
+from .waits import expect, frame, quiet, settled, sideways
 
 pytest.importorskip("playwright")
 
@@ -157,13 +157,11 @@ def _chromium() -> None:
 
 
 def _overflow(page) -> int:
-    """How far the page runs past the window, measured once layout has settled: after two frames,
-    so a script that rearranges a row on resize (static/feedback.js evenRow) has had its turn (a
-    full parallel run once caught 3 px mid-change after a click at 200% text)."""
-    return page.evaluate(
-        "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => "
-        "r(document.documentElement.scrollWidth - document.documentElement.clientWidth))))"
-    )
+    """How far the page runs past the window, once layout has settled: two frames first, so a
+    script that rearranges a row on resize (static/feedback.js evenRow) has had its turn (a full
+    parallel run once caught 3 px mid-change after a click at 200% text)."""
+    frame(page)
+    return sideways(page)  # once the page has settled (tests/waits.py)
 
 
 @pytest.mark.parametrize(("width", "view"), [(390, "text"), (1366, "grid")])
