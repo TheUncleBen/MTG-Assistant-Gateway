@@ -306,11 +306,16 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+
         # the page's view, grouping and sort (a quick add draws its new card in place: each
         # touched row then carries its markup and the stack it belongs in)
-        draw = data.get("view") if data.get("view") in VIEWS else None
-        grouping = data.get("group") if data.get("group") in GROUPS else "category"
-        sorting = data.get("sort") if data.get("sort") in SORTS else "name"
+        def choice(key: str, allowed: Any, default: str | None) -> str | None:
+            value = data.get(key)  # only text can be one of the choices (a list is not hashable)
+            return value if isinstance(value, str) and value in allowed else default
+
+        draw = choice("view", VIEWS, None)
+        grouping = choice("group", GROUPS, "category")
+        sorting = choice("sort", SORTS, "name")
 
         def view(deck: Any, touched: set[str], *, stale: bool) -> dict[str, Any]:
             """The rows of the touched cards and the page fragments, from one read of the deck."""

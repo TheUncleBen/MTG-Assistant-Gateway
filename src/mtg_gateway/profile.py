@@ -361,6 +361,9 @@ def _clean_avatar(raw: bytes) -> tuple[bytes, str]:
         with Image.open(io.BytesIO(raw)) as probe:
             fmt = probe.format
             w, h = probe.size
+    except Image.DecompressionBombError as exc:
+        # a header that declares more pixels than Pillow will open: refused before any decoding
+        raise _err("The picture has too many pixels. Choose a smaller one.") from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise _err("That file is not a picture the gateway can read. Use JPEG or PNG.") from exc
     if fmt not in AVATAR_FORMATS:

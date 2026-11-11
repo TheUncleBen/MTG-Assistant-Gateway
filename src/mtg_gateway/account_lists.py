@@ -1141,6 +1141,9 @@ def _redraw(raw: bytes, crop: tuple[int, int, int, int] | None) -> bytes:
         with Image.open(io.BytesIO(raw)) as probe:
             fmt = probe.format
             w, h = probe.size
+    except Image.DecompressionBombError as exc:
+        # a header that declares more pixels than Pillow will open: refused before any decoding
+        raise _err("The picture has too many pixels. Choose a smaller one.") from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise _err("That file is not a picture the gateway can read. Use JPEG, PNG or WebP.") from exc
     if fmt not in PICTURE_FORMATS:
