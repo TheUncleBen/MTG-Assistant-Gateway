@@ -4087,6 +4087,7 @@ class Database:
                 (
                     state,
                     state,
+                    state,
                     str((result or {}).get("error") or "") if isinstance(result, dict) else "",
                     int(time.time()) if state == "applied" else None,
                     snapshot_id,
