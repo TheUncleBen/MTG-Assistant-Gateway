@@ -732,6 +732,13 @@ def release_place(slot: int) -> None:
         PLACES.notify_all()
 
 
+def queued_count() -> int:
+    """How many jobs wait to start. A job cancelled while it waited stays in QUEUE until the worker
+    reaches it, so the queue's own length would count it and refuse a new job for an empty queue."""
+    with JOBS_LOCK:
+        return sum(1 for j in JOBS.values() if j.state == "queued")
+
+
 def waiting() -> bool:
     """Whether a job is waiting for a place (the one the worker holds)."""
     return any(j.state == "queued" for j in list(HELD))
@@ -914,7 +921,7 @@ class Handler(BaseHTTPRequestHandler):
                     "cards": len(NAMES),
                     "aliases": len(ALIASES),
                     "busy": busy,
-                    "queued": QUEUE.qsize() + len(HELD),
+                    "queued": queued_count(),
                     "max_parallel": MAX_PARALLEL,
                     # "machine" when the number follows the container's CPUs and memory
                     "max_parallel_from": PLACES_FROM,
@@ -974,7 +981,7 @@ class Handler(BaseHTTPRequestHandler):
                 if unknown:
                     self.send(422, {"error": "cards Forge does not have", "unknown": sorted(set(unknown))})
                     return
-                if QUEUE.qsize() + len(HELD) >= MAX_QUEUE:
+                if queued_count() >= MAX_QUEUE:
                     self.send(429, {"error": "simulation queue is full; try again later"})
                     return
                 seed = body.get("seed")
