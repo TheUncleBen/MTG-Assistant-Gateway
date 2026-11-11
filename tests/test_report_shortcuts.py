@@ -43,13 +43,15 @@ def test_each_shortcut_says_which_way_it_pushes_and_lists_its_cards_as_cards() -
     sec = html.split("id='rv-g-approx'", 1)[1]
     assert "<h3 id='rv-g-approx-h'>Shortcuts the solo test takes</h3>" in html
     assert "Shortcuts the model takes" not in html  # "model" is the card models' word
+    # what a shortcut is and what its label means, shown without opening Details
+    assert f"<p class='ig-lead'>{rv.APPROX_LEAD}</p>" in sec
     rows = re.findall(r"<li class='sc sc-(high|low|either)'>", sec)
     assert len(rows) == 6
     # the ones that can flatter the deck first, then the ones that can hurt it, then the rest
     order = {"high": 0, "low": 1, "either": 2}
     assert [order[r] for r in rows] == sorted(order[r] for r in rows)
     first = sec.split("<li class='sc sc-high'>", 1)[1].split("</ul></li>", 1)[0]
-    assert "Treated as producing any color" in first and "Can make the deck look better" in first
+    assert "Treated as producing any color" in first and "Results may look better" in first
     assert rv.SHORTCUT_PUSH["any-color"][1] in first
     names = re.findall(r"<button type='button' class='cardlink' data-card='([^']+)'", first)
     assert names == ["Lotus Field", "Opaline Unicorn", "Transguild Promenade"]

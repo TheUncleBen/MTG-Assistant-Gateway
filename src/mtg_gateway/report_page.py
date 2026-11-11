@@ -20,6 +20,7 @@ from . import card_models, card_models_view, ui
 from .busy import outage
 from .report_view import (
     APPROX_HEADING,
+    APPROX_LEAD,
     APPROX_TEXT,
     CONSTRUCTED_VALIDATION,
     ENDED_TEXT,
@@ -1262,7 +1263,7 @@ def model_section_html(
                 f"{len(approx)} shortcut{'s' if len(approx) != 1 else ''} · "
                 f"{sc_cards} card{'s' if sc_cards != 1 else ''}",
                 f"<p>{APPROX_TEXT}</p>",
-                sc_html,
+                f"<p class='ig-lead'>{_esc(APPROX_LEAD)}</p>{sc_html}",
             )
         )
     return _sec(
@@ -2067,6 +2068,7 @@ REPORT_PAGE_CSS = (
   outline-offset:-2px}
 .rv-page .ig-sum .bar-split{margin:16px 16px 8px}
 .rv-page .ig-foot{margin:.4rem 16px 0;font-size:.85rem;line-height:1.4;color:var(--text-muted)}
+.rv-page .ig-lead{margin:0 16px .6rem;font-size:.92rem;line-height:1.45;color:var(--text-muted)}
 .rv-page .ig-foot a{display:inline-flex;align-items:center;min-height:44px}
 .rv-page .ig-sec{margin:1.75rem 0 0}
 .rv-page .ig-info > summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:baseline;

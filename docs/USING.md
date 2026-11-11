@@ -175,7 +175,7 @@ One deck:
 - A report's **What the quick solo test leaves out** lists the cards the solo
   test played without their effect, those that need opponents, those that
   never mattered, and **Shortcuts the solo test takes**: each rule it
-  simplifies, which way it can push the numbers, and the cards it touched.
+  simplifies, whether it may make your results look better or worse than real games, and the cards it touched.
   Tap a card in any of them and the card's panel says what the test did with
   it.
 - A **card model** is a short description of one card's effect, in the solo

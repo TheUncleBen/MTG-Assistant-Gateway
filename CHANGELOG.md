@@ -75,9 +75,9 @@ placeholders showed, and no blue links.
   now) and **Remove**; its menu (right-click, press and hold, ⋮) has the same. A model saved for
   an older version of the solo test says so. The report page and the Goldfish page link to it.
 - **Shortcuts the solo test takes** (was "Shortcuts the model takes") on a report: each shortcut
-  says which way it can push the numbers (can make the deck look better, worse, or a small push
-  either way) and why, with its cards as names you can tap, the ones that can flatter the deck
-  first. The summary above the groups says how many cards a shortcut touched. Markdown and HTML
+  says whether your results may look better or worse than real games because of it (or the
+  effect is small either way) and why, with its cards as names you can tap, the ones that can
+  make results look better first. The summary above the groups says how many cards a shortcut touched. Markdown and HTML
   exports list the same.
 - **A card tapped in a report says what the test did with it**: played without its effect, needs
   opponents, never mattered, or which shortcut, and for a card played without its effect, a link to

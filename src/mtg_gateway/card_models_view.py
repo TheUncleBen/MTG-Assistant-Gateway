@@ -29,25 +29,26 @@ from .theme import esc, icon
 TITLE = "Card models"
 PAGE = "/history/models"
 REMOVE_ACTION = "/history/models/remove"
-SUB_TEXT = "How your quick solo tests play cards they can't play on their own. Only you see and use these."
+SUB_TEXT = "Notes that teach your quick solo test what a card does, so your results count it."
 # What a card model is, for a member who has never heard the words (Ben, 2026-11-11: "what's the
 # difference between a card model and just looking up a card?"). Open on the page while the member
 # keeps none; the report and the card viewer link here.
 EXPLAIN: tuple[tuple[str, str], ...] = (
     (
         "What is a card model?",
-        "The quick solo test plays your deck hundreds of times on its own. It plays many cards' "
-        "effects by itself, but for others it has no description of what they do, so it draws and "
-        "casts them and nothing happens. A card model is a short description of one card's effect "
-        "in the solo test's own simple terms, such as “when it enters, draw 2 cards”. Once one is "
-        "saved, your later quick solo tests play that card with its effect.",
+        "A short note that tells the quick solo test what one card does. For example, a card "
+        "says “When this enters, draw two cards”. If the solo test can't read that card, it casts "
+        "it and nothing happens, so your report never counts those two cards. A card model for "
+        "it says just “When it enters: draw 2 cards”, and from then on your quick solo tests "
+        "play the card that way. The solo test reads most cards by itself; card models are only "
+        "for the ones it can't.",
     ),
     (
         "How is it different from looking up a card?",
-        "Looking up a card (Card search, or tapping a card anywhere) shows its official text, "
-        "picture, rulings and prices, and changes nothing. A card model changes how your quick solo "
-        "tests play the card. It doesn't change the card, your deck on Archidekt, or Forge games, "
-        "which play nearly every card by its real rules.",
+        "Looking up a card shows it to you: its text, picture, rulings and prices. A card model "
+        "teaches it to the quick solo test, so the test plays it. It doesn't change the card, "
+        "your deck on Archidekt, or Forge games, which play nearly every card by its real "
+        "rules.",
     ),
     (
         "How do I add one?",
@@ -300,7 +301,8 @@ CSS = """
   overflow-wrap:anywhere;max-height:20rem;overflow:auto}
 .mm-acts{display:flex;flex-wrap:wrap;gap:.5rem}
 .mm-acts .cardlink:hover{text-decoration:none}
-.mm-acts .btn{margin:0;min-height:44px;flex:1 1 auto;justify-content:center;padding:0 1rem;gap:.4rem}
+.mm-acts .btn{margin:0;min-height:44px;flex:1 1 auto;justify-content:center;padding:0 1rem;gap:.4rem;
+  text-wrap:balance}
 .mm-empty{margin:0;color:var(--text-muted)}
 .gf-models,.rv-models{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.5rem 0 0}
 .gf-models .btn,.rv-models .btn{margin:0}

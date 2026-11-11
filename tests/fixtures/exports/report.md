@@ -152,14 +152,14 @@ These cards were understood, drawn and played, and nothing they do changed a sol
 
 **Shortcuts the solo test takes: 6.**
 
-To play hundreds of games quickly, the solo test simplifies some rules. Each shortcut says which of your cards it touched and which way it can push the numbers above.
+To play hundreds of games quickly, the solo test bends a few rules. For example, it lets a mana creature tap for mana the turn it arrives, which the real rules don't allow. A shortcut like that makes the deck look a little better than it would play at a table; others make it look a little worse. Each shortcut below says which, why, and which of your cards it touched. Which way each one leans is our best judgment from what the shortcut does, not a measurement.
 
-- Treated as producing any color (Can make the deck look better): Lotus Field, Opaline Unicorn, Transguild Promenade. They can pay for any spell, so the deck casts on curve more often than it might at a table.
-- Mana creatures can tap for mana the turn they arrive (Can make the deck look better): Opaline Unicorn. They tap for mana the turn they arrive, a turn earlier than the real rules allow without haste.
-- Equipment text beyond its bonus is ignored (Can make the deck look worse): Leather Armor, Plate Armor. Only the bonus counts; anything else the Equipment does is missing.
-- Extra card text ignored (Can make the deck look worse): Black Dragon Gate, Dungeon Map, Leechridden Swamp, Lotus Field, Nephalia Academy, Orzhov Keyrune, The Soul Stone, Transguild Promenade, Vault of the Archangel. Only the parts the solo test understands are played; the rest of the card's text does nothing.
-- Fetch lands find a land that enters tapped, in your main phase (Small push either way): Evolving Wilds. Close to a real fetch, but the land always arrives tapped.
-- Hybrid and Phyrexian costs paid with one color (Small push either way): Norn's Annex. Paid with one of the colors only, never with life or the other color.
+- Treated as producing any color (Results may look better): Lotus Field, Opaline Unicorn, Transguild Promenade. They can pay for any spell, so the deck casts on curve more often than it might at a table.
+- Mana creatures can tap for mana the turn they arrive (Results may look better): Opaline Unicorn. They tap for mana the turn they arrive, a turn earlier than the real rules allow without haste.
+- Equipment text beyond its bonus is ignored (Results may look worse): Leather Armor, Plate Armor. Only the bonus counts; anything else the Equipment does is missing.
+- Extra card text ignored (Results may look worse): Black Dragon Gate, Dungeon Map, Leechridden Swamp, Lotus Field, Nephalia Academy, Orzhov Keyrune, The Soul Stone, Transguild Promenade, Vault of the Archangel. Only the parts the solo test understands are played; the rest of the card's text does nothing.
+- Fetch lands find a land that enters tapped, in your main phase (Small effect either way): Evolving Wilds. Close to a real fetch, but the land always arrives tapped.
+- Hybrid and Phyrexian costs paid with one color (Small effect either way): Norn's Annex. Paid with one of the colors only, never with life or the other color.
 
 ## Validation: issues found
 

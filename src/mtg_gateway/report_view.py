@@ -102,9 +102,9 @@ SHORTCUT_PUSH = {
     "monarch": ("high", "You stay the monarch all game, so the extra card is never lost."),
 }
 PUSH_WORDS = {
-    "high": ("Can make the deck look better", "orange"),
-    "low": ("Can make the deck look worse", "grey"),
-    "either": ("Small push either way", "grey"),
+    "high": ("Results may look better", "orange"),
+    "low": ("Results may look worse", "grey"),
+    "either": ("Small effect either way", "grey"),
 }
 
 
@@ -1060,9 +1060,18 @@ LOW_IMPACT_TEXT = (
     "a real table."
 )
 APPROX_HEADING = "Shortcuts the solo test takes"
+# always shown above the shortcuts (Ben 2026-11-11 did not follow "which way it can push the
+# numbers"): what a shortcut is and what its label means, in one line; Details has the example
+APPROX_LEAD = (
+    "To play fast, the solo test bends a few rules. Each one says whether it may make your results "
+    "look better or worse than real games."
+)
 APPROX_TEXT = (
-    "To play hundreds of games quickly, the solo test simplifies some rules. Each shortcut says which "
-    "of your cards it touched and which way it can push the numbers above."
+    "To play hundreds of games quickly, the solo test bends a few rules. For example, it lets a "
+    "mana creature tap for mana the turn it arrives, which the real rules don't allow. A shortcut "
+    "like that makes the deck look a little better than it would play at a table; others make it "
+    "look a little worse. Each shortcut below says which, why, and which of your cards it touched. "
+    "Which way each one leans is our best judgment from what the shortcut does, not a measurement."
 )
 UNMODELED_SAVED_TEXT = (
     "The gateway keeps up to 200 card models for you once they pass its check, and your later solo "
