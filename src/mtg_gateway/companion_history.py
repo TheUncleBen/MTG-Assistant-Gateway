@@ -658,14 +658,8 @@ def add_history_routes(
             else ""
         )
 
-        # the member's own saved descriptions, as a box the mentions open (card_models_view)
-        my_models = (
-            card_models_view.box_html(
-                reports.models.mine(sub), csrf=_csrf(s, sid) or "", back=f"/history/reports/{safe}"
-            )
-            if reports.models.available
-            else ""
-        )
+        # the Card models page's button where saved models are mentioned (card_models_view)
+        my_models = "1" if reports.models.available else ""
         left_out: list[Any] = []
         for block in (r.get("forge"), r.get("forge_solo")):
             if isinstance(block, dict) and isinstance(block.get("not_played"), list):
@@ -692,7 +686,11 @@ def add_history_routes(
             removable=mine,
             csrf=_csrf(s, sid) or "",
             card_types=_card_types(left_out) if left_out else {},
-            my_models=my_models + delete_box + stop_box,
+            my_models=my_models,
+            models_now=frozenset(front_face(m["name"]).casefold() for m in reports.models.mine(sub))
+            if my_models
+            else frozenset(),
+            boxes_html=delete_box + stop_box,
             by_html=by_html,
             changes_html=changes,
             since_html=since_last_html(r, prev, tested=tested),
@@ -707,7 +705,7 @@ def add_history_routes(
             heading=False,
             current="/reports",
             viewer_only=True,  # the card viewer for "Open card" on the left-out cards (report.js)
-            extra_scripts=("export.js", "forge-live.js", "report.js", "cardmodels.js"),
+            extra_scripts=("export.js", "forge-live.js", "report.js"),
             extra_css=REPORT_CSS + REPORT_PAGE_CSS + card_models_view.CSS,
             main_class="ui-wide",
         )
@@ -1014,12 +1012,24 @@ def add_history_routes(
         remove = str(qp.get("remove") or "")[:286]
         if remove and remove.casefold() not in {m["name"].casefold() for m in mine}:
             remove = ""  # only a card of the member's own list gets a confirm
+        # what is saved for each: the model and the simulator version it was checked with
+        full = reports.models.for_cards(sub, [m["name"] for m in mine])
+        models = [
+            {
+                **m,
+                **{k: v for k, v in (full.get(m["card_key"]) or {}).items() if k in ("model", "sim_version")},
+            }
+            for m in mine
+        ]
         from .report_view import MODEL_NOTICES
 
         notice = MODEL_NOTICES.get(qp.get("models") or "", "")
         kind = "error" if qp.get("models") == "error" else "ok"
-        body = (ui.notice(notice, kind, role="status") if notice else "") + card_models_view.box_html(
-            mine, csrf=_csrf(s, sid) or "", back=card_models_view.PAGE, open=True, remove=remove
+        body = card_models_view.page_html(
+            models,
+            csrf=_csrf(s, sid) or "",
+            remove=remove,
+            notice_html=ui.notice(notice, kind, role="status") if notice else "",
         )
         return page(
             card_models_view.TITLE,
@@ -1027,9 +1037,9 @@ def add_history_routes(
             sub=sub,
             sid=sid,
             heading=False,
-            current="/reports",
+            current=card_models_view.PAGE,
             viewer_only=True,
-            extra_scripts=("cardmodels.js",),
+            extra_scripts=("export.js", "cardmodels.js"),
             extra_css=card_models_view.CSS,
         )
 

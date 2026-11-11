@@ -923,8 +923,31 @@
     Menu.open({ head: name, label: "Report: " + name, items: items, focusBack: open }, x, y);
   }
 
+  // -- a saved card model's row (the Card models page, card_models_view.py) ------------------------
+  function modelRowOf(node) {
+    var li = node && node.closest ? node.closest(".mm-list li.mm-item[data-card]") : null;
+    // the row's own buttons act on a tap; the row and its ⋮ open the menu
+    return li && !(node.closest(".mm-acts") && !node.closest(".kebab")) ? li : null;
+  }
+  function openModelMenu(li, x, y) {
+    var M = window.MtgCardModels, name = li.getAttribute("data-card") || "";
+    var d = li.querySelector("details"), sum = li.querySelector("summary");
+    var open = $(".mm-acts button.cardlink", li);
+    var items = [
+      item(d && d.open ? "Hide what's saved" : "Show what's saved", "eye", function () { if (M) M.toggle(li); else if (d) d.open = !d.open; }),
+      open ? item("Open card", "layers", function () { Menu.whenClosed(function () { open.click(); }); }) : null,
+      M ? item("Ask your assistant to change it", "copy", function () { M.ask(li); }) : null,
+      sep(),
+      item("Remove…", "trash", function () {
+        Menu.whenClosed(function () { if (M) M.remove(li, sum); else location.href = $("a[data-remove-model]", li).getAttribute("href"); });
+      }, { danger: true })
+    ].filter(Boolean);
+    Menu.open({ head: name, label: "Card model: " + name, items: items, focusBack: $(".kebab", li) || sum }, x, y);
+  }
+
   // -- the ways in, for every kind at once ------------------------------------------------------
   var KINDS = [
+    { of: modelRowOf, open: openModelMenu },
     { of: deckOf, open: openDeckMenu, el: function (d) { return d.el; } },
     { of: folderOf, open: openFolderMenu, el: function (f) { return f.el; } },
     { of: collectionRowOf, open: openCollectionMenu },
@@ -949,7 +972,7 @@
     itemOf: itemOf,
     // a hold on a Binder tile's picture (button.thumbbtn, most of the tile) opens the row's
     // menu, as a hold on a deck tile's link does (0.7.46 audit D08); other buttons act on a tap
-    skip: "button:not(.thumbbtn), input, select, textarea, summary, form.qty, form.rm, .wbtn",
+    skip: "button:not(.thumbbtn), input, select, textarea, summary:not(.mm-sum), form.qty, form.rm, .wbtn",
     button: ".kebab",
     open: function (node, x, y) { node.__mtgKind.open(node, x, y); }
   });

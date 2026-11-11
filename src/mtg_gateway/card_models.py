@@ -571,3 +571,175 @@ def merge(
         for k in kept
     ]
     return {**options, "annotations": own + [k["model"] for k in kept]}, used
+
+
+# -- a kept model in plain words (My card models: "What your solo tests do with it") ------------
+# Each word of the vocabulary above, as the simulator plays it (Mystic Forge dd82cd1, engine.py:
+# the "global" events skip the permanent that is itself entering; "attack" fires once per combat
+# with attackers; counts such as per_artifact repeat the action once per matching permanent).
+INERT_TEXT = "The solo test leaves this card in your hand: it is marked as a card the solo test can't play."
+_EVENT_WORDS = {
+    "cast": "When you cast it",
+    "etb": "When it enters",
+    "creature_etb": "Whenever another creature of yours enters",
+    "equipment_etb": "Whenever another Equipment of yours enters",
+    "land_etb": "Whenever another land of yours enters",
+    "attack": "Whenever you attack",
+    "combat_begin": "At the beginning of each of your combats",
+    "upkeep": "At the beginning of your upkeep",
+}
+_SPELL_WORDS = {"instant_or_sorcery": "an instant or sorcery spell", "noncreature": "a noncreature spell"}
+_IF_WORDS = {"metalcraft": "you control three or more artifacts", "equipped": "it is equipped"}
+_PER_WORDS = {
+    "per_equipped_attacker": "each equipped attacking creature",
+    "per_artifact": "each artifact you control",
+    "per_creature": "each creature you control",
+    "per_attacker": "each attacking creature",
+    "per_land": "each land you control",
+    "per_spell_cast_this_turn": "each spell you cast this turn",
+}
+_TUTOR_WORDS = {
+    "equipment": "Equipment card",
+    "any": "card",
+}
+_STATIC_WORDS = {
+    "equip_free": "Equipping costs nothing.",
+    "equip_free_if_metalcraft": "Equipping costs nothing while you control three or more artifacts.",
+    "token_doubling": "Creature tokens you create are doubled.",
+}
+_SPELLS_WORDS = {
+    "instant_or_sorcery": "Instant and sorcery spells",
+    "noncreature": "Noncreature spells",
+    "creature": "Creature spells",
+    "artifact": "Artifact spells",
+    "equipment": "Equipment spells",
+    "any": "Spells",
+}
+_COLOR_WORDS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
+
+
+def _n(n: int, one: str, many: str | None = None) -> str:
+    return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def _and(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def _stats(p: int, t: int) -> str:
+    return f"{p:+d}/{t:+d}"
+
+
+def _verb_words(part: dict[str, Any]) -> str:
+    """What one trigger's or ability's action does, in words; a symbolic count reads "for each…"."""
+    raw = part.get("count", 1)
+    per = _PER_WORDS.get(raw) if isinstance(raw, str) else None
+    n = 1 if per else int(raw)
+    do = part["do"]
+    kw = f" with {_and(part['keywords'])}" if part.get("keywords") else ""
+    if do == "draw":
+        out = f"draw {_n(n, 'card')}"
+    elif do == "gain_life":
+        out = f"gain {n} life"
+    elif do == "treasure":
+        out = f"create {_n(n, 'Treasure token')}"
+    elif do == "damage":
+        who = "each opponent" if part.get("target") == "each_opponent" else "one opponent"
+        out = f"deal {n} damage to {who}"
+    elif do == "create_token":
+        size = f"{part.get('power', 0)}/{part.get('toughness', 0)}"
+        out = f"create {_n(n, size + ' creature token')}{kw}"
+        kw = ""
+    elif do == "ramp_land":
+        out = f"put {_n(n, 'land')} from your library onto the battlefield tapped"
+    elif do == "ramp_mana":
+        out = f"create {_n(n, 'mana rock')} that tap{'s' if n == 1 else ''} for {{C}}"
+    elif do == "add_mana":
+        out = f"add {n} mana of any color" if part.get("colors") == "any" else f"add {part.get('pips', '')}"
+        if part.get("colors") != "any" and n > 1:
+            out += f", {n} times"
+    elif do == "tutor":
+        f = str(part.get("filter") or "any")
+        what = f"card named {f[5:]}" if f.startswith("name:") else _TUTOR_WORDS.get(f, f"{f} card")
+        out = f"search your library for {_n(n, what)} and put {'it' if n == 1 else 'them'} into your hand"
+    elif do == "attach":
+        out = (
+            "attach an unattached Equipment of yours to a creature"
+            if n == 1
+            else f"attach up to {n} unattached Equipment of yours to creatures"
+        )
+    elif do == "attach_from_board":
+        out = f"attach up to {n} of your other unattached Equipment to it"
+    elif do == "pump":
+        p, t = int(part.get("power", 0)) * n, int(part.get("toughness", 0)) * n
+        when = "until end of turn" if part.get("duration", "eot") == "eot" else "for the rest of the game"
+        out = f"it gets {_stats(p, t)}{kw} {when}"
+        kw = ""
+    elif do == "extra_combat":
+        out = f"take {_n(n, 'extra combat')} this turn"
+    elif do == "token_copy":
+        copies = "a token copy" if n == 1 else f"{n} token copies"
+        out = f"create {copies} of it (an Equipment copies the creature it equips)"
+    else:  # never reached: clean_model refuses any other verb
+        out = "do something the solo test plays"
+    return out + kw + (f", for {per}" if per else "")
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def describe(model: dict[str, Any]) -> list[str]:
+    """The kept model ``model`` (clean_model's shape) as plain sentences, one per trigger, ability,
+    static and equipment bonus: what the member's solo tests do with the card. Mana symbols stay
+    as {R} for the page to draw (mana.rules_html)."""
+    if model.get("inert"):
+        return [INERT_TEXT]
+    lines: list[str] = []
+    for t in model.get("triggers") or []:
+        if t["on"] == "spell_cast":
+            when = f"Whenever you cast {_SPELL_WORDS.get(t.get('filter') or 'any', 'a spell')}"
+        else:
+            when = _EVENT_WORDS.get(t["on"], "When it is played")
+        cond = str(t.get("if") or "")
+        if cond.startswith("power_gte:"):
+            when += f", if its power is {cond[10:]} or more"
+        elif cond:
+            when += f", if {_IF_WORDS.get(cond, cond)}"
+        lines.append(f"{when}: {_verb_words(t)}.")
+    for a in model.get("activated") or []:
+        cost = [a["cost"]] if a.get("cost") else []
+        if a.get("sac_self"):
+            cost.append("sacrifice it")
+        lines.append(_cap(f"{', '.join(cost) or 'Any time'}: {_verb_words(a)}."))
+    for s in model.get("statics") or []:
+        s = {"kind": s} if isinstance(s, str) else s
+        kind = s["kind"]
+        if kind in _STATIC_WORDS:
+            lines.append(_STATIC_WORDS[kind])
+        elif kind == "anthem":
+            bits = []
+            if s.get("power") or s.get("toughness"):
+                bits.append(f"get {_stats(int(s.get('power', 0)), int(s.get('toughness', 0)))}")
+            if s.get("keywords"):
+                bits.append(f"have {_and(s['keywords'])}")
+            lines.append(f"Creatures you control {' and '.join(bits) or 'are unchanged'}.")
+        elif kind == "cost_reduction":
+            f = str(s.get("filter") or "any")
+            who = (
+                f"{_COLOR_WORDS.get(f[6:], f[6:])} spells"
+                if f.startswith("color:")
+                else _SPELLS_WORDS.get(f, "Spells")
+            )
+            lines.append(f"{who} cost {{{int(s.get('amount', 0))}}} less.")
+        elif kind == "extra_land_drops":
+            lines.append(f"You may play {_n(int(s.get('count', 1)), 'extra land')} each turn.")
+    g = model.get("grants") or {}
+    if g:
+        bits = []
+        if g.get("power") or g.get("toughness"):
+            bits.append(f"gets {_stats(int(g.get('power', 0)), int(g.get('toughness', 0)))}")
+        if g.get("keywords"):
+            bits.append(f"has {_and(g['keywords'])}")
+        lines.append(f"The creature it equips {' and '.join(bits)}.")
+    return lines

@@ -20,6 +20,7 @@ from . import card_models, card_models_view, ui
 from .busy import outage
 from .report_view import (
     APPROX_HEADING,
+    APPROX_LEAD,
     APPROX_TEXT,
     CONSTRUCTED_VALIDATION,
     ENDED_TEXT,
@@ -32,6 +33,8 @@ from .report_view import (
     OUT_OF_SCOPE_HEADING,
     OUT_OF_SCOPE_TEXT,
     PREFLIGHT_ONLY,
+    PUSH_WORDS,
+    SHORTCUT_PUSH,
     TOO_FEW_TEXT,
     UNMODELED_FORGE_TEXT,
     UNMODELED_HEADING,
@@ -49,6 +52,8 @@ from .report_view import (
     _share,
     _tile,
     _turn,
+    _validation_groups,
+    _validation_lead,
     ask_html,
     coverage,
     forge_enough,
@@ -64,6 +69,7 @@ from .report_view import (
     plain_words,
     report_sections,
     solo_heading,
+    split_card_names,
     validation_html,
 )
 from .reports_page import PHONE_WIDGETS_CSS, STATUS_LABEL, source_label_html, status_label
@@ -174,7 +180,7 @@ def remove_model_boxes(
             f"<form id='{fid}' method='post' action='/history/reports/{_esc(report_id)}/models/remove'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             f"<input type='hidden' name='card' value='{_esc(name)}'></form>"
-            f"<p>Later solo tests play “{_esc(card)}” without its effect again, until a new description "
+            f"<p>Later solo tests play “{_esc(card)}” without its effect again, until a new card model "
             "is saved. The reports that already played it keep their numbers.</p>"
         )
         out.append(
@@ -959,6 +965,7 @@ def solo_section_html(
     removable: frozenset[str],
     csrf: str,
     models_opener: str = "",
+    models_now: frozenset[str] = frozenset(),
 ) -> tuple[str, str]:
     """The solo test section and the "what the quick solo test leaves out" section ('' when none).
     ``models_opener``: the My card models button, placed where saved descriptions are mentioned
@@ -1025,27 +1032,62 @@ def solo_section_html(
         cls="btn-plain",
         button=f"{icon('copy')}<span class='label'>{_esc('Copy a request for your assistant')}</span>",
     )
-    model = model_section_html(g, ask, models_opener, forge_full=forge_solo_done(r))
+    model = model_section_html(g, ask, models_opener, forge_full=forge_solo_done(r), models_now=models_now)
     return solo, model
 
 
 # -- what the quick solo test leaves out: an inset grouped list (the account settings look) -------
-def _rows(cards: list[dict[str, Any]]) -> str:
+def _rows(cards: list[dict[str, Any]], ctx: tuple[str, str] | None = None) -> str:
     """Card rows: the name opens the shared card menu (static/menus.js), its draw rate trails."""
-    items = _row_items(cards)
+    items = _row_items(cards, ctx)
     # an odd last row keeps its partner cell on the two-column desktop grid
     return "".join(items) + ("<li class='fill' aria-hidden='true'></li>" if len(items) % 2 else "")
 
 
-def _row_items(cards: list[dict[str, Any]]) -> list[str]:
+# What the card viewer says about a card tapped in a group (menus.js passes data-ctx on to
+# cardview.js): the group in the singular, and what the test did with that one card.
+CTX_UNMODELED = "Played without its effect"
+CTX_UNMODELED_TEXT = (
+    "The solo test drew and cast it, but has no description of what it does, so whatever it does "
+    "is missing from this report's numbers."
+)
+CTX_OPP_TEXT = (
+    "The solo test has no opponents, so this had nothing to act on. If it is a creature or another "
+    "permanent, it was still cast."
+)
+CTX_LOW = "Played, but never mattered"
+CTX_LOW_TEXT = (
+    "The solo test played its effect, and it never changed a game. With no opponents, this says "
+    "nothing about how it does at a table."
+)
+
+
+def _ctx(label: str, text: str, model: str = "") -> str:
+    """The data attributes the card viewer reads to say what this test did with the card;
+    ``model``: the card's model on the Card models page, or "new" when it has none."""
+    return f" data-ctx='{_esc(label)}' data-ctx-text='{_esc(text)}'" + (
+        f" data-model='{_esc(model)}'" if model else ""
+    )
+
+
+def _row_items(
+    cards: list[dict[str, Any]], ctx: tuple[str, str] | None = None, models: frozenset[str] | None = None
+) -> list[str]:
+    """Card rows: the name opens the card viewer (static/menus.js) and says what the test did with
+    it (``ctx``); ``models``: the cards the member keeps a card model for now (front faces, case
+    aside), for a card played without its effect."""
     items = []
     for c in cards:
         copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
         name = front_face(c["name"])
         drawn = f"<span class='v'>drawn {_pct(c['drawn'])}</span>" if c.get("drawn") is not None else ""
         drawn = "<span class='v'>commander</span>" if c.get("commander") else drawn
+        model = ""
+        if models is not None:
+            model = card_models_view.anchor(name) if name.casefold() in models else "new"
+        attrs = _ctx(ctx[0], ctx[1], model) if ctx else ""
         items.append(
-            f"<li><span class='nm'><button type='button' class='cardlink' data-card='{_esc(name)}'>"
+            f"<li><span class='nm'><button type='button' class='cardlink' data-card='{_esc(name)}'{attrs}>"
             f"{copies}{_esc(name)}</button></span>{drawn}</li>"
         )
     return items
@@ -1082,8 +1124,45 @@ def _group(gid: str, heading: str, count: str, info: str, body: str) -> str:
     )
 
 
+def shortcuts_html(approx: list[dict[str, Any]], known: set[str]) -> tuple[str, int]:
+    """The shortcuts as rows (what it does, which way it can push the numbers and why, its cards as
+    names that open the viewer), those that can flatter the deck first; and how many cards they
+    touch."""
+    order = {"high": 0, "low": 1, "either": 2}
+    rows: list[tuple[int, int, str]] = []
+    touched: set[str] = set()
+    for i, a in enumerate(approx):
+        push, why = SHORTCUT_PUSH.get(str(a.get("kind")), ("either", ""))
+        word, colour = PUSH_WORDS[push]
+        names = split_card_names(str(a.get("cards") or ""), known)
+        touched |= {front_face(n).casefold() for n in names}
+        attrs = _ctx(f"Shortcut: {a['label']}", why or APPROX_TEXT)
+        cards = "".join(
+            f"<li class='sc-pill'><button type='button' class='cardlink' data-card='{_esc(nm)}'{attrs}>"
+            f"{_esc(nm)}</button></li>"
+            for nm in (front_face(n) for n in names)
+        )
+        rows.append(
+            (
+                order[push],
+                i,
+                f"<li class='sc sc-{push}'><div class='sc-top'><span class='sc-t'>{_esc(a['label'])}</span>"
+                f"{ui.label(word, colour, 'arrows' if push == 'either' else 'stats')}</div>"
+                + (f"<p class='sc-why'>{_esc(why)}</p>" if why else "")
+                + f"<ul class='sc-cards' aria-label='Cards'>{cards}</ul></li>",
+            )
+        )
+    rows.sort()
+    return f"<div class='ig'><ul class='ig-list ig-sc'>{''.join(r[2] for r in rows)}</ul></div>", len(touched)
+
+
 def model_section_html(
-    g: dict[str, Any], ask: str = "", models_opener: str = "", *, forge_full: bool = False
+    g: dict[str, Any],
+    ask: str = "",
+    models_opener: str = "",
+    *,
+    forge_full: bool = False,
+    models_now: frozenset[str] = frozenset(),
 ) -> str:
     """The quick solo test's "leaves out" section: a summary card (the bar and the three counts),
     then one group per kind of card, each a heading with Details and a list of rows; the request
@@ -1096,6 +1175,13 @@ def model_section_html(
     approx = [a for a in h.get("approximations") or [] if a.get("cards")]
     if not (unrec or oos or low or approx):
         return ""
+    # the deck's own names, so a name with a comma in a shortcut's line stays whole
+    known = (
+        set(g.get("quantities") or {})
+        | {front_face(c["name"]).casefold() for c in unrec + [c for grp in oos for c in grp["cards"]]}
+        | {front_face(n).casefold() for n in low}
+    )
+    sc_html, sc_cards = shortcuts_html(approx, known) if approx else ("", 0)
     parts: list[str] = []
     cov = coverage(g)
     if cov and (unrec or oos):
@@ -1117,7 +1203,14 @@ def model_section_html(
             + row("m", "Played with their effect", cov["modeled"])
             + row("u", UNMODELED_HEADING, blanks, "#rv-g-unmodeled")
             + row("o", OUT_OF_SCOPE_HEADING, aside, "#rv-g-opp")
-            + f"</ul></div><p class='ig-foot'>{_esc(KNOWN_TEXT.format(**cov))}</p>"
+            + f"</ul></div><p class='ig-foot'>{_esc(KNOWN_TEXT.format(**cov))}"
+            + (
+                f" <a href='#rv-g-approx'>{sc_cards} card{'s' if sc_cards != 1 else ''} played with a "
+                "shortcut</a>."
+                if sc_cards
+                else ""
+            )
+            + "</p>"
         )
     if unrec:
         info = f"<p>{UNMODELED_TEXT}"
@@ -1132,17 +1225,20 @@ def model_section_html(
                 UNMODELED_HEADING,
                 _share(_copies(unrec), size),
                 info + "</p>",
-                _card(_row_items(unrec), "ig-cards", "cards") + actions,
+                _card(_row_items(unrec, (CTX_UNMODELED, CTX_UNMODELED_TEXT), models_now), "ig-cards", "cards")
+                + actions,
             )
         )
     if oos:
         total = _copies([c for grp in oos for c in grp["cards"]])
-        lists = "".join(
-            f"<details class='ig-dis'><summary><span class='nm'>{_esc(grp['label'])}</span>"
-            f"<span class='v'>{_copies(grp['cards'])}</span>{icon('chev')}</summary>"
-            f"<ul class='ig-list ig-cards'>{_rows(grp['cards'])}</ul></details>"
-            for grp in oos
-        )
+        lists = ""
+        for grp in oos:
+            ctx = (f"{OUT_OF_SCOPE_HEADING}: {grp['label']}", CTX_OPP_TEXT)
+            lists += (
+                f"<details class='ig-dis'><summary><span class='nm'>{_esc(grp['label'])}</span>"
+                f"<span class='v'>{_copies(grp['cards'])}</span>{icon('chev')}</summary>"
+                f"<ul class='ig-list ig-cards'>{_rows(grp['cards'], ctx)}</ul></details>"
+            )
         lists = f"<div class='ig'>{lists}</div>"
         parts.append(
             _group(
@@ -1156,22 +1252,18 @@ def model_section_html(
                 LOW_IMPACT_HEADING,
                 _share(len(low), size),
                 f"<p>{LOW_IMPACT_TEXT}</p>",
-                _card(_row_items([{"name": n} for n in low]), "ig-cards", "cards"),
+                _card(_row_items([{"name": n} for n in low], (CTX_LOW, CTX_LOW_TEXT)), "ig-cards", "cards"),
             )
         )
     if approx:
-        rows = [
-            f"<li><span class='nm'>{_esc(a['label'])}</span>"
-            f"<span class='cards'>{_esc(a['cards'])}</span></li>"
-            for a in approx
-        ]
         parts.append(
             _group(
                 "rv-g-approx",
                 APPROX_HEADING,
-                f"{len(approx)} shortcut{'s' if len(approx) != 1 else ''}",
+                f"{len(approx)} shortcut{'s' if len(approx) != 1 else ''} · "
+                f"{sc_cards} card{'s' if sc_cards != 1 else ''}",
                 f"<p>{APPROX_TEXT}</p>",
-                _card(rows, "ig-approx", "shortcuts"),
+                f"<p class='ig-lead'>{_esc(APPROX_LEAD)}</p>{sc_html}",
             )
         )
     return _sec(
@@ -1189,8 +1281,28 @@ def validation_section_html(s: dict[str, Any]) -> str:
     if v is not None:
         word, colour, ic = VALIDATION_LABEL.get(str(v.get("verdict")), ("Checked", "grey", "check"))
         lab = ui.label(word, colour, ic)
-    body = validation_html(v).replace("<ul class='vlines'>", "<ul class='vlines rv-notes'>")
-    return _sec("rv-valid", "Validation", body, label=lab)
+    return _sec("rv-valid", "Validation", validation_body_html(v), label=lab)
+
+
+def validation_body_html(v: dict[str, Any] | None) -> str:
+    """The validation's findings: its own lead line only when it says more than the verdict the
+    label already shows, then each group with the cards nested under the line that names them."""
+    if v is None:
+        return validation_html(v)
+    lead = _validation_lead(v)
+    body = f"<p class='b'>{_esc(lead)}</p>" if lead else ""
+    for grp in _validation_groups(v):
+        if grp["heading"]:
+            body += f"<h3>{_esc(grp['heading'])}</h3>"
+        items = "".join(
+            f"<li>{_esc(it['text'])}"
+            + ("<ul>" + "".join(f"<li>{_esc(sub)}</li>" for sub in it["sub"]) + "</ul>" if it["sub"] else "")
+            + "</li>"
+            for it in grp["items"]
+        )
+        if items:
+            body += f"<ul class='vlines rv-notes'>{items}</ul>"
+    return body or "<p class='muted'>No details.</p>"
 
 
 def _jump_html(
@@ -1695,6 +1807,8 @@ def report_page_html(
     csrf: str = "",
     card_types: Mapping[str, str] | None = None,
     my_models: str = "",
+    models_now: frozenset[str] = frozenset(),
+    boxes_html: str = "",
     by_html: str = "",
     changes_html: str = "",
     since_html: str = "",
@@ -1704,8 +1818,10 @@ def report_page_html(
     """The signed-in report page's body. ``stats_html`` is the deck statistics strip
     (companion.stats_strip), ``actions_html`` the export buttons, ``notice_html`` a notice from the
     address (a Remove or a Play more games that started nothing), ``card_types`` the type lines the
-    gateway knows for the cards Forge left out, ``my_models`` the My card models box
-    (card_models_view.box_html), whose opener sits where saved descriptions are mentioned.
+    gateway knows for the cards Forge left out, ``my_models`` set when the gateway keeps card
+    models (the Card models page's button sits where saved models are mentioned), ``models_now``
+    the cards the member keeps one for now (front faces, case aside), ``boxes_html`` the page's
+    boxes (Delete, Stop the test).
     Owner decision C7: ``by_html`` who ran it (the app chip), ``changes_html`` whether the deck changed
     since (deck_changes_html or its placeholder), ``since_html`` the "since your last test" strip,
     ``tested`` the rows it played (the Tested list), ``pair_href`` its head-to-head view."""
@@ -1781,7 +1897,12 @@ def report_page_html(
         # not set up"); the page is read again then
         forge = solo_forge = ""
     solo, model = solo_section_html(
-        r, s, removable=removable, csrf=csrf, models_opener=card_models_view.opener() if my_models else ""
+        r,
+        s,
+        removable=removable,
+        csrf=csrf,
+        models_opener=card_models_view.opener() if my_models else "",
+        models_now=models_now,
     )
     valid = validation_section_html(s)
     stats = (
@@ -1839,7 +1960,7 @@ def report_page_html(
         + stats
         + tested_html
         + raw
-        + my_models
+        + boxes_html
         + "</div>"
     )
 
@@ -1923,6 +2044,7 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-ended b{font-variant-numeric:tabular-nums;white-space:nowrap}
 .rv-page .rv-notes{margin:.25rem 0 .5rem;padding-left:min(1.1rem, 6vw)}
 .rv-page .rv-notes li{margin:.2rem 0;overflow-wrap:anywhere}
+.rv-page .rv-notes ul{margin:.2rem 0 0;padding-left:1.1rem;list-style:circle}
 .rv-page .rv-det{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
 /* what the quick solo test leaves out: inset grouped lists, as on the account settings pages */
 .rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--group-bg);
@@ -1946,6 +2068,8 @@ REPORT_PAGE_CSS = (
   outline-offset:-2px}
 .rv-page .ig-sum .bar-split{margin:16px 16px 8px}
 .rv-page .ig-foot{margin:.4rem 16px 0;font-size:.85rem;line-height:1.4;color:var(--text-muted)}
+.rv-page .ig-lead{margin:0 16px .6rem;font-size:.92rem;line-height:1.45;color:var(--text-muted)}
+.rv-page .ig-foot a{display:inline-flex;align-items:center;min-height:44px}
 .rv-page .ig-sec{margin:1.75rem 0 0}
 .rv-page .ig-info > summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:baseline;
   gap:.1rem .6rem;padding:.35rem 16px;min-height:44px;align-content:center;box-sizing:border-box}
@@ -1981,8 +2105,18 @@ REPORT_PAGE_CSS = (
 .rv-page .ig-dis > ul{border-top:1px solid var(--border-soft);background:var(--bg)}
 .rv-page .ig-more > summary:focus-visible,.rv-page .ig-dis > summary:focus-visible{
   outline:2px solid var(--focus);outline-offset:-2px}
-.rv-page .ig-approx li{flex-direction:column;align-items:stretch;gap:.15rem;padding:10px 16px}
-.rv-page .ig-approx .cards{color:var(--text-muted);font-size:.9rem;line-height:1.4}
+/* the shortcuts: what each does, which way it can push the numbers, why, then its cards (shortcuts_html) */
+.rv-page .ig-sc > li.sc{display:block;padding:12px 16px}
+.rv-page .sc-top{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .6rem}
+.rv-page .sc-t{font-weight:700;overflow-wrap:break-word;min-width:0;max-width:100%}
+.rv-page .sc-top .ui-lbl{white-space:normal;max-width:100%}
+.rv-page .sc-why{margin:.3rem 0 .55rem;color:var(--text-muted);font-size:.92rem;line-height:1.45}
+.rv-page .sc-cards{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.4rem}
+.rv-page .ig-list .sc-cards li{display:block;min-height:0;padding:0;border:0}
+.rv-page .sc-cards .cardlink{display:inline-flex;align-items:center;min-height:44px;padding:0 .85rem;
+  border:1px solid var(--border-soft);border-radius:999px;background:var(--bg);color:var(--text);
+  font:inherit;font-size:.92rem;cursor:pointer;text-align:left;overflow-wrap:anywhere;max-width:100%}
+.rv-page .sc-cards .cardlink:hover{border-color:var(--border)}
 .rv-page .ig-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:.75rem auto 0;
   max-width:46rem}
 .rv-page .ig-actions.two{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -2005,8 +2139,6 @@ REPORT_PAGE_CSS = (
   .rv-page .ig-sum .ig-list li{border-top:0}
   .rv-page .ig-sum .ig-list li + li{border-left:1px solid var(--border-soft)}
   .rv-page .ig-sum .ig-list .sp{display:none}
-  .rv-page .ig-approx li{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:1rem;
-    align-items:center}
 }
 .rv-page .rv-games .tr{grid-template-columns:var(--cols)!important}
 @media (max-width:599.98px){.rv-page .rv-games .tr{grid-template-columns:var(--cols-sm)!important}
@@ -2038,8 +2170,10 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-link{margin:.25rem 0}
 .rv-page .rv-link a{display:inline-flex;align-items:center;min-height:32px}
 /* the solo test's seven numbers: a compact grid, rules between rows only */
-.rv-page .tiles.rv-stats{grid-template-columns:repeat(auto-fill,minmax(min(100%,8.5rem),1fr));gap:0 1rem;
+/* a wrapping row whose last line shares the width: never one number stranded beside a hole */
+.rv-page .tiles.rv-stats{display:flex;flex-wrap:wrap;gap:0 1rem;
   margin:.75rem 0;border-top:1px solid var(--border-soft)}
+.rv-page .tiles.rv-stats > .tile{flex:1 1 8.5rem;min-width:0}
 .rv-page .rv-stats .tile{background:transparent;border:0;border-radius:0;
   border-bottom:1px solid var(--border-soft);
   padding:.6rem 0;font-size:.84rem}
@@ -2117,6 +2251,7 @@ REPORT_PAGE_CSS = (
   text-align:left;min-height:0}
 /* every name opens the viewer and reads the same: the orange underline is for a pointer that can
    hover (a touch screen keeps the last tapped name "hovered", so one name stood out as a link) */
+.rv-page .cardlink:hover{text-decoration:none}
 @media (hover:hover){.rv-page .cardlink:hover{text-decoration:underline;color:var(--orange-text)}}
 .rv-page .cardlink:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:3px}
 /* owner decision C7: has the deck changed since, since the last test, the tested list, paired tests */

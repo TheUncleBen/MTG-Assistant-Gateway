@@ -63,6 +63,82 @@ APPROXIMATIONS = {
     "own-life": "Your own life total is not tracked",
     "monarch": "The monarch's extra card is drawn at your upkeep",
 }
+# Which way each shortcut can push the solo test's numbers, and what it means, in a sentence. The
+# direction is read from what each shortcut says it does (not measured): "high" can make the deck
+# look better than it would play, "low" worse, "either" a small push either way. A shortcut not
+# listed here reads "either".
+SHORTCUT_PUSH = {
+    "any-color": (
+        "high",
+        "They can pay for any spell, so the deck casts on curve more often than it might at a table.",
+    ),
+    "creature-producer": (
+        "high",
+        "They tap for mana the turn they arrive, a turn earlier than the real rules allow without haste.",
+    ),
+    "equipment-extra": ("low", "Only the bonus counts; anything else the Equipment does is missing."),
+    "fetch": ("either", "Close to a real fetch, but the land always arrives tapped."),
+    "hybrid-cost": ("either", "Paid with one of the colors only, never with life or the other color."),
+    "residual-text": (
+        "low",
+        "Only the parts the solo test understands are played; the rest of the card's text does nothing.",
+    ),
+    "bounce-land": ("either", "They count as two mana, without the land they return."),
+    "filter-ignored": ("low", "They can't turn one color of mana into another."),
+    "ramp-widened": ("either", "Ramp that would find something more specific finds any land."),
+    "for-each": ("either", "Mana that grows or shrinks with the board is a fixed amount."),
+    "conditional-tapland": ("high", "Lands that sometimes enter tapped always enter untapped."),
+    "dfc-back-face": ("low", "The back face is never used."),
+    "lifelink": ("either", "The solo test doesn't count your life, so lifelink adds nothing."),
+    "unused-option": ("low", "Kicker, cycling, miracle, convoke and other options are never used."),
+    "graveyard-shuffle": ("either", "Shuffling the graveyard back into the library is skipped."),
+    "discount-ignored": ("low", "The ability always costs its full price."),
+    "land-from-hand": ("either", "The land comes from the library, tapped, instead of your hand."),
+    "library-order": ("low", "Scry and surveil don't help find cards."),
+    "no-deaths": ("low", "Nothing dies, so “when this dies” and similar triggers never happen."),
+    "attack-trigger": ("high", "Triggers that need a certain creature to attack happen whenever you attack."),
+    "anthem-self": ("high", "The card's bonus for your other creatures also applies to itself."),
+    "own-life": ("high", "Paying life costs nothing."),
+    "monarch": ("high", "You stay the monarch all game, so the extra card is never lost."),
+}
+PUSH_WORDS = {
+    "high": ("Results may look better", "orange"),
+    "low": ("Results may look worse", "grey"),
+    "either": ("Small effect either way", "grey"),
+}
+
+
+def _push(a: dict[str, Any]) -> tuple[str, str]:
+    """A shortcut's direction in words, and why (SHORTCUT_PUSH)."""
+    push, why = SHORTCUT_PUSH.get(str(a.get("kind")), ("either", ""))
+    return PUSH_WORDS[push][0], why
+
+
+def _by_push(approx: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The shortcuts that can flatter the deck first, then those that can hurt it, then the rest."""
+    order = {"high": 0, "low": 1, "either": 2}
+    return sorted(approx, key=lambda a: order[SHORTCUT_PUSH.get(str(a.get("kind")), ("either", ""))[0]])
+
+
+def split_card_names(text: str, known: set[str]) -> list[str]:
+    """The research service's comma-joined card names ("Lotus Field, Aesi, Tyrant of Gyre Strait")
+    as names, a name with a comma kept whole when the deck holds it (``known``: front faces, case
+    aside). Without known names nothing is split: the line is one item, never a wrong cut."""
+    pieces = [p.strip() for p in str(text or "").split(", ") if p.strip()]
+    if not known:
+        return [", ".join(pieces)] if pieces else []
+    out: list[str] = []
+    i = 0
+    while i < len(pieces):
+        for j in range(len(pieces), i, -1):
+            joined = ", ".join(pieces[i:j])
+            if j == i + 1 or front_face(joined).casefold() in known:
+                out.append(joined)
+                i = j
+                break
+    return out
+
+
 # The milestones the simulator tracks as "reached by turn N", in plain words and plot order. A
 # 60-card game (no commander, 20 life) has no commander milestones and its kill is 20 damage.
 COMMANDER_MILESTONES = ("commander_cast", "cmdr21")
@@ -410,6 +486,12 @@ def _parse_goldfish(block: dict[str, Any], *, deck_size: int | None) -> dict[str
             # dropped (names may hold commas, so the list is not split into cards here).
             body = re.sub(r"^warning\s*[—:-]\s*", "", s, flags=re.I)
             body = re.sub(r" // [^,]*", "", body)
+            body = re.sub(
+                r"^not recognized by scryfall, skipped:",
+                "not found on Scryfall, so the solo test played without them:",
+                body,
+                flags=re.I,
+            )
             out["warnings"].append(body[:1].upper() + body[1:])
             continue
         for part in s.split("|"):
@@ -954,11 +1036,11 @@ UNMODELED_HEADING = "Played without their effect"
 # An assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
 # text says so; the sentence on saving shows only when the gateway can save (the schema 14 table).
 UNMODELED_TEXT = (
-    "The solo test found these cards and their exact text, but has no description yet of what they "
-    "do, so it drew and cast them without their effect. Whatever they would do in a real game is "
-    "missing from the numbers above. Your assistant may be able to describe some of them from their "
-    "exact text, in a form the solo test can play. Many cards need things the solo test does not "
-    "model, such as opponents to interact with."
+    "The solo test found these cards and their exact text, but has no card model for them (a short "
+    "description of what a card does, in the solo test's own terms), so it drew and cast them without "
+    "their effect. Whatever they would do in a real game is missing from the numbers above. Your "
+    "assistant may be able to write card models for some of them from their exact text. Many cards "
+    "need things the solo test does not model, such as opponents to interact with."
 )
 # Said only when the report has a finished Forge solo test (Forge plays nearly every card).
 UNMODELED_FORGE_TEXT = (
@@ -977,21 +1059,31 @@ LOW_IMPACT_TEXT = (
     "solo test game has no opponent and no interaction, so this says nothing about how the card does at "
     "a real table."
 )
-APPROX_HEADING = "Shortcuts the model takes"
+APPROX_HEADING = "Shortcuts the solo test takes"
+# always shown above the shortcuts (Ben 2026-11-11 did not follow "which way it can push the
+# numbers"): what a shortcut is and what its label means, in one line; Details has the example
+APPROX_LEAD = (
+    "To play fast, the solo test bends a few rules, such as letting a mana creature tap for mana "
+    "the turn it arrives. Each one says whether it may make your results look better or worse "
+    "than real games."
+)
 APPROX_TEXT = (
-    "Simplifications applied to these cards; they play a little better or worse than in a real game."
+    "To play hundreds of games quickly, the solo test bends a few rules. For example, it lets a "
+    "mana creature tap for mana the turn it arrives, which the real rules don't allow. A shortcut "
+    "like that makes the deck look a little better than it would play at a table; others make it "
+    "look a little worse. Each shortcut below says which, why, and which of your cards it touched. "
+    "Which way each one leans is our best judgment from what the shortcut does, not a measurement."
 )
 UNMODELED_SAVED_TEXT = (
-    "The gateway can keep up to 200 of these descriptions for you once they pass its check, and your "
-    "later solo tests then play those cards with them. Your card models play only in your own "
-    "solo tests."
+    "The gateway keeps up to 200 card models for you once they pass its check, and your later solo "
+    "tests play those cards with them. Only you see and use your card models."
 )
 OUT_OF_SCOPE_HEADING = "Needs opponents"
 MODEL_HEADING = "What the quick solo test leaves out"
 KEPT_HEADING = "Played with your card models"
 KEPT_TEXT = (
-    "Your assistant described each of these cards in a form the solo test can play, and the gateway "
-    "checked its format and saved it. This run played these cards with those descriptions."
+    "Your assistant wrote a card model for each of these cards, and the gateway checked and saved it. "
+    "This run played these cards with their card models."
 )
 
 
@@ -1016,7 +1108,7 @@ REMOVE_MODEL_LABEL = "Remove"
 # What the report page says after a Remove (?models=…)
 MODEL_NOTICES = {
     "removed": "The card model was removed. Later solo tests play that card without its effect "
-    "again, until a new description is saved.",
+    "again, until a new card model is saved.",
     "gone": "That card model was already removed, or an admin removed it.",
     "error": "The card model could not be removed. Try again later.",
 }
@@ -1274,7 +1366,11 @@ def honesty_groups(
         )
     approx = [a for a in h.get("approximations") or [] if a.get("cards")]
     if approx:
-        rows = "".join(f"<dt>{_esc(a['label'])}</dt><dd>{_esc(a['cards'])}</dd>" for a in approx)
+        rows = "".join(
+            f"<dt>{_esc(a['label'])} <small>({_esc(_push(a)[0])})</small></dt>"
+            f"<dd>{_esc(_push(a)[1] + ' ' if _push(a)[1] else '')}{_esc(a['cards'])}</dd>"
+            for a in _by_push(approx)
+        )
         out.append(
             (
                 "approx",
@@ -2366,7 +2462,10 @@ def report_markdown(r: dict[str, Any], *, report_url: str = "") -> str:
         if approx:
             lines += [f"**{APPROX_HEADING}: {len(approx)}.**", "", APPROX_TEXT, ""]
             # each shortcut's names are the research service's own comma-joined line
-            lines += [f"- {a['label']}: {a['cards']}" for a in approx]
+            lines += [
+                f"- {a['label']} ({_push(a)[0]}): {a['cards']}" + (f". {_push(a)[1]}" if _push(a)[1] else "")
+                for a in _by_push(approx)
+            ]
             lines.append("")
     if s["constructed"]:
         lines += ["## Validation", "", CONSTRUCTED_VALIDATION, ""]

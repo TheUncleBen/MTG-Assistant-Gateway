@@ -26,7 +26,8 @@ What is measured, beyond the overflow sweep's sideways scroll, clipping and over
 * ``link-blue``: a link drawn in the browser's or the site's plain blue link colour: the site's
   links are text, rows or buttons in its own colours.
 * ``contrast``: text whose colour against its background is under 4.5:1 (3:1 for large text).
-* ``unstyled``: a button or select the browser draws itself (its grey default face).
+* ``unstyled``: a button or select the browser draws itself (its grey default face), or an opened
+  card viewer drawn without its styles (in the page's flow instead of over it).
 * ``raw-value``: shown text that leaks a program value: undefined, null, NaN, None, [object …], an
   ISO timestamp, a price with one decimal ($12.5) or a number with four or more decimals; a setting's
   own name (MTG_…); "unknown" as a value in more than one place; an element marked hidden that is
@@ -183,11 +184,23 @@ STATES = {
         ".ctxmenu, .mtgmenu",
     ),
     "filters": ("document.querySelector('.sp-open').click()", ".spanel.open, .spanel:not(.folded)"),
+    # a report's card name (0.7.46 opened an unstyled card panel under the page: Ben, Fold open)
+    "rvcard": (
+        "document.querySelector('#rv-g-unmodeled button.cardlink[data-card]').click()",
+        ".cardview.open, .cardview[open], .cardview",
+    ),
+    # a saved card model opened to what is saved (the Card models page)
+    "mmopen": (
+        "document.querySelector('.mm-item details').open = true",
+        ".mm-item details[open] .mm-body",
+    ),
 }
 STATE_PAGES = [
     "/decks/42#viewer",
     "/decks/42#cardmenu",
     "/decks/42?view=grid#viewer",
+    "/history/reports/r1#rvcard",
+    "/history/models#mmopen",
     "/search#filters",
     "/decks#filters",
     "/collection?view=grid#filters",
@@ -535,6 +548,13 @@ CHECKS = (
     const cs = getComputedStyle(el);
     if (/^rgb\(2(39|40), 2(39|40), 2(39|40)\)$/.test(cs.backgroundColor) || /outset/.test(cs.borderStyle))
       add('unstyled', el, 'drawn in the browser\'s own style (' + cs.backgroundColor + ')');
+  }
+  // ... and a panel or sheet drawn without its page's styles: an opened card viewer that is not
+  // laid over the page (0.7.46's report page never loaded deck.css: the card opened as bare text)
+  for (const el of document.querySelectorAll('.cardview.open')) {
+    if (!visible(el)) continue;
+    if (getComputedStyle(el).position !== 'fixed')
+      add('unstyled', el, 'an opened card viewer drawn without its styles, in the page instead of over it');
   }
 
   // --- raw values and plural slips in shown text

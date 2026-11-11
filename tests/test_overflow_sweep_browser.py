@@ -8,6 +8,7 @@ without a Chromium build."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -338,6 +339,45 @@ def _seed(server: Server) -> tuple[str, str]:
 
     seed_history(server.db, "user-1", now=int(time.time()))
     store_report(server.db, "user-1", "r1", deck_name=LONGER)
+    # saved card models (the Card models page; one is a card the report plays without its effect,
+    # one has the longest name, one was saved for an older solo test)
+    from mtg_gateway import card_models as CM
+
+    models = [
+        (
+            "Aegis of the Gods",
+            {"statics": [{"kind": "anthem", "power": 1, "toughness": 1, "keywords": ["hexproof"]}]},
+        ),
+        (
+            "Cathars' Crusade",
+            {
+                "triggers": [
+                    {"on": "creature_etb", "do": "pump", "power": 1, "toughness": 1, "duration": "permanent"}
+                ]
+            },
+        ),
+        ("Cleric Class", {"triggers": [{"on": "upkeep", "do": "gain_life", "count": "per_creature"}]}),
+        (
+            CARDS[-1],
+            {
+                "activated": [{"cost": "{2}{W}{T}", "do": "draw", "count": 2}],
+                "grants": {"power": 2, "toughness": 0, "keywords": ["first strike", "vigilance"]},
+            },
+        ),
+        ("Smothering Tithe", {"triggers": [{"on": "upkeep", "do": "treasure", "count": 3}]}),
+        ("Archangel of Thune", {"triggers": [{"on": "attack", "do": "gain_life"}]}),
+        ("Weird Old Card", {"inert": True}),
+    ]
+    for i, (name, body) in enumerate(models):
+        server.db.put_card_model(
+            CM.card_key(name),
+            name,
+            json.dumps({"name": name, **body}),
+            "user-1",
+            int(time.time()) - 86400 * (i + 1),
+            sim_version="mystic-forge 0000000" if name == "Cleric Class" else CM.SIM_VERSION,
+            most=CM.MAX_PER_MEMBER,
+        )
     # a watchlist with long, unbroken names and a few days of prices (prices.py)
     with server.db.tx() as c:
         for i, name in enumerate(CARDS[-2:]):
