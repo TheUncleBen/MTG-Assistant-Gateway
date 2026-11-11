@@ -51,11 +51,13 @@ CHIPS = (
     ("decks", "Decks"),
 )
 SORTS = (
+    # every choice says it is the order: the box has no label beside it, and a bare "Price" beside
+    # "Any finish" read as a filter once it was chosen
     ("", "Sort: Name"),
-    ("price", "Price"),
-    ("d1", "Change, 1 day"),
-    ("d7", "Change, 7 days"),
-    ("d30", "Change, 30 days"),
+    ("price", "Sort: Price"),
+    ("d1", "Sort: Change, 1 day"),
+    ("d7", "Sort: Change, 7 days"),
+    ("d30", "Sort: Change, 30 days"),
 )
 CHANGE_KEYS = (("1 day", "change_1d_pct"), ("7 days", "change_7d_pct"), ("30 days", "change_30d_pct"))
 SHORT_DAYS = 30

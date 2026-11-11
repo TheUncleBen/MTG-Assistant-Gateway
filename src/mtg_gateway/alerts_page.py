@@ -48,8 +48,7 @@ BOX_ROWS = 8  # rows the bell's box shows; the page shows them all
 SHOW_CHOICES = (("", "All"), ("unread", "Unread"))
 ACTIONS = ("read", "unread", "dismiss", "undo", "read_all", "clear_all")
 FOOT = (
-    "Alerts from Archidekt are read from Archidekt: marking them read or dismissing them here "
-    "doesn't change them on archidekt.com. Dismissed alerts are kept 30 days for Undo."
+    "What you read or dismiss here stays as it is on archidekt.com. Dismissed alerts stay 30 days for Undo."
 )
 # where the kinds of Archidekt's own alerts are chosen (the gateway's are under Settings)
 ARK_CHOICE = "<a class='btn btn-plain' href='/account/details/email'>Email and alerts on Archidekt</a>"
@@ -412,8 +411,8 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             f"{tools_html(csrf_in, any_unread=any_unread, any_rows=kept_any) if not cross_site else ''}</div>"
             "<p class='ui-sub'>What needs you and what happened, from this gateway and from Archidekt.</p>"
             f"{note}{tools}{link_note}<div class='card al-card' data-al-page>{body_list}</div>"
-            f"<p class='muted small bell-foot'>{esc(FOOT)} Choose which alerts Archidekt sends you under "
-            f"Email and alerts on Archidekt.</p><p class='al-ark'>{ARK_CHOICE}</p></div>",
+            # the button under it says where Archidekt's own alerts are chosen: not said twice
+            f"<p class='muted small bell-foot'>{esc(FOOT)}</p><p class='al-ark'>{ARK_CHOICE}</p></div>",
             sub=sub,
             sid=sid,
             current="/notifications",

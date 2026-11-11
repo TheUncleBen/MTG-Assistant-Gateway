@@ -20,6 +20,8 @@ INTROS = [
     ("/reports", "p.ui-sub, p.ui-note"),
     ("/search", "#s-results .panel > p.muted"),
     ("/cards", ".panel > p.muted"),
+    ("/notifications", "p.ui-sub, p.bell-foot"),
+    ("/lists/custom", "p.ui-sub"),
 ]
 LINES = """(sel) => [...document.querySelectorAll(sel)]
   .filter(e => e.getClientRects().length && !e.closest('details:not([open]), dialog'))

@@ -51,10 +51,7 @@ from .theme import esc, icon
 PAGE = "/lists"
 HUB = "/collection/lists"  # Binder › Lists, the hub both blocks live on
 TITLE = "Archidekt lists"
-SUB_TEXT = (
-    "Your Archidekt lists that shape every deck. Changes are saved to Archidekt and read "
-    "back; a copy from just before is kept under History."
-)
+SUB_TEXT = "Your Archidekt lists that shape every deck. A copy from before each change is kept under History."
 # Pinned cards: the cards pinned on Archidekt, at Binder's old Wants address (the Watchlist is
 # the want list; the pins keep Archidekt's own name)
 WANTS = "/collection/wants"
@@ -1366,8 +1363,8 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
         else (ui.load_more("", done=ui.all_shown(total, "")) if total else "")
     )
     return (
-        head + "<p class='ui-sub'>Cards you made on Archidekt. Add one to a deck from its menu; deleting one "
-        "blanks it in every deck that has it.</p>"
+        head + "<p class='ui-sub'>Cards you made on Archidekt. Deleting one blanks it in every deck that "
+        "has it.</p>"
         + ui.toolbar(f"{PAGE}/custom", search_label="Search by name", placeholder="Name", q=q)
         + table
         + more
