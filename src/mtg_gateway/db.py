@@ -3332,7 +3332,10 @@ class Database:
         page) since ``since``: what an approval mode's row limit is counted against, so one big
         edit split into small proposals is still one big edit."""
         row = self._one(
-            "SELECT COALESCE(SUM(json_array_length(p.rows_json)), 0) FROM proposals p "
+            # a package's heading row is not a card row (decks._over_the_window leaves it out too)
+            "SELECT COALESCE(SUM((SELECT COUNT(*) FROM json_each(p.rows_json) j "
+            "WHERE json_type(j.value) = 'object' "
+            "AND COALESCE(json_extract(j.value, '$.kind'), '') != 'package')), 0) FROM proposals p "
             "WHERE p.owner_sub = ? AND p.deck_id = ? AND p.state = 'applied' AND p.applied_at >= ? "
             "AND p.rows_json IS NOT NULL AND json_valid(p.rows_json) AND EXISTS ("
             "SELECT 1 FROM audit_log a WHERE a.sub = p.owner_sub AND a.event = 'proposal_applied' "

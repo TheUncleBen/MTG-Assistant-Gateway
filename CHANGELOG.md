@@ -33,8 +33,8 @@ odd input gets a plain answer instead of an error page, and a connected app read
   many were left out.
 - The list of scan sessions says when it shows only the newest 50, and an older session is
   still found by its name.
-- A weekly summary whose Monday was missed goes out the next day, and one the notification
-  server refused is tried again.
+- A weekly summary whose Monday was missed goes out the next day. The first one after you turn
+  it on still waits for a Monday.
 
 ### Fixed
 - **The row limit of an approval mode counts what assistants already applied by themselves in
@@ -47,13 +47,16 @@ odd input gets a plain answer instead of an error page, and a connected app read
   what to compare.
 - A Binder removal older than the newest 1,000 records can be removed: it keeps the card name.
 - The card text reader reads the gateway's own decklist text: a category in brackets is not a
-  set, finish and commander markers are not part of the name, and a line it cannot read is
+  set (unless it is two to six capital letters alone, which still reads as a set code), finish and commander markers are not part of the name, and a line it cannot read is
   named instead of dropped.
 - Odd input gets a plain answer: numbers written in other scripts or thousands of digits long,
   a skip past the end of a list, a picture that declares too many pixels, a deck check without
   a deck, and a list where a name is expected. A tool that fails inside the gateway answers in
   plain words with what to do next.
-- A research source that fails is reported in the gateway's own words, with no time promised.
+- A research source that fails is reported in the gateway's own words, the same ones every
+  other outage uses, with no time promised.
+- An approval mode's 24-hour count leaves out a package's heading row, as the proposal's own
+  count does.
 - On a proposal page on a phone with very large text, the Apply box sits in the page instead of
   covering the proposal.
 - At very large text on a phone, the third button of the Decks and Binder headings fills its

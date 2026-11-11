@@ -69,3 +69,28 @@ async def test_old_applies_no_longer_count(stack: Stack) -> None:
         db._conn.commit()
     second = await _propose(h, token, 2, NAMES[:1])
     assert second["assistant_may_apply"] is True, second
+
+
+async def test_a_package_heading_is_not_a_counted_row(stack: Stack) -> None:
+    """The heading row of a package is not a card row: the proposal's own count leaves it out, so
+    the count of what was applied before leaves it out too (it made the limit one row smaller)."""
+    import json
+
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    first = await _propose(h, token, 1, NAMES[:2])
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": first["proposal_id"]}))
+    assert a["state"] == "applied", a
+    db = stack.h.db
+    with db._lock:
+        raw = db._conn.execute("SELECT rows_json FROM proposals WHERE id = ?", (first["proposal_id"],))
+        rows = json.loads(raw.fetchone()[0])
+        assert len(rows) == 2, rows
+        db._conn.execute(
+            "UPDATE proposals SET rows_json = ? WHERE id = ?",
+            (json.dumps([{"kind": "package", "name": "Ramp"}, *rows]), first["proposal_id"]),
+        )
+        db._conn.commit()
+    second = await _propose(h, token, 2, NAMES[2:5])  # 2 + 3 = 5, the heading is not a sixth
+    assert second["assistant_may_apply"] is True, second

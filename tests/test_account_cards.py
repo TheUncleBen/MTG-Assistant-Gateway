@@ -225,25 +225,36 @@ async def test_view_choices_asks_in_a_box_and_delete_my_data_puts_the_tick_above
         await b.aclose()
 
 
-async def test_a_missed_weekly_summary_is_sent_the_next_day_and_a_failed_one_again(stack: Stack) -> None:
-    """Weekly summaries went out on Mondays only, so a Monday the gateway was off lost the week's;
-    and a summary the notification server refused was marked sent, so it was never tried again."""
+async def test_a_missed_weekly_summary_is_sent_the_next_day_and_is_kept_once(stack: Stack) -> None:
+    """Weekly summaries went out on Mondays only, so a Monday the gateway was off lost the week's.
+    A summary is kept on the Alerts page before its push, so one that was not pushed (the member
+    chose Alerts only, or the notification server refused it) still counts as this week's: a
+    second try would keep it twice."""
     b = await _browser(stack)
     try:
         await _opt_in(b)
         await _post(b, "/account", {"action": "summary_save", "summary_every": "weekly"})
         due = stack.gw.summaries.send_due
+
+        def kept() -> int:
+            return stack.gw.db._conn.execute(
+                "SELECT COUNT(*) FROM gateway_alerts WHERE event = 'summary'"
+            ).fetchone()[0]
+
         assert await due("2026-10-14") == 0  # the first one waits for a Monday
         assert await due("2026-10-19") == 1  # Monday
         assert await due("2026-10-20") == 0 and await due("2026-10-25") == 0  # this week's has gone
         assert await due("2026-10-27") == 1  # Monday the 26th was missed: Tuesday sends it
-        assert await due("2026-10-28") == 0
-        # a daily one the server refuses is tried again on the next run of the same day
-        await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
+        assert await due("2026-10-28") == 0 and kept() == 2
+        # Alerts only: nothing is pushed, and the week's summary is kept once, not once a day
+        await _post(b, "/account", {"action": "notify_save", "ntfy_on": "1", "deliver_summary": "list"})
+        for day in ("2026-11-02", "2026-11-03", "2026-11-04"):
+            assert await due(day) == 0
+        assert kept() == 3
+        # a push the notification server refuses: kept once as well
+        await _post(b, "/account", {"action": "notify_save", "ntfy_on": "1", "deliver_summary": "push"})
         stack.ntfy.status = 403
-        assert await due("2026-10-29") == 0
-        stack.ntfy.status = 200
-        assert await due("2026-10-29") == 1
-        assert await due("2026-10-29") == 0
+        assert await due("2026-11-09") == 0 and await due("2026-11-10") == 0
+        assert kept() == 4
     finally:
         await b.aclose()

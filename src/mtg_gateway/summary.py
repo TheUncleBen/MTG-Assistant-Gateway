@@ -159,8 +159,9 @@ class Summaries:
         day, weekly ones on Mondays) and has ntfy notifications on. Returns how many were sent.
 
         A weekly one whose Monday was missed (the gateway was off, the run failed) is sent on the
-        first day after it, and a summary the notification server did not take is not marked sent,
-        so the next run tries it again."""
+        first day after it. A summary is marked sent once it was handed over, pushed or not: it is
+        kept on the Alerts page before the push, so a second try would keep it twice (and a member
+        who chose Alerts only is never pushed one). Only a run that raised is tried again."""
         if self.notifier is None or not self.notifier.enabled:
             return 0
         today = _dt.date.fromisoformat(day)
@@ -185,11 +186,9 @@ class Summaries:
             except Exception:  # one member's summary must not stop the others
                 logger.exception("summary failed for one member")
                 continue
-            if not ok:
-                continue
             with self.db.tx() as c:
                 c.execute("UPDATE notify_prefs SET summary_sent_day = ? WHERE sub = ?", (day, r["sub"]))
-            sent += 1
+            sent += ok
         return sent
 
 

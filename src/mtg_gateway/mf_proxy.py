@@ -407,12 +407,14 @@ def upstream_refusal(result: types.CallToolResult) -> types.CallToolResult:
         about = re.match(r"^(?:Request to ([A-Za-z ]+?) timed out\.|Rate limited by (\w+))", text)
         named = (about.group(1) or about.group(2) or "") if about else ""
     service = _UPSTREAM_NAMES.get(named.lower(), named) or "The research service"
+    # the one table of outage sentences (busy.OUTAGE). A source that limits the research service is
+    # "can't be reached right now": the gateway pauses nothing here, so the pause sentence is not true
     if text.startswith("Rate limited"):
-        words = f"{service} asked the gateway to slow down."
+        words = outage("unavailable", service)
     elif "timed out" in text[:80]:
-        words = f"{service} didn't answer in time."
+        words = outage("timeout", service)
     else:
-        words = f"{service} had a problem answering."
+        words = outage("failing", service)
     out = {
         "ok": False,
         "error": "unavailable",
