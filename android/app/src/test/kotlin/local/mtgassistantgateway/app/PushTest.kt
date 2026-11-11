@@ -57,6 +57,24 @@ class PushTest {
         assertNull(Push.since("1&x=2"))
     }
 
+    @Test fun beforeAnyMessageSinceIsTheLastLinesTime() {
+        // a stream that stalled before its first message: the next connection starts a second
+        // before the gateway's time on the last line the app got, so nothing sent meanwhile is lost
+        assertEquals("1794369039", Push.since(null, 1794369040L))
+        assertEquals("m1AbCdEf9", Push.since("m1AbCdEf9", 1794369040L)) // a message id wins
+        assertEquals("1794369039", Push.since("1&x=2", 1794369040L))
+        assertNull(Push.since(null, 5L)) // not a Unix time the gateway takes
+        assertNull(Push.since(null, null))
+    }
+
+    @Test fun lineTimeReadsTheGatewaysTime() {
+        assertEquals(1794369040L, Push.lineTime("""{"event":"keepalive","time":1794369040}"""))
+        assertEquals(1794369039L, Push.lineTime("""{"id":"open0001","time":1794369039,"event":"open"}"""))
+        assertNull(Push.lineTime("""{"event":"keepalive","time":5}"""))
+        assertNull(Push.lineTime("""{"event":"keepalive"}"""))
+        assertNull(Push.lineTime("not json"))
+    }
+
     @Test fun backoffDoublesUpToFiveMinutes() {
         assertEquals(listOf(5L, 10L, 20L, 40L, 80L, 160L, 300L, 300L, 300L), (1..9).map { Push.backoffSeconds(it, 0.0) })
         assertEquals(6L, Push.backoffSeconds(1, 1.0)) // up to a fifth more, spread over phones

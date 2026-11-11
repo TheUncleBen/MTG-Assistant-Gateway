@@ -114,6 +114,8 @@ what it is ("Price drop · Sol Ring").
   and its status line says the turn and the library (each zone's heading has its own count).
 
 ### Fixed
+- The Android app no longer loses a push sent while its connection to the gateway had gone
+  quiet before the first push arrived: it connects again from where that connection stopped.
 - At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
   cover the sheet's last control (the card size).
 - Long names break between their parts instead of inside a word (a member's name, a printing's

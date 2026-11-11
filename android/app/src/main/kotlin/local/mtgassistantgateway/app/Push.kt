@@ -149,8 +149,28 @@ object Push {
         }
     }
 
-    /** `since` for the next connection: the last message id the app got, so nothing is missed. */
-    fun since(lastId: String?): String? = lastId?.takeIf { ID.matches(it) }
+    /**
+     * `since` for the next connection, so nothing is missed: the last message id the app got, else
+     * (no message yet) the gateway's time on the last line it got ([lineTime]), a second early. A
+     * stream that stalled before its first message (seen on the emulator: the gateway kept writing
+     * to a connection the phone never read again) then still brings what was sent meanwhile; a
+     * message seen twice is shown once ([Seen]). Neither: from now.
+     */
+    fun since(lastId: String?, lastTime: Long? = null): String? =
+        lastId?.takeIf { ID.matches(it) } ?: lastTime?.takeIf { it in TIMES }?.let { (it - 1).toString() }
+
+    /** The gateway's Unix time on a stream [line] (an open, a keepalive or a message), if any. */
+    fun lineTime(line: String): Long? {
+        val t = try {
+            JSONObject(line).optLong("time", 0L)
+        } catch (e: JSONException) {
+            return null
+        }
+        return t.takeIf { it in TIMES }
+    }
+
+    /** Unix times the gateway takes as `since` (ten digits: 2001 to 2286). */
+    private val TIMES = 1_000_000_000L..9_999_999_999L
 
     /**
      * Seconds before connecting again after the [failures]th failure in a row (1 is the first):

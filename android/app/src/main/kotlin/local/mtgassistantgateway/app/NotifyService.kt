@@ -162,7 +162,7 @@ class NotifyService : Service() {
 
     /** One connection: NONE once it worked and ended, else what the gateway's answer means. */
     private fun listen(origin: String, key: String): Push.Refusal {
-        val since = Push.since(prefs.pushLastId)
+        val since = Push.since(prefs.pushLastId, prefs.pushLastTime)
         val url = GatewayUrl.join(origin, Push.PATH) +
             (if (since != null) "?since=" + URLEncoder.encode(since, "UTF-8") else "")
         val c = URL(url).openConnection() as HttpURLConnection
@@ -194,6 +194,8 @@ class NotifyService : Service() {
                     val line = r.readLine() ?: break
                     lastLineAt = SystemClock.elapsedRealtime()
                     handle(Push.parse(line), seen)
+                    // where the next connection starts while no message has come yet (Push.since)
+                    if (prefs.pushLastId == null) Push.lineTime(line)?.let { prefs.pushLastTime = it }
                 }
             }
             return Push.Refusal.NONE
