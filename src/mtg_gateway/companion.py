@@ -565,6 +565,7 @@ EVENT_LABELS = {
     "login_rejected_disabled": "Sign-in refused: account disabled",
     "login_rejected_issuer": "Sign-in refused: unexpected identity provider",
     "tokens_issued": "An assistant connected",
+    "tokens_refreshed": "An assistant renewed its access",
     "tokens_revoked": "An assistant's access was revoked",
     "refresh_rejected": "An assistant's expired access was refused",
     "refresh_reuse_detected": "A reused assistant token was refused",

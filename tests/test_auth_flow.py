@@ -536,3 +536,21 @@ async def test_whoami_never_uses_an_email_shaped_username_as_the_name(gw: Harnes
     result = sse_json(r)["result"]
     assert result["structuredContent"]["name"] is None
     assert "alice@example.test" not in json.dumps(result)
+
+
+async def test_a_refresh_is_not_written_as_a_new_connection(gw: Harness):
+    """0.7.47 (owner's Activity, 2026-11-10: dozens of "An assistant connected" a day): an assistant's
+    hourly refresh wrote the same tokens_issued row as a new connection. A refresh now writes
+    tokens_refreshed, which Activity lists only when asked for by name."""
+    from mtg_gateway import activity_view, companion
+
+    client = await gw.register()
+    t1 = await gw.tokens_for(client)
+    for _ in range(3):
+        t1 = (await gw.token(client, grant_type="refresh_token", refresh_token=t1["refresh_token"])).json()
+    events = [r[0] for r in gw.db._conn.execute("SELECT event FROM audit_log ORDER BY id").fetchall()]
+    assert events.count("tokens_issued") == 1
+    assert events.count("tokens_refreshed") == 3
+    assert "tokens_refreshed" in activity_view.QUIET_EVENTS
+    assert companion.EVENT_LABELS["tokens_refreshed"] == "An assistant renewed its access"
+    assert companion.EVENT_LABELS["tokens_issued"] == "An assistant connected"
