@@ -2864,6 +2864,11 @@ GOLDFISH_CSS = """
 .gf-row{--gw:130px;display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--gw),1fr));gap:.5rem;
   align-items:start;min-height:2rem}
 html[data-card-size=s] .gf-row{--gw:92px} html[data-card-size=l] .gf-row{--gw:180px}
+/* a row with a card shown without its picture: as wide as above at the usual text size, wider
+   at large text (200%), so a long word in a card's name or type stays whole (0.7.47 join: "Reclamation"
+   broke inside the word on an open Fold and a laptop) */
+.gf-row:has(.ph){--gw:max(130px,8.125em)} html[data-card-size=s] .gf-row:has(.ph){--gw:max(92px,5.75em)}
+html[data-card-size=l] .gf-row:has(.ph){--gw:max(180px,11.25em)}
 .gf-row + .gf-row{margin-top:.75rem;padding-top:.75rem;border-top:1px dashed var(--border)}
 .gf-empty{color:var(--text-muted);margin:0;grid-column:1 / -1}
 .gf-piles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:0 1rem}

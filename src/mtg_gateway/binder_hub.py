@@ -804,7 +804,6 @@ CSS = """
 .bn-set .bn-fields{display:flex;flex-direction:column;gap:.75rem;padding:.9rem 1rem}
 .bn-set .bn-fields .ui-hint{margin:0}
 .bn-save{display:flex;justify-content:flex-end}
-.bn-save .btn{min-width:8rem}
 /* the split view needs room for the words, not only pixels: the queries are on the page's width
    in its own text size (.bn-wrap), so 200% text on an open Fold gets the phone's one column */
 .bn-wrap{container:bn / inline-size}
