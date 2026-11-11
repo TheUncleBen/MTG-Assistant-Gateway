@@ -45,3 +45,28 @@ def test_an_open_fold_between_600_and_900_px(server: Server, screen: str) -> Non
     lines = [f.line() for f in res.findings]
     assert res.errors == [], "\n".join(res.errors[:20])
     assert lines == [], "\n".join(lines[:40])
+
+
+def test_a_wrapped_row_of_buttons_never_leaves_one_alone_at_any_width(server: Server) -> None:  # noqa: F811
+    """A row of buttons wraps where its words' widths say, which differs by font: CI's fonts put a
+    report's Delete… alone under two buttons at 600 px with 200% text, where this machine's did not
+    (CI 11-11). So the row is checked at every width from 520 to 900 px in 20 px steps, at both text
+    sizes, not only at the matrix's screens."""
+    if _chromium_path() == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, _pending = _seed(server)
+    server.app.state.gateway.decks.archidekt_budget.per_window = 100_000
+    displays = [M.Display(f"w{w}", f"{w} px", w, 1000, True, M.FOLD_UA) for w in range(520, 901, 20)]
+    res = M.sweep(
+        server,
+        sid,
+        ["/history/reports/r1", "/decks/42"],
+        displays=displays,
+        themes=("light",),
+        texts=(1, 2),
+        kinds={"stranded"},
+        menus=False,
+    )
+    lines = [f.line() for f in res.findings]
+    assert res.errors == [], "\n".join(res.errors[:20])
+    assert lines == [], "\n".join(lines[:40])

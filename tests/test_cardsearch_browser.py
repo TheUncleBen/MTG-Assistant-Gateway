@@ -256,8 +256,12 @@ def test_add_to_deck_from_the_card_page_saves_through_the_edit_endpoint(
         assert viewer.locator("h3").inner_text().startswith("Sol Talisman")
         # the printing reads "SET #number", as every screen writes it
         # (0.7.46: with watchlists on the printing is the Printing row that opens the Printings sheet)
-        said = " ".join(viewer.locator("dl.facts, .printrow").all_inner_texts())
-        assert re.search(r"\b[A-Z0-9]{2,6} #\w+", said), said
+        # read once the viewer has drawn the full card: it opens on the tile's data and redraws when
+        # the card's details arrive, and text read in between runs its words together
+        # ("PrintingsMH2 #236", CI 11-11), so the check waits for the printing itself
+        from playwright.sync_api import expect
+
+        expect(viewer.locator(".printrow .val")).to_have_text(re.compile(r"^[A-Z0-9]{2,6} #\w+"))
         viewer.locator("button", has_text="Add to deck").click()
         sheet = page.locator(".addsheet.open")
         sheet.wait_for(timeout=3000)

@@ -463,19 +463,24 @@
   }
   function evenRow(row) {
     row.classList.remove("even-rows");
+    Array.prototype.forEach.call(row.querySelectorAll(".even-span"), function (c) { c.classList.remove("even-span"); });
     if (getComputedStyle(row).display !== "flex") return;
     var items = rowItems(row);
     if (items.length < 3) return;
     var tops = items.map(function (c) { return Math.round(c.getBoundingClientRect().top); });
-    var firstTop = Math.min.apply(null, tops), lastTop = Math.max.apply(null, tops);
-    if (lastTop - firstTop < 4) return;
-    var lines = 1, seen = [firstTop];
-    tops.forEach(function (t) { if (seen.every(function (u) { return Math.abs(u - t) > 3; })) { seen.push(t); lines++; } });
-    var first = tops.filter(function (t) { return Math.abs(t - firstTop) <= 3; }).length;
-    var last = tops.filter(function (t) { return Math.abs(t - lastTop) <= 3; }).length;
-    if (last * 2 >= first) return;
-    row.style.setProperty("--even-cols", String(Math.ceil(items.length / lines)));
+    var seen = [];
+    tops.forEach(function (t) { if (seen.every(function (u) { return Math.abs(u - t) > 3; })) seen.push(t); });
+    var lines = seen.length;
+    if (lines < 2) return;
+    // a line holding one button beside a line of two or more: the one reads as left behind (the
+    // matrix's stranded check), whichever line it is on and however many lines there are
+    var counts = seen.map(function (u) { return tops.filter(function (t) { return Math.abs(t - u) <= 3; }).length; });
+    if (!(counts.some(function (n) { return n === 1; }) && counts.some(function (n) { return n >= 2; }))) return;
+    var cols = Math.ceil(items.length / lines);
+    row.style.setProperty("--even-cols", String(cols));
     row.classList.add("even-rows");
+    // an odd one over in the last line takes the whole line rather than half of it
+    if (items.length % cols === 1) items[items.length - 1].classList.add("even-span");
   }
   if (window.ResizeObserver) {
     var evenRO = new ResizeObserver(function (entries) {

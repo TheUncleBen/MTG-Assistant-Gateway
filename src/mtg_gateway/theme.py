@@ -313,6 +313,7 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
    same; details.dd only adds where its panel sits. */
 /* a row of buttons that would leave one alone on its last line, as an even grid (static/feedback.js) */
 .even-rows{display:grid!important;grid-template-columns:repeat(var(--even-cols,2),minmax(0,1fr))}
+.even-rows .even-span{grid-column:1 / -1}
 .even-rows > :is(a,button,summary,details,.btn):not(.sr-only),.even-rows > form > :is(button,.btn){width:100%;
   min-width:0;margin:0;justify-content:center;white-space:normal}
 details.dd{position:relative;margin:0}
