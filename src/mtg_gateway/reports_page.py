@@ -259,7 +259,7 @@ def won_cell(r: dict[str, Any]) -> tuple[str, str]:
     elif state in FORGE_NOT_RUN:
         text = "did not run"
     else:
-        text = "no Forge"
+        text = "no games"
     return text, ""
 
 
@@ -298,7 +298,8 @@ def row_html(r: dict[str, Any], apps: dict[str, str], *, now: float) -> str:
         f"{status_label(r.get('status'), cls='stin', research=r.get('research'))}</span>"
         + (f"<span class='deck'>{line}</span>" if line else "")
         + "<span class='sub'>"
-        f"<span class='kv'{tip}>Won <b>{esc(won)}</b></span>"
+        # "Won 62%" only for a rate; any other state is about the Forge games ("Forge no games")
+        f"<span class='kv'{tip}>{'Won' if won.endswith('%') else 'Forge'} <b>{esc(won)}</b></span>"
         f"<span class='kv'>{esc(kill)} <b>{esc(dmg)}</b></span>{app}{ran}</span></span>"
         f"{acts}</div>"
     )
