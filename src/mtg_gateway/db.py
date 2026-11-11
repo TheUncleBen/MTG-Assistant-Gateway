@@ -4075,7 +4075,10 @@ class Database:
             # the new result; a null mark is dropped (json_patch).
             c.execute(
                 "UPDATE proposals SET state = ?, "
-                "applied_at = CASE WHEN ? = 'applying' THEN applied_at ELSE ? END, "
+                # an apply cut off (a shutdown) keeps its claim time, as fail_interrupted_applies
+                # does, so the read-back after the restart finds it by when it ran
+                "applied_at = CASE WHEN ? = 'applying' OR (? = 'failed' AND ? = 'interrupted') "
+                "THEN applied_at ELSE ? END, "
                 "snapshot_id = COALESCE(?, snapshot_id), "
                 "result_json = CASE WHEN ? = 'pending' AND ? IS NOT NULL THEN json_patch(?, json_object("
                 "'no_backup_copy', CASE WHEN json_extract(result_json, '$.no_backup_copy') "
@@ -4084,6 +4087,7 @@ class Database:
                 (
                     state,
                     state,
+                    str((result or {}).get("error") or "") if isinstance(result, dict) else "",
                     int(time.time()) if state == "applied" else None,
                     snapshot_id,
                     state,
