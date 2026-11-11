@@ -127,7 +127,7 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
                 3,
                 "This app",
                 [
-                    _row("Scan with the app's camera", "camera", native="openCamera"),
+                    _row("Scan cards", "camera", native="openCamera"),
                     _row("Reload", "refresh", native="reload"),
                     _row("Open a copied link", "link", native="openCopiedLink"),
                     _row("Change gateway", "swap", native="changeGateway"),

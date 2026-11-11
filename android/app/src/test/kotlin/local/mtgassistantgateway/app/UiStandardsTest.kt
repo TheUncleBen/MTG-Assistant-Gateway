@@ -63,7 +63,7 @@ class UiStandardsTest {
     }
 
     @Test fun togglesSayTheirStateInWordsAndNeverTakeTheOrange() {
-        // Torch and Auto read "Torch: On" / "Torch: Off" and "Auto: On" / "Auto: Off" (NEW-WORDING 28)
+        // Flash (Ben, 2026-11-10; was Torch) and Auto read "Flash: On" / "Flash: Off" and "Auto: On" / "Auto: Off" (NEW-WORDING 28)
         val s = strings()
         val byId = elements("layout/camera_panel.xml", "ToggleButton").associateBy { it.getAttribute("android:id") }
         val torch = byId.getValue("@+id/torch_toggle")
@@ -72,8 +72,8 @@ class UiStandardsTest {
         assertEquals("@string/torch_state_off", torch.getAttribute("android:textOff"))
         assertEquals("@string/auto_state_on", auto.getAttribute("android:textOn"))
         assertEquals("@string/auto_state_off", auto.getAttribute("android:textOff"))
-        assertEquals("Torch: On", s.getValue("torch_state_on"))
-        assertEquals("Torch: Off", s.getValue("torch_state_off"))
+        assertEquals("Flash: On", s.getValue("torch_state_on"))
+        assertEquals("Flash: Off", s.getValue("torch_state_off"))
         assertEquals("Auto: On", s.getValue("auto_state_on"))
         assertEquals("Auto: Off", s.getValue("auto_state_off"))
         // the checked state is a tint with a bright outline, not the orange fill next to the orange Shoot

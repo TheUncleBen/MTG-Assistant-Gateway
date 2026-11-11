@@ -497,15 +497,20 @@ def _identity_exempt(commanders: set[str], card: DeckCard) -> bool:
     return False
 
 
+def _cards(qty: int) -> str:
+    """'1 card', '2 cards': the deck-size problem's count."""
+    return f"{qty} card" if qty == 1 else f"{qty} cards"
+
+
 def size_problem(fmt: str, qty: int) -> str | None:
     """The deck-size problem ``deck_checks`` would report for ``qty`` cards in format ``fmt`` (the
     deck proper), in the same words; None when the size fits or the format sets none."""
     fmt = "commander" if fmt == "edh" else fmt
     minimum = _MIN_SIZES.get(fmt) or (_MIN_SIZE if fmt in _CONSTRUCTED_FORMATS else None)
     if minimum is not None:
-        return None if qty >= minimum else f"deck has {qty} cards; {fmt} wants at least {minimum}"
+        return None if qty >= minimum else f"deck has {_cards(qty)}; {fmt} wants at least {minimum}"
     expected = _DECK_SIZES.get(fmt)
-    return None if expected is None or qty == expected else f"deck has {qty} cards; {fmt} wants {expected}"
+    return None if expected is None or qty == expected else f"deck has {_cards(qty)}; {fmt} wants {expected}"
 
 
 def _power_toughness(card: DeckCard) -> bool:
@@ -712,11 +717,11 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     if minimum:
         size: dict[str, Any] = {"actual": qty, "minimum": minimum, "ok": qty >= minimum}
         if not size["ok"]:
-            problems.append(f"deck has {qty} cards; {fmt} wants at least {minimum}")
+            problems.append(f"deck has {_cards(qty)}; {fmt} wants at least {minimum}")
     else:
         size = {"actual": qty, "expected": expected, "ok": expected is None or qty == expected}
         if not size["ok"]:
-            problems.append(f"deck has {qty} cards; {fmt} wants {expected}")
+            problems.append(f"deck has {_cards(qty)}; {fmt} wants {expected}")
 
     # The command zone.
     zone: dict[str, Any] = {"count": sum(c.quantity for c in commanders), "ok": True}

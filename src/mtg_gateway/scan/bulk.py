@@ -761,6 +761,70 @@ class PrintingsCopy:
     async def oracle_of(self, name: str) -> tuple[str, str] | None:
         return await asyncio.to_thread(self.oracle_of_now, name)
 
+    def picture_rows(self, page: int = 2000) -> Any:
+        """What the scanner's picture index (picture.py) needs of each paper printing with a
+        picture: (scryfall id, oracle id, illustration id, set code, collector number, ``small``
+        picture address). Art cards are left out (their picture is another card's). Read a page of
+        rows at a time, so the copy is never held long. Blocking: call it in a thread."""
+        last = 0
+        while self.enabled:
+            with self._lock:
+                try:
+                    conn = self._open()
+                    if conn is None:
+                        return
+                    zdict = self._meta.get("zdict") or b""
+                    got = conn.execute(
+                        "SELECT rowid, row FROM printings WHERE rowid > ? ORDER BY rowid LIMIT ?",
+                        (last, page),
+                    ).fetchall()
+                except (sqlite3.Error, ValueError) as exc:
+                    self._damaged(exc)
+                    return
+            if not got:
+                return
+            last = got[-1][0]
+            for _rowid, blob in got:
+                z = zlib.decompressobj(zdict=zdict)
+                try:
+                    card = json.loads(z.decompress(blob) + z.flush())
+                except (zlib.error, ValueError):
+                    continue
+                url = card.get("image_small")
+                if (
+                    not isinstance(url, str)
+                    or not url
+                    or card.get("digital")
+                    or card.get("paper") is False
+                    or card.get("layout") in NAMELESS_LAYOUTS
+                    or not card.get("scryfall_id")
+                ):
+                    continue
+                yield (
+                    str(card["scryfall_id"]),
+                    str(card.get("oracle_id") or ""),
+                    str(card.get("illustration_id") or ""),
+                    str(card.get("set") or "").lower(),
+                    str(card.get("collector_number") or "").lower(),
+                    url,
+                )
+
+    def printing_now(self, set_code: str, number: str) -> dict[str, Any] | None:
+        """One printing's row (the shape of ``summarize``, with its prices) by set and number;
+        None when the copy has no such printing. Blocking: call it in a thread."""
+        rows = self._reading(
+            lambda: self._rows(
+                "SELECT row FROM printings WHERE set_code = ? AND cn = ? LIMIT 1",
+                (str(set_code).lower(), str(number).lower()),
+            ),
+            [],
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        row.pop("_prices", None)
+        return row
+
     def card_names_now(self) -> list[str]:
         """Every card's name as Scryfall's card-name catalog lists it (no tokens, emblems or other
         extras), from the copy: the name catalog's stand-in while Scryfall can't send its own

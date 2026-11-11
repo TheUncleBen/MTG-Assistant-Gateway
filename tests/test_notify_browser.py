@@ -33,7 +33,7 @@ window.MtgNative.notificationsState = function () {
 """
 
 MENU = (
-    "<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
+    "<button type='button' data-native='openCamera'>Scan cards</button>"
     "<button type='button' data-native='reload'>Reload</button>"
     "<button type='button' data-native='changeGateway'>Change gateway</button>"
 )
@@ -59,7 +59,7 @@ def test_each_app_button_reaches_the_app() -> None:
     with sync_playwright() as p:
         browser, page = _page(p, exe, MENU, "off")
         try:
-            for label in ("Scan with the app's camera", "Reload", "Change gateway"):
+            for label in ("Scan cards", "Reload", "Change gateway"):
                 page.get_by_role("button", name=label).click()
             assert page.evaluate("window.calls") == ["openCamera", "reload", "changeGateway"]
         finally:

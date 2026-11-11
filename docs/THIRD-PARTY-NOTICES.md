@@ -91,6 +91,15 @@ the Tesseract English language model (Apache-2.0), fetched at image build time
 by `scripts/fetch_ocr_assets.py`; their licence files are stored next to the
 assets under `src/mtg_gateway/scan/static/vendor/`.
 
+## Picture model (scan)
+
+The gateway finds scanned cards by their picture with Google's MediaPipe image embedder model
+`mobilenet_v3_small.tflite` (Apache License 2.0, as its own metadata states), fetched at image build
+time by `scripts/fetch_ocr_assets.py` (SHA-256 checked) into `src/mtg_gateway/scan/model/`. It
+runs with Google's **LiteRT** runtime, the `ai-edge-litert` package (Apache License 2.0), and
+**NumPy** (BSD 3-Clause, with parts under 0BSD, MIT, Zlib and CC0-1.0, as its package metadata
+states; see the licence files in the NumPy distribution installed in the image).
+
 ## Android app
 
 The Android app (`android/`, and the APK the gateway image and GitHub

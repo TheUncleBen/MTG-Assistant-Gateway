@@ -15,6 +15,7 @@ build/
 
 # Self-hosted OCR assets, fetched by scripts/fetch_ocr_assets.py (not committed)
 src/mtg_gateway/scan/static/vendor/
+src/mtg_gateway/scan/model/
 
 # The Android APK the CI release build drops here before building the image (not committed)
 docker/app-dist/*

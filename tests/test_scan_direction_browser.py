@@ -247,8 +247,11 @@ def test_in_the_app_the_shutter_and_auto_open_the_phone_camera(server: Server, a
             assert page.evaluate("() => window.__calls") is None
             browser.close()
             return
-        # The app: the page's own camera never starts; the shutter is the phone camera.
+        # The app: the page's own camera never starts; the shutter is the phone camera. Until the
+        # gateway's picture index is ready (0.7.47) the page tells the app it isn't the scanner, so
+        # the app keeps its own camera panel with the torch, zoom and exposure (MainActivity.startScan).
         assert opened == 0 and page.locator("#camera video").count() == 0
+        assert page.evaluate("() => window.__scan.ownCamera") is False
         assert page.locator("#phone-camera").count() == 0  # the shutter does its job now
         shutter = page.locator("#shutter")
         assert shutter.get_attribute("aria-label") == "Scan with the phone camera"

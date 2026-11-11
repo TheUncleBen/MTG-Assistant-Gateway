@@ -19,7 +19,7 @@
     <string name="setup_bad_http">The address must start with https://.</string>
     <string name="setup_bad_userinfo">Leave the user name and password out of the address.</string>
 
-    <string name="menu_scan">Scan with the app\'s camera</string>
+    <string name="menu_scan">Scan cards</string>
     <string name="menu_reload">Reload</string>
     <string name="menu_gateway">Change gateway</string>
     <string name="menu_update">Check for app updates</string>
@@ -89,23 +89,23 @@
     <string name="camera_title">Scan a card</string>
     <string name="shoot">Shoot</string>
     <string name="done">Done</string>
-    <string name="torch">Torch</string>
-    <!-- The Torch and Auto toggles say their state in words (NEW-WORDING 28). -->
-    <string name="torch_state_on">Torch: On</string>
-    <string name="torch_state_off">Torch: Off</string>
+    <string name="torch">Flash</string>
+    <!-- The Flash and Auto toggles say their state in words (NEW-WORDING 28). -->
+    <string name="torch_state_on">Flash: On</string>
+    <string name="torch_state_off">Flash: Off</string>
     <string name="auto_state_on">Auto: On</string>
     <string name="auto_state_off">Auto: Off</string>
-    <string name="torch_level">Torch %1$d of %2$d</string>
-    <string name="torch_strength">Torch brightness</string>
+    <string name="torch_level">Flash %1$d of %2$d</string>
+    <string name="torch_strength">Flash brightness</string>
     <string name="zoom">Zoom</string>
     <string name="exposure">Exposure</string>
     <string name="camera_none">No back camera found.</string>
     <!-- The CameraX error code goes to the log (CameraPanel), not into the message. -->
     <string name="camera_error">The camera stopped working. Close it and try again.</string>
     <string name="status_no_flash">Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
-    <string name="status_strength">Torch brightness is adjustable on this phone. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
-    <string name="status_no_strength_old">Torch brightness control needs Android 15. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
-    <string name="status_no_strength_device">This camera does not report adjustable torch brightness. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
+    <string name="status_strength">Flash brightness is adjustable on this phone. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
+    <string name="status_no_strength_old">Flash brightness control needs Android 15. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
+    <string name="status_no_strength_device">This camera does not report adjustable flash brightness. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
     <string name="status_focusing">Focusing…</string>
     <string name="status_capturing">Taking the picture…</string>
     <string name="status_reading">Reading the card…</string>
@@ -113,7 +113,7 @@
     <string name="auto_mode">Auto</string>
     <string name="undo">Undo</string>
     <string name="save_photo">Save this photo</string>
-    <string name="scan_photo_saved">Photo saved in Pictures › %1$s. Send it to whoever runs your gateway, so they can see why the card wasn’t found.</string>
+    <string name="scan_photo_saved">Photo saved in Pictures › %1$s. Update the gateway to 0.7.47 or later to keep missed pictures there for its admin.</string>
     <string name="scan_photo_not_saved">The photo couldn’t be saved. Check the phone has room and try again.</string>
     <string name="auto_on">Auto: hold each card in the dashed box until it is added.</string>
     <string name="auto_off">Auto off. Tap Shoot for one card at a time.</string>

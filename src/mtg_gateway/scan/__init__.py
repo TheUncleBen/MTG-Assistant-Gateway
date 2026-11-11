@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from .art import ArtIndex, ArtSettings
 from .bulk import PrintingsCopy
+from .picture import PictureIndex
 from .routes import add_scan_routes
 from .scryfall import ScryfallClient
 from .service import ScanService, ScanThresholds
@@ -84,6 +85,15 @@ def add_scan(server: MCPServer, state: AppState, *, scryfall: ScryfallClient | N
         service.copy = PrintingsCopy(data_dir, lambda: service.scryfall, enabled)
         if live is not None:
             live.on_change.append(service.copy.setting_changed)
+        # every printing's artwork, for finding a card by its picture (picture.py): built in the
+        # background from the copy, off with the artwork setting or the copy
+        copy = service.copy
+        service.pictures = PictureIndex(
+            data_dir,
+            copy,
+            enabled=lambda: bool(getattr(st, "scan_art_enabled", True)) and copy.enabled,
+            user_agent=st.archidekt_user_agent,
+        )
     state.scan = service  # type: ignore[attr-defined]
     # proposals that add a card a scan matched from a misread name say so (decks._save_proposal)
     state.decks.guessed_names = service.guessed_names  # type: ignore[attr-defined]

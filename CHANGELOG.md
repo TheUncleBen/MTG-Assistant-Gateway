@@ -17,7 +17,7 @@ placeholders showed, and no blue links. The Binder is one page for every card yo
 with lists for both, Select for bulk changes, price alerts that follow your own defaults, and no
 watch limit. Every alert is in one place: the bell opens Alerts, where each one can be read,
 marked read, dismissed or cleared, on every device at once, and each push says at a glance
-what it is ("Price drop · Sol Ring").
+what it is ("Price drop · Sol Ring"). The scanner finds cards by their picture while you hold them up, the same in the browser and the app, and lets you swap the printing, finish or card before it adds one.
 
 ### Upgrade notes
 - **The database goes to schema 24** at the first start (the gateway saves a copy first, as in
@@ -37,9 +37,51 @@ what it is ("Price drop · Sol Ring").
   and Mark read on each push. An older app still shows the pushes, without these.
 - **The research image is `1.3.2-mag8`.** The example stack and compose files name it; change it
   if you pinned the image yourself.
+- **The scanner learns every printing's picture once, in the background.** A few minutes after
+  the first start the gateway fetches Scryfall's small picture of each paper printing (about
+  100,000 pictures, roughly 1.5 GB in all, about 8 a second, so several hours) and keeps a
+  summary of each artwork in the data folder, `<MTG_DATA_DIR>/scan-pictures.sqlite` (about
+  150 MB for 100,000 printings). After that it only fetches new printings. Until the first round
+  is done the scanner reads card titles as before; Admin › Card scanner shows how far it is. It
+  uses the daily printings copy, so **Keep a local copy of card printings** (Settings, General)
+  must stay on, and `MTG_SCAN_ART_ENABLED=false` turns it off. If you restrict outbound traffic,
+  allow `cards.scryfall.io`. The summary is not part of the backup (Scryfall gives it again);
+  deleting the file is safe and starts the fetching over.
+- **About 50 to 60 MB more memory** (measured on an x86 machine, not yet on a Pi): the summary
+  in memory (about 27 MB for 100,000 printings) and the picture model with its runtime (about
+  20 MB, loaded at the first scan). The default `MTG_MEMORY_LIMIT` of 256 MB stays the limit;
+  check the gateway's memory on your own setup before lowering it.
+- The image gains Google's MediaPipe image model (`mobilenet_v3_small.tflite`, about 4 MB,
+  Apache-2.0) and the LiteRT runtime that runs it, fetched and checked at build time with the text
+  recognition files. The missed pictures table is created at
+  start, outside the schema steps.
+- The Android app opens the page's own scanner once the gateway has learned the card pictures.
+  Until then, and in an app from before 0.7.47, the app's own camera panel scans as before.
 - No new environment variables.
 
 ### Changed
+- **The scanner finds a card by its picture, while you hold it up.** Hold a card inside the
+  frame and keep it still for a moment: the page sends the straightened card to the gateway,
+  which compares its artwork with every printing's (in a test on 8,474 printings with made-up
+  phone photos, the right card 99 times in 100; real phones still to be measured). No title
+  reading, no button to press, and the same scanner in the browser and the Android app (the big
+  button that opened a separate camera is gone once the pictures are learned). Each card found is
+  added at once; the bar under the camera shows it, with **Change** (the printing, the finish,
+  the count, or another card: "Not this card" lists the next closest ones) and **Undo**. A card
+  the gateway isn't sure of is added too, marked **Check it**. Printings that share one artwork
+  (reprints) are told apart by the set and number at the bottom left of the card, or the set
+  lock; when neither can, the card is kept by name and marked **Check it**. The camera takes the
+  screen: only the count, **Flash** (was Torch), **Camera settings**, **Scan area** and zoom sit
+  on its corners. Zoom chips (where the camera reports a zoom range) and two fingers on the
+  viewfinder zoom; **Scan area** moves and resizes the frame, kept on the device. Camera settings
+  holds brightness (where the camera reports it), **Saturation** (applied by the page, kept on
+  the device), Set, Foil, a photo from your pictures, and typing a name. Title reading stays for
+  photos the picture can't place.
+- **A card the scanner can't find can be kept for the admin** ("Keep this picture for the
+  admin") instead of a message asking you to send photos to whoever runs the gateway. The new
+  **Admin › Card scanner** page shows the pictures kept, who kept them and when, with Delete, and
+  how far the picture index has got. Pictures are deleted after 30 days, at most 500 are kept,
+  one member can keep 50 a day, and they go with a member's data when it is deleted.
 - **A new deck is made in seconds.** Applying a new deck looked its cards up on Archidekt one at a
   time, which took over two minutes for a 100-card deck. The printings now come from one card
   lookup and one Archidekt request per 60 cards; a card those miss is still looked up on its own.
@@ -200,6 +242,11 @@ what it is ("Price drop · Sol Ring").
   card's back face or second half ("Insectile Aberration", "Ice") finds its card. An exact lookup
   with a set code keeps that set.
 - Anything a page marks as hidden stays hidden (the deck header's "Est unknown" showed anyway).
+- A scan session an assistant saves keeps each card's foil ("*F*"), so a deck or binder made
+  from it adds the foil copy.
+- A deck made or edited from a scan session says which scanned cards were left out because no
+  card was found for them yet.
+- A deck-size note says "1 card", not "1 cards".
 
 ## [0.7.46] - 2026-10-28
 

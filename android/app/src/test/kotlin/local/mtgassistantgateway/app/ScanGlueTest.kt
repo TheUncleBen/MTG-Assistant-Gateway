@@ -147,11 +147,18 @@ class ScanGlueTest {
     }
 
     @Test fun oneLinersAreExpressions() {
-        for (js in listOf(ScanGlue.READY, ScanGlue.BEGIN, ScanGlue.END, ScanGlue.UNDO, ScanGlue.setContinuous(true))) {
+        val all = listOf(
+            ScanGlue.READY, ScanGlue.OWN_CAMERA, ScanGlue.SHOW_CAMERA, ScanGlue.BEGIN, ScanGlue.END, ScanGlue.UNDO,
+            ScanGlue.setContinuous(true),
+        )
+        for (js in all) {
             assertTrue(js, js.startsWith("(function(){"))
             assertTrue(js, js.endsWith("})();"))
         }
         assertTrue(ScanGlue.setContinuous(true).contains("setContinuous(true)"))
         assertTrue(ScanGlue.setContinuous(false).contains("setContinuous(false)"))
+        // a 0.7.47 page says it is the scanner itself; the app then opens no camera panel over it
+        assertTrue(ScanGlue.OWN_CAMERA.contains("window.__scan.ownCamera"))
+        assertTrue(ScanGlue.SHOW_CAMERA.contains("showTab('camera')"))
     }
 }

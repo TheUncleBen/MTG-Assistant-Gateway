@@ -14,7 +14,7 @@ deployment recipes for setups I don't run are all welcome.
 
 ## Setting up
 
-You need Python 3.11 or newer (CI runs the suite on 3.12 and also checks that the code compiles and imports on 3.11) and, for the browser tests,
+You need Python 3.11 or 3.12 (the card scanner's picture model, ai-edge-litert, has no wheels for newer versions yet; CI runs the suite on 3.12 and also checks that the code compiles and imports on 3.11) and, for the browser tests,
 Chromium through Playwright.
 
 ```bash

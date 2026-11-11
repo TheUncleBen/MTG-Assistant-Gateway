@@ -450,6 +450,25 @@ async def test_new_deck_size_and_fuzzy_scan_warnings(manual: Stack) -> None:
     assert p["ok"] and any("100" in w for w in p.get("warnings", [])), p
 
 
+async def test_a_scan_session_with_unfound_cards_says_they_are_left_out(manual: Stack) -> None:
+    """Live test 11-10: a scan session's unresolved names were dropped from a new deck or an edit
+    without a word, so the assistant could not tell the user that a scanned card was missing."""
+    token = await linked_user(manual)
+    saved = structured(
+        await call(
+            manual.h, token, "save_scan_session", {"name": "Gaps", "text": "1 Sol Ring\n1 Notacard Xyzzy"}
+        )
+    )
+    assert saved["unresolved"] == 1, saved
+    checked = structured(
+        await call(manual.h, token, "check_new_deck", {"name": "From scan", "scan_session": "Gaps"})
+    )
+    left_out = [w for w in checked["warnings"] if "Notacard Xyzzy" in w]
+    assert left_out and "left out" in left_out[0] and "ask the user" in left_out[0], checked["warnings"]
+    # one card is "1 card", not "1 cards"
+    assert "deck has 1 card; commander wants 100" in checked["warnings"], checked["warnings"]
+
+
 # -- collection ---------------------------------------------------------------------------------
 async def test_the_assistant_applies_its_own_collection_proposal_in_auto_mode(stack: Stack) -> None:
     token = await linked_user(stack)
