@@ -418,7 +418,7 @@ def upstream_refusal(result: types.CallToolResult) -> types.CallToolResult:
         "error": "unavailable",
         "error_code": "UPSTREAM_ERROR",
         "message": f"{words} This lookup returned nothing, and nothing was changed.",
-        "next_step": "Try again in a few minutes. Do not answer from memory in its place.",
+        "next_step": "Try again later. Do not answer from memory in its place.",
     }
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(out, separators=(",", ":")))],
