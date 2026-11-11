@@ -13,12 +13,61 @@ Proposal cards in Claude and ChatGPT no longer fill the chat: only the newest ca
 that still waits draws in full. Signing in to the Android app comes back to the app by itself
 after Continue, and every page in the app can be pulled down to refresh. Every page reads as one app on every screen: centred on a laptop
 and a wide desktop, one column where two left holes, plain words where program values or
-placeholders showed, and no blue links.
+placeholders showed, and no blue links. The Binder is one page for every card you own or want,
+with lists for both, Select for bulk changes, price alerts that follow your own defaults, and no
+watch limit. Every alert is in one place: the bell opens Alerts, where each one can be read,
+marked read, dismissed or cleared, on every device at once, and each push says at a glance
+what it is ("Price drop · Sol Ring").
 
 ### Upgrade notes
-- Nothing to do: no new settings, environment variables or database steps.
+- **The database goes to schema 24** at the first start (the gateway saves a copy first, as in
+  [docs/UPGRADING.md](docs/UPGRADING.md)): lists can hold cards you own, each watched card
+  knows whether it follows your price alert defaults, and each alert knows its type and whether
+  it was read or dismissed. Alerts already seen in the bell count as read. Cards whose alerts match the default they
+  were given follow the new defaults (10% under and 20% over the price when added); cards with
+  alerts of their own keep them.
+- **The card watch limit is off by default.** The **Cards one member may watch** setting
+  (Settings › Watchlists and prices) now means "no limit" at 0 and is 0 unless you saved a
+  number; a number you saved stays. To turn watching
+  off, use the **Watchlists** switch.
+- **Members choose where each type of alert goes** under Account › Push notifications: Off, Alerts
+  only, or Alerts and push. What they had unticked before stays out of their pushes. Every type
+  is pushed by default except changes an assistant applied without asking (Alerts only).
+- **Members update the Android app** for a notification category per type, grouped messages
+  and Mark read on each push. An older app still shows the pushes, without these.
+- No new environment variables.
 
 ### Changed
+- **Alerts is the one place for every alert.** The bell and Alerts on the rail open one list,
+  newest first: changes waiting for you, changes applied for you, finished reports, price
+  alerts, Archidekt's alerts, a new assistant, your summary and, for admins, a newer release or
+  a failed backup. Each row names its type, opens its page and is marked read there; its ⋮ (or
+  a right-click, or a press and hold) marks it read or unread or dismisses it, and **Mark all
+  read** and **Clear all** act on every row, with Undo. Read and dismissed follow you to every
+  device, and a push you read or dismissed anywhere leaves your phones. Type, Show (All or
+  Unread) and search narrow the list. Assistants read the gateway's own alerts too.
+- **Each push says what it is.** Titles start with the type and name the deck or card ("Review ·
+  Atraxa", "Price drop · Sol Ring", "Archidekt · Forum reply", "Report ready · Atraxa"). On
+  Android, Waiting for you and New assistant pop up, summaries are silent, and the rest make a
+  sound without popping up; each type can be changed in Android's settings for the app.
+- **Home's notices can be dismissed for good.** A newly connected assistant's notice and the
+  admin's newer-release notice have a ×, kept on every device. Needs you has one row for new
+  alerts in place of separate price and Archidekt rows. A page's "Saved." notice is gone after
+  a reload.
+- **One Binder.** Binder opens one page for every card you own or want: All cards, Owned, Want,
+  Price alerts and your lists beside one list of rows (side by side on a computer or an open
+  Fold, one at a time on a phone). A printing you own and watch is one row with its price, its
+  move over a week, the copies you own, its alert prices and its list. **Select** ticks rows for
+  Price alerts, Add to list, Watch, Stop watching, Tag on Archidekt (adds a binder tag; the
+  others stay) and Remove from binder, each with Undo. The Archidekt collection page, Archidekt
+  lists, Decks I watch and Watch settings are under More, and their pages lead back with
+  "‹ Binder".
+- **Lists hold cards you own and cards you want.** Archidekt's binder tags stay Archidekt's and
+  are a filter on the Binder.
+- **Price alerts by default: 10% under and 20% over the price when added, moves under $0.50
+  ignored**, so a cheap card does not alert on a few cents. **Watch settings** shows what your
+  defaults mean in dollars, and cards that use them change when you save new ones.
+- **No watch limit by default**; the owner can still set one.
 - **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
   shows one line until it has checked that it is the newest card of a change that still waits.
   Only that card draws its list, pictures and buttons; a card for a change that was updated,
@@ -114,6 +163,8 @@ placeholders showed, and no blue links.
 - Deck settings shows its list of sections only when there is room for it on both sides of the
   settings. In a narrower window or at large text the settings are one centred column, instead of
   being pushed to the right by the list.
+- The Android app no longer loses a push sent while its connection to the gateway had gone
+  quiet before the first push arrived: it connects again from where that connection stopped.
 - At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
   cover the sheet's last control (the card size).
 - Long names break between their parts instead of inside a word (a member's name, a printing's

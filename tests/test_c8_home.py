@@ -1,6 +1,7 @@
 """Decision C8 (0.7.46), Home: recent decks and what needs you, not a second copy of the
-navigation. Needs you lists proposals waiting, Forge tests running, Archidekt alerts (filled
-by static/bell.js) and watched cards past a price alert, each only when there is one; the
+navigation. Needs you lists proposals waiting, Forge tests running and one row for every new alert
+(filled by static/bell.js: price alerts, reports, Archidekt's and the rest since 0.7.47), each only
+when there is one; the
 Find a deck form and the Quick access tiles are gone; Connect an AI assistant shows only while
 no assistant is connected; the site search suggests the member's own decks."""
 
@@ -45,14 +46,14 @@ RUNNING = [
 
 
 def test_needs_you_shows_only_what_waits() -> None:
-    nothing = home.needs_you_html(pending=0, board=[], running=[], watch_hits=[], linked=False, now=NOW)
-    assert nothing == ""
+    nothing = home.needs_you_html(pending=0, board=[], running=[], linked=False, now=NOW)
+    # nothing waits: only the alerts row, and the whole section hidden until bell.js counts one
+    assert nothing.startswith("<section class='needs' aria-labelledby='needs-h' data-bell-section hidden>")
     rows = [{"deck_id": "42", "created_at": NOW - 3600, "expires_at": NOW + 7200, "status": "pending"}]
     out = home.needs_you_html(
         pending=1,
         board=rows,
         running=RUNNING,
-        watch_hits=["Mana Crypt is below your $150.00"],
         linked=True,
         now=NOW,
     )
@@ -60,9 +61,9 @@ def test_needs_you_shows_only_what_waits() -> None:
     assert "<li class=accent>" in out and "<b>1 proposal</b> waiting for you" in out
     assert "<span>1 on 1 deck</span><span>oldest 1 h</span><span>next expires in 2 h</span>" in out
     assert "href='/proposals'" in out and ">Review it</a>" in out and out.count("btn-primary") == 1
-    two = home.needs_you_html(pending=2, board=rows, running=[], watch_hits=[], linked=True, now=NOW)
+    two = home.needs_you_html(pending=2, board=rows, running=[], linked=True, now=NOW)
     assert "<b>2 proposals</b> waiting for you" in two and ">Review them</a>" in two
-    plain = home.needs_you_html(pending=1, board=rows, running=[], watch_hits=[], linked=False, now=NOW)
+    plain = home.needs_you_html(pending=1, board=rows, running=[], linked=False, now=NOW)
     assert ">Review it</a>" in plain and "btn-primary" not in plain  # Link Archidekt keeps the orange
     # several tests going: each deck and how far it is, the animated spinner, the Reports list
     assert (
@@ -76,16 +77,13 @@ def test_needs_you_shows_only_what_waits() -> None:
         "<li data-bell-row hidden>" in out
         and "<span data-bell-n>0</span> new <span data-bell-word>alerts</span>" in out
     )
-    assert "<b>1 watched card</b> past a price alert" in out and "Mana Crypt is below your $150.00" in out
-    # not linked: no alerts row (the bell reads Archidekt)
-    one = home.needs_you_html(pending=0, board=[], running=RUNNING[:1], watch_hits=[], linked=False, now=NOW)
-    assert "data-bell-row" not in one
+    assert "watched card" not in out  # price alerts are counted in the alerts row (0.7.47)
+    # not linked: the alerts row still counts the gateway's own alerts
+    one = home.needs_you_html(pending=0, board=[], running=RUNNING[:1], linked=False, now=NOW)
+    assert "<li data-bell-row hidden>" in one
     # one test: its own words and the way to that report, not the list
     assert "<b>1 test running</b>: Forge has played 2 of 5 games." in one and "ui-spin" in one
     assert "href='/history/reports/rep_a'" in one and ">Open the report</a>" in one and "/reports'" not in one
-    assert "data-bell-row" not in home.needs_you_html(
-        pending=0, board=[], running=RUNNING[:1], watch_hits=[], linked=False, now=NOW
-    )
     # with something else waiting, the section shows from the start
     assert "<section class='needs' aria-labelledby='needs-h'>" in out
 
@@ -94,7 +92,7 @@ def test_no_needs_you_heading_when_nothing_waits() -> None:
     """Review F8: a linked member with nothing waiting got a "Needs you" heading over nothing (the
     alerts row is hidden until bell.js counts above zero). With only that row, the whole section
     starts hidden and bell.js shows it with the row."""
-    only_bell = home.needs_you_html(pending=0, board=[], running=[], watch_hits=[], linked=True, now=NOW)
+    only_bell = home.needs_you_html(pending=0, board=[], running=[], linked=True, now=NOW)
     assert only_bell.startswith("<section class='needs' aria-labelledby='needs-h' data-bell-section hidden>")
     assert "<li data-bell-row hidden>" in only_bell
     js = (Path(home.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
@@ -116,7 +114,7 @@ def test_the_needs_you_section_follows_the_alert_count_in_a_browser() -> None:
     exe = _chromium_path()
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
-    section = home.needs_you_html(pending=0, board=[], running=[], watch_hits=[], linked=True, now=NOW)
+    section = home.needs_you_html(pending=0, board=[], running=[], linked=True, now=NOW)
     bell_js = (Path(home.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
@@ -148,7 +146,8 @@ def test_home_is_recent_decks_and_needs_you_not_the_navigation_again(server: Ser
     assert "In the same order as the navigation" not in page
     # not linked: Link Archidekt is the one orange button, no deck panel, nothing needs them yet
     assert page.count("btn-primary") == 1 and "Link Archidekt</a>" in page
-    assert "<h2>My decks</h2>" not in page and "id='needs-h'" not in page
+    assert "<h2>My decks</h2>" not in page
+    assert "<section class='needs' aria-labelledby='needs-h' data-bell-section hidden>" in page
     # no assistant connected: the connection details are offered; the row says what it is for
     # and the connector address sits inside with Copy, not as the row's text (0.7.46 audit QG-20)
     assert "<details class='connect panel'>" in page and "Guided setup" in page

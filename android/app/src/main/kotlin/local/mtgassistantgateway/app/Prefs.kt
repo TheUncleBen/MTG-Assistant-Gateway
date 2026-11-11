@@ -70,7 +70,7 @@ class Prefs(context: Context) {
         get() = p.getString(KEY_PUSH, null)
         set(value) {
             p.edit().apply {
-                if (value == null) remove(KEY_PUSH).remove(KEY_PUSH_LAST).remove(KEY_PUSH_SEEN) else putString(KEY_PUSH, value)
+                if (value == null) remove(KEY_PUSH).remove(KEY_PUSH_LAST).remove(KEY_PUSH_TIME).remove(KEY_PUSH_SEEN) else putString(KEY_PUSH, value)
             }.apply()
         }
 
@@ -79,6 +79,13 @@ class Prefs(context: Context) {
         get() = p.getString(KEY_PUSH_LAST, null)
         set(value) {
             p.edit().putString(KEY_PUSH_LAST, value).apply()
+        }
+
+    /** The gateway's time on the last stream line ([Push.lineTime]): `since` before any message. */
+    var pushLastTime: Long?
+        get() = p.getLong(KEY_PUSH_TIME, 0L).takeIf { it > 0L }
+        set(value) {
+            p.edit().apply { if (value == null) remove(KEY_PUSH_TIME) else putLong(KEY_PUSH_TIME, value) }.apply()
         }
 
     /** The ids of the messages already shown ([Push.Seen]). */
@@ -114,6 +121,7 @@ class Prefs(context: Context) {
         private const val KEY_UPDATE_SNOOZED_AT = "update_snoozed_at"
         private const val KEY_PUSH = "push_key"
         private const val KEY_PUSH_LAST = "push_last_id"
+        private const val KEY_PUSH_TIME = "push_last_time"
         private const val KEY_PUSH_SEEN = "push_seen"
         private const val KEY_BATTERY_ASKED = "battery_asked"
         private const val KEY_NOTIFY_ASKED = "notify_asked"

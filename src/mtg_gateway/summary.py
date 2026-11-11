@@ -15,6 +15,7 @@ import datetime as _dt
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
+from . import notify
 from . import prices as _prices
 from .forge import FINAL_STATES
 from .prices import day_of, days_before, money, pct_change
@@ -144,7 +145,7 @@ class Summaries:
         return await self.notifier.send(
             sub,
             "summary",
-            f"Your {'daily' if summary['period'] == 'day' else 'weekly'} summary",
+            notify.push_title("summary", "Today" if summary["period"] == "day" else "This week"),
             short_text(summary),
             "/account/details/notifications#summary",
         )

@@ -22,7 +22,7 @@ from .waits import bell_read, expect, form_aged, settled
 TEXT = (
     ".acc h2, .acc .ui-row .lab, .acc .ui-row .help, .acc .ui-row label, .acc .btn, .acc button, "
     ".acc #archidekt-only p, .acc .muted, .acc .notice, .col-vis .t, .col-vis .btn, .col-vis button, "
-    ".mtgbox h2, .mtgbox p, .mtgbox .acts button, .bell-row .t, .bell-row .s, .bell-badge, .hq .wdg .lab, "
+    ".mtgbox h2, .mtgbox p, .mtgbox .acts button, .al-title, .al-text, .al-meta, .bell-badge, .hq .wdg .lab, "
     ".hq .wdg .big, .hq .wdg .det"
 )
 NOTES = [
@@ -114,7 +114,7 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
                 sizes = _targets(
                     page,
                     ".acc .ui-row .switch, .acc .ui-row .msel-btn, .acc .btn, .acc button:not(.inline), "
-                    ".col-vis .btn, .col-vis button, .topbar .bell, .tabbar a.bell, .bell-row, "
+                    ".col-vis .btn, .col-vis button, .topbar .bell, .tabbar a.bell, .al-main, "
                     ".hq .wdg .go .btn, .yhub .yrow, .yhub details.yrow > summary, .yhub .ysignout button",
                 )
                 assert sizes and min(sizes) >= 43.5, (path, sizes)
@@ -197,15 +197,15 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         page.locator(".topbar .bell").click()
         box = page.locator(".mtgbox-scrim .mtgbox")
         box.wait_for(state="visible")
-        page.locator(".bell-list").wait_for(state="visible", timeout=4000)
-        rows = page.locator(".bell-row")
-        assert rows.count() == 4 and page.locator(".bell-row.new").count() == 3
-        assert page.locator(".bell-badge").inner_text() == "3 new"
-        assert page.locator(".bell-row[href='/decks/42']").count() == 1
-        assert "The count clears when you open this list." in box.inner_text()
+        page.locator(".mtgbox .al-list").wait_for(state="visible", timeout=4000)
+        rows = page.locator(".mtgbox .al-row")
+        assert rows.count() == 4 and page.locator(".mtgbox .al-row.unread").count() == 3
+        assert page.locator(".bell-badge").inner_text() == "3 unread"
+        assert "Deck comment" in box.inner_text()  # the type word above, the alert's own title
+        assert "Open all alerts to filter them or clear them." in box.inner_text()
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
-        assert min(_targets(page, ".bell-row, .mtgbox .acts button, .mtgbox .acts .btn")) >= 43.5
+        assert min(_targets(page, ".mtgbox .al-main, .mtgbox .al-menu > summary, .mtgbox .acts .btn")) >= 43.5
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert not badge.is_visible()
@@ -220,9 +220,9 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         page.set_viewport_size({"width": 1366, "height": 860})
         page.goto(f"{server.base}/", wait_until="networkidle")
         page.locator("[data-bell-row]").wait_for(state="visible", timeout=4000)
-        assert page.locator("[data-bell-row] .what").inner_text() == "1 new alert on Archidekt"
+        assert page.locator("[data-bell-row] .what").inner_text() == "1 new alert"
         page.locator("[data-bell-open]").click()
-        page.locator(".bell-list").wait_for(state="visible", timeout=4000)
+        page.locator(".mtgbox .al-list").wait_for(state="visible", timeout=4000)
         page.keyboard.press("Escape")
         browser.close()
     assert errors == []

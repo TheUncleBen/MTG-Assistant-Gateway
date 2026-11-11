@@ -1505,6 +1505,12 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
 UI_CSS = """
 /* width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
+/* One Binder (0.7.47): "‹ Binder" back on the pages that open from the Binder page */
+.bn-up{margin:0}
+.bn-back{display:inline-flex;align-items:center;gap:.2rem;min-height:44px;color:var(--orange-text);font-weight:700;
+  text-decoration:none}
+.bn-back svg.i{width:18px;height:18px}
+.bn-up + .ui-head h1 .cn{font-size:.55em;font-weight:600;color:var(--text-muted);vertical-align:middle}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
 /* its parts never shrink under their words: when they are wider than the screen (large text on a
@@ -2354,29 +2360,77 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 """
 CSS += BOX_CSS
 
-# The bell's list (profile_page.py, static/bell.js): in the box on every page and on the
-# /notifications page. Unseen rows are tinted; a row links to its target where there is one.
+# The Alerts page and the bell's box (alerts_page.py, static/bell.js): one row an alert, its type's
+# icon and colour, its type and time on a small line, the title in bold and its words; unread rows
+# carry a dot and a tint; each kept row ends with its ⋮ (Mark read or unread, Dismiss).
 BELL_CSS = """
-.bell-list{list-style:none;margin:0;padding:0}
-.bell-part{font-size:.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
-  margin:.9rem 0 .2rem}
-.bell-part:first-child{margin-top:0}
-.bell-row{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.45rem 0;
-  border-top:1px solid var(--border-soft);text-decoration:none;color:var(--text)}
-.bell-list > li:first-child > .bell-row{border-top:0}
-.bell-row i{width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:grid;
-  place-items:center;font-style:normal;font-weight:900;flex:none;color:var(--text)}
-.bell-row .t{flex:1;min-width:0;overflow-wrap:anywhere}
-.bell-row .t .s{display:block;color:var(--text-muted);font-size:.86rem}
-.bell-row.new{background:var(--orange-tint);margin:0 -16px;padding:.45rem 16px}
-a.bell-row:hover .t{text-decoration:underline}
-.bell-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;
+.al-list{list-style:none;margin:0;padding:0}
+.al-row{position:relative;display:flex;align-items:stretch;gap:.25rem;
+  border-top:1px solid var(--border-soft);-webkit-touch-callout:none}
+.al-list > .al-row:first-child{border-top:0}
+.al-row.unread{background:var(--orange-tint)}
+.al-main{flex:1 1 auto;min-width:0;display:flex;gap:.75rem;align-items:flex-start;
+  padding:.7rem .5rem .7rem .75rem;color:var(--text);text-decoration:none;min-height:44px}
+.al-main:hover .al-title{text-decoration:underline}
+.al-ic{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;
+  background:var(--surface-2);color:var(--text)}
+.al-ic svg.i{width:20px;height:20px}
+.al-ic.k-waiting{background:var(--orange-tint);color:var(--orange-text)}
+.al-ic.k-price{background:var(--green-tint);color:var(--green-text)}
+.al-ic.k-report{background:var(--blue-tint);color:var(--blue-text)}
+.al-ic.k-account{background:var(--red-tint);color:var(--red-text)}
+.al-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:.1rem;overflow-wrap:anywhere}
+.al-meta{display:flex;flex-wrap:wrap;column-gap:.6rem;font-size:.86rem;color:var(--text-muted)}
+.al-type{font-weight:700;color:var(--text)}
+.al-title{font-weight:700;line-height:1.3}
+.al-row:not(.unread) .al-title{font-weight:600}
+.al-text{color:var(--text-muted);line-height:1.4}
+.al-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--orange);margin-top:.45rem}
+.al-row details.al-menu{flex:none;position:relative;align-self:center;margin-right:.25rem}
+.al-row details.al-menu > summary{list-style:none}
+.al-row details.al-menu > summary::-webkit-details-marker{display:none}
+.al-row details.al-menu .menu{position:absolute;right:0;top:calc(100% + .25rem);width:max-content;
+  max-width:min(20rem,calc(100vw - 16px))}
+.al-row details.al-menu .menu form{margin:0}
+.al-row details.al-menu .menu button{display:flex;align-items:center;gap:.6rem;width:100%;min-height:44px;
+  padding:0 1rem;border:0;border-radius:0;background:transparent;color:var(--text);box-shadow:none;
+  text-align:left;font-weight:400}
+.al-row details.al-menu .menu button:hover{background:var(--surface-3)}
+.al-empty{text-align:center;padding:1.5rem 1rem}
+.al-empty > svg.i{width:32px;height:32px;color:var(--green-text)}
+.al-empty p{margin:.35rem 0}
+.al-card{padding:0;overflow:hidden}
+.al-card > .notice{margin:.75rem}
+.al-head{flex-wrap:wrap;gap:.5rem 1rem}
+/* the three actions sit in one row or one above the other, never two and one alone (0.7.47
+   audit): the row needs --al-row (about 26em of their own text size, with room to spare), so
+   200% text stacks them sooner */
+.al-acts{--al-row:29em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
+  flex-wrap:wrap;gap:.5rem}
+.al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
+.al-acts form{margin:0;display:flex}
+.al-acts .btn,.al-acts button{margin:0;min-height:44px;display:inline-flex;align-items:center;gap:.4rem;
+  width:100%;justify-content:center;text-align:center}
+.al-linknote{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 .75rem}
+.al-linknote p{margin:0}
+.bell-badge{display:inline-grid;place-items:center;min-width:20px;min-height:20px;border-radius:10px;white-space:nowrap;
   background:var(--orange);color:var(--on-orange);font-size:.75rem;font-weight:900;padding:0 5px;
   vertical-align:middle;margin-left:.3rem;line-height:1}
-.bell-page .bell-row{padding:.45rem .5rem}  /* read and unread rows line up: the tint is a fill only */
-.bell-page .bell-row.new{margin:0}
+h1 .bell-badge{display:inline-block;font-size:.8rem;line-height:1.6;min-height:0;border-radius:999px;
+  padding:0 8px}
 .bell-foot{margin:.75rem 0 0}
+.mtgbox .body .al-list{margin:0 -16px}
+.mtgbox .body .al-row.unread{background:var(--orange-tint)}
 .mtgbox .body .bell-foot{margin-top:.75rem}
+/* the update strip's × (assistants.dismiss_form) */
+.notice.upd{position:relative;padding-right:calc(1rem + 44px)}
+.notice.upd form.nx{position:absolute;top:50%;right:.25rem;transform:translateY(-50%);margin:0}
+.notice.upd form.nx .close,.notice.once .close{width:44px;height:44px;min-height:44px;padding:0;border:0;
+  border-radius:50%;background:transparent;color:inherit;font-size:1.4rem;line-height:1;box-shadow:none}
+/* a one-time notice (a saved form's result): its × takes it away (static/feedback.js) */
+.notice.once{position:relative;padding-right:calc(1rem + 44px)}
+.notice.once > .close{position:absolute;top:50%;right:.25rem;transform:translateY(-50%);margin:0}
+.notice.once > .close::before{content:"×"}
 """
 CSS += BELL_CSS
 
@@ -3023,7 +3077,7 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
-    ("/collection", "Binder", "collection"),
+    ("/binder", "Binder", "collection"),
     ("/proposals", "Assistant", "proposals"),
 ]
 # The pages one nav place stands for: Assistant's switch (Proposals, History, Reports)
@@ -3041,9 +3095,11 @@ BINDER_PAGES = (
 NAV_PLACE = {
     "/history": "/proposals",
     "/reports": "/proposals",
-    "/collection/lists": "/collection",
-    "/collection/wants": "/collection",
-    "/watchlist": "/collection",
+    "/collection": "/binder",
+    "/collection/lists": "/binder",
+    "/collection/wants": "/binder",
+    "/watchlist": "/binder",
+    "/binder/settings": "/binder",
 }
 # The pages that light the picture (the Account place)
 ACCOUNT_PAGES = ("/account", "/account/details")
@@ -3325,10 +3381,21 @@ def render(
     # Admins hear about a newer gateway release on every page (update_check.py); the admin overview
     # carries the steps, so it shows its own card instead of this line.
     found = update_check.newer() if signed_in and admin else None
+    if (
+        found
+        and sub
+        and update_check.dismissed_for is not None
+        and update_check.dismissed_for(sub) == found["version"]
+    ):
+        found = None  # its × was pressed for this release (home.py /home/dismiss); Alerts keeps it
     if found and "id='updates'" not in body:
+        from .assistants import dismiss_form
+
+        close = dismiss_form(csrf or "", "update", found["version"], "Dismiss the update notice")
         h1 = (
-            f"<div class='notice warn' role='status'>Gateway {html.escape(found['version'])} is available "
-            f"(this one runs {html.escape(__version__)}). <a href='/admin#updates'>How to update</a></div>"
+            f"<div class='notice warn upd' role='status' data-dismissable>Gateway "
+            f"{html.escape(found['version'])} is available (this one runs {html.escape(__version__)}). "
+            f"<a href='/admin#updates'>How to update</a>{close}</div>"
         ) + h1
     classes = " ".join(
         c

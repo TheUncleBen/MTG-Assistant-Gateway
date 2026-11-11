@@ -220,8 +220,8 @@ add MTG Assistant Gateway to **Never sleeping apps**. Make sure it is not in
 the Account page says this too.
 
 The same connection brings new Archidekt alerts (comments, replies,
-follows) from 0.7.46, while **A new alert on Archidekt** is ticked on the
-card: the gateway looks for them only for members whose phone is connected
+follows) from 0.7.46, while **From Archidekt** is set to **Alerts and push** on
+the card: the gateway looks for them only for members whose phone is connected
 now or was in the last 12 hours. Nothing in the app changed for this; a
 pressed alert opens its deck, forum thread or profile in the app.
 

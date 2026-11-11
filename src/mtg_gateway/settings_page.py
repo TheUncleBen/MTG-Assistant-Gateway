@@ -154,7 +154,10 @@ TEXT: dict[str, tuple[str, str]] = {
         "Watchlist and price features",
         "Shows the Watchlist page, the price buttons and the watch tools.",
     ),
-    "watch_max_cards": ("Cards one member may watch", "0 turns card watching off."),
+    "watch_max_cards": (
+        "Cards one member may watch",
+        "0 means no limit. To switch watching off, use the Watchlists switch.",
+    ),
     "watch_max_decks": (
         "Decks one member may watch",
         "Each watched deck is read from Archidekt once a day. 0 turns deck watching off.",

@@ -1,8 +1,9 @@
 """The signed-in home page: your recent decks and what needs you (decision C8, 0.7.46).
 
 Under the greeting and New deck come the things waiting for the member, each only when there
-is one: proposals waiting for their press, Forge tests running, Archidekt alerts (the bell's
-count, read after the page has loaded by static/bell.js) and watched cards past a price alert.
+is one: proposals waiting for their press, Forge tests running, and one row for every new alert
+(the bell's count, read after the page has loaded by static/bell.js: price alerts, finished
+reports, Archidekt's alerts and the rest, all on the Alerts page).
 Then the newest decks as covers (more of them than before; a row to swipe on a phone), and the
 assistant connection details only while no assistant is connected. The navigation stays in the
 bars, so the page repeats none of it. The page is for signed-in members only; MCP clients use
@@ -28,7 +29,6 @@ from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, im
 from .decks import DeckError, is_busy
 from .pages import _csrf, browser_session, login_redirect_here
 from .theme import SPINNER, icon, render
-from .watchlist_page import due_line
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 _esc = html.escape
 RECENT = 8
+UPDATE_DISMISSED = "update.dismissed"  # account_prefs: the release an admin closed the update strip for
 DECKS_TIMEOUT = 6.0  # seconds; the home page must not hang on Archidekt
 
 
@@ -187,12 +188,11 @@ def needs_you_html(
     pending: int,
     board: list[dict[str, Any]],
     running: list[dict[str, Any]],
-    watch_hits: list[str],
     linked: bool,
     now: float,
 ) -> str:
     """Needs you: the rows for what waits, each only when there is something; nothing at all
-    when nothing waits and no alert can come (the bell's row needs a linked account). With a
+    when nothing waits (the alerts row shows once bell.js has a count above zero). With a
     link, Review it (them) is the page's orange button; without one, Link Archidekt keeps it.
     ``running``: the tests still going (reports.running)."""
     rows = []
@@ -212,33 +212,21 @@ def needs_you_html(
         )
     if running:
         rows.append(running_row(running))
-    if linked:
-        # Archidekt's unseen alerts: the count comes after the page has loaded (static/bell.js
-        # fills data-bell-n and shows the row when the count is above zero)
-        rows.append(
-            need_row(
-                "bell",
-                "<b><span data-bell-n>0</span> new <span data-bell-word>alerts</span></b> on Archidekt",
-                "",
-                f"<a class='btn btn-plain' href='/notifications' data-bell-open>{icon('bell')} "
-                "Open alerts</a>",
-                attrs=" data-bell-row hidden",
-            )
+    # every new alert in one row (0.7.47: price alerts, Archidekt's, finished reports, ... are
+    # all on the Alerts page): the count comes after the page has loaded (static/bell.js fills
+    # data-bell-n and shows the row when the count is above zero)
+    rows.append(
+        need_row(
+            "bell",
+            "<b><span data-bell-n>0</span> new <span data-bell-word>alerts</span></b>",
+            "",
+            f"<a class='btn btn-plain' href='/notifications' data-bell-open>{icon('bell')} Open alerts</a>",
+            attrs=" data-bell-row hidden",
         )
-    if watch_hits:
-        rows.append(
-            need_row(
-                "stats",
-                f"<b>{_n(len(watch_hits), 'watched card', 'watched cards')}</b> past a price alert",
-                " · ".join(watch_hits[:2]),
-                ui.button_link("Open watchlist", "/watchlist"),
-            )
-        )
-    if not rows:
-        return ""
+    )
     # only the alerts row, which waits for bell.js's count: the whole section waits with it, so
     # nothing to do shows no heading over nothing (bell.js shows the section with the row)
-    wait = " data-bell-section hidden" if linked and len(rows) == 1 else ""
+    wait = " data-bell-section hidden" if len(rows) == 1 else ""
     return (
         f"<section class='needs' aria-labelledby='needs-h'{wait}><h2 id='needs-h'>Needs you</h2>"
         f"<ul>{''.join(rows)}</ul></section>"
@@ -376,6 +364,38 @@ def connect_html(mcp_url: str) -> str:
 def add_home_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
+    @server.custom_route("/home/dismiss", methods=["POST"], include_in_schema=False)
+    async def dismiss(request: Request) -> Response:
+        """A notice's × (assistants.dismiss_form): gone for good, on every device. An
+        assistant's notice is its page seen, and its New assistant alert is read too."""
+        sub, sid = browser_session(state, request)
+        if sub is None:
+            return login_redirect_here(request, "/")
+        from urllib.parse import parse_qs
+
+        from .pages import csrf_form_ok, read_limited
+
+        raw = await read_limited(request, 4096)
+        data = {k: v[0] for k, v in parse_qs((raw or b"").decode("utf-8", "replace")).items()}
+        if csrf_form_ok(s, sid, data) and data.get("what") == "assistant":
+            key = (data.get("key") or "")[:200]
+            state.db.mark_assistant_opened(sub, key)
+            ids = [
+                a["id"]
+                for a in state.db.gateway_alerts(sub, kinds=("account",))
+                if str(a["ukey"] or "").startswith(assistants.alert_prefix(key))
+            ]
+            if ids:
+                state.db.set_gateway_alerts_read(sub, ids)
+                if state.notifier is not None:
+                    state.notifier.withdraw_alerts(sub, ids)
+        elif csrf_form_ok(s, sid, data) and data.get("what") == "update":
+            state.db.set_pref(sub, UPDATE_DISMISSED, (data.get("key") or "")[:20])
+        back = data.get("next") if str(data.get("next") or "").startswith("/") else "/"
+        if back.startswith("//"):
+            back = "/"
+        return RedirectResponse(back, 303)
+
     @server.custom_route("/", methods=["GET"], include_in_schema=False)
     async def index(request: Request) -> Response:
         sub, sid = browser_session(state, request)
@@ -425,15 +445,10 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             + "</div>"
         )
         running = state.reports.running(sub) if state.reports is not None else []
-        hits: list[str] = []
-        if state.prices is not None:
-            data = state.prices.overview(sub, history=False)
-            hits = [d for d in (due_line(v) for v in data.get("cards") or [] if v.get("alerts")) if d]
         needs = needs_you_html(
             pending=pending,
             board=board,
             running=running,
-            watch_hits=hits,
             linked=bool(link["linked"]),
             now=now,
         )
@@ -461,7 +476,9 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         connect = connect_html(s.mcp_url) if not state.db.user_clients(sub) else ""
         # an assistant connected for the first time: one notice under the greeting, naming the
         # default it starts with (assistants.py), until its page is opened
-        joined = assistants.home_notice(state.db, sub, state.decks.mode_of(sub), now=now)
+        joined = assistants.home_notice(
+            state.db, sub, state.decks.mode_of(sub), now=now, csrf=_csrf(s, sid) or ""
+        )
         # the New deck box (F4): the hero's New deck and the empty panel's "Create one" open it here
         csrf = _csrf(s, sid)
         newdeck = new_deck_box_html(csrf, None, back="/") if link["linked"] and csrf else ""

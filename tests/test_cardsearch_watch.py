@@ -154,7 +154,8 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         toast.wait_for(timeout=5000)
         # with the price alert it came with, the member's default (independent review 2, L5)
         assert re.fullmatch(
-            r"Sol Ring added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+            r"Sol Ring added to your watchlist, with a price alert: "
+            r"under \$\d+\.\d\d · over \$\d+\.\d\d\.",
             toast.locator(".msg").inner_text(),
         ), toast.locator(".msg").inner_text()
         assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Ring"
@@ -267,7 +268,8 @@ def test_the_deck_page_card_menu_watches_a_card_and_opens_art_variants(tmp_path:
             toast = page.locator(".deck-toast", has_text="watchlist")
             toast.wait_for(timeout=5000)
             assert re.fullmatch(
-                r"Sol Ring added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+                r"Sol Ring added to your watchlist, with a price alert: "
+                r"under \$\d+\.\d\d · over \$\d+\.\d\d\.",
                 toast.locator(".msg").inner_text(),
             ), toast.locator(".msg").inner_text()
             assert [w["name"] for w in s.app.state.gateway.prices.watched_cards("user-1")] == ["Sol Ring"]
@@ -314,10 +316,8 @@ async def test_a_new_watch_says_the_price_alert_it_came_with(stack: Stack, monke
         r = await b.http.post("/watchlist/api/watch", content=json.dumps({"name": "Sol Ring"}), headers=hdr)
         d = r.json()
         assert r.status_code == 200 and d["watch"]["created"] is True
-        assert d["watch"]["alerts"] == {"drop": 10.0}
-        assert d["message"].startswith(
-            "Sol Ring added to your watchlist, with a price alert: drops 10% below $"
-        )
+        assert d["watch"]["alerts"] == {"drop": 10.0, "rise": 20.0}
+        assert d["message"].startswith("Sol Ring added to your watchlist, with a price alert: under $")
         again = await b.http.post(
             "/watchlist/api/watch", content=json.dumps({"name": "Sol Ring"}), headers=hdr
         )

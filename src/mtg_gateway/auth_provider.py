@@ -1070,8 +1070,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         resource = resource or self.settings.mcp_url
         access_ttl = self._ttl("access_token_ttl")
         # the assistant this app belongs to (assistants.py): a new one starts at the member's
-        # default; read before the new tokens are saved, so a first sign-in counts as new
-        assistants.note_sign_in(self.db, sub, client_id)
+        # default; read before the new tokens are saved, so a new connection (a family not yet
+        # saved) counts as one and a refresh does not
+        assistants.note_sign_in(self.db, sub, client_id, family)
         self.db.save_token(
             access,
             kind="access",

@@ -70,6 +70,66 @@ MAX_SINGLE = 3  # up to this many new alerts are pushed one by one; more make on
 FINGERPRINT_LEN = 12  # hex characters kept of each alert's fingerprint
 ALERTS_STATE = "notify.alerts_state"  # what the last look saw (account_prefs)
 TITLE = "New on Archidekt"
+# The push title's second half for each kind of Archidekt alert ("Archidekt · Deck comment"), so
+# a comment, a forum reply and news look different at a glance.
+KIND_TITLES = {
+    "ForumThread": "Forum reply",
+    "Global": "Forum news",
+    "Sticky": "Forum news",
+    "Features": "Forum news",
+    "Deck": "Deck comment",
+    "DeckThread": "Deck comment",
+    "DeckUserEditorLink": "Deck editor",
+    "News": "News",
+    "Profile": "Profile",
+    "Contest": "Contest",
+}
+
+
+def title_for(item: dict[str, Any]) -> str:
+    return notify.push_title("archidekt", KIND_TITLES.get(str(item.get("kind") or ""), "New alert"))
+
+
+def keys_for(items: list[dict[str, Any]]) -> list[str]:
+    """Each alert's key on the Alerts page (newest first, as ``items``): its fingerprint and how
+    many alerts with the same one are older, so the same words arriving twice are two alerts."""
+    seen: Counter[str] = Counter()
+    out = []
+    for item in reversed(items):
+        mark = fingerprint(item)
+        out.append(f"ark-{mark}-{seen[mark]}")
+        seen[mark] += 1
+    out.reverse()
+    return out
+
+
+ARCHIDEKT_SITE = "https://archidekt.com/"  # an alert with no page here opens there
+
+
+def mirror(db: Database, sub: str, items: list[dict[str, Any]]) -> int:
+    """Keep Archidekt's alerts (newest first) on the member's Alerts page, each once, so they
+    can be read, dismissed and cleared there like the gateway's own; how many were new here. One
+    Archidekt shows as seen is kept as read. Nothing is pushed (AlertWatch does that), and
+    nothing changes on Archidekt. A member who chose Off for Archidekt's alerts keeps none."""
+    if notify.prefs(db, sub)["deliver"].get("archidekt") == "off":
+        return 0
+    n = 0
+    for item, key in reversed(list(zip(items, keys_for(items), strict=True))):  # oldest first
+        text = str(item.get("text") or "").strip() or "Something new is in your Archidekt alerts."
+        got = db.add_gateway_alert(
+            sub,
+            "alerts",
+            title_for(item),
+            text,
+            path_for(item),
+            keep=notify.KEPT_ALERTS,
+            kind="archidekt",
+            subject=KIND_TITLES.get(str(item.get("kind") or ""), ""),
+            ukey=key,
+            seen=bool(item.get("seen")),
+        )
+        n += got is not None
+    return n
 
 
 def fingerprint(item: dict[str, Any]) -> str:
@@ -80,9 +140,14 @@ def fingerprint(item: dict[str, Any]) -> str:
 
 
 def path_for(item: dict[str, Any]) -> str:
-    """Where a pushed alert opens: the gateway's own page, as the bell links it, else the bell."""
+    """Where an alert opens: the gateway's own page where it has one; Archidekt's news and contests
+    (no page here) on archidekt.com; else the Alerts page."""
     href = profile_page._gateway_url(item.get("url"))
-    return href if href and href.startswith("/") and not href.startswith("//") else "/notifications"
+    if href and href.startswith("/") and not href.startswith("//"):
+        return href
+    if href and href.startswith(ARCHIDEKT_SITE):
+        return href
+    return "/notifications"
 
 
 def _state(db: Database, sub: str, uid: int) -> dict[str, Any] | None:
@@ -248,20 +313,32 @@ class AlertWatch:
         state = _state(self.db, sub, uid) or state
         fresh = new_alerts(items, state.get("known"), count - int(state["count"]))
         _save(self.db, sub, uid, count, [fingerprint(i) for i in items])  # before any push
-        await self._push(sub, fresh)
+        await self._push(sub, fresh, dict(zip(map(id, items), keys_for(items), strict=True)))
+        mirror(self.db, sub, items)  # the rest, kept on the Alerts page without a push
         return {"count": count, "pushed": len(fresh)}
 
-    async def _push(self, sub: str, fresh: list[dict[str, Any]]) -> None:
+    async def _push(self, sub: str, fresh: list[dict[str, Any]], keys: dict[int, str]) -> None:
         if len(fresh) > MAX_SINGLE:
+            # one message for many; each is kept on the Alerts page by itself (mirror)
             await self.notifier.send(
                 sub,
                 "alerts",
-                f"{len(fresh)} new on Archidekt",
+                notify.push_title("archidekt", f"{len(fresh)} new alerts"),
                 "Comments, replies or follows are waiting in your Archidekt alerts.",
-                "/notifications",
+                "/notifications?type=archidekt",
                 retry=True,
+                ukey=f"ark-many-{keys[id(fresh[0])]}",
             )
             return
         for item in reversed(fresh):  # oldest first, so the newest is on top on the phone
             text = str(item.get("text") or "").strip() or "Something new is in your Archidekt alerts."
-            await self.notifier.send(sub, "alerts", TITLE, text, path_for(item), retry=True)
+            await self.notifier.send(
+                sub,
+                "alerts",
+                title_for(item),
+                text,
+                path_for(item),
+                retry=True,
+                subject=KIND_TITLES.get(str(item.get("kind") or ""), ""),
+                ukey=keys[id(item)],
+            )

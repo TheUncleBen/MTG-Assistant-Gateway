@@ -46,23 +46,30 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 /* a row of actions that wraps (200% text on a tablet) fills each line evenly, never a lone button
    under the others (Ben's UI principles: balanced button rows) */
 .ui-head.phead .acts > .btn,.ui-head.phead .acts > button,.ui-head.phead .acts > details{flex:1 1 auto}
-/* My decks: the switch starts the row, the actions end it; on a phone the switch takes the width and
-   the three actions share the row under it, one third each */
+/* My decks: the switch starts the row (the Binder's pages, .bnhead: their heading), the actions
+   end it; on a phone the switch takes the width and the three actions share the row under it, one
+   third each */
 .ui-head.hubhead{gap:12px}
 @media (max-width:599.98px){
-  .ui-head.hubhead{display:grid;grid-template-columns:1fr}
+  .ui-head.hubhead,.ui-head.bnhead{display:grid;grid-template-columns:1fr}
   /* three a row where each keeps whole words; fewer a row (one at 320 px with the browser's font
      doubled) rather than a word overflowing its button (final audit F02) */
-  .ui-head.hubhead .acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5em),1fr));
+  .ui-head.hubhead .acts,.ui-head.bnhead .acts{display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5em),1fr));
     gap:8px}
   /* the head's own buttons only, never the items of its More menu (0.7.47: the menu lost its icons
      and padding on a phone, its two items' text starting 7 px apart) */
   .ui-head.hubhead .acts > .btn,.ui-head.hubhead .acts > button,.ui-head.hubhead .acts > form > button,
-  .ui-head.hubhead .acts > details > summary{width:100%;padding:0 .4rem;gap:.3rem;
+  .ui-head.hubhead .acts > details > summary,
+  .ui-head.bnhead .acts > .btn,.ui-head.bnhead .acts > button,.ui-head.bnhead .acts > form > button,
+  .ui-head.bnhead .acts > details > summary{width:100%;padding:0 .4rem;gap:.3rem;
     font-size:.93rem;white-space:normal;text-align:center;line-height:1.1}
   .ui-head.hubhead .acts > .btn svg,.ui-head.hubhead .acts > button svg,
   .ui-head.hubhead .acts > form > button svg,
-  .ui-head.hubhead .acts > details > summary svg{display:none} }
+  .ui-head.hubhead .acts > details > summary svg,
+  .ui-head.bnhead .acts > .btn svg,.ui-head.bnhead .acts > button svg,
+  .ui-head.bnhead .acts > form > button svg,
+  .ui-head.bnhead .acts > details > summary svg{display:none} }
 /* the Collection menu's quantity row: one fewer, the count, one more; the menu stays open */
 .ctxmenu .mqty{display:flex;align-items:center;gap:.25rem;padding:.15rem .5rem .15rem 1rem;min-height:38px}
 /* the label starts where the items' text does, after their 18 px icon and its .6rem gap */

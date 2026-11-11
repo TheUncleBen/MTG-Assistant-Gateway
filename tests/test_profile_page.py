@@ -11,7 +11,6 @@ from __future__ import annotations
 import html
 import io
 import re
-from pathlib import Path
 
 import pytest
 
@@ -24,10 +23,6 @@ from .test_decks_and_proxy import Browser, call, linked_user, structured
 stack_options = stack_with(SHIPPED)
 WHO = "alice"
 P, E, D = "/account/details/profile", "/account/details/email", "/account/details/defaults"
-BELL_WHERE = (
-    "Choose which of the gateway's alerts you get under Account › Account details › Push notifications,"
-    " and Archidekt's under Email and alerts on Archidekt."
-)
 
 
 def _png(size: tuple[int, int] = (64, 64), fmt: str = "PNG") -> bytes:
@@ -172,7 +167,8 @@ async def test_the_cards_are_not_drawn_while_archidekt_is_not_linked(stack: Stac
         assert "data-bell" in page  # the bell is in the bar on every page
         assert (await b.http.get("/notifications/count")).json() == {"ok": True, "unseen": 0}
         page = (await b.http.get("/notifications")).text
-        assert "Link your Archidekt account under Account details to see its alerts here." in page
+        assert "Link your Archidekt account to see its alerts here." in page
+        assert "<a class='btn btn-plain' href='/account/details/archidekt'>Link Archidekt</a>" in page
     finally:
         await b.aclose()
 
@@ -439,10 +435,14 @@ async def test_collection_visibility_public_asks_once_more(member: Browser, stac
 async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_while(
     member: Browser, stack: Stack
 ) -> None:
+    db = stack.h.app.state.gateway.db
+    await stack.gw.notifier.drain()  # the sign-in's own New assistant alert, kept, then out of the way
+    db.dismiss_gateway_alerts("user-1", None)
+    db.mark_gateway_alerts_seen("user-1")
     stack.ark.account.notes[WHO] = [
         {"notificationType": "DeckThread", "text": "amy commented on “Meren”", "linkId": 42, "seen": False},
         {"notificationType": "ForumThread", "text": "bob replied", "selfId": 7, "seen": False},
-        {"notificationType": "Odd", "text": "x", "seen": True},
+        {"notificationType": "News", "text": "Spoiler season", "linkId": 55, "seen": True},
     ]
     stack.ark.calls.clear()
     page = (await member.http.get("/")).text
@@ -455,44 +455,46 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     assert "<span data-bell-n>0</span> new <span data-bell-word>alerts</span>" in row
     assert "href='/notifications' data-bell-open>" in row and "Open alerts</a>" in row
     r = await member.http.get("/notifications/count")
+    # Archidekt's alerts are kept here when its count changes: the two it had not shown as seen
     assert r.json() == {"ok": True, "unseen": 2} and r.headers["cache-control"] == "no-store"
     await member.http.get("/notifications/count")
     assert len([c for c in stack.ark.calls if "notificationCount" in c[1]]) == 1  # kept, not asked again
     r = await member.http.get("/notifications", headers={"Accept": "application/json"})
     d = r.json()
-    assert d["ok"] and d["unseen"] == 2
-    assert "<a class='bell-row new' href='/decks/42'>" in d["html"]  # a deck opens here, on the gateway
-    # a forum reply opens the gateway's own thread page, in the same tab
-    assert "<a class='bell-row new' href='/forum/thread/7'>" in d["html"]
-    assert "archidekt.com/forum" not in d["html"]
-    assert (
-        "<div class='bell-row'><i aria-hidden='true'>A</i><span class='t'>x<span class='s'>Archidekt</span>"
-        in d["html"]
-    )
+    assert d["ok"] and d["unseen"] == 2 and d["unread"] == 2
+    kept = {a["title"]: a for a in db.gateway_alerts("user-1", kinds=("archidekt",))}
+    assert set(kept) == {"Archidekt · Deck comment", "Archidekt · Forum reply", "Archidekt · News"}
+    # a deck and a forum reply open the gateway's own pages; news stays on Archidekt, in a new tab
+    assert kept["Archidekt · Deck comment"]["path"] == "/decks/42"
+    assert kept["Archidekt · Forum reply"]["path"] == "/forum/thread/7"
+    news = kept["Archidekt · News"]
+    assert news["path"] == "https://archidekt.com/news/55" and news["read_at"] is not None  # seen there
+    assert f"href='/notifications/open/{news['id']}' target='_blank' rel='noopener'>" in d["html"]
+    r = await member.http.get(f"/notifications/open/{news['id']}", follow_redirects=False)
+    assert r.headers["location"] == "https://archidekt.com/news/55"
     # the count clears once the list was opened, as Archidekt's own bell does
     assert (await member.http.get("/notifications/count")).json()["unseen"] == 0
-    await member.http.get("/notifications", headers={"Accept": "application/json"})
-    assert len([c for c in stack.ark.calls if c[1].endswith("notifications/")]) == 1
     # the page without scripts
     page = (await member.http.get("/notifications")).text
     assert "<title>Alerts" in page and "amy commented on “Meren”" in page
-    assert _said(page, profile_page.BELL_NOTE) and "href='/account/details/email'" in page
-    # the note names the cards as Account details titles them (review F12), in the page and the box
-    assert BELL_WHERE in profile_page.BELL_NOTE
-    bell_js = (Path(profile_page.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
-    assert BELL_WHERE.replace("'", "\u2019") in bell_js and "Account › Email and alerts." not in bell_js
+    assert "href='/account/details/email'>Email and alerts on Archidekt</a>" in page
     assert "aria-current=page" in page.split("class='icon-btn bell'", 1)[1][:160]
 
 
 async def test_the_bell_stays_quiet_when_archidekt_cannot_be_asked(member: Browser, stack: Stack) -> None:
     # a link without Archidekt's account number (profile.user_id refuses): the badge stays
     # empty, the list says why, and the pages stand
-    stack.h.app.state.gateway.db._conn.execute("UPDATE archidekt_links SET archidekt_user_id=''")
-    stack.h.app.state.gateway.db._conn.commit()
+    db = stack.h.app.state.gateway.db
+    await stack.gw.notifier.drain()
+    db.dismiss_gateway_alerts("user-1", None)
+    db.mark_gateway_alerts_seen("user-1")
+    db._conn.execute("UPDATE archidekt_links SET archidekt_user_id=''")
+    db._conn.commit()
     r = await member.http.get("/notifications/count")
     assert r.status_code == 200 and r.json() == {"ok": True, "unseen": 0}
     r = await member.http.get("/notifications", headers={"Accept": "application/json"})
-    assert r.status_code == 200 and r.json()["ok"] is False and "Link Archidekt again" in r.json()["message"]
+    box = html.unescape(r.json()["html"])
+    assert r.status_code == 200 and "Archidekt's alerts couldn't be read" in box
     assert (await member.http.get("/")).status_code == 200
     for path in (P, E, D):  # each page says so, with nothing to press
         page = (await member.http.get(path)).text
@@ -505,8 +507,10 @@ async def test_the_bell_stays_quiet_when_archidekt_cannot_be_asked(member: Brows
 
 def test_a_notification_opens_the_gateways_own_page_where_it_has_one() -> None:
     """A deck, a forum thread and a follower's profile open here; Archidekt's news and contests
-    (no page here) stay on Archidekt, in a new tab. A profile link that is a number, not a
-    username, stays on Archidekt too: /users/ takes a username."""
+    (no page here) stay on Archidekt. A profile link that is a number, not a username, stays on
+    Archidekt too: /users/ takes a username."""
+    from mtg_gateway import alerts_push
+
     rows = [
         ("ForumThread", {"selfId": 7}, "/forum/thread/7"),
         ("Global", {"linkId": 8}, "/forum/thread/8"),
@@ -515,19 +519,14 @@ def test_a_notification_opens_the_gateways_own_page_where_it_has_one() -> None:
         ("DeckThread", {"linkId": 42}, "/decks/42"),
         ("Profile", {"linkId": "dave"}, "/users/dave"),
         ("Profile", {"linkId": "Amy B."}, "/users/Amy%20B."),
+        ("News", {"linkId": 55}, "https://archidekt.com/news/55"),
+        ("Contest", {"linkId": 12}, "https://archidekt.com/contest/discussion/12"),
+        ("Profile", {"linkId": 123}, "https://archidekt.com/user/123"),
+        ("Odd", {}, "/notifications"),
     ]
     for kind, extra, want in rows:
         url = profile.notification_url({"notificationType": kind, **extra})
-        out = profile_page.notifications_html(
-            {"notifications": [{"kind": kind, "text": "t", "seen": True, "url": url}]}
-        )
-        assert f"href='{want}'>" in out and "target=" not in out, (kind, out)
-    for kind, extra in (("News", {"linkId": 55}), ("Contest", {"linkId": 12}), ("Profile", {"linkId": 123})):
-        url = profile.notification_url({"notificationType": kind, **extra})
-        out = profile_page.notifications_html(
-            {"notifications": [{"kind": kind, "text": "t", "seen": True, "url": url}]}
-        )
-        assert "href='https://archidekt.com/" in out and "target='_blank'" in out, (kind, out)
+        assert alerts_push.path_for({"kind": kind, "url": url}) == want, (kind, url)
 
 
 def test_the_profile_cards_without_a_profile_say_so() -> None:
@@ -537,12 +536,6 @@ def test_the_profile_cards_without_a_profile_say_so() -> None:
         assert _said(card, "Archidekt can't be reached right now") and "id='pr-" not in card, name
     assert profile_page.account_cards(None, "c") == "".join(cards.values())
     assert profile_page.collection_visibility(None, "c", "sub") == ""
-    assert re.search(
-        r"<i aria-hidden='true'>D</i>",
-        profile_page.notifications_html(
-            {"notifications": [{"kind": "Deck", "text": "t", "seen": True, "url": None}]}
-        ),
-    )
 
 
 async def test_a_link_from_another_site_reads_no_notifications(member: Browser, stack: Stack) -> None:

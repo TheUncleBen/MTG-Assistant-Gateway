@@ -124,7 +124,7 @@ def test_a_0_7_22_database_is_upgraded_and_keeps_its_rows(tmp_path: Path, monkey
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 22
+        assert new.schema_version == db_module.SCHEMA_VERSION == 24
         assert new.get_user("u1") is not None
         tables = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {
@@ -341,7 +341,10 @@ async def test_assistant_tools_watch_list_history_and_unwatch(stack: Stack, monk
     await stack.gw.prices.run_daily()
     listed = structured(await call(h, token, "list_watchlist"))
     assert [c["name"] for c in listed["cards"]] == ["Sol Talisman"]
-    assert "history" not in listed["cards"][0] and listed["limits"] == {"cards": 5000, "decks": 100}
+    assert "history" not in listed["cards"][0] and listed["limits"] == {
+        "cards": None,
+        "decks": 100,
+    }  # None: no limit (0.7.47)
     hist = structured(await call(h, token, "card_price_history", {"card": "sol talisman"}))
     assert [p["day"] for p in hist["cards"][0]["history"]] == ["2026-10-12", "2026-10-13"]
     dh = structured(await call(h, token, "card_price_history", {"deck_id": "42"}))
@@ -391,7 +394,7 @@ async def test_notifications_are_off_and_harmless_without_a_server(plain: Stack)
     b = await _browser(plain)
     try:
         assert (
-            "<span class='lbl'>Push notifications</span><span class='val'>Not available</span>"
+            "<span class='lbl'>Push notifications</span><span class='val'>Alerts only</span>"
             in (await b.http.get("/account/details")).text
         )
         page = (await b.http.get(N)).text
@@ -483,8 +486,11 @@ async def test_a_proposal_waiting_for_the_member_and_a_finished_report_notify(st
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "42", "simulate": False}))
     await stack.gw.notifier.drain()
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "Deck report finished"
-    assert msg["click"] == f"https://mtg.test/history/reports/{rep['report_id']}"
+    assert msg["title"] == "Report ready · Sample Commander Deck" and msg["tags"] == ["report"]
+    assert msg["message"] == "Test finished."
+    (kept,) = stack.h.db.gateway_alerts("user-1", kinds=("report",))
+    assert msg["click"] == f"https://mtg.test/notifications/open/{kept['id']}"
+    assert kept["path"] == f"/history/reports/{rep['report_id']}"
     # switched off one by one
     b = await _browser(stack)
     try:
@@ -514,7 +520,7 @@ async def test_a_queued_forge_run_notifies_when_it_ends(stack: Stack) -> None:
     assert stack.ntfy.messages == []
     assert rs._save_forge("rep_q", {"state": "done"})
     await stack.gw.notifier.drain()
-    assert [m["title"] for m in stack.ntfy.messages] == ["Deck report finished"]
+    assert [m["title"] for m in stack.ntfy.messages] == ["Report ready · D"]
     rs._save_forge("rep_q", {"state": "done"})  # saved again: not sent twice
     await stack.gw.notifier.drain()
     assert len(stack.ntfy.messages) == 1
@@ -543,9 +549,14 @@ async def test_price_alerts_reach_the_member(stack: Stack, monkeypatch) -> None:
     stack.sf.prices[sol["id"]] = {"usd": "1.60"}  # +23% and above $1.50
     assert (await stack.gw.prices.run_daily())["alerts"] == 1
     msg = stack.ntfy.messages[-1]
-    # the alert opens the card's row (test_watchlist_rows)
-    assert msg["title"] == "Price alert" and msg["click"] == f"https://mtg.test/watchlist?open={wid}#wr-{wid}"
-    assert msg["message"] == "Sol Ring rose 23.1% and rose above $1.50: $1.30 to $1.60."
+    # 0.7.47: the type and the card first; the alert opens through the Alerts page, which marks it
+    # read and goes on to the card's row (test_watchlist_rows)
+    assert msg["title"] == "Price rise · Sol Ring" and msg["tags"] == ["price"]
+    (kept,) = stack.h.db.gateway_alerts("user-1", kinds=("price",))
+    assert msg["click"] == f"https://mtg.test/notifications/open/{kept['id']}"
+    assert kept["path"] == f"/watchlist?open={wid}#wr-{wid}" and kept["subject"] == "Sol Ring"
+    # 0.7.47: the one-day move is $0.30, under the shipped $0.50 floor, so only the price crossing counts
+    assert msg["message"] == "$1.30 to $1.60: rose above $1.50."
 
 
 # -- summaries ----------------------------------------------------------------------------------
@@ -574,7 +585,10 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
         # weekly: only the next Monday sends
         assert out["summaries"] == (1 if clock.day == "2026-10-19" else 0), clock.day
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "Your weekly summary" and msg["click"] == f"https://mtg.test{N}#summary"
+    assert msg["title"] == "Summary · This week" and msg["click"].startswith(
+        "https://mtg.test/notifications/open/"
+    )
+    assert stack.h.db.gateway_alerts("user-1", kinds=("summary",))[0]["path"] == f"{N}#summary"
     assert "2 watched cards, biggest move Sol Ring +25%" in msg["message"]
     token = await mcp_token(h)
     s = structured(await call(h, token, "get_summary", {"period": "week"}))
@@ -628,7 +642,7 @@ def test_settings_default_off_and_the_token_comes_from_a_file(monkeypatch, tmp_p
     s = load_settings()
     assert s.ntfy_url is None and s.ntfy_token is None
     assert (s.watch_max_cards, s.watch_max_decks, s.price_history_days, s.price_hour_utc) == (
-        5000,
+        0,  # 0.7.47: no limit
         100,
         365,
         6,
@@ -769,7 +783,7 @@ async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
         clock.next_day()
         out = await prices.DailyJobs(None, st.gw.summaries, hour_utc=6).run_due()
         assert "prices" not in out and out["summaries"] == 1
-        assert st.ntfy.messages[-1]["title"] == "Your daily summary"
+        assert st.ntfy.messages[-1]["title"] == "Summary · Today"
 
 
 async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:
@@ -778,7 +792,7 @@ async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:
         page = (await b.http.get("/decks")).text
         assert "data-watchlist" in page and "href='/watchlist'" not in page  # not a More item (C8)
         binder = (await b.http.get("/collection")).text
-        assert "href='/watchlist'" in binder  # Binder's switch: Cards | Wants | Watchlist
+        assert "href='/binder'" in binder  # One Binder (0.7.47): back to the Binder page
         assert (await b.http.get("/watchlist")).status_code == 200
     finally:
         await b.aclose()

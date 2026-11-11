@@ -73,9 +73,12 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         # Price alert defaults (mockup screen 8): a row under This gateway that opens the
         # watchlist's box, its value the shipped default until the member saves their own, short
         # enough for the row's one line (review 2, L10)
-        assert "<a class='yrow' href='/watchlist?box=defaults'><svg" in page
+        assert "<a class='yrow' href='/binder/settings'><svg" in page
         # short enough for one line beside its label (independent review 2, L10)
-        assert "<span class='lbl'>Price alert defaults</span><span class='val'>10% drop</span>" in page
+        assert (
+            "<span class='lbl'>Price alert defaults</span>"
+            "<span class='val'>10% under, 20% over</span>" in page
+        )
         # Sign out on all my devices asks first in a box, so it ends in "…" as its neighbours do
         assert "<span class='lbl'>Sign out on all my devices…</span>" in page
         # approval mode and connected apps: one Assistants row (each assistant has its own mode) and

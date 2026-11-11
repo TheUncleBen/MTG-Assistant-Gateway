@@ -2700,6 +2700,22 @@ class ReportService:
             )
         return out
 
+    def finished_words(self, rid: str) -> tuple[str, str]:
+        """A finished report's deck name and one line on how it ended, for the member's alert:
+        "Test finished with Forge games." / "Test ended. Some parts did not run; the report says
+        why." ("", "") for a report that is gone."""
+        with self.db._lock:
+            row = self.db._conn.execute("SELECT * FROM reports WHERE id = ?", (rid,)).fetchone()
+        if row is None:
+            return "", ""
+        s = self._summary(dict(row))
+        name = str(s.get("deck_name") or "") or "Unnamed deck"
+        if s.get("status") == "complete":
+            line = "Test finished with Forge games." if s.get("engine") == "forge" else "Test finished."
+        else:
+            line = "Test ended. Some parts did not run; the report says why."
+        return name, line
+
     def for_proposal(self, sub: str, proposal_id: str) -> list[dict[str, Any]]:
         """The member's reports of one proposal's resulting deck (run_proposal), newest first: id,
         when, overall status and the paired test against the deck as it was (``paired``, None when

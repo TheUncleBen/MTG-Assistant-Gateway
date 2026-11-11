@@ -606,15 +606,16 @@ async def test_one_message_per_deck_follows_its_waiting_count(stack: Stack) -> N
         n.deck_waiting("user-1", "42", "Atraxa, Grand  Unifier", 1, "/decks/42")
         await n.drain()
         msg = stack.ntfy.published[-1]
-        assert msg["title"] == "1 change to Atraxa, Grand Unifier is waiting for you"
+        # 0.7.47: the type and the deck first, the count and what to do in its line
+        assert msg["title"] == "Review · Atraxa, Grand Unifier" and msg["tags"] == ["waiting"]
         assert msg["sequence_id"] == "deck-42" and msg["click"] == "https://mtg.test/decks/42"
-        assert msg["message"] == notify.WAITING_TEXT
+        assert msg["message"] == "1 change to apply or reject."
         n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 1, "/decks/42")  # no change: nothing sent
         n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 2, "/decks/42")
         await n.drain()
         assert (
             len(stack.ntfy.published) == 2
-            and stack.ntfy.published[-1]["title"] == "2 changes to Atraxa, Grand Unifier are waiting for you"
+            and stack.ntfy.published[-1]["message"] == "2 changes to apply or reject."
         )
         n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 0, "/decks/42")
         await n.drain()
@@ -622,7 +623,8 @@ async def test_one_message_per_deck_follows_its_waiting_count(stack: Stack) -> N
         n.deck_waiting("user-1", "x", "Odd", 3, "/decks/x")  # not a deck id: nothing
         await n.drain()
         assert len(stack.ntfy.published) == 2
-        assert notify.waiting_title(3, "") == "3 changes to your deck are waiting for you"
+        assert notify.waiting_title(3, "") == "Review · Unnamed deck"
+        assert notify.new_decks_title(2) == "Review · 2 new decks"
     finally:
         await b.aclose()
 
@@ -827,7 +829,7 @@ async def test_a_deck_message_sent_again_is_only_the_one_still_to_show(
         n.deck_waiting("user-1", "42", "Atraxa", 2, "/decks/42")  # taken at once
         await _until(lambda: len(ntfy.published) == 1)
         await asyncio.sleep(0.5)  # the first message's retry time has come and gone
-        assert [m["title"] for m in ntfy.published] == ["2 changes to Atraxa are waiting for you"]
+        assert [m["message"] for m in ntfy.published] == ["2 changes to apply or reject."]
         # a withdraw ntfy could not take is sent again too
         ntfy.status = 503
         n.deck_waiting("user-1", "42", "Atraxa", 0, "/decks/42")

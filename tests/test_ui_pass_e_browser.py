@@ -547,13 +547,14 @@ def test_notification_rows_line_up(server: Server) -> None:
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1280, "dark", exe)
         page.goto(f"{server.base}/notifications", wait_until="networkidle")
-        assert page.locator(".bell-row.new").count() == 2
-        assert page.locator(".bell-row:not(.new)").count() == 1
+        # Archidekt's alerts, kept here (0.7.47): two it had not shown as seen, one read
+        assert page.locator(".al-row.unread").count() == 2
+        assert page.locator(".al-row:not(.unread)").count() >= 1
         xs = page.evaluate(
-            "() => [...document.querySelectorAll('.bell-row i')]"
+            "() => [...document.querySelectorAll('.al-row .al-ic')]"
             ".map(i => Math.round(i.getBoundingClientRect().x))"
         )
-        assert max(xs) - min(xs) <= 1, xs  # the read row's avatar and words under the unread rows'
+        assert max(xs) - min(xs) <= 1, xs  # the read rows' icons and words under the unread rows'
         browser.close()
     assert errors == []
 

@@ -51,9 +51,9 @@ async def test_each_card_has_one_orange_button_and_every_tick_its_own_row(stack:
         assert "id='summary'" not in notes and page.index("id='notifications'") < page.index("id='summary'")
         assert _orange(notes) == 1 and "Save push notifications" in notes
         assert _orange(summ) == 1 and "Save summary" in summ
-        # each tick its own 44 px row (.ui-checks label); the When group has no panel border
+        # the master tick its own 44 px row (.ui-checks label); then one row a type of alert (0.7.47)
         assert "<div class='ui-checks master'><label><input type='checkbox' name='ntfy_on'" in notes
-        assert "<fieldset class='nf-when'><legend>When</legend><div class='ui-checks'>" in notes
+        assert "<fieldset class='nf-kinds'><legend>Each type of alert</legend>" in notes
         assert "class='check'" not in notes
         # Your phones: the hint, Send test and Disconnect my phones plain, the explanation visible
         assert "<h3>Your phones</h3>" in notes and "/install?for=android" in notes
@@ -100,7 +100,12 @@ async def test_send_it_now_sends_the_summary_the_card_shows(stack: Stack, monkey
         assert r.headers["location"] == f"{N}?ok=summary_sent#summary"
         assert len(stack.ntfy.messages) == sent + 1
         msg = stack.ntfy.messages[-1]
-        assert msg["title"] == "Your daily summary" and msg["click"] == f"https://mtg.test{N}#summary"
+        assert msg["title"] == "Summary · Today" and msg["click"].startswith(
+            "https://mtg.test/notifications/open/"
+        )
+        # it is kept under Alerts too, and opens the summary through it (marked read there)
+        aid = int(msg["click"].rsplit("/", 1)[1])
+        assert stack.gw.db.gateway_alert("user-1", aid)["path"] == f"{N}#summary"
         # the same short text the schedule sends
         assert msg["message"] == summary.short_text(stack.gw.summaries.build("user-1", "day"))
         # once a minute, on its own wait: Send test still works, and the test does not hold it back
@@ -118,7 +123,7 @@ async def test_send_it_now_sends_the_summary_the_card_shows(stack: Stack, monkey
         summ = _card((await b.http.get(N)).text, "summary")
         assert "<h3>The last 7 days</h3>" in summ and "as your weekly summary would." in summ
         await _post(b, "/account", {"action": "summary_send"})
-        assert stack.ntfy.messages[-1]["title"] == "Your weekly summary"
+        assert stack.ntfy.messages[-1]["title"] == "Summary · This week"
         # a refusal from the server is said plainly
         stack.gw.notifier._last_summary.clear()
         stack.ntfy.status = 403

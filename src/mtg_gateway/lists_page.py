@@ -49,7 +49,7 @@ from .theme import esc, icon
 
 PAGE = "/lists"
 HUB = "/collection/lists"  # Binder › Lists, the hub both blocks live on
-TITLE = "Binder: Lists"
+TITLE = "Archidekt lists"
 SUB_TEXT = (
     "Your Archidekt lists that shape every deck. Changes are saved to Archidekt and read "
     "back; a copy from just before is kept under History."
@@ -62,7 +62,7 @@ WANTS_SUB = (
     "The cards you pinned on Archidekt, with a note and the copies you are after. Pin one from "
     "any card's menu."
 )
-HUB_SUB = "The lists that shape your decks on Archidekt, and the lists your watchlist is grouped in."
+HUB_SUB = "The lists that shape your decks on Archidekt."
 # the page shows the chosen picture before it is sent (a blob: address), and a pin's printing
 LISTS_CSP = DECK_CSP.replace("img-src 'self'", "img-src 'self' blob:")
 PICTURE_BODY_LIMIT = account_lists.PICTURE_MAX_BYTES + 64_000  # the file plus the form's own fields
@@ -2022,15 +2022,11 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             return login_redirect_here(request, HUB)
         if reloading(("lists-hub", sub)):  # a reload or the app's pull: the counts are read again
             account_lists.read_counts_again(sub)
-        prices_svc = getattr(state, "prices", None)
-        watch_lists = None
+        # One Binder (0.7.47): the gateway's own lists live on the Binder page (binder_hub.py), so
+        # this hub holds the Archidekt lists only
+        watch_lists: list[dict[str, Any]] | None = None
         ungrouped = 0
         badges: dict[str, int] = {}
-        if prices_svc is not None:
-            watch_lists = prices_svc.lists(sub)
-            total = prices_svc.watch_count(sub)
-            ungrouped = total - sum(wl["count"] for wl in watch_lists)
-            badges["/watchlist"] = total
         q = request.query_params
         ok = q.get("ok") or ""
         notice = ui.notice(OK_NOTES[ok], "ok", role="status") if ok in OK_NOTES else ""
