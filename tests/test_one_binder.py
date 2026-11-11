@@ -83,7 +83,7 @@ def test_step_23_marks_the_watches_that_follow_the_defaults(tmp_path: Path) -> N
     con.close()
     d = db_module.Database(path)
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 23
+        assert d.schema_version == db_module.SCHEMA_VERSION == 24
         got = {
             r[0]: tuple(r[1:])
             for r in d._conn.execute(
@@ -156,8 +156,8 @@ async def test_the_floor_keeps_a_cheap_cards_small_moves_quiet(stack: Stack, mon
     day2 = prices.day_of(prices.now())
     with stack.gw.db.tx() as c:
         c.execute("INSERT INTO price_points (scryfall_id, day, usd) VALUES ('s1', ?, 1.90)", (day2,))
-    [(sub, _title, message, _path)] = svc._alerts_due(day2)
-    assert sub == SUB and message.startswith("Cheap rose 46.2%")
+    [(sub, title, message, _path)] = svc._alerts_due(day2)
+    assert sub == SUB and title == "Price rise · Cheap" and message == "$1.30 to $1.90: rose 46.2%."
 
 
 # -- no limit --------------------------------------------------------------------------------------

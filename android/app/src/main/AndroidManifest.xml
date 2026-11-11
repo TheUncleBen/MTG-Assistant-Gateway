@@ -134,6 +134,12 @@
             android:name="local.mtgassistantgateway.app.NotifyService$Tick"
             android:exported="false" />
 
+        <!-- A notification's Mark read (NotifyService.MarkRead). Not exported: only the app's own
+             notifications reach it. -->
+        <receiver
+            android:name="local.mtgassistantgateway.app.NotifyService$MarkRead"
+            android:exported="false" />
+
         <!-- The share sheet's Copy gateway link and Copy deck list (DeckShare.kt). Not exported:
              only the sheet's own PendingIntents reach it. -->
         <receiver

@@ -431,7 +431,7 @@ def test_schema_20_adds_the_table_and_changes_no_mode(tmp_path) -> None:
     raw.close()
     again = db_module.Database(str(path), upgrade_dir=tmp_path / "before-upgrade")
     try:
-        assert again.schema_version == db_module.SCHEMA_VERSION == 23
+        assert again.schema_version == db_module.SCHEMA_VERSION == 24
         assert again.get_user("u1")["approval_mode"] == "semi"
         assert again.assistant_modes("u1") == {}
         again.set_assistant_mode("u1", "claude", "auto")

@@ -2065,8 +2065,7 @@ async def details_html(
             value=modes.MODE_LABELS.get(default, "") + differs,
         ),
     ]
-    if state.summaries is not None:
-        assistant.append(row("notifications", _notifications_value(state, sub)))
+    assistant.append(row("notifications", _notifications_value(state, sub)))
     gateway = [
         _yfold("What your sign-in shares", "account", _identity_details(user), rid="identity"),
         _yfold(
@@ -2190,10 +2189,11 @@ def _ygroup(g: tuple[int, str, list[str], str]) -> str:
 
 
 def _notifications_value(state: Any, sub: str) -> str:
-    """The Push notifications row's value: On, Off, or Not available without a notification server."""
+    """The Push notifications row's value: On or Off, or "Alerts only" on a gateway with no
+    notification server (each type's alerts still show under Alerts)."""
     n = state.notifier
     if n is None or not n.enabled:
-        return "Not available"
+        return "Alerts only"
     p = notify.prefs(state.db, sub)
     return "On" if p["ntfy_on"] and bool(p["ntfy_topic"]) else "Off"
 

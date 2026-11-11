@@ -18,7 +18,7 @@ import os
 import shutil
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -149,8 +149,15 @@ def newest_backup(backup_dir: Path) -> tuple[Path, float] | None:
 
 
 async def nightly_loop(
-    db: Database, backup_dir: Path, hour_utc: int, keep_days: int, copy_dir: Path | None = None
+    db: Database,
+    backup_dir: Path,
+    hour_utc: int,
+    keep_days: int,
+    copy_dir: Path | None = None,
+    on_failed: Callable[[str], Awaitable[object]] | None = None,
 ) -> None:
+    """The nightly backup; ``on_failed`` (the admins' alert, app.py) hears of one that failed,
+    with the error's name."""
     while True:
         await asyncio.sleep(seconds_until(hour_utc))
         try:
@@ -159,6 +166,11 @@ async def nightly_loop(
         except Exception as exc:
             last_run.update(ok=False, at=int(time.time()), error=type(exc).__name__)
             logger.exception("nightly backup failed")
+            if on_failed is not None:
+                try:
+                    await on_failed(type(exc).__name__)
+                except Exception:  # an alert never stops the loop
+                    logger.exception("backup alert failed")
 
 
 PURGE_INTERVAL_SECONDS = 3600

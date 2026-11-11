@@ -3717,6 +3717,9 @@ class DeckService:
         )
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
+        # An assistant's own apply that went through (apply via "mcp"): the member's "Applied for
+        # you" alert (app._notify_events); called with the member, the proposal row and the outcome.
+        self.on_applied: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None
         # called with (sub, deck) after a deck page read a deck (prices.PriceService.note_deck)
         self.read_hooks: list[Callable[[str, Deck], None]] = []
         from . import packages
@@ -6527,7 +6530,13 @@ class DeckService:
             self._running.pop(proposal_id, None)
             self._progress.pop(proposal_id, None)
             if not t.cancelled():
-                t.exception()  # retrieved here; the apply already recorded it on the proposal
+                # retrieved here; the apply already recorded it on the proposal
+                if t.exception() is None and via == "mcp" and self.on_applied is not None:
+                    out = t.result()
+                    try:
+                        self.on_applied(sub, row, out if isinstance(out, dict) else {})
+                    except Exception:  # an alert never touches the apply
+                        logger.exception("applied alert failed")
 
         task.add_done_callback(done)
         try:

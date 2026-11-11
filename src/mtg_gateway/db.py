@@ -340,6 +340,10 @@ INTERRUPTED_SQL = (
 # one may be, so a page script cannot grow the database without bound.
 MAX_PREFS_PER_ACCOUNT = 300
 MAX_PREF_BYTES = 4096
+# Alerts (notify.py): a dismissed alert is kept this many days for Undo; an Archidekt alert past
+# that stays as an empty row (its fingerprint), this many per member, so it never comes back.
+DISMISSED_DAYS = 30
+ARCHIDEKT_TOMBSTONES = 500
 MAX_PREF_NAME = 120
 # One simulator card model (card_models.model_json, schema 14): the shape Mystic Forge validated,
 # at most this many bytes as JSON.
@@ -1113,6 +1117,33 @@ def _step_23(conn: sqlite3.Connection) -> None:
             )
 
 
+# the old ``event`` names of gateway_alerts rows and the alert kind each one is (notify.KINDS)
+_EVENT_KINDS = {"prices": "price", "reports": "report", "summary": "summary"}
+
+
+def _step_24(conn: sqlite3.Connection) -> None:
+    """0.7.47 notifications: the Alerts page is the one place for every alert. Each kept alert
+    has its ``kind`` (notify.KINDS), the deck or card it is about (``subject``), when the member
+    read it (``read_at``: opened it or pressed Mark read) and when they dismissed it
+    (``dismissed_at``: Dismiss or Clear all; Undo takes it back), and ``ukey``, a key that names
+    the same alert twice (an Archidekt alert by its fingerprint, an assistant's first connection)
+    so it is kept once. Rows kept before take their kind from their event; an alert the member
+    had already seen counts as read."""
+    _add_column(conn, "gateway_alerts", "kind", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "gateway_alerts", "subject", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "gateway_alerts", "read_at", "INTEGER")
+    _add_column(conn, "gateway_alerts", "dismissed_at", "INTEGER")
+    _add_column(conn, "gateway_alerts", "ukey", "TEXT")
+    for event, kind in _EVENT_KINDS.items():
+        conn.execute("UPDATE gateway_alerts SET kind = ? WHERE event = ? AND kind = ''", (kind, event))
+    conn.execute("UPDATE gateway_alerts SET kind = event WHERE kind = ''")
+    conn.execute("UPDATE gateway_alerts SET read_at = seen_at WHERE read_at IS NULL AND seen_at IS NOT NULL")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS gateway_alerts_ukey ON gateway_alerts (sub, ukey) "
+        "WHERE ukey IS NOT NULL"
+    )
+
+
 # A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
 # result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
 RISK_REASON_KEY = "_risk_reason"
@@ -1142,6 +1173,7 @@ MIGRATIONS = [
     _step_21,
     _step_22,
     _step_23,
+    _step_24,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -1288,6 +1320,8 @@ class Database:
         self._lock = threading.RLock()
         self._atomic_thread: int | None = None  # the thread inside atomic(), if any
         self._anonymous_audit_inserts = 0
+        # an assistant new to a member signed in (assistants.note_sign_in): their alert (app.py)
+        self.on_new_assistant: Callable[[str, str], None] | None = None
         self.price_days = PRICE_RETENTION_DAYS
         # Snapshots kept per deck; None means SNAPSHOTS_KEEP_PER_DECK (the app wires the live
         # setting in, snapshots_keep()).
@@ -1698,7 +1732,7 @@ class Database:
         """Remember that ``assistant`` signed in for ``sub`` (called before its new tokens are
         saved). The first time it follows the member's default (no mode of its own), and counts as
         new unless ``client_id`` already held a token for the member (connected before schema 20).
-        True when the row is new."""
+        True when the assistant is new to the member (the row is new and the app held no token)."""
         now = int(time.time())
         with self.tx() as c:
             known = c.execute(
@@ -1709,7 +1743,7 @@ class Database:
                 "opened_at) VALUES (?, ?, NULL, NULL, ?, ?)",
                 (sub, assistant, now, now if known else None),
             )
-            return cur.rowcount > 0
+            return cur.rowcount > 0 and not known
 
     def assistant_modes(self, sub: str) -> dict[str, dict[str, Any]]:
         """The member's assistants by key: mode (None follows their default), set_at,
@@ -4642,45 +4676,196 @@ class Database:
 
     # the gateway's own alerts for the bell (notify.py records them) ---------------------------
     def add_gateway_alert(
-        self, sub: str, event: str, title: str, message: str, path: str, *, keep: int = 50
-    ) -> None:
-        """Keep one alert for the member's bell; only the newest ``keep`` stay."""
+        self,
+        sub: str,
+        event: str,
+        title: str,
+        message: str,
+        path: str,
+        *,
+        keep: int = 200,
+        kind: str = "",
+        subject: str = "",
+        ukey: str | None = None,
+        seen: bool = False,
+    ) -> int | None:
+        """Keep one alert for the member's Alerts page; its id, or None when it is not kept (no
+        such member, or an alert with the same ``ukey`` is kept already, dismissed or not).
+        ``seen``: kept as seen and read (an Archidekt alert the member had seen on the site).
+        Only the newest ``keep`` alerts the member has not dismissed stay; one past that is
+        dropped, except an Archidekt alert, which stays as dismissed so it never comes back
+        (prune_gateway_alerts)."""
+        now = int(time.time())
         with self.tx() as c:
             if c.execute("SELECT 1 FROM users WHERE sub = ?", (sub,)).fetchone() is None:
-                return
-            c.execute(
-                "INSERT INTO gateway_alerts (sub, event, title, message, path, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (sub, event[:32], title[:120], message[:1000], path[:500], int(time.time())),
+                return None
+            if (
+                ukey is not None
+                and c.execute(
+                    "SELECT 1 FROM gateway_alerts WHERE sub = ? AND ukey = ?", (sub, ukey[:120])
+                ).fetchone()
+            ):
+                return None
+            cur = c.execute(
+                "INSERT INTO gateway_alerts (sub, event, title, message, path, created_at, kind, subject, "
+                "ukey, seen_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    sub,
+                    event[:32],
+                    title[:120],
+                    message[:1000],
+                    path[:500],
+                    now,
+                    (kind or _EVENT_KINDS.get(event, event))[:32],
+                    subject[:200],
+                    None if ukey is None else ukey[:120],
+                    now if seen else None,
+                    now if seen else None,
+                ),
             )
-            c.execute(
-                "DELETE FROM gateway_alerts WHERE sub = ? AND id NOT IN (SELECT id FROM gateway_alerts "
-                "WHERE sub = ? ORDER BY id DESC LIMIT ?)",
-                (sub, sub, max(1, keep)),
-            )
+            new_id = int(cur.lastrowid or 0)
+            self._prune_alerts(c, sub, max(1, keep), now)
+        return new_id
 
-    def gateway_alerts(self, sub: str, *, events: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
-        """The member's kept alerts, newest first (``events``: only those kinds)."""
+    @staticmethod
+    def _prune_alerts(c: sqlite3.Connection, sub: str, keep: int, now: int) -> None:
+        """The newest ``keep`` alerts the member has not dismissed stay. Past that, and dismissed
+        alerts after DISMISSED_DAYS: an Archidekt alert stays as an empty dismissed row (its
+        fingerprint, so a later read of Archidekt's list never brings it back), up to
+        ARCHIDEKT_TOMBSTONES of them; any other is deleted."""
+        old = c.execute(
+            "SELECT id, kind FROM gateway_alerts WHERE sub = ? AND dismissed_at IS NULL AND id NOT IN "
+            "(SELECT id FROM gateway_alerts WHERE sub = ? AND dismissed_at IS NULL ORDER BY id DESC LIMIT ?)",
+            (sub, sub, keep),
+        ).fetchall()
+        for row in old:
+            if row["kind"] == "archidekt":
+                c.execute(
+                    "UPDATE gateway_alerts SET dismissed_at = ?, title = '', message = '' WHERE id = ?",
+                    (now, row["id"]),
+                )
+            else:
+                c.execute("DELETE FROM gateway_alerts WHERE id = ?", (row["id"],))
+        cutoff = now - DISMISSED_DAYS * 86400
+        c.execute(
+            "DELETE FROM gateway_alerts WHERE sub = ? AND kind != 'archidekt' AND dismissed_at < ?",
+            (sub, cutoff),
+        )
+        c.execute(
+            "UPDATE gateway_alerts SET title = '', message = '' WHERE sub = ? AND kind = 'archidekt' "
+            "AND dismissed_at < ? AND title != ''",
+            (sub, cutoff),
+        )
+        c.execute(
+            "DELETE FROM gateway_alerts WHERE sub = ? AND kind = 'archidekt' AND dismissed_at IS NOT NULL "
+            "AND id NOT IN (SELECT id FROM gateway_alerts WHERE sub = ? AND kind = 'archidekt' "
+            "AND dismissed_at IS NOT NULL ORDER BY id DESC LIMIT ?)",
+            (sub, sub, ARCHIDEKT_TOMBSTONES),
+        )
+
+    def gateway_alerts(
+        self,
+        sub: str,
+        *,
+        events: tuple[str, ...] | None = None,
+        kinds: tuple[str, ...] | None = None,
+        dismissed: bool = False,
+    ) -> list[dict[str, Any]]:
+        """The member's kept alerts, newest first: those not dismissed (``dismissed``: those
+        dismissed, for Undo). ``events`` / ``kinds``: only those."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, event, title, message, path, created_at, seen_at FROM gateway_alerts "
-                "WHERE sub = ? ORDER BY id DESC",
+                "SELECT id, event, kind, title, subject, message, path, created_at, seen_at, read_at, "
+                "dismissed_at, ukey FROM gateway_alerts WHERE sub = ? AND dismissed_at IS "
+                + ("NOT NULL" if dismissed else "NULL")
+                + " ORDER BY id DESC",
                 (sub,),
             ).fetchall()
         out = [dict(r) for r in rows]
         if events is not None:
             out = [r for r in out if r["event"] in events]
+        if kinds is not None:
+            out = [r for r in out if r["kind"] in kinds]
         return out
 
+    def gateway_alert(self, sub: str, alert_id: int) -> dict[str, Any] | None:
+        """One of the member's kept alerts (dismissed or not), or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, event, kind, title, subject, message, path, created_at, seen_at, read_at, "
+                "dismissed_at, ukey FROM gateway_alerts WHERE sub = ? AND id = ?",
+                (sub, int(alert_id)),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def alert_owner(self, alert_id: int) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT sub FROM gateway_alerts WHERE id = ?", (int(alert_id),)
+            ).fetchone()
+        return None if row is None else row["sub"]
+
     def unseen_gateway_alerts(self, sub: str, *, events: tuple[str, ...] | None = None) -> int:
+        """How many of the member's alerts are new since they last opened the Alerts list."""
         return sum(1 for r in self.gateway_alerts(sub, events=events) if r["seen_at"] is None)
 
     def mark_gateway_alerts_seen(self, sub: str) -> None:
+        """The member opened the Alerts list: the count clears (each row stays unread)."""
         with self.tx() as c:
             c.execute(
                 "UPDATE gateway_alerts SET seen_at = ? WHERE sub = ? AND seen_at IS NULL",
                 (int(time.time()), sub),
             )
+
+    def _alert_ids(self, c: sqlite3.Connection, sub: str, ids: list[int] | None, where: str) -> list[int]:
+        q = f"SELECT id FROM gateway_alerts WHERE sub = ? AND {where}"
+        args: list[Any] = [sub]
+        if ids is not None:
+            ids = [int(i) for i in ids][:500]
+            if not ids:
+                return []
+            q += f" AND id IN ({','.join('?' * len(ids))})"
+            args += ids
+        return [r["id"] for r in c.execute(q, args).fetchall()]
+
+    def set_gateway_alerts_read(self, sub: str, ids: list[int] | None, *, read: bool = True) -> list[int]:
+        """Mark the member's alerts ``ids`` (None: every one not dismissed) read, or unread again;
+        the ids that changed. Read also counts as seen."""
+        now = int(time.time())
+        with self.tx() as c:
+            if read:
+                changed = self._alert_ids(c, sub, ids, "read_at IS NULL AND dismissed_at IS NULL")
+                for i in changed:
+                    c.execute(
+                        "UPDATE gateway_alerts SET read_at = ?, seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+                        (now, now, i),
+                    )
+            else:
+                changed = self._alert_ids(c, sub, ids, "read_at IS NOT NULL AND dismissed_at IS NULL")
+                for i in changed:
+                    c.execute("UPDATE gateway_alerts SET read_at = NULL WHERE id = ?", (i,))
+        return changed
+
+    def dismiss_gateway_alerts(self, sub: str, ids: list[int] | None, *, undo: bool = False) -> list[int]:
+        """Dismiss the member's alerts ``ids`` (None: every one), or take a dismissal back
+        (``undo``, ids only); the ids that changed. A dismissed alert counts as read."""
+        now = int(time.time())
+        with self.tx() as c:
+            if undo:
+                if ids is None:
+                    return []
+                changed = self._alert_ids(c, sub, ids, "dismissed_at IS NOT NULL AND title != ''")
+                for i in changed:
+                    c.execute("UPDATE gateway_alerts SET dismissed_at = NULL WHERE id = ?", (i,))
+            else:
+                changed = self._alert_ids(c, sub, ids, "dismissed_at IS NULL")
+                for i in changed:
+                    c.execute(
+                        "UPDATE gateway_alerts SET dismissed_at = ?, read_at = COALESCE(read_at, ?), "
+                        "seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+                        (now, now, now, i),
+                    )
+        return changed
 
     def set_pref(
         self, sub: str, name: str, value: Any, *, keep_newest: tuple[str, int] | None = None

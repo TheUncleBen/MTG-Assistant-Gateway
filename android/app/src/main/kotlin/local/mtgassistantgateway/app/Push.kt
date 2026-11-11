@@ -21,7 +21,80 @@ object Push {
     private val KEY = Regex("^mtg-[A-Za-z0-9_-]{22}$")
     /** Message ids from ntfy, and the groups the gateway makes, as the app keeps or shows them. */
     private val ID = Regex("^[A-Za-z0-9]{8,24}$")
-    private val GROUP = Regex("^deck-[0-9]{1,12}$")
+    /** A deck's waiting changes (`deck-<id>`) or one kept alert (`a-<id>`, 0.7.47). */
+    private val GROUP = Regex("^(deck|a)-[0-9]{1,12}$")
+    private val ALERT = Regex("^a-[0-9]{1,12}$")
+
+    /** How loud a kind is on the phone: pops up (HIGH), sounds (DEFAULT) or stays quiet (LOW). */
+    enum class Level { HIGH, DEFAULT, LOW }
+
+    /** The Android channel a kind is shown on: its id (the kind) and its level. */
+    data class Channel(val id: String, val level: Level)
+
+    /**
+     * Every kind of alert the gateway sends (its message's tag), with how loud it is and what a
+     * group of them is called. Ben's choice (0.7.47): what waits for you and a new assistant pop
+     * up; price alerts, reports, Archidekt's alerts, applied changes and the gateway's own make a
+     * sound; summaries are quiet. Each is a channel the member can change in Android's settings.
+     */
+    val KINDS: Map<String, Pair<Level, Pair<String, String>>> = linkedMapOf(
+        "waiting" to (Level.HIGH to ("change waiting for you" to "changes waiting for you")),
+        "account" to (Level.HIGH to ("new assistant" to "new assistants")),
+        "price" to (Level.DEFAULT to ("price alert" to "price alerts")),
+        "report" to (Level.DEFAULT to ("report ready" to "reports ready")),
+        "archidekt" to (Level.DEFAULT to ("Archidekt alert" to "Archidekt alerts")),
+        "applied" to (Level.DEFAULT to ("change applied for you" to "changes applied for you")),
+        "gateway" to (Level.DEFAULT to ("gateway alert" to "gateway alerts")),
+        "summary" to (Level.LOW to ("summary" to "summaries")),
+    )
+
+    /** The channel id of messages with no kind (a test, a gateway before 0.7.47). */
+    const val GENERAL = "messages"
+
+    fun channelFor(kind: String): Channel {
+        val k = KINDS[kind] ?: return Channel(GENERAL, Level.DEFAULT)
+        return Channel(kind, k.first)
+    }
+
+    /** A kind's name in Android's settings and on its messages (the gateway's own words for it). */
+    fun channelName(kind: String): String = when (kind) {
+        "waiting" -> "Waiting for you"
+        "applied" -> "Applied for you"
+        "report" -> "Deck reports"
+        "price" -> "Price alerts"
+        "archidekt" -> "From Archidekt"
+        "account" -> "New assistant"
+        "summary" -> "Summaries"
+        "gateway" -> "Gateway (admins)"
+        else -> "MTG Gateway"
+    }
+
+    /** What a kind's channel is for, under its name in Android's settings. */
+    fun channelHint(kind: String): String = when (kind) {
+        "waiting" -> "An assistant left changes for you to apply or reject."
+        "applied" -> "An assistant changed a deck without asking, as your approval mode allows."
+        "report" -> "A test or deck report finished."
+        "price" -> "A watched card crossed your price alert."
+        "archidekt" -> "A comment, a reply, a new follower or news in your Archidekt alerts."
+        "account" -> "An assistant connected to your account for the first time."
+        "summary" -> "Your daily or weekly summary."
+        "gateway" -> "A newer gateway release, or a nightly backup that failed."
+        else -> ""
+    }
+
+    /** A group's summary line: "3 price alerts". */
+    fun groupText(kind: String, count: Int): String {
+        val words = KINDS[kind]?.second ?: ("alert" to "alerts")
+        return "$count ${if (count == 1) words.first else words.second}"
+    }
+
+    /** Whether a message is one kept alert, which Mark read can mark read on the gateway. */
+    fun markable(tag: String): Boolean = ALERT.matches(tag)
+
+    /** The body of the app's Mark read (POST [READ_PATH]). */
+    fun readBody(tag: String): String = JSONObject().put("tag", tag).toString()
+
+    const val READ_PATH = "/app/notifications/read"
 
     fun isKey(key: String?): Boolean = key != null && KEY.matches(key)
 
@@ -30,8 +103,18 @@ object Push {
         /** The connection works (an `open` or a `keepalive`). */
         object Alive : Action()
 
-        /** Show a notification; [tag] names it on the phone (its group or its own id). */
-        data class Show(val id: String, val tag: String, val title: String, val text: String, val click: String?) : Action()
+        /**
+         * Show a notification; [tag] names it on the phone (its group or its own id), [kind] is
+         * the gateway's kind of alert ([KINDS], "" for none).
+         */
+        data class Show(
+            val id: String,
+            val tag: String,
+            val title: String,
+            val text: String,
+            val click: String?,
+            val kind: String = "",
+        ) : Action()
 
         /** Take the notification [tag] off the phone. */
         data class Remove(val tag: String) : Action()
@@ -58,6 +141,7 @@ object Push {
                     title = o.optString("title").take(120).ifBlank { "MTG Gateway" },
                     text = o.optString("message").take(1000),
                     click = o.optString("click").takeIf { it.startsWith("https://") },
+                    kind = o.optJSONArray("tags")?.optString(0)?.takeIf { it in KINDS } ?: "",
                 )
             }
             "message_delete", "message_clear" -> if (group != null) Action.Remove(group) else Action.Skip

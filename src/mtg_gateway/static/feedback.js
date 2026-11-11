@@ -445,3 +445,47 @@
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
   }
 })();
+
+/* One-time notices (0.7.47, Ben: "refresh does not get rid of the temporary notifications"): a
+   page shows a form's result from its address (?ok=, ?err=, ?done=, ?deleted=, ?saved=). Shown
+   once: a reload (also the app's pull to refresh) or a Back to such a page loads it again without
+   that part of the address, so the notice is gone; every other part stays (a filter, ?connect=1).
+   On the first showing nothing changes, so a page that reads its own address again (a live
+   review page, a late page) still has it. Each notice also gets a × that takes it away. */
+(function () {
+  "use strict";
+  var ONCE = ["ok", "err", "done", "deleted", "saved"];
+  if (!window.URLSearchParams) return;
+  var q = new URLSearchParams(location.search);
+  var had = ONCE.filter(function (k) { return q.has(k); });
+  if (!had.length) return;
+  var how = "";
+  try {
+    var nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    how = nav ? nav.type : (performance.navigation && performance.navigation.type === 1 ? "reload" : "");
+  } catch (e) { how = ""; }
+  if (how === "reload" || how === "back_forward") {
+    ONCE.forEach(function (k) { q.delete(k); });
+    var s = q.toString();
+    location.replace(location.pathname + (s ? "?" + s : "") + location.hash);
+    return;
+  }
+  function closeable() {
+    var main = document.querySelector("main") || document.body;
+    Array.prototype.forEach.call(main.querySelectorAll(".notice[role=status], .notice[role=alert]"), function (n) {
+      if (n.querySelector(":scope > .close") || n.hasAttribute("data-dismissable") || n.closest(".mtgbox")) return;
+      n.classList.add("once");
+      var x = document.createElement("button");
+      x.type = "button";
+      x.className = "close icon-only";
+      x.setAttribute("aria-label", "Dismiss");
+      x.title = "Dismiss";
+      // the × is drawn by the style sheet (.notice.once > .close::before), so the notice's own
+      // words stay its text
+      x.addEventListener("click", function () { n.remove(); });
+      n.appendChild(x);
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", closeable);
+  else closeable();
+})();

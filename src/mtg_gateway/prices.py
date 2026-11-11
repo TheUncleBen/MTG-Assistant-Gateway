@@ -41,7 +41,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from . import dbwait, refusals
+from . import dbwait, notify, refusals
 from .binder_prices import BINDER_PAGE_SIZE, PRICED_FOR_DAYS, BinderStore
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, owns_deck
@@ -1381,7 +1381,8 @@ class PriceService:
             alerts = self._alerts_due(day)
         for sub, title, message, path in alerts:
             if self.notifier is not None:
-                await self.notifier.send(sub, "prices", title, message, path, retry=True)
+                subject = title.partition(" · ")[2]
+                await self.notifier.send(sub, "price", title, message, path, retry=True, subject=subject)
         # each member's Watchlist rows worked out now, in the background, so the first view after
         # today's prices is as quick as the rest
         for row in self._rows("SELECT DISTINCT sub FROM watch_cards"):
@@ -1759,12 +1760,13 @@ class PriceService:
                             f"{money(added, currency)} it was added at"
                         )
             if reasons:
+                # the push says the card and which way first: "Price drop · Sol Ring"
+                word = "Price drop" if cur < prev else "Price rise"
                 out.append(
                     (
                         w["sub"],
-                        "Price alert",
-                        f"{label} {' and '.join(reasons)}: "
-                        f"{money(prev, currency)} to {money(cur, currency)}.",
+                        notify.push_title("price", label, word),
+                        f"{money(prev, currency)} to {money(cur, currency)}: {' and '.join(reasons)}.",
                         f"/watchlist?open={quote(str(w['id']), safe='')}#wr-{quote(str(w['id']), safe='')}",
                     )
                 )

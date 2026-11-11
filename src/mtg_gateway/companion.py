@@ -429,6 +429,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
 
     # The route modules import this module's helpers, so they are imported here, not at the top.
+    from .alerts_page import add_alerts_routes
     from .companion_decks import add_deck_routes
     from .companion_folders import add_folder_routes
     from .companion_history import add_history_routes
@@ -471,6 +472,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     add_history_routes(server, state, reports, h)
     add_lists_routes(server, state, h)
     add_profile_routes(server, state, h)
+    add_alerts_routes(server, state, h)
     add_forum_routes(server, state, h)
     add_shell_routes(server, h)
 

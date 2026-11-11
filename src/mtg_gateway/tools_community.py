@@ -87,8 +87,8 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         name="get_my_notifications",
         title="Read my Archidekt alerts",
         description=(
-            "The user's Archidekt alerts (the bell): kind, text, whether it was seen, and the "
-            "page it points to. Nothing here marks them read. Changes nothing."
+            "The user's Archidekt alerts: kind, text, seen, page; gateway_alerts holds the "
+            "gateway's own (reports, price alerts, ...). Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -99,7 +99,9 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
             out = await profile.notifications(state.decks, _sub())
         except DeckError as exc:
             return _tool_error(exc)
-        return {"ok": True, **out}
+        from .alerts_page import assistant_view
+
+        return {"ok": True, **out, "gateway_alerts": assistant_view(state, _sub())}
 
     @server.tool(
         name="propose_profile_change",

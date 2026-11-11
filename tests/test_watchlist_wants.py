@@ -38,7 +38,7 @@ def _sol(stack: Stack) -> dict:
 def test_the_schema_grows_lists_and_the_price_when_added(tmp_path: Path) -> None:
     d = Database(tmp_path / "w.sqlite")
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 23
+        assert d.schema_version == db_module.SCHEMA_VERSION == 24
         cols = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_cards)")}
         assert {"list_name", "added_price", "added_currency", "alert_drop_pct", "alert_rise_pct"} <= cols
         lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
@@ -75,7 +75,7 @@ def test_schema_21_adds_the_lists_to_a_schema_20_database(
     monkeypatch.undo()
     d = Database(path, upgrade_dir=tmp_path / "before-upgrade")
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 23
+        assert d.schema_version == db_module.SCHEMA_VERSION == 24
         lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
         assert lists == {"sub", "name", "created_at"}
         row = d._conn.execute("SELECT list_name, added_price FROM watch_cards WHERE id = 'w1'").fetchone()
@@ -129,10 +129,7 @@ async def test_a_new_watch_gets_the_default_alert_and_the_price_it_was_added_at(
     stack.sf.prices[sol["id"]] = {"usd": "0.75"}  # $0.53 under $1.28: the alert (0.7.47 floor)
     assert (await stack.gw.prices.run_daily())["alerts"] == 1
     msg = stack.ntfy.messages[-1]
-    assert (
-        msg["message"]
-        == "Sol Ring fell under $0.78, its alert below the $1.28 it was added at: $1.10 to $0.75."
-    )
+    assert msg["message"] == "$1.10 to $0.75: fell under $0.78, its alert below the $1.28 it was added at."
     clock.next_day()
     stack.sf.prices[sol["id"]] = {"usd": "0.70"}  # already below: not again
     assert (await stack.gw.prices.run_daily())["alerts"] == 0

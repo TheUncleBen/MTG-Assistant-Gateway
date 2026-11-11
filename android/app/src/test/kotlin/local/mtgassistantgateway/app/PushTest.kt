@@ -99,4 +99,50 @@ class PushTest {
         assertFalse(again.first("aaaaaaaa4"))
         assertTrue(again.first("aaaaaaaa1"))
     }
+
+    // 0.7.47: each kind of alert has its own channel, group and words; a kept alert can be marked read
+    @Test fun aKeptAlertCarriesItsKindAndItsOwnTag() {
+        val a = Push.parse(
+            """{"id":"m4AbCdEf9","event":"message","sequence_id":"a-17","tags":["price"],""" +
+                """"title":"Price drop · Sol Ring","message":"$1.20 to $0.90: fell below $1.00.",""" +
+                """"click":"https://mtg.example.com/notifications/open/17"}""",
+        )
+        assertEquals(
+            Push.Action.Show(
+                "m4AbCdEf9", "a-17", "Price drop · Sol Ring", "$1.20 to $0.90: fell below $1.00.",
+                "https://mtg.example.com/notifications/open/17", "price",
+            ),
+            a,
+        )
+        assertEquals(Push.Action.Remove("a-17"), Push.parse("""{"event":"message_delete","sequence_id":"a-17"}"""))
+        // an unknown tag (a newer gateway's kind) is no kind: the general channel
+        val b = Push.parse("""{"id":"m5AbCdEf9","event":"message","tags":["sparkles"],"message":"x"}""") as Push.Action.Show
+        assertEquals("", b.kind)
+    }
+
+    @Test fun eachKindHasItsChannelAndLevel() {
+        assertEquals(Push.Channel("waiting", Push.Level.HIGH), Push.channelFor("waiting"))
+        assertEquals(Push.Channel("account", Push.Level.HIGH), Push.channelFor("account"))
+        assertEquals(Push.Channel("price", Push.Level.DEFAULT), Push.channelFor("price"))
+        assertEquals(Push.Channel("report", Push.Level.DEFAULT), Push.channelFor("report"))
+        assertEquals(Push.Channel("archidekt", Push.Level.DEFAULT), Push.channelFor("archidekt"))
+        assertEquals(Push.Channel("summary", Push.Level.LOW), Push.channelFor("summary"))
+        // a test, and a message from a gateway before 0.7.47: the old channel, as before
+        assertEquals(Push.Channel("messages", Push.Level.DEFAULT), Push.channelFor(""))
+        assertEquals(Push.Channel("messages", Push.Level.DEFAULT), Push.channelFor("test"))
+        assertEquals(Push.KINDS.keys, setOf("waiting", "applied", "report", "price", "archidekt", "account", "summary", "gateway"))
+    }
+
+    @Test fun aGroupSaysHowManyOfItsKind() {
+        assertEquals("3 price alerts", Push.groupText("price", 3))
+        assertEquals("2 changes waiting for you", Push.groupText("waiting", 2))
+        assertEquals("2 alerts", Push.groupText("", 2))
+    }
+
+    @Test fun onlyAKeptAlertCanBeMarkedRead() {
+        assertTrue(Push.markable("a-17"))
+        assertFalse(Push.markable("deck-42")) // what waits leaves once it is applied or rejected
+        assertFalse(Push.markable("m1AbCdEf9"))
+        assertEquals("""{"tag":"a-17"}""", Push.readBody("a-17"))
+    }
 }

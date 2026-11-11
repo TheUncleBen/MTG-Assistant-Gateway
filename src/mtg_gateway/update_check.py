@@ -51,6 +51,10 @@ def parse_version(value: Any) -> tuple[int, int, int] | None:
     return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
 
 
+# The release an admin closed the update strip for (app.py: their account choice), or None.
+dismissed_for: Any = None
+
+
 def newer() -> dict[str, str] | None:
     """The newer release found by the last good lookup (``version``, ``url``), or None."""
     found = parse_version(last.get("latest"))
@@ -92,6 +96,8 @@ class UpdateChecker:
     def __init__(self, enabled: bool, http: httpx.AsyncClient | None = None):
         self.enabled = enabled
         self._http = http
+        # a newer release found: the admins' alert (app.py), awaited with {version, url}
+        self.on_newer: Any = None
         last.update(enabled=enabled)
 
     async def check_once(self) -> None:
@@ -116,6 +122,8 @@ class UpdateChecker:
         was = newer()
         last.update(at=int(time.time()), ok=True, latest=version, url=url, error=None)
         now = newer()
+        if now and self.on_newer is not None:
+            await self.on_newer(now)  # kept once per version (its alert's key)
         if now and now != was:
             logger.warning(
                 "gateway %s is available (this one runs %s): %s. Admins see the update steps on /admin",

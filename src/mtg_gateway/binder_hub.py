@@ -685,7 +685,7 @@ def settings_html(d: dict[str, float], split: tuple[int, int], csrf: str, notice
         + _row_label(
             section_href("notifications"),
             "bell",
-            "Push notifications",
+            "Price alerts on your phone",
             "",
             "Set in Account › Push notifications",
         )
