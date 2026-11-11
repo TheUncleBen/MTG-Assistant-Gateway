@@ -151,13 +151,19 @@ object Push {
 
     /**
      * `since` for the next connection, so nothing is missed: the last message id the app got, else
-     * (no message yet) the gateway's time on the last line it got ([lineTime]), a second early. A
-     * stream that stalled before its first message (seen on the emulator: the gateway kept writing
-     * to a connection the phone never read again) then still brings what was sent meanwhile; a
-     * message seen twice is shown once ([Seen]). Neither: from now.
+     * (no message yet) the gateway's time on the last line it got ([lineTime]), [SINCE_MARGIN_S]
+     * early. A stream that stalled before its first message (seen on the emulator: the gateway kept
+     * writing to a connection the phone never read again) then still brings what was sent
+     * meanwhile. The margin covers a gateway whose clock runs ahead of ntfy's (its own keepalive
+     * carries the gateway's time, a message ntfy's); a message seen twice is shown once ([Seen]).
+     * Neither: from now.
      */
     fun since(lastId: String?, lastTime: Long? = null): String? =
-        lastId?.takeIf { ID.matches(it) } ?: lastTime?.takeIf { it in TIMES }?.let { (it - 1).toString() }
+        lastId?.takeIf { ID.matches(it) }
+            ?: lastTime?.takeIf { it in TIMES }?.let { (it - SINCE_MARGIN_S).toString() }
+
+    /** Seconds before the remembered time that a connection starts from ([since], audit AX3). */
+    const val SINCE_MARGIN_S = 60L
 
     /** The gateway's Unix time on a stream [line] (an open, a keepalive or a message), if any. */
     fun lineTime(line: String): Long? {

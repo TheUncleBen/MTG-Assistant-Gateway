@@ -58,13 +58,22 @@ class PushTest {
     }
 
     @Test fun beforeAnyMessageSinceIsTheLastLinesTime() {
-        // a stream that stalled before its first message: the next connection starts a second
-        // before the gateway's time on the last line the app got, so nothing sent meanwhile is lost
-        assertEquals("1794369039", Push.since(null, 1794369040L))
+        // a stream that stalled before its first message: the next connection starts a minute
+        // before the gateway's time on the last line the app got, so nothing sent meanwhile is
+        // lost, even from an ntfy whose clock runs up to a minute behind the gateway's (audit AX3)
+        assertEquals(60L, Push.SINCE_MARGIN_S)
+        assertEquals("1794368980", Push.since(null, 1794369040L))
         assertEquals("m1AbCdEf9", Push.since("m1AbCdEf9", 1794369040L)) // a message id wins
-        assertEquals("1794369039", Push.since("1&x=2", 1794369040L))
+        assertEquals("1794368980", Push.since("1&x=2", 1794369040L))
         assertNull(Push.since(null, 5L)) // not a Unix time the gateway takes
         assertNull(Push.since(null, null))
+    }
+
+    @Test fun aGatewayClockAheadOfNtfysStillGetsTheMessage() {
+        // the gateway's keepalive says 1794369040, while ntfy, 30 s behind, stamped the message
+        // sent meanwhile 1794369015: ntfy's since= (a time) brings it, as it is after the start
+        val since = Push.since(null, 1794369040L)!!.toLong()
+        assertTrue("since $since is after the message's time", 1794369015L >= since)
     }
 
     @Test fun lineTimeReadsTheGatewaysTime() {
