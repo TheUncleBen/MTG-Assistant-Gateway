@@ -990,6 +990,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             refresh_token.resource,
             row["family"],
             auth_time=auth_time,
+            event="tokens_refreshed",
         )
         # the window runs from the first rotation: a retry never extends it
         self._note_rotation(old_hash, client.client_id, row["family"], issued, at=retry.at if retry else None)
@@ -1058,7 +1059,11 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         family: str,
         *,
         auth_time: int,
+        event: str = "tokens_issued",
     ) -> OAuthToken:
+        """A new access and refresh token pair. ``event`` names the audit row: tokens_issued for a
+        new connection (the code exchange), tokens_refreshed for a refresh, so an assistant's
+        routine renewal is not listed as a new connection (0.7.47, owner's Activity 2026-11-10)."""
         now = int(time.time())
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
@@ -1089,7 +1094,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             expires_at=now + self._ttl("refresh_token_ttl"),
             auth_time=auth_time,
         )
-        self.db.audit("tokens_issued", sub=sub, client_id=client_id)
+        self.db.audit(event, sub=sub, client_id=client_id)
         return OAuthToken(
             access_token=access,
             token_type="Bearer",
