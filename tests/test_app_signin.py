@@ -697,3 +697,15 @@ def test_legs_expire_and_are_bounded() -> None:
     for _ in range(600):
         legs.start_leg("c" * 43, "/", None, False)
     assert len(legs._legs) <= 500
+
+
+def test_a_flood_of_legs_from_one_network_does_not_push_out_anothers() -> None:
+    """Anyone can ask for an app sign-in leg without signing in. A full table makes room from the
+    network that holds the most, so a member's leg still waits for their Continue."""
+    from mtg_gateway import app_signin
+
+    legs = app_signin.AppSignins()
+    mine = legs.start_leg("a" * 43, "/", None, False, "198.51.100.7")
+    for _ in range(app_signin.MAX_PENDING + 50):
+        legs.start_leg("b" * 43, "/", None, False, "203.0.113.9")
+    assert legs.take_leg(mine, mine) is not None

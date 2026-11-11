@@ -38,7 +38,7 @@ from . import (
 )
 from . import decks as decks_mod
 from .archidekt import PATIENCE_SPENT, page_turn
-from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
+from .auth_provider import BROWSER_COOKIE, BROWSER_KEY, LoginError, cookie_name, login_source
 from .avatars import initials_svg
 from .busy import outage
 from .clickguard import GUARD_DWELL_MS, GUARD_SETTLE_MS, form_stamp, guarded_form, submitted_too_soon
@@ -207,7 +207,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 return small("Sign-in failed", smallpage.signin_failed(login_href(nxt)), status=400)
             # Any app on the phone can open this address: a page first, and only its Continue goes
             # on to the identity provider (app_continue).
-            token = state.app_signins.start_leg(challenge, nxt, back, fresh)  # type: ignore[attr-defined]
+            holder = BROWSER_KEY.get()
+            source = login_source(holder.get("client_ip") if holder else None) or ""
+            token = state.app_signins.start_leg(  # type: ignore[attr-defined]
+                challenge, nxt, back, fresh, source
+            )
             resp = small(
                 "Sign in to the app?",
                 app_signin.confirm_body(s.server_name, token),

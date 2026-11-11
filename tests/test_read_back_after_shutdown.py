@@ -36,7 +36,9 @@ def test_a_cancelled_apply_of_an_older_proposal_is_read_back(tmp_path: Path) -> 
         db.finish_proposal(pid, state="applying", snapshot_id="snap-" + pid)
         db.note_apply_progress(pid, {"writes_started": True, "sent_entries": 1})
     db.finish_proposal(
-        "cancelled", state="failed", result={"writes_started": True, "sent_entries": 1, "error": "interrupted"}
+        "cancelled",
+        state="failed",
+        result={"writes_started": True, "sent_entries": 1, "error": "interrupted"},
     )
     db.fail_interrupted_applies()
     back = {r["id"] for r in db.interrupted_to_read_back(now - int(READ_BACK_WITHIN_SECONDS))}

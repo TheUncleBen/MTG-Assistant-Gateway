@@ -37,7 +37,9 @@ async def test_semi_split_edit_waits_for_the_member(stack: Stack) -> None:
     second = await _propose(h, token, 2, NAMES[:1])  # one more row: 6 in all, over Semi's 5
     assert second["assistant_may_apply"] is False, second
     refused = structured(await call(h, token, "apply_proposal", {"proposal_id": second["proposal_id"]}))
-    assert refused.get("error_code") == "browser_required" or refused.get("error") == "browser_required", refused
+    assert refused.get("error_code") == "browser_required" or refused.get("error") == "browser_required", (
+        refused
+    )
     assert "24 hours" in str(refused), refused
     assert len(ark.patches) == sent  # nothing more was written
 
