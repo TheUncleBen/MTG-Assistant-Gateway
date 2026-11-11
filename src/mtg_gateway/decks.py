@@ -8383,7 +8383,10 @@ class DeckService:
                 "changes": {
                     **{k: v for k, v in (extra or {}).items() if v},
                     "add": adds,
-                    "remove": [{"id": r["id"], "quantity": r["quantity"]} for r in removes],
+                    "remove": [
+                        {"id": r["id"], "quantity": r["quantity"], "name": str(r.get("name") or "")}
+                        for r in removes
+                    ],
                     **(
                         {"tag": [{"id": t["id"], "name": t["name"], "tags": list(t["tags"])} for t in tags]}
                         if tags
