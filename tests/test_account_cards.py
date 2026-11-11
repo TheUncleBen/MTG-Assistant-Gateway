@@ -223,3 +223,27 @@ async def test_view_choices_asks_in_a_box_and_delete_my_data_puts_the_tick_above
         assert "<a class='yrow' href='/account/assistants'>" in page
     finally:
         await b.aclose()
+
+
+async def test_a_missed_weekly_summary_is_sent_the_next_day_and_a_failed_one_again(stack: Stack) -> None:
+    """Weekly summaries went out on Mondays only, so a Monday the gateway was off lost the week's;
+    and a summary the notification server refused was marked sent, so it was never tried again."""
+    b = await _browser(stack)
+    try:
+        await _opt_in(b)
+        await _post(b, "/account", {"action": "summary_save", "summary_every": "weekly"})
+        due = stack.gw.summaries.send_due
+        assert await due("2026-10-14") == 0  # the first one waits for a Monday
+        assert await due("2026-10-19") == 1  # Monday
+        assert await due("2026-10-20") == 0 and await due("2026-10-25") == 0  # this week's has gone
+        assert await due("2026-10-27") == 1  # Monday the 26th was missed: Tuesday sends it
+        assert await due("2026-10-28") == 0
+        # a daily one the server refuses is tried again on the next run of the same day
+        await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
+        stack.ntfy.status = 403
+        assert await due("2026-10-29") == 0
+        stack.ntfy.status = 200
+        assert await due("2026-10-29") == 1
+        assert await due("2026-10-29") == 0
+    finally:
+        await b.aclose()

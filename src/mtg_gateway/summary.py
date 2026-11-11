@@ -156,29 +156,40 @@ class Summaries:
 
     async def send_due(self, day: str) -> int:
         """Send the summary to every member who chose one that is due on ``day`` (daily ones every
-        day, weekly ones on Mondays) and has ntfy notifications on. Returns how many were sent."""
+        day, weekly ones on Mondays) and has ntfy notifications on. Returns how many were sent.
+
+        A weekly one whose Monday was missed (the gateway was off, the run failed) is sent on the
+        first day after it, and a summary the notification server did not take is not marked sent,
+        so the next run tries it again."""
         if self.notifier is None or not self.notifier.enabled:
             return 0
-        weekday = _dt.date.fromisoformat(day).weekday()
+        today = _dt.date.fromisoformat(day)
+        monday = (today - _dt.timedelta(days=today.weekday())).isoformat()
         with self.db._lock:
             rows = self.db._conn.execute(
-                "SELECT sub, summary_every FROM notify_prefs WHERE ntfy_on = 1 AND ntfy_topic IS NOT NULL "
+                "SELECT sub, summary_every, summary_sent_day FROM notify_prefs "
+                "WHERE ntfy_on = 1 AND ntfy_topic IS NOT NULL "
                 "AND summary_every != 'off' AND (summary_sent_day IS NULL OR summary_sent_day != ?)",
                 (day,),
             ).fetchall()
         sent = 0
         for r in rows:
-            if r["summary_every"] == "weekly" and weekday != 0:
-                continue
+            if r["summary_every"] == "weekly":
+                last = r["summary_sent_day"]
+                # the first one waits for a Monday; later ones are due once this week's has not gone
+                if (last is None and today.weekday() != 0) or (last is not None and last >= monday):
+                    continue
             period = "day" if r["summary_every"] == "daily" else "week"
             try:
                 ok = await self.send(r["sub"], period)
             except Exception:  # one member's summary must not stop the others
                 logger.exception("summary failed for one member")
                 continue
+            if not ok:
+                continue
             with self.db.tx() as c:
                 c.execute("UPDATE notify_prefs SET summary_sent_day = ? WHERE sub = ?", (day, r["sub"]))
-            sent += ok
+            sent += 1
         return sent
 
 
