@@ -26,6 +26,7 @@ from starlette.responses import RedirectResponse, Response
 from . import ui
 from .archidekt import removed_rows
 from .decks import DeckError, _clean_deck_id, current_client
+from .digits import is_digits
 from .theme import esc, time_html
 
 if TYPE_CHECKING:
@@ -191,7 +192,7 @@ def add_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> None:
         if not sub:
             return login_redirect_here(request)
         raw_page = q.get("page") or "1"
-        num = int(raw_page) if raw_page.isdigit() and 0 < int(raw_page) <= 500 else 1
+        num = int(raw_page) if is_digits(raw_page) and 0 < int(raw_page) <= 500 else 1
         try:
             got = await read(decks, sub, q.get("deck_id") or "", num)
         except DeckError as exc:

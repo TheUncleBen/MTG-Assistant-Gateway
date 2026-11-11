@@ -24,6 +24,7 @@ from . import refusals
 from .archidekt import ArchidektError
 from .decklist import clean_text
 from .decks import DeckError, archidekt_wait
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -49,7 +50,7 @@ def target(thread_id: Any) -> str:
 def thread_of(target_id: str) -> int | None:
     """The thread number of a forum comment target, or None for a deck."""
     raw = str(target_id or "")
-    if raw.startswith(FORUM_TARGET_PREFIX) and raw[len(FORUM_TARGET_PREFIX) :].isdigit():
+    if raw.startswith(FORUM_TARGET_PREFIX) and is_digits(raw[len(FORUM_TARGET_PREFIX) :]):
         return int(raw[len(FORUM_TARGET_PREFIX) :])
     return None
 
@@ -58,7 +59,7 @@ def _thread_id(value: Any) -> int:
     raw = str(value or "").strip().rstrip("/")
     if "/forum/thread/" in raw:
         raw = raw.rsplit("/forum/thread/", 1)[1].split("?")[0].split("/")[0]
-    if not raw.isdigit() or not 0 < int(raw) < 10**12:
+    if not is_digits(raw) or not 0 < int(raw) < 10**12:
         raise DeckError("invalid", "thread_id must be a forum thread's number or its link.")
     return int(raw)
 

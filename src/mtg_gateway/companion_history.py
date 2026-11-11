@@ -23,6 +23,7 @@ from .companion import (
 )
 from .db import DECK_CHANGE_KINDS, SNAPSHOT_HELD_RESTORE
 from .decks import DeckError, current_client, mark_gone, owns_deck
+from .digits import is_digits
 from .history_view import (
     DELETED_NOTICES,
     HISTORY_CSS,
@@ -615,7 +616,7 @@ def add_history_routes(
         if came.path not in ("/reports", "/history"):
             back = (
                 f"/history?deck_id={quote(str(r['deck_id']))}"
-                if str(r.get("deck_id") or "").isdigit()
+                if is_digits(str(r.get("deck_id") or ""))
                 else "/history"
             )
         opener, delete_box = delete_box_html(
@@ -723,7 +724,7 @@ def add_history_routes(
         from .reports import list_diff, tested_rows
 
         deck_id = str(r.get("deck_id") or "")
-        if not deck_id.isdigit():
+        if not is_digits(deck_id):
             return ""
         deck = decks.kept_page_deck(sub, deck_id)
         if deck is None:
@@ -802,7 +803,7 @@ def add_history_routes(
         try:
             tested = reports.tested(sub, rid)
             deck_id = str(r.get("deck_id") or "")
-            if tested is None or not deck_id.isdigit():
+            if tested is None or not is_digits(deck_id):
                 raise DeckError("invalid", RESTORE_NO_LIST)
             deck = await decks.get_own_deck(sub, deck_id)
             p = await decks.propose(sub, deck_id, restore_changes(tested, deck))

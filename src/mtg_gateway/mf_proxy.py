@@ -26,6 +26,7 @@ from . import dbwait, deck_stats
 from .busy import AGAIN, outage
 from .decklist import _FACE_SPLIT, front_faces
 from .decks import DeckError
+from .digits import is_digits
 from .report_view import found_not_verified
 from .schemas import compact_schema, flatten_params
 from .tool_labels import tool_name
@@ -634,7 +635,7 @@ def names_deck(value: Any) -> bool:
         return True
     if isinstance(value, str):
         value = value.strip()
-        return value.isdigit() or ("archidekt.com" in value.lower() and "\n" not in value)
+        return is_digits(value) or ("archidekt.com" in value.lower() and "\n" not in value)
     return False
 
 

@@ -160,7 +160,7 @@ def _page(
 ) -> dict[str, object]:
     """One page of a list: one row more than asked is read to know whether another page follows."""
     limit = max(1, min(int(limit), most))
-    offset = max(0, int(offset))
+    offset = min(max(0, int(offset)), 10**9)  # a huge skip is an empty page, never an error
     got = fetch(limit + 1, offset)
     more = len(got) > limit
     return {

@@ -36,6 +36,7 @@ from .busy import busy_json_response, busy_response, held_html, same_url
 from .companion import DECK_CSP
 from .deckpage import image_url
 from .decks import DeckError, current_client, own_snapshot, reloading
+from .digits import is_digits
 from .pages import (
     BROWSER_CLIENT_ID,
     TOO_BIG,
@@ -265,7 +266,7 @@ def cmc_of(cost: str) -> float:
         parts = [p.strip().upper() for p in sym.split("/")]
         best = 0.0
         for p in parts:
-            if p.isdigit():
+            if is_digits(p):
                 best = max(best, float(p))
             elif p in ("X", "Y", "Z", "P", "S", ""):
                 best = max(best, 0.0)
@@ -2000,7 +2001,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
     def page_of(q: Any) -> int:
         raw = q.get("page") or "1"
-        return int(raw) if raw.isdigit() and 1 <= int(raw) <= 1000 else 1
+        return int(raw) if is_digits(raw) and 1 <= int(raw) <= 1000 else 1
 
     @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)
     async def lists_home(request: Request) -> Response:

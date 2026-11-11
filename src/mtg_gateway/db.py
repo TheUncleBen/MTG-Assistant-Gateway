@@ -3212,7 +3212,7 @@ class Database:
             args.append(int(until))
         order = "ASC" if oldest_first else "DESC"
         sql += f" ORDER BY created_at {order}, rowid {order} LIMIT ? OFFSET ?"
-        args += [max(0, int(limit)), max(0, int(offset))]
+        args += [min(max(0, int(limit)), 10**9), min(max(0, int(offset)), 10**12)]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
@@ -4219,7 +4219,7 @@ class Database:
             sql += " AND taken_at < ?"
             args.append(int(until))
         sql += " ORDER BY taken_at DESC, rowid DESC LIMIT ? OFFSET ?"
-        args += [max(0, int(limit)), max(0, int(offset))]
+        args += [min(max(0, int(limit)), 10**9), min(max(0, int(offset)), 10**12)]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         return [
@@ -5060,7 +5060,7 @@ class Database:
                 "SELECT card_key, name, added_by, added_at, updated_at, "
                 "length(CAST(model_json AS BLOB)) AS size FROM card_models "
                 "ORDER BY updated_at DESC, card_key, added_by LIMIT ? OFFSET ?",
-                (max(0, int(limit)), max(0, int(offset))),
+                (min(max(0, int(limit)), 10**9), min(max(0, int(offset)), 10**12)),
             ).fetchall()
         return [dict(r) for r in rows]
 

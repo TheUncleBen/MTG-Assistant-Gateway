@@ -36,6 +36,7 @@ import hmac
 import html
 import time
 
+from .digits import is_digits
 from .theme import icon
 
 GUARD_SCRIPT = "/static/clickguard.js"
@@ -61,7 +62,7 @@ def submitted_too_soon(secret: str, scope: str, value: str | None, now: float | 
     if not value:
         return True
     ms_text, _, sig = value.partition(".")
-    if not ms_text.isdigit() or len(ms_text) > 15:
+    if not is_digits(ms_text) or len(ms_text) > 15:
         return True
     expected = hmac.new(secret.encode(), f"shown:{scope}:{ms_text}".encode(), hashlib.sha256).hexdigest()[:32]
     if not hmac.compare_digest(sig.encode(), expected.encode()):

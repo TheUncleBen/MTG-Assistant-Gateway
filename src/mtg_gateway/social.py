@@ -27,6 +27,7 @@ from . import formatting, prefs, refusals
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, QuillDoc, plain_text, rich_text
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
+from .digits import is_digits
 from .pages import NO_STORE, browser_session, csrf_header_ok, read_limited
 
 if TYPE_CHECKING:
@@ -179,7 +180,7 @@ class SocialService:
         if link is None:
             raise DeckError("not_linked", refusals.not_linked(self.state.settings.public_url))
         uid = str(link.get("archidekt_user_id") or "")
-        if not uid.isdigit():
+        if not is_digits(uid):
             raise DeckError("not_linked", refusals.no_user_id(self.state.settings.public_url))
         return uid, str(link.get("archidekt_username") or "")
 
@@ -477,7 +478,7 @@ class SocialService:
         comments = [comment_out(c, keep_doc=keep_doc) for c in results if isinstance(c, dict)]
         link = self.state.db.get_link(sub) if linked else None
         raw_me = str((link or {}).get("archidekt_user_id") or "")
-        me = int(raw_me) if raw_me.isdigit() else None
+        me = int(raw_me) if is_digits(raw_me) else None
         return {
             "root": root,
             "count": count if isinstance(count, int) else len(comments),
@@ -627,7 +628,7 @@ class SocialService:
         out = comment_out(created)
         if not out["owner"]["username"]:
             out["owner"]["username"] = name
-        if out["owner"].get("id") is None and _uid.isdigit():
+        if out["owner"].get("id") is None and is_digits(_uid):
             out["owner"]["id"] = int(_uid)  # so the page offers Edit and Delete on it at once
         return {"comment": out, "parent": target}
 
@@ -670,7 +671,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
 
     def user_id(request: Request) -> int:
         raw = str(request.path_params["user_id"])
-        if not raw.isdigit() or len(raw) > 12:
+        if not is_digits(raw) or len(raw) > 12:
             raise DeckError("invalid", "User ID is not a number.")
         return int(raw)
 
@@ -785,7 +786,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
 
     def comment_id(request: Request) -> int | None:
         raw = str(request.path_params.get("comment_id") or "")
-        return int(raw) if raw.isdigit() and len(raw) <= 12 else None
+        return int(raw) if is_digits(raw) and len(raw) <= 12 else None
 
     @server.custom_route(
         "/social/api/decks/{deck_id}/comments/{comment_id}", methods=["PATCH"], include_in_schema=False

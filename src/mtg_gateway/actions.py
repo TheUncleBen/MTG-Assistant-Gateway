@@ -18,6 +18,7 @@ from . import formatting, refusals
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, _row, needs_look_error
+from .digits import is_digits
 from .social import FOLLOWING_LOOKUP_PAGES
 
 if TYPE_CHECKING:
@@ -341,7 +342,7 @@ async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[in
             follow_url=profile_url(want),
         ) from exc
     name = clean_text(str((found or {}).get("username") or ""))
-    if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
+    if not found or not is_digits(str(found.get("id") or "")) or name.casefold() != want.casefold():
         # one text for follow and unfollow
         raise DeckError(
             "not_found",
@@ -445,7 +446,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         if by_name:
             owner_id, who = await follow_target(decks, sub, params.get("username"))
         else:
-            owner_id = int(deck.owner_id) if deck and str(deck.owner_id or "").isdigit() else None
+            owner_id = int(deck.owner_id) if deck and is_digits(str(deck.owner_id or "")) else None
             who = _owner(deck)
         if owner_id is None:
             raise DeckError(

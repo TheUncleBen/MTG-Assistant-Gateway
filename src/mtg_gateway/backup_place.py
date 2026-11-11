@@ -28,6 +28,7 @@ import html
 from typing import TYPE_CHECKING, Any
 
 from .decks import DeckError
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -162,7 +163,7 @@ async def post(decks: DeckService, sub: str, action: str, data: dict[str, Any]) 
     """The Backup folder page's two forms: the notice code to show (``ok=...`` or ``err=...``)
     and, for a refusal, its words (kept for the page, which shows them as they are)."""
     raw = str(data.get("folder_id") or "")
-    if not raw.isdigit():
+    if not is_digits(raw):
         raise DeckError("invalid", "Pick a backup folder.")
     if action == "backup_top":
         out = await move_to_top(decks, sub, int(raw))

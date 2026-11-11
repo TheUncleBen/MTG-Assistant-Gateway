@@ -107,6 +107,7 @@ from .decklist import (
     parse_decklist,
     to_text,
 )
+from .digits import is_digits
 from .timing import add_time, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
@@ -1213,7 +1214,7 @@ OVERLAP_STEP = (
 def _new_deck_fields(kind: str, result: Any) -> dict[str, Any]:
     """``new_deck_id`` and ``new_deck_url`` of a clone that made its copy."""
     new = result.get("deck_id") if kind == "clone" and isinstance(result, dict) else None
-    if new is None or not str(new).isdigit():
+    if new is None or not is_digits(str(new)):
         return {}
     return {"new_deck_id": str(new), "new_deck_url": f"https://archidekt.com/decks/{new}"}
 
@@ -1396,7 +1397,7 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
                 raise DeckError(
                     "invalid", f"Change {i}: relation_id goes with {', '.join(ROW_TARGET_ACTIONS)} only."
                 )
-            if isinstance(rel, str) and rel.isdigit():
+            if isinstance(rel, str) and is_digits(rel):
                 rel = int(rel)
             if isinstance(rel, bool) or not isinstance(rel, int) or rel <= 0:
                 raise DeckError(
@@ -3254,7 +3255,7 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
         if action not in CUSTOM_CARD_ACTIONS:
             raise DeckError("invalid", f"Change {i}: action must be one of {', '.join(CUSTOM_CARD_ACTIONS)}.")
         cid = item.get("custom_card_id")
-        if isinstance(cid, str) and cid.strip().isdigit():
+        if isinstance(cid, str) and is_digits(cid.strip()):
             cid = int(cid.strip())
         if not isinstance(cid, int) or isinstance(cid, bool) or cid < 1:
             raise DeckError("invalid", f"Change {i}: custom_card_id must be the custom card's ID (a number).")
@@ -4343,7 +4344,7 @@ class DeckService:
                     lambda token, *_, p=page: self.client.packages_list(token, owner=username, page=p),
                 )
                 found += [
-                    r for r in body["results"] if isinstance(r, dict) and str(r.get("id") or "").isdigit()
+                    r for r in body["results"] if isinstance(r, dict) and is_digits(str(r.get("id") or ""))
                 ]
                 if not body.get("next"):
                     break
@@ -5223,7 +5224,7 @@ class DeckService:
         # an optional folder of the member's own, checked as propose_clone checks it
         folder = None
         if folder_id is not None:
-            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+            if isinstance(folder_id, bool) or not is_digits(str(folder_id)):
                 raise DeckError("invalid", "That folder is not in your Archidekt account.")
             _info, folder = await self._folder_in(sub, int(folder_id))
             if folder.get("backup"):
@@ -5817,7 +5818,9 @@ class DeckService:
                 else {}
             ),
             "deck_id": row["deck_id"],
-            "deck_url": f"https://archidekt.com/decks/{row['deck_id']}" if row["deck_id"].isdigit() else None,
+            "deck_url": f"https://archidekt.com/decks/{row['deck_id']}"
+            if is_digits(row["deck_id"])
+            else None,
             "deck_name": row["deck_name"],
             "state": state,
             "diff": row["diff_text"],
@@ -6114,7 +6117,7 @@ class DeckService:
             deck_id = str(r.get("deck_id") or "")
             if r.get("kind") == "create_deck":
                 deck_id = "new"  # every new deck under one key: it has no deck id yet
-            elif not deck_id.isdigit():
+            elif not is_digits(deck_id):
                 continue
             row = self.db.get_proposal(r["id"], sub)
             if row is None or row["state"] != "pending":
@@ -7812,7 +7815,7 @@ class DeckService:
             if str((made.get("backup") or {}).get("backup_deck_id")) == str(backup_id):
                 made.pop("backup")  # the selection's next change on this deck makes its own
         if (
-            not str(backup_id).isdigit()
+            not is_digits(str(backup_id))
             or str(backup_id) == str(source_deck_id)
             or snap is None
             or str(snap.get("backup_deck_id") or "") != str(backup_id)
@@ -7922,7 +7925,7 @@ class DeckService:
             and _changed_anything(proposal.get("result") or {})
         )
         if (
-            not backup_id.isdigit()
+            not is_digits(backup_id)
             or backup_id == deck_id
             or snap is None
             or str(snap.get("backup_deck_id") or "") != backup_id
@@ -8028,7 +8031,7 @@ class DeckService:
         sid, sub, pid = job["snapshot_id"], job["sub"], job["proposal_id"]
         self.db.drop_backup_delete(sid)
         backup_id = str(job["backup_deck_id"])
-        if error != "copy_changed" and backup_id.isdigit():
+        if error != "copy_changed" and is_digits(backup_id):
             # The copy stays where it is and is no longer counted, so
             # no later trim queues it again (one more Archidekt read and give-up per new copy),
             # and its restore point is no longer held past the newest kept.
@@ -8163,7 +8166,7 @@ class DeckService:
         newest = copies[0]
         backup_id = str(newest["backup_deck_id"])
         made = self.db.backup_made(backup_id)
-        if not made or made.get("kept") or not backup_id.isdigit() or backup_id == str(deck.id):
+        if not made or made.get("kept") or not is_digits(backup_id) or backup_id == str(deck.id):
             return None
         if self.db.backup_copy_queued(sub, backup_id):
             return None  # an unused or over-limit copy waiting to be deleted is never shared
@@ -8212,7 +8215,7 @@ class DeckService:
             if not made or made.get("kept"):
                 continue
             counted += 1
-            if counted <= keep or not backup_id.isdigit() or backup_id == str(deck_id) or not sid:
+            if counted <= keep or not is_digits(backup_id) or backup_id == str(deck_id) or not sid:
                 continue
             if self.db.backup_delete_queued(sid):
                 continue
@@ -8451,7 +8454,7 @@ class DeckService:
         changes: dict[str, Any] = {"name": new_name}
         folder_name = None
         if folder_id is not None:
-            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+            if isinstance(folder_id, bool) or not is_digits(str(folder_id)):
                 raise DeckError("invalid", "That folder is not in your Archidekt account.")
             _info, folder = await self._folder_in(sub, int(folder_id))
             changes["folder_id"] = int(folder["id"])

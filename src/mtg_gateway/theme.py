@@ -2923,7 +2923,7 @@ def time_html(ts: int | float | None, *, day: bool = True) -> str:
     return f"<time datetime='{iso}'{'' if day else ' data-fmt=time'}>{shown}</time>"
 
 
-_NUMBERS = re.compile(r"(\d+)")
+_NUMBERS = re.compile(r"([0-9]+)")  # plain digits only: "²" and "٣" sort as text
 
 
 @functools.lru_cache(maxsize=16384)
@@ -2932,7 +2932,9 @@ def natural_key(text: str | None) -> tuple[str | int, ...]:
     the rest without regard to case. Every key alternates text and numbers from the first
     character, so any two compare. Kept for the last names asked about: a Watchlist at the cap
     sorts 5,000 names on every view."""
-    return tuple(int(p) if p.isdigit() else p.casefold() for p in _NUMBERS.split(text or ""))
+    # split() with one group alternates text, number, text ...: the place decides, so two keys always
+    # hold the same kind at the same place. Python converts at most 4300 digits.
+    return tuple(int(p[:4000]) if i % 2 else p.casefold() for i, p in enumerate(_NUMBERS.split(text or "")))
 
 
 def plural(n: int | float, word: str, plural_word: str | None = None) -> str:

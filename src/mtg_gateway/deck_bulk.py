@@ -21,6 +21,7 @@ from starlette.responses import RedirectResponse, Response
 from . import ui
 from .deckpage import folder_options_html
 from .decks import DeckError, current_client
+from .digits import is_digits
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_form_ok, login_redirect_here, read_limited
 from .theme import esc, icon
 
@@ -192,7 +193,7 @@ def add_bulk_routes(server: MCPServer, state: AppState) -> None:
         if not csrf_form_ok(s, sid, flat):
             return RedirectResponse(f"{back}{sep}err=expired", status_code=303)
         doing = flat.get("do", "")
-        ids = [d for d in data.get("deck_id", []) if d.isdigit() and len(d) <= 12]
+        ids = [d for d in data.get("deck_id", []) if is_digits(d) and len(d) <= 12]
         if doing not in ("move", "visibility"):
             return RedirectResponse(f"{back}{sep}err=invalid", status_code=303)
         if not ids:
@@ -209,7 +210,7 @@ def add_bulk_routes(server: MCPServer, state: AppState) -> None:
         if doing == "move":
             raw = flat.get("folder_id", "")
             if raw:
-                if not raw.isdigit():
+                if not is_digits(raw):
                     return RedirectResponse(f"{back}{sep}err=invalid", status_code=303)
                 folder_id = int(raw)
         elif want not in {v for v, _ in VISIBILITIES}:

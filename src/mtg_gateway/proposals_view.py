@@ -23,6 +23,7 @@ from .busy import outage
 from .clickguard import GUARD_SCRIPT
 from .db import RISK_REASON_KEY
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT, UNDO_KINDS
+from .digits import is_digits
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
 from .theme import esc
@@ -135,7 +136,7 @@ def read_query(params: Any) -> dict[str, Any]:
     deck = str(params.get("deck_id") or "").strip()
     return {
         "show": one("show", {s for s, _ in SHOWS}, "waiting"),
-        "deck_id": deck if deck.isdigit() and len(deck) <= 12 else "",
+        "deck_id": deck if is_digits(deck) and len(deck) <= 12 else "",
         "risk": one("risk", set(RISK_CODES)),
         "from": str(params.get("from") or "").strip()[:60],
         "when": one("when", {w for w, _ in WHENS if w}),
@@ -199,7 +200,7 @@ class Names:
 
 
 def _untied(db: Any, sub: str, row: dict[str, Any]) -> bool:
-    if row.get("kind") in _UNTIED_KINDS or not str(row.get("deck_id") or "").isdigit():
+    if row.get("kind") in _UNTIED_KINDS or not is_digits(str(row.get("deck_id") or "")):
         return True
     if row.get("kind") == "action":
         full = db.get_proposal(row["id"], sub) or {}
@@ -567,7 +568,7 @@ def _no(it: dict[str, Any]) -> str:
 
 def _deck_attr(it: dict[str, Any]) -> str:
     """The row's deck, for its menu's "Open the deck" (static/menus.js); none for an untied change."""
-    if it.get("untied") or not str(it.get("deck_id") or "").isdigit():
+    if it.get("untied") or not is_digits(str(it.get("deck_id") or "")):
         return ""
     return f" data-deck='{esc(it['deck_id'])}'"
 
@@ -709,7 +710,7 @@ def _toolbar(data: dict[str, Any], query: dict[str, Any]) -> str:
     items = data["items"]
     decks: dict[str, str] = {}
     for it in items:
-        if not it["untied"] and it["deck_id"].isdigit():
+        if not it["untied"] and is_digits(it["deck_id"]):
             decks.setdefault(it["deck_id"], str(it["deck_name"]))
     deck_opts = [("", "All decks"), *sorted(decks.items(), key=lambda kv: kv[1].casefold())]
     if query["deck_id"] and query["deck_id"] not in decks:

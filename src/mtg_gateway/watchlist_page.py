@@ -35,6 +35,7 @@ from urllib.parse import quote, urlencode
 
 from . import ui
 from .deckpage import image_url
+from .digits import is_digits
 from .history_view import _trend_svg
 from .prices import ALERT_KINDS, MAX_LIST_NAME, NO_LIST, alert_band, money
 from .reports_page import PHONE_WIDGETS_CSS
@@ -1119,7 +1120,7 @@ def stop_words(ok: str, said: dict[str, str] | None) -> str:
             head, _, last = names.rpartition(", ")
             names = f"{head} and {last}"
         return f"{names} {'are' if many else 'is'} {tail}"
-    if said.get("n", "").isdigit():
+    if is_digits(said.get("n", "")):
         n = int(said["n"])
         return f"1 card is {tail}" if n == 1 else f"{n} cards are {tail}"
     return OK_NOTES[ok]

@@ -24,6 +24,7 @@ from . import card_models, ui
 from .busy import outage
 from .deck_stats import is_basic_land
 from .decklist import LINE as DECK_LINE
+from .digits import is_digits
 from .theme import ICON_DATA_URL, icon, plural, time_html, time_text
 from .theme import esc as _esc
 from .tool_labels import TOOLS
@@ -2279,7 +2280,7 @@ def export_meta(r: dict[str, Any], s: dict[str, Any], report_url: str = "") -> l
     g = s["goldfish"]
     rows: list[tuple[str, str, str]] = []
     name = str(r.get("deck_name") or r.get("deck_id") or "")
-    if str(r.get("deck_id") or "").isdigit():
+    if is_digits(str(r.get("deck_id") or "")):
         rows.append(("Deck", name, f"https://archidekt.com/decks/{r.get('deck_id')}"))
     source = r.get("source") if isinstance(r.get("source"), dict) else None
     if source and source.get("label"):

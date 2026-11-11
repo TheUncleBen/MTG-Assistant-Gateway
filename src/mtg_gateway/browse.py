@@ -39,6 +39,7 @@ from .deckpage import (
     deck_list_html,
 )
 from .decks import DeckError, _clean_deck_id
+from .digits import is_digits
 from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .theme import esc as _esc
 from .theme import icon, render, stylesheet_link
@@ -167,7 +168,7 @@ BROWSE_CSS = """
 
 def deck_ref(text: str) -> str | None:
     """The deck ID when ``text`` is an Archidekt deck link or a deck ID, else None."""
-    if not text or not (text.isdigit() or "archidekt.com" in text.lower()):
+    if not text or not (is_digits(text) or "archidekt.com" in text.lower()):
         return None
     try:
         return _clean_deck_id(text)
@@ -209,7 +210,7 @@ def read_query(qp: Any) -> dict[str, Any]:
         "name": (qp.get("name") or qp.get("q") or "").strip()[:120],
         "commander": (qp.get("commander") or "").strip()[:120],
         "owner": (qp.get("owner") or "").strip()[:120],  # a profile's username comes through here too
-        "deck_format": int(fmt) if fmt.isdigit() and int(fmt) in FORMAT_NAMES else None,
+        "deck_format": int(fmt) if is_digits(fmt) and int(fmt) in FORMAT_NAMES else None,
         "colors": colors,
         "colour_mode": qp.get("cm") if qp.get("cm") in dict(COLOUR_MODES) and colors else "incl",
         "order_by": qp.get("order") if qp.get("order") in SEARCH_ORDERS else "-viewCount",
@@ -753,7 +754,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             or query["colors"]
         )
         # a deck link in the name box opens that deck ("Open this deck" under the box): no search
-        if deck_ref(query["name"]) and not query["name"].isdigit():
+        if deck_ref(query["name"]) and not is_digits(query["name"]):
             asked = False
         body = ""
         if asked:
@@ -1001,7 +1002,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
         except DeckError:
             return None, username, None
-        if not found or not str(found.get("id") or "").isdigit():
+        if not found or not is_digits(str(found.get("id") or "")):
             return False, username, None
         return True, str(found.get("username") or username), found["id"]
 
@@ -1087,8 +1088,12 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         limit: Annotated[int, Field(description="How many of the page to return, 1 to 60.")] = 20,
     ) -> dict[str, Any]:
         fmt = FORMAT_IDS.get((format or "").strip().lower()) if format else None
-        if format and fmt is None and not str(format).isdigit():
-            return {"ok": False, "error": "invalid", "message": f"unknown format “{format[:30]}”"}
+        if format and fmt is None and not is_digits(str(format)):
+            return {
+                "ok": False,
+                "error": "invalid",
+                "message": f"“{format[:30]}” is not a format the search knows. Use a name such as commander.",
+            }
 
         async def run(commander_name: str) -> dict[str, Any]:
             return await decks.search_decks(
@@ -1098,7 +1103,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
                 owner=(owner or "").strip(),
                 deck_format=fmt
                 if fmt is not None
-                else (int(format) if format and str(format).isdigit() else None),
+                else (int(format) if format and is_digits(str(format)) else None),
                 colors=(colors or "").strip(),
                 order_by=order_by if order_by in SEARCH_ORDERS else "-viewCount",
                 page=max(1, min(int(page or 1), 17)),

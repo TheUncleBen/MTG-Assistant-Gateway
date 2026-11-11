@@ -34,6 +34,7 @@ from .decks import (
     scopes_allow_writes,
     split_label,
 )
+from .digits import is_digits
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
 from .views import deck_brief, deck_out
 
@@ -262,7 +263,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     async def _deck_or_snapshot(sub: str, ref: str) -> Any:
         from .archidekt import parse_deck
 
-        if ref.startswith("snap_") or (not ref.isdigit() and "/" not in ref and "." not in ref):
+        if ref.startswith("snap_") or (not is_digits(ref) and "/" not in ref and "." not in ref):
             return parse_deck(decks.snapshot(sub, ref.removeprefix("snap_"))["deck"])
         return await decks.get_any_deck(sub, ref)
 

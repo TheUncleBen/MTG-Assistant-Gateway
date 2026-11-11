@@ -25,6 +25,7 @@ from . import refusals
 from .archidekt_account import CUSTOM_CARD_FIELDS, HEX_COLOR_RE
 from .decklist import clean_text
 from .decks import DeckError, _row, needs_look_error
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -980,7 +981,7 @@ async def apply(  # noqa: C901, PLR0912, PLR0915
 def _owner(decks: DeckService, sub: str) -> int:
     link = decks.db.get_link(sub)
     uid = str((link or {}).get("archidekt_user_id") or "")
-    if not uid.isdigit():
+    if not is_digits(uid):
         if link is None:
             raise DeckError("not_linked", refusals.not_linked(decks.settings.public_url))
         raise DeckError("not_linked", refusals.no_user_id(decks.settings.public_url))
