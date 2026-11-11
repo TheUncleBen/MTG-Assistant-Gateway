@@ -43,7 +43,7 @@
             android:textColor="@color/text" />
     </LinearLayout>
 
-    <!-- A newer version of the app is out (Updater.kt): one tap installs it. Over the page's top
+    <!-- A newer version of the app is out (Updater.kt): Update saves it to Downloads. Over the page's top
          bar until Update or Later is tapped. Both buttons are 48dp tall (the 44dp touch minimum). -->
     <LinearLayout android:id="@+id/update_bar"
         android:layout_width="match_parent" android:layout_height="wrap_content"

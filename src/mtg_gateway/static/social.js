@@ -102,6 +102,7 @@
             likeBtn.classList.toggle("on", d.vote === 1);
             likeBtn.setAttribute("aria-pressed", d.vote === 1 ? "true" : "false");
             $(".n", likeBtn).textContent = d.points;
+            $(".n", likeBtn).hidden = !d.points;  // deckpage.social_html: no "0" beside the heart
             setLabel(likeBtn, d.vote === 1 ? "Liked" : d.vote === 2 ? "Voted down" : "Like");
             if (noteEl) noteEl.remove();
           }).catch(function () { busy(likeBtn, false); note(down ? "No connection; your vote was not changed." : "No connection; the like was not changed."); });

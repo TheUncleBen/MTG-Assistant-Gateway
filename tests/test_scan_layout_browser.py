@@ -16,7 +16,7 @@ from .test_cardsearch_browser import _chromium
 from .test_cardview_browser import PNG
 from .test_editor_browser import _link
 from .test_suggest_browser import Server, server  # noqa: F401
-from .waits import redrawn
+from .waits import redrawn, sideways
 
 pytest.importorskip("playwright")
 
@@ -494,9 +494,7 @@ def test_the_card_size_switch_sizes_the_list_pictures_and_the_picker_tiles(
             "width"
         ]
         assert small < medium, (medium, small)
-        over = page.evaluate(
-            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
-        )
+        over = sideways(page)
         assert over <= 0
         # the picker carries the same switch, and its tiles follow the size
         page.locator("ul.items .setbtn").first.click()
@@ -507,9 +505,7 @@ def test_the_card_size_switch_sizes_the_list_pictures_and_the_picker_tiles(
             page.locator("#picker .sheet-tools [data-card-size-set=l]").click()
         tile_l = page.locator("#picker .tile").first.bounding_box()["width"]
         assert tile_l > tile_s * 1.3, (tile_s, tile_l)
-        over = page.evaluate(
-            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
-        )
+        over = sideways(page)
         assert over <= 0
         assert errors == []
         browser.close()
@@ -574,11 +570,6 @@ def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> N
     # How it works: a capsule button in the text colour that opens the intro.
     how = page.locator("#how-it-works")
     assert how.evaluate("e => e.tagName") == "BUTTON"
-    link = page.evaluate(
-        "() => { const a = document.createElement('a'); a.href = '#'; document.body.append(a);"
-        " const c = getComputedStyle(a).color; a.remove(); return c; }"
-    )
-    assert _style(how, "color") != link
     assert _style(how, "color") == _style(page.locator("main h1").first, "color")
     box = how.bounding_box()
     assert box["height"] >= 43.5 and box["width"] >= 43.5, box

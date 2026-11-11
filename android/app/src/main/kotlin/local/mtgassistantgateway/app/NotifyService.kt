@@ -162,7 +162,7 @@ class NotifyService : Service() {
 
     /** One connection: NONE once it worked and ended, else what the gateway's answer means. */
     private fun listen(origin: String, key: String): Push.Refusal {
-        val since = Push.since(prefs.pushLastId)
+        val since = Push.since(prefs.pushLastId, prefs.pushLastTime)
         val url = GatewayUrl.join(origin, Push.PATH) +
             (if (since != null) "?since=" + URLEncoder.encode(since, "UTF-8") else "")
         val c = URL(url).openConnection() as HttpURLConnection
@@ -194,6 +194,8 @@ class NotifyService : Service() {
                     val line = r.readLine() ?: break
                     lastLineAt = SystemClock.elapsedRealtime()
                     handle(Push.parse(line), seen)
+                    // where the next connection starts while no message has come yet (Push.since)
+                    if (prefs.pushLastId == null) Push.lineTime(line)?.let { prefs.pushLastTime = it }
                 }
             }
             return Push.Refusal.NONE
@@ -272,12 +274,21 @@ class NotifyService : Service() {
                     ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mtgassistant:notify")
                 wl?.acquire(10_000)
                 try {
-                    if (canPost(this)) nm.notify(action.tag, MESSAGE_ID, message(action))
+                    if (canPost(this, action.kind)) {
+                        nm.notify(action.tag, MESSAGE_ID, message(action))
+                        summarize(this, action.kind)
+                    }
                 } finally {
                     if (wl?.isHeld == true) wl.release()
                 }
             }
-            is Push.Action.Remove -> nm.cancel(action.tag, MESSAGE_ID)
+            is Push.Action.Remove -> {
+                // read or dismissed elsewhere (or nothing waits there any more): off this phone too
+                val kind = nm.activeNotifications.firstOrNull { it.tag == action.tag && it.id == MESSAGE_ID }
+                    ?.notification?.group?.removePrefix(GROUP_PREFIX)
+                nm.cancel(action.tag, MESSAGE_ID)
+                if (kind != null) summarize(this, kind)
+            }
             Push.Action.Alive, Push.Action.Skip -> Unit
         }
     }
@@ -292,7 +303,8 @@ class NotifyService : Service() {
         val tap = PendingIntent.getActivity(
             this, m.tag.hashCode(), open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        return Notification.Builder(this, CHANNEL_MESSAGES)
+        val channel = Push.channelFor(m.kind)
+        val b = Notification.Builder(this, channel.id)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(m.title)
             .setContentText(m.text)
@@ -301,8 +313,19 @@ class NotifyService : Service() {
             .setAutoCancel(true)
             // A deck's message updated while it still shows (its count changed) doesn't sound again.
             .setOnlyAlertOnce(true)
-            .setCategory(Notification.CATEGORY_MESSAGE)
-            .build()
+            .setCategory(if (m.kind == "waiting" || m.kind == "account") Notification.CATEGORY_REMINDER else Notification.CATEGORY_STATUS)
+            // each kind in its own group, so a day's price alerts stack under one line
+            .setGroup(GROUP_PREFIX + m.kind.ifEmpty { Push.GENERAL })
+            .setSubText(Push.channelName(m.kind))
+        if (Push.markable(m.tag)) {
+            // Mark read: read on the gateway too, so the bell and the member's other phones follow
+            val read = Intent(this, MarkRead::class.java).putExtra(EXTRA_TAG, m.tag)
+            val pi = PendingIntent.getBroadcast(
+                this, ("read:" + m.tag).hashCode(), read, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            b.addAction(Notification.Action.Builder(null, getString(R.string.notify_mark_read), pi).build())
+        }
+        return b.build()
     }
 
     private fun ongoing(): Notification {
@@ -381,6 +404,53 @@ class NotifyService : Service() {
         }
     }
 
+    /**
+     * A message's Mark read: off this phone at once, then read on the gateway with the phone's key
+     * (POST [Push.READ_PATH]), which takes it off the member's other phones and the bell's count.
+     * Not exported: only the app's own notifications reach it. A press with no connection is
+     * dropped (the alert stays unread on the Alerts page).
+     */
+    class MarkRead : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val tag = intent.getStringExtra(EXTRA_TAG) ?: return
+            if (!Push.markable(tag)) return
+            val nm = context.getSystemService(NotificationManager::class.java)
+            val kind = nm?.activeNotifications?.firstOrNull { it.tag == tag && it.id == MESSAGE_ID }
+                ?.notification?.group?.removePrefix(GROUP_PREFIX)
+            nm?.cancel(tag, MESSAGE_ID)
+            if (kind != null) summarize(context, kind)
+            val prefs = Prefs(context)
+            val key = prefs.pushKey
+            val origin = prefs.gatewayOrigin
+            if (!Push.isKey(key) || origin == null) return
+            val done = goAsync()
+            Thread {
+                try {
+                    val c = URL(GatewayUrl.join(origin, Push.READ_PATH)).openConnection() as HttpURLConnection
+                    try {
+                        c.connectTimeout = 15_000
+                        c.readTimeout = 15_000
+                        c.instanceFollowRedirects = false
+                        c.useCaches = false
+                        c.requestMethod = "POST"
+                        c.doOutput = true
+                        c.setRequestProperty("Authorization", "Bearer $key")
+                        c.setRequestProperty("Content-Type", "application/json")
+                        c.setRequestProperty("User-Agent", "MTGAssistant/" + BuildConfig.VERSION_NAME)
+                        c.outputStream.use { it.write(Push.readBody(tag).toByteArray(Charsets.UTF_8)) }
+                        c.responseCode
+                    } finally {
+                        c.disconnect()
+                    }
+                } catch (e: IOException) {
+                    Log.i(TAG, "mark read not sent: ${e.javaClass.simpleName}")
+                } finally {
+                    done.finish()
+                }
+            }.start()
+        }
+    }
+
     companion object {
         private const val TAG = "MtgNotify"
         private const val ACTION_TICK = "local.mtgassistantgateway.app.NOTIFY_TICK"
@@ -389,12 +459,34 @@ class NotifyService : Service() {
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_CONNECTION = "connection"
 
-        /** The channels: the members' messages (normal), and the quiet "Always connected" notification. */
+        private const val SUMMARY_ID = 3
+        private const val GROUP_PREFIX = "mtg-"
+        private const val EXTRA_TAG = "tag"
+
+        /**
+         * The channels: one for each kind of alert ([Push.KINDS], 0.7.47), at its level, so the
+         * member can make any of them louder or quieter in Android's settings; the general one for
+         * a test and for a gateway before 0.7.47; and the quiet "Always connected" notification.
+         * A channel's level is Android's to keep once made: the member's own changes win.
+         */
         fun channels(context: Context) {
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_MESSAGES, context.getString(R.string.notify_channel_messages), NotificationManager.IMPORTANCE_DEFAULT),
             )
+            for (kind in Push.KINDS.keys) {
+                val c = Push.channelFor(kind)
+                val importance = when (c.level) {
+                    Push.Level.HIGH -> NotificationManager.IMPORTANCE_HIGH
+                    Push.Level.DEFAULT -> NotificationManager.IMPORTANCE_DEFAULT
+                    Push.Level.LOW -> NotificationManager.IMPORTANCE_LOW
+                }
+                nm.createNotificationChannel(
+                    NotificationChannel(c.id, Push.channelName(kind), importance).apply {
+                        description = Push.channelHint(kind)
+                    },
+                )
+            }
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_CONNECTION, context.getString(R.string.notify_channel_connection), NotificationManager.IMPORTANCE_MIN).apply {
                     description = context.getString(R.string.notify_channel_connection_text)
@@ -403,14 +495,48 @@ class NotifyService : Service() {
             )
         }
 
-        /** True when Android lets the app post the members' messages. */
-        fun canPost(context: Context): Boolean {
+        /** True when Android lets the app post the members' messages (of [kind]: its channel is on). */
+        fun canPost(context: Context, kind: String = ""): Boolean {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
             ) return false
             val nm = context.getSystemService(NotificationManager::class.java) ?: return false
             if (!nm.areNotificationsEnabled()) return false
-            return nm.getNotificationChannel(CHANNEL_MESSAGES)?.importance != NotificationManager.IMPORTANCE_NONE
+            return nm.getNotificationChannel(Push.channelFor(kind).id)?.importance != NotificationManager.IMPORTANCE_NONE
+        }
+
+        /**
+         * The group line of a kind ("3 price alerts") while two or more of its messages show, so
+         * Android stacks them under it; gone once one or none is left.
+         */
+        fun summarize(context: Context, kind: String) {
+            val nm = context.getSystemService(NotificationManager::class.java) ?: return
+            val group = GROUP_PREFIX + kind.ifEmpty { Push.GENERAL }
+            val tag = "group:$group"
+            val n = nm.activeNotifications.count { it.id == MESSAGE_ID && it.notification.group == group }
+            if (n < 2) {
+                nm.cancel(tag, SUMMARY_ID)
+                return
+            }
+            val open = Intent(context, MainActivity::class.java).apply {
+                action = Intent.ACTION_VIEW
+                data = Uri.parse((Prefs(context).gatewayOrigin ?: "") + "/notifications" + if (kind.isEmpty()) "" else "?type=$kind")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val tap = PendingIntent.getActivity(
+                context, tag.hashCode(), open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val summary = Notification.Builder(context, Push.channelFor(kind).id)
+                .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                .setContentTitle(Push.groupText(kind, n))
+                .setSubText(Push.channelName(kind))
+                .setGroup(group)
+                .setGroupSummary(true)
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(true)
+                .setContentIntent(tap)
+                .build()
+            nm.notify(tag, SUMMARY_ID, summary)
         }
 
         /** Starts the service when this phone was connected; a no-op otherwise. */

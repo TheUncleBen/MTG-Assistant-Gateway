@@ -36,7 +36,7 @@ from urllib.parse import quote, urlencode
 from . import ui
 from .deckpage import image_url
 from .history_view import _trend_svg
-from .prices import ALERT_KINDS, MAX_LIST_NAME, NO_LIST, money
+from .prices import ALERT_KINDS, MAX_LIST_NAME, NO_LIST, alert_band, money
 from .reports_page import PHONE_WIDGETS_CSS
 from .theme import UNPRICED_HTML, esc, icon, in_app, natural_key, plural
 
@@ -199,40 +199,83 @@ def change_html(v: float | None) -> str:
 
 
 def changes_html(view: dict[str, Any]) -> str:
-    return "".join(f"<span>{label} {change_html(view.get(key))}</span>" for label, key in CHANGE_KEYS)
+    # only the periods with history: "7 days unknown · 30 days unknown" under every new card read as
+    # noise (0.7.47 polish)
+    kept = [(label, view.get(key)) for label, key in CHANGE_KEYS if view.get(key) is not None]
+    return "".join(f"<span>{label} {change_html(v)}</span>" for label, v in kept)
 
 
-def alert_text(alerts: dict[str, Any], currency: str, added: float | None = None) -> str:
+def alert_text(
+    alerts: dict[str, Any], currency: str, added: float | None = None, floor: float | None = None
+) -> str:
     """A card's alert in its short form: "Moves more than 10%", "Below $150.00", "Above $45.00 ·
-    below $30.00", "Drops 10% below $2.00" (``added``: the price when added; without one, "below
-    the price when added")."""
+    below $30.00", "Under $1.80 · over $2.50" (with ``added``, the price when added, a drop or rise
+    is the price it fires at, ``floor`` the smallest move counted, 0.7.47); without one, "drops
+    10% below the price when added", and the floor said once ("moves under $0.50 ignored")."""
     parts = []
-    at = money(added, currency) if added is not None else "the price when added"
-    if alerts.get("drop") is not None:
-        parts.append(f"drops {alerts['drop']:g}% below {at}")
-    if alerts.get("rise") is not None:
-        parts.append(f"rises {alerts['rise']:g}% above {at}")
+    floor = float(floor if floor is not None else alerts.get("floor") or 0)
+    if added is not None and (alerts.get("drop") is not None or alerts.get("rise") is not None):
+        under, over = alert_band(added, alerts.get("drop"), alerts.get("rise"), floor)
+        if under is not None:
+            parts.append(f"under {money(under, currency)}")
+        if over is not None:
+            parts.append(f"over {money(over, currency)}")
+    else:
+        if alerts.get("drop") is not None:
+            parts.append(f"drops {alerts['drop']:g}% below the price when added")
+        if alerts.get("rise") is not None:
+            parts.append(f"rises {alerts['rise']:g}% above the price when added")
     if alerts.get("pct") is not None:
         parts.append(f"moves more than {alerts['pct']:g}%")
     if alerts.get("above") is not None:
         parts.append(f"above {money(alerts['above'], currency)}")
     if alerts.get("below") is not None:
         parts.append(f"below {money(alerts['below'], currency)}")
-    text = " · ".join(parts)
+    long = added is None and any(k in alerts and alerts[k] is not None for k in ("drop", "rise"))
+    if parts and floor and added is None:
+        parts.append(f"moves under {money(floor, currency)} ignored")
+        long = True
+    # the long phrases wrap in a narrow box, and a "·" may not end or start a line: commas there
+    text = (", " if long else " · ").join(parts)
     return text[:1].upper() + text[1:]
 
 
-def alert_pills(alerts: dict[str, Any], currency: str, added: float | None = None) -> list[tuple[str, str]]:
+def alert_pills(
+    alerts: dict[str, Any], currency: str, added: float | None = None, floor: float = 0.0
+) -> list[tuple[str, str]]:
     """Each alert condition in its short form with its full words: ("±10%", "Moves more than 10%"),
-    ("Below $150.00", "Below $150.00"), ("−10% below $2.00", "Drops 10% below $2.00"). One pill per
-    condition, each one line in a phone row's facts line (polish B8)."""
-    at = money(added, currency) if added is not None else "the price when added"
-    short_at = money(added, currency) if added is not None else "added price"
+    ("Below $150.00", "Below $150.00"), ("Under $1.80", "Under $1.80: 10% below the $2.00 it was
+    added at"). One pill per condition, each one line in a phone row's facts line (polish B8). With
+    the price when added, a drop or rise is the price it fires at (``floor``: the smallest move
+    counted, 0.7.47)."""
     out: list[tuple[str, str]] = []
+    under, over = alert_band(added, alerts.get("drop"), alerts.get("rise"), floor)
+    at = money(added, currency) if added is not None else ""
+    least = f", at least {money(floor, currency)}" if floor else ""
     if alerts.get("drop") is not None:
-        out.append((f"−{alerts['drop']:g}% below {short_at}", f"Drops {alerts['drop']:g}% below {at}"))
+        out.append(
+            (
+                f"Under {money(under, currency)}",
+                f"Under {money(under, currency)}: {alerts['drop']:g}% below the {at} it was added at{least}",
+            )
+            if under is not None
+            else (
+                f"−{alerts['drop']:g}% below added price",
+                f"Drops {alerts['drop']:g}% below the price when added",
+            )
+        )
     if alerts.get("rise") is not None:
-        out.append((f"+{alerts['rise']:g}% above {short_at}", f"Rises {alerts['rise']:g}% above {at}"))
+        out.append(
+            (
+                f"Over {money(over, currency)}",
+                f"Over {money(over, currency)}: {alerts['rise']:g}% above the {at} it was added at{least}",
+            )
+            if over is not None
+            else (
+                f"+{alerts['rise']:g}% above added price",
+                f"Rises {alerts['rise']:g}% above the price when added",
+            )
+        )
     if alerts.get("pct") is not None:
         out.append((f"±{alerts['pct']:g}%", f"Moves more than {alerts['pct']:g}%"))
     if alerts.get("above") is not None:
@@ -248,7 +291,9 @@ def alert_label(v: dict[str, Any]) -> str:
         return "<span class='none'>No price alert</span>"
     return "".join(
         ui.label(short, "blue", "tag", title="" if short == full else full)
-        for short, full in alert_pills(alerts, v.get("currency") or "usd", v.get("added_price"))
+        for short, full in alert_pills(
+            alerts, v.get("currency") or "usd", v.get("added_price"), float(v.get("floor") or 0)
+        )
     )
 
 
@@ -926,8 +971,13 @@ def boxes_html(
         + "<label class='check wide'><input type='checkbox' name='remember' value='1' checked>"
         "<span>Use this finish next time, here and in card menus</span></label>"
         f"<p class='ui-hint wide'>Price alert: {esc(default_words)} (your defaults). {CARD_HINT} "
-        f"{search_hint(in_app())} You may watch up to {lim['cards']:,} cards and {lim['decks']:,} decks."
-        "</p></form>",
+        f"{search_hint(in_app())} "
+        + (
+            f"You may watch up to {lim['cards']:,} cards and {lim['decks']:,} decks."
+            if lim.get("cards")
+            else f"You may watch as many cards as you like and up to {lim['decks']:,} decks."
+        )
+        + "</p></form>",
         actions=[
             ui.box_button("Cancel", cancel=True),
             ui.box_button("Watch card", kind="primary", form="w-add-f"),

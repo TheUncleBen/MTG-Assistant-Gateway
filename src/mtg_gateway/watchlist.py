@@ -171,8 +171,23 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         """The member's price alert defaults (prefs.WATCH_ALERTS), checked as a card's alerts are."""
         values = prices._alerts(*(alert_values(data)[k] for k in prices.ALERT_KINDS))
         kept = {k: v for k, v in zip(prices.ALERT_KINDS, values, strict=True) if v is not None}
+        floor = (data.get("alert_floor") or "").strip()
+        if floor:
+            try:
+                f = round(float(floor), 2)
+            except ValueError as exc:
+                raise DeckError("invalid", "The smallest move must be an amount, such as 0.50.") from exc
+            if not 0 <= f <= 1000:
+                raise DeckError("invalid", "The smallest move must be from 0 to 1,000.")
+            if f > 0:
+                kept["floor"] = f
+        elif "alert_floor" not in data:  # an older form without the box keeps the floor it had
+            had = prefs.alert_defaults(state.db, sub).get("floor")
+            if had:
+                kept["floor"] = had
         if not prefs.save(state.db, sub, prefs.WATCH_ALERTS, kept):
             raise DeckError("invalid", "Those defaults could not be saved.")
+        state.prices.apply_defaults(sub)
 
     def list_of(data: dict[str, str]) -> str | None:
         """The list a form names: a new list's name over the drop-down's choice; None when the
@@ -430,7 +445,7 @@ def watched_text(w: dict[str, Any]) -> str:
     alerts = w.get("alerts") or {}
     if not alerts:
         return f"{name} added to your watchlist."
-    said = alert_text(alerts, w.get("currency") or "usd", w.get("added_price"))
+    said = alert_text(alerts, w.get("currency") or "usd", w.get("added_price"), w.get("floor"))
     return f"{name} added to your watchlist, with a price alert: {said[:1].lower()}{said[1:]}."
 
 
@@ -455,7 +470,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         title="Watch a card's price",
         description=(
             "Add a card to the member's watchlist, or change a watched one's list or named alerts "
-            "(others kept). By name it follows Scryfall's printing for the name; set_code and "
+            "(others kept). By name: the cheapest printing in the finish (printing_now); set_code and "
             "collector_number: one printing. Alerts: alert_pct, alert_above, alert_below (dollars, or "
             "euros with no dollar price) and alert_drop; a new watch with none gets the member's "
             "defaults. Checked daily; alerts are push notifications. Changes only gateway data. "

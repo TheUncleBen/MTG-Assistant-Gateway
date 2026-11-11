@@ -112,7 +112,7 @@ def test_the_rail_markup_is_four_places_a_line_the_rest_and_alerts_at_the_foot(s
     assert items == [
         ("a", "/", "", ""),
         ("a", "/decks", "", ""),
-        ("a", "/collection", "", ""),
+        ("a", "/binder", "", ""),
         ("a", "/proposals", "", ""),
         ("span", "", "rail-sep railonly", ""),
         ("a", "/scan", "", "railonly"),
@@ -231,7 +231,7 @@ def test_the_open_fold_rail_holds_every_page_without_scrolling(
     assert got["order"] == [
         "/",
         "/decks",
-        "/collection",
+        "/binder",
         "/proposals",
         "rail-sep",
         "/scan",
@@ -280,7 +280,7 @@ def test_the_phone_keeps_its_tab_bar_and_more_sheet(chromium, server: Server, ap
     with _page(chromium, server, 375, 812, touch=True, app=app) as page:
         page.goto(f"{server.base}/decks", wait_until="load")
         got = page.evaluate(RAIL)
-        assert got["order"] == ["/", "/decks", "/collection", "/proposals", "dd"], got
+        assert got["order"] == ["/", "/decks", "/binder", "/proposals", "dd"], got
         assert got["more"] and got["moreItems"] == [
             "/search",
             "/precons",
@@ -449,6 +449,43 @@ def test_no_pull_while_a_box_holds_typed_words(chromium, server: Server) -> None
         ctx.close()
 
 
+def test_no_pull_on_a_drag_a_changed_choice_or_a_page_that_says_so(chromium, server: Server) -> None:
+    """0.7.47: every page offers the pull (owner, 2026-11-08), so the page guards more of itself: a
+    touch on something that can be dragged (the deck editor's cards) never pulls, a drop-down the
+    member changed and has not sent holds it like typed words, and a page holding state of its own
+    (data-no-pull on the root) refuses it."""
+    ctx = chromium.new_context(
+        viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, user_agent=APP_UA
+    )
+    ctx.add_cookies([{"name": "mtg_session", "value": server.sign_in(), "url": server.base}])
+    ctx.add_init_script(STUB)
+    page = ctx.new_page()
+    try:
+        page.goto(f"{server.base}/decks", wait_until="load")
+        page.evaluate(
+            """() => {
+              const main = document.querySelector('main');
+              const card = document.createElement('div'); card.id = 'drag'; card.draggable = true;
+              card.innerHTML = '<span id=inside>card</span>';
+              const f = document.createElement('form'); f.id = 'f'; f.action = 'javascript:void 0';
+              f.innerHTML = '<select id=pick><option value=a selected>a</option>'
+                + '<option value=b>b</option></select>';
+              main.prepend(card); main.append(f);
+            }"""
+        )
+        may = "sel => window.mtgMayPull(document.querySelector(sel))"
+        assert page.evaluate(may, "h1") is True
+        assert page.evaluate(may, "#inside") is False  # inside something that can be dragged
+        page.select_option("#pick", "b")
+        assert page.evaluate(may, "h1") is False  # a changed choice, not sent
+        page.select_option("#pick", "a")
+        assert page.evaluate(may, "h1") is True  # back to what the page came with
+        page.evaluate("() => document.documentElement.setAttribute('data-no-pull', '')")
+        assert page.evaluate(may, "h1") is False
+    finally:
+        ctx.close()
+
+
 def test_the_hook_waits_for_an_app_that_has_it(chromium, server: Server) -> None:
     """A browser, or an older app without the bridge method, gets no hook at all."""
     with _page(chromium, server, 390, 844, touch=True, app=True) as page:
@@ -459,36 +496,20 @@ def test_the_hook_waits_for_an_app_that_has_it(chromium, server: Server) -> None
 # -- screen 9: the app's side (Kotlin, compiled and unit-tested by CI's android-check job) --------
 
 
-def test_the_app_offers_pull_to_refresh_on_list_pages_only() -> None:
+def test_the_app_offers_pull_to_refresh_on_every_page_but_a_few() -> None:
+    """Owner, 2026-11-08: every page (0.7.46: list pages only). The scanner, the sign-in pages and a
+    goldfish game never offer it; the page itself refuses a pull while something is unsent."""
     rule = (ANDROID / "PullRefresh.kt").read_text(encoding="utf-8")
-    assert "const val DECK_PAGE = true" in rule  # open for the owner
-    for path in (
-        '"/"',
-        '"/decks"',
-        '"/collection"',
-        '"/collection/wants"',
-        '"/watchlist"',
-        '"/proposals"',
-        '"/notifications"',
-        '"/precons"',
-        '"/cards"',
-        '"/search"',
-        '"/collection/lists"',
-    ):
-        assert path in rule, path
-    assert 'Regex("^/decks/\\\\d+$")' in rule  # the deck page, never its editor or settings
-    # Binder › Lists' own pages and profiles, never the box addresses under them
-    assert 'Regex("^/lists/(templates|defaults|tags|btags|custom)$")' in rule  # btags: Binder tags
-    assert 'Regex("^/users/[^/]+$")' in rule
-    assert (
-        "/scan" not in rule.split("object PullRefresh")[1]
-        and "/edit" not in rule.split("object PullRefresh")[1]
-    )
+    body = rule.split("object PullRefresh")[1]
+    assert 'private val NEVER = setOf("/login", "/logout", "/signed-out", "/data-deleted")' in body
+    assert 'private val NEVER_UNDER = listOf("/scan/", "/login/", "/auth/")' in body
+    assert 'path == "/scan"' in body and 'Regex("^/decks/\\\\d+/goldfish$")' in body
+    assert "/edit" not in body and "DECK_PAGE" not in body
     test = (ROOT / "android/app/src/test/kotlin/local/mtgassistantgateway/app/PullRefreshTest.kt").read_text(
         encoding="utf-8"
     )
-    assert '"/decks/12345/edit"' in test and '"/scan"' in test and '"/decks/new"' in test
-    assert '"/lists/templates/new"' in test and '"/users/alice"' in test
+    assert '"/decks/12345/edit"' in test and '"/scan"' in test and '"/decks/12345/goldfish"' in test
+    assert "everyPageOffersIt" in test and "theScannerSignInAndAGameNeverOfferIt" in test
 
 
 def test_the_app_wires_the_pull_layer_to_the_page_and_the_bridge() -> None:

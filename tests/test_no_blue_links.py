@@ -37,13 +37,13 @@ def server(tmp_path: Path):
         s.stop()
 
 
-# every visible link or link-like button in the page's main column drawn in the link colour
+# every visible link or link-like button in the page's main column drawn blue (0.7.47: the theme's
+# link colour is the text colour, so the test is the hue, not a match with a probe link)
 BLUE = """() => {
-  const probe = document.createElement('a'); probe.href = '#'; document.body.appendChild(probe);
-  const link = getComputedStyle(probe).color; probe.remove();
   return Array.from(document.querySelectorAll('main a, main button')).filter(a => {
     if (!a.offsetParent) return false;
-    return getComputedStyle(a).color === link;
+    const [r, g, b] = getComputedStyle(a).color.match(/[\\d.]+/g).map(Number);
+    return b > r + 40 && b > g + 15;
   }).map(a => (a.className || a.parentElement.className) + ': ' + a.innerText.trim().slice(0, 40));
 }"""
 
@@ -117,10 +117,10 @@ SHELL_PAGES = [
     "/collection?add=1",  # the Add box's "open Scan"
 ]
 CRUMBS = """() => {
-  const probe = document.createElement('a'); probe.href = '#'; document.body.appendChild(probe);
-  const link = getComputedStyle(probe).color; probe.remove();
-  return Array.from(document.querySelectorAll('.fm nav.crumbs a'))
-    .filter(a => getComputedStyle(a).color === link).map(a => a.innerText.trim());
+  return Array.from(document.querySelectorAll('.fm nav.crumbs a')).filter(a => {
+    const [r, g, b] = getComputedStyle(a).color.match(/[\\d.]+/g).map(Number);
+    return b > r + 40 && b > g + 15;
+  }).map(a => a.innerText.trim());
 }"""
 
 

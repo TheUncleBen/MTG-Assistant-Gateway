@@ -304,7 +304,7 @@ def test_pager_says_where_you_are_and_never_caps_silently() -> None:
     last = ui.pager(50, 51, newer_href="?page=2", older_href=None)
     assert "51–51 of 51" in last and "type='button' disabled>Older →</button>" in last
     assert "rel='prev'>← Newer</a>" in last
-    assert "1–5 of 5" in ui.pager(0, 5, newer_href=None, older_href=None)
+    assert ui.pager(0, 5, newer_href=None, older_href=None) == ""  # one page: no pager (0.7.47)
     assert "1,001–1,025 of 2,000" in ui.pager(1000, 2000, newer_href="a", older_href="b")
     assert ui.pager(0, 0, newer_href=None, older_href=None) == ""
 
@@ -396,3 +396,14 @@ def test_render_main_class() -> None:
     assert "<main class='wrap' id='main' tabindex='-1'>" in plain
     wide = theme.render("T", "<p>x</p>", site="S", main_class="ui-wide").body.decode()
     assert "<main class='wrap ui-wide' id='main' tabindex='-1'>" in wide
+
+
+def test_a_one_page_list_shows_no_pager() -> None:
+    """ "1–1 of 1" with a dead ← Newer and Older → under a one-page list read as broken (0.7.47 UI
+    sweep): one page shows nothing, or only the list's cap note."""
+    from mtg_gateway import ui as U
+
+    assert U.pager(0, 1, newer_href=None, older_href=None) == ""
+    assert "Newer" not in U.pager(0, 3, newer_href=None, older_href=None, note="kept 30 days")
+    assert "kept 30 days" in U.pager(0, 3, newer_href=None, older_href=None, note="kept 30 days")
+    assert "Older" in U.pager(0, 30, newer_href=None, older_href="/x?o=25")

@@ -943,7 +943,7 @@ def test_mana_value_grouping_restacks_at_once(server: Server, width: int, height
             assert cell.inner_text() == "12"
             head = page.locator(".stack[data-group='12 mana value'] .stackhead")
             assert head.locator("h2 .title").inner_text() == "12 mana value"
-            assert head.locator(".meta").inner_text() == "Qty: 1"
+            assert head.locator(".meta").inner_text() == "1 card"
             row.scroll_into_view_if_needed()
             _menu_shot(page, "mv-group-saving", width, scheme)
         finally:

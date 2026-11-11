@@ -105,7 +105,14 @@ def test_words_for_changes_alerts_and_days() -> None:
         ("Above $45.00", "Above $45.00"),
         ("Below $30.00", "Below $30.00"),
     ]
-    assert alert_pills({"drop": 10.0}, "usd", 2.0) == [("−10% below $2.00", "Drops 10% below $2.00")]
+    assert alert_pills({"drop": 10.0}, "usd", 2.0) == [
+        ("Under $1.80", "Under $1.80: 10% below the $2.00 it was added at")
+    ]
+    # 0.7.47: with the member's floor a cheap card's alert sits at least that far away
+    assert alert_pills({"drop": 10.0, "rise": 20.0}, "usd", 2.0, 0.5) == [
+        ("Under $1.50", "Under $1.50: 10% below the $2.00 it was added at, at least $0.50"),
+        ("Over $2.50", "Over $2.50: 20% above the $2.00 it was added at, at least $0.50"),
+    ]
     assert alert_pills({"rise": 5.0}, "usd") == [
         ("+5% above added price", "Rises 5% above the price when added")
     ]

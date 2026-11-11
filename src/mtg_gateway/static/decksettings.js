@@ -112,6 +112,7 @@
   window.addEventListener("beforeunload", function (ev) {
     if (inFlight) { ev.preventDefault(); ev.returnValue = ""; }
   });
+  (window.mtgHolds = window.mtgHolds || []).push(function () { return inFlight > 0; });  // no pull to refresh mid-save (static/topbar.js)
   function post(form, extra) {
     var fd = new FormData(form);
     fd.set("json", "1");

@@ -108,7 +108,8 @@ def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, 
             toast = page.locator(".toast.cards-toast")
             toast.wait_for(timeout=5000)
             assert re.fullmatch(  # with the default price alert it came with (independent review 2, L5)
-                r"Sol Talisman added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+                r"Sol Talisman added to your watchlist, with a price alert: "
+                r"under \$\d+\.\d\d · over \$\d+\.\d\d\.",
                 toast.locator(".msg").inner_text(),
             ), toast.locator(".msg").inner_text()
             assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Talisman"
@@ -207,7 +208,8 @@ def test_the_top_bar_suggestions_get_the_card_menu_only(tmp_path: Path, width: i
             toast = page.locator(".toast.cards-toast")
             toast.wait_for(timeout=5000)
             assert re.fullmatch(  # with the default price alert it came with (independent review 2, L5)
-                r"Sol Ring added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+                r"Sol Ring added to your watchlist, with a price alert: "
+                r"under \$\d+\.\d\d · over \$\d+\.\d\d\.",
                 toast.locator(".msg").inner_text(),
             ), toast.locator(".msg").inner_text()
             watched = server.app.state.gateway.prices.watched_cards("user-1")

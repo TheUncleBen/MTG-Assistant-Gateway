@@ -26,7 +26,7 @@ from .test_history_page import store_report
 from .test_overflow_sweep_browser import MEASURE
 from .test_social_browser import Server as ReportsServer
 from .test_text_zoom_browser import TEXT_200
-from .waits import expect, settled
+from .waits import expect, redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -176,6 +176,7 @@ def test_the_delete_box_wraps_a_long_unbroken_category_name(
         _deck_page(page, server)
         if big:
             page.evaluate(TEXT_200)
+            redrawn(page)
         box = _open_delete_box(page, "Removal")
         select = box.locator("select#catmove")
         select.select_option(LONG)

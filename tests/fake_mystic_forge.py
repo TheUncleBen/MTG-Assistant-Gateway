@@ -104,6 +104,12 @@ def fake_mystic_forge() -> MCPServer:
         both = [line for line in params.decklist.splitlines() if " // " in line]
         if both:
             return "# Validation: ISSUES FOUND\n\n**not found on Scryfall:**\n" + "\n".join(both)
+        if any(line.split(" ", 1)[-1].strip() == "Fire" for line in params.decklist.splitlines()):
+            # the color identity check, as Mystic Forge words it, for the name it was sent
+            return (
+                "# Validation: ISSUES FOUND\n\n**1 card(s) outside commander's color identity (G, U):**\n"
+                "  - Fire (has R)"
+            )
         return f"Validated {len(params.decklist.splitlines())} lines"
 
     @mf.tool(name="watchlist_list", description="stateful, must stay hidden")

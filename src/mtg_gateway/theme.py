@@ -93,7 +93,8 @@ _LIGHT = """
     --seg-track:var(--surface-3); --seg-on:var(--surface); /* a switch's track and its chosen part */
     --seg-muted:#4c4c4c; /* a softer word on the track (a tab's count): 4.8:1 on --surface-3 */
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
-    --text:#383838; --link:#1d55b3; /* 5.2:1 on --surface-2 (the menu); Archidekt's #4183c4 is 3.8:1 */
+    /* links are the text colour, underlined in running text (no blue links: the owner, 0.7.46 checklist) */
+    --text:#383838; --link:#383838;
     /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
     --text-muted:#5e5e5e;
     --menu-head:#595959; /* 5.2:1 on --surface-2 */
@@ -183,7 +184,7 @@ CSS = (
   /* a switch's chosen part is lighter than its track, raised as on iOS: #e3e3e3 on it 5.4:1 */
   --seg-track:#2f2f2f; --seg-on:#5a5a5a; --seg-muted:#a8a8a8; /* 5.6:1 on the track */
   --border:#5f5f5f; --border-soft:#323232; --card-border:#525252;
-  --text:#e3e3e3; --text-muted:#a8a8a8; --link:#73a8dc;
+  --text:#e3e3e3; --text-muted:#a8a8a8; --link:#e3e3e3;
   --menu-head:#b0b0b0; /* 5.4:1 on --surface-2 */
   --toolbar-bg:#2e2d2d; --toolbar-text:#f5f5f5;
   --navbar-bg:#111111; --navbar-text:#ffffff; --navbar-muted:#e3e3e3;
@@ -270,6 +271,9 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
    a fold's summary, or a label that works one (the Binder's "10 entries · …" fold, a search box's
    magnifier) */
 :is(button, .btn, [role=tab], [role=button], summary, label) > svg.i{min-width:.85em;min-height:.85em}
+/* a drop-down's item icons: one size, link or button (see .ctxmenu .i) */
+.menu :is(a, button, .item) > svg.i{width:max(18px,.85em);height:max(18px,.85em);min-width:0;min-height:0;
+  flex:none}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
 
 /* global toolbar (navbar): flat, 50px, links bold white turning orange */
@@ -307,6 +311,11 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 /* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel. The panel
    styling is the shared .menu class, so a script-made menu (the deck page's card menu) looks the
    same; details.dd only adds where its panel sits. */
+/* a row of buttons that would leave one alone on its last line, as an even grid (static/feedback.js) */
+.even-rows{display:grid!important;grid-template-columns:repeat(var(--even-cols,2),minmax(0,1fr))}
+.even-rows .even-span{grid-column:1 / -1}
+.even-rows > :is(a,button,summary,details,.btn):not(.sr-only),.even-rows > form > :is(button,.btn){width:100%;
+  min-width:0;margin:0;justify-content:center;white-space:normal}
 details.dd{position:relative;margin:0}
 details.dd > summary{list-style:none;cursor:pointer;user-select:none}
 details.dd > summary::-webkit-details-marker{display:none}
@@ -377,6 +386,9 @@ details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
    phone a 12-letter word of a heading needs the 4 px a gutter of 28 px took (re-audit N02); a
    full-bleed element spans them with var(--gutter) */
 :root{--gutter:min(1rem,16px)}
+/* an element marked hidden is never drawn, whatever display its own rules give it (0.7.47 polish:
+   the deck banner's hidden "Est unknown" showed, its span's inline-block beating [hidden]) */
+[hidden]{display:none!important}
 .wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 var(--gutter)}
 main.wrap{flex:1;padding:var(--main-top,1rem) var(--gutter) 3rem;container-type:inline-size}
 /* a heading wraps between words, at a hyphen where the browser has a dictionary, and inside a
@@ -404,6 +416,9 @@ ul.plain{list-style:none;margin:0;padding:0}
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
 .panel h2,.card h2{font-size:min(1.5rem,7vw)}
+/* the install page's QR code: dark on white in both themes; not on a phone, which is already there */
+.qr-code svg{display:block;background:#fff;border-radius:var(--radius)}
+@media (hover:none) and (pointer:coarse){.qr-desk{display:none}}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
 code{font-size:.92em;background:var(--surface-2);padding:.1rem .4rem;border-radius:3px;overflow-wrap:anywhere}
 pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(--border-soft);
@@ -1176,7 +1191,10 @@ body .tabbar:has(details.more[open]){z-index:25}
   pointer-events:none;top:0;left:0}
 .tabbar details.more summary{list-style:none;cursor:pointer}
 .tabbar details.more summary::-webkit-details-marker{display:none}
-.tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
+/* the More sheet rises from its own tab, the bar's last, held at the window's right edge (0.7.47:
+   centred on the window, it floated beside the tab it came from) */
+.tabbar details.more .menu.sheet{position:fixed;left:auto;right:calc(.5rem + env(safe-area-inset-right));
+  transform:none;top:auto;
   bottom:calc(56px + env(safe-area-inset-bottom) + .5rem);width:min(18rem,calc(100vw - 2rem));
   z-index:30;border-radius:16px;padding:.5rem}
 .tabbar details.more .menu.sheet a{min-height:44px;padding:0 1rem}
@@ -1487,6 +1505,12 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
 UI_CSS = """
 /* width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
+/* One Binder (0.7.47): "‹ Binder" back on the pages that open from the Binder page */
+.bn-up{margin:0}
+.bn-back{display:inline-flex;align-items:center;gap:.2rem;min-height:44px;color:var(--orange-text);font-weight:700;
+  text-decoration:none}
+.bn-back svg.i{width:18px;height:18px}
+.bn-up + .ui-head h1 .cn{font-size:.55em;font-weight:600;color:var(--text-muted);vertical-align:middle}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
 /* its parts never shrink under their words: when they are wider than the screen (large text on a
@@ -1540,6 +1564,14 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
 .hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
+/* a place's switch with no actions beside it sits in the middle, as the Assistant's does (the owner's UI
+   principles: a switch is centred or full width, never leaving empty space to one side) */
+.ui-head.hubhead:not(:has(> .acts)){justify-content:center}
+/* a page of grouped lists (Account, Account details, Assistants, Binder › Lists) is one centred
+   column; its heading and switch line up with the column instead of the wider page (the owner, 0.7.46
+   checklist: everything shifted to the left on a desktop) */
+main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
+.wide main.wrap:has(> .yhub, > .acc, > .lp-col){max-width:calc(42rem + 2rem)}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%} .hubseg.seg-grid{display:grid}
   .hubbar{display:block}
   /* large text on a narrow phone: a part keeps its name on one line and moves to the next row
@@ -1954,7 +1986,7 @@ main.wrap.ui-wide{max-width:1200px}
   .with-panel .ui-table .tr{grid-template-columns:var(--cols-md)}
   .with-panel .ui-table .md-hide{display:none}
   .with-panel .ui-table .sub{display:flex}
-  .with-panel .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
+  .with-panel .ui-widgets{--wdg-min:11rem}
 }
 @media (max-width:1099.98px){
   .ui-split.with-panel .list-only{display:none}
@@ -2055,8 +2087,11 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .glance-tgl:checked + .glance-lbl + .ui-widgets{padding:min(.75rem,11px);margin-bottom:1rem;
     border:1px solid var(--card-border);
     border-top:0;border-radius:0 0 var(--radius-panel) var(--radius-panel);background:var(--surface-2)} }
-.ui-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;
-  margin:0 0 1.25rem}
+.ui-widgets{display:flex;flex-wrap:wrap;gap:.75rem;margin:0 0 1.25rem}
+/* (0.7.47 polish) a row of tiles that wraps: each tile at least --wdg-min wide, and the tiles of a
+   last row that is not full share its width, so five tiles never leave a hole at the bottom right
+   as a grid's columns did; a page asks for N a row with --wdg-min: calc(100% / N - the gaps) */
+.ui-widgets > *{flex:1 1 min(100%,var(--wdg-min,13rem));min-width:0}
 .wdg{display:flex;flex-direction:column;gap:.35rem;min-width:0;padding:.85rem 1rem;background:var(--surface);
   border:1px solid var(--card-border);border-radius:var(--radius-panel)}
 /* the label wraps at its spaces beside its icon, and a word too wide for the room beside the icon
@@ -2095,25 +2130,25 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .bar-split{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-2)}
 .bar-split i{display:block;height:100%}
 @media (min-width:600px) and (max-width:899.98px){
-  .ui-widgets{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .wdg.wide-sm{grid-column:1 / -1}
+  .ui-widgets{--wdg-min:calc(50% - .375rem)}
+  .ui-widgets > .wdg.wide-sm{flex-basis:100%}
 }
 /* the row measured in its own em (final polish Z5): two a row at 600-899 px gave a tile 12 em at
    200% text on a 720 px window, where a price and its unit no longer fit a line; below 25.75 em
    (two tiles of 12.5 em and the gap) each tile takes the row. At 100% the row has 40 em at 600 px */
 .ui-widgets{container-type:inline-size}
 @media (min-width:600px) and (max-width:899.98px){
-  @container (max-width:25.75em){ .wdg{grid-column:1 / -1} } }
+  @container (max-width:25.75em){ .ui-widgets > .wdg{flex-basis:100%} } }
 @media (max-width:599.98px){
   /* two a row, or one a row when enlarged text leaves a half too narrow for 8.5rem */
-  .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,max(8.5rem,calc(50% - .25rem))),1fr));
+  .ui-widgets{--wdg-min:max(8.5rem,calc(50% - .25rem));
     gap:.5rem}
   .wdg{padding:.6rem min(.7rem,10px)}  /* the side padding stops at its 100% size, as the fold's */
   .wdg .big{font-size:1.5rem}
   .wdg .det{font-size:.82rem}
   .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center;padding:0 .4rem;
     font-size:.86rem}
-  .wdg.wide-sm{grid-column:1 / -1}
+  .ui-widgets > .wdg.wide-sm{flex-basis:100%}
 }
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
 /* a fold-out under a row or a section (a report's details, a watched card's history) */
@@ -2154,7 +2189,10 @@ CARD_MENU_CSS = """
   overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
 .ctxmenu .ghead{padding:.55rem 1rem .15rem;font-size:.75rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.04em;color:var(--menu-head)}
-.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange-text);fill:none;
+/* one size for every item's icon, link or button (a button's icon grew with large text and a link's
+   did not: the items' text then started in two columns, 0.7.47) */
+.ctxmenu .ic,.ctxmenu .i{width:max(18px,.85em);height:max(18px,.85em);min-width:0;min-height:0;flex:none;
+  color:var(--orange-text);fill:none;
   stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
 /* The menu scrolls as a whole when the window is short; its items never shrink to make room (a
@@ -2195,7 +2233,7 @@ CARD_MENU_CSS = """
   .menu a,.menu button,.menu .item,details.dd .menu a,details.dd .menu button,details.dd .menu .item{
     min-height:44px}
 /* a row without an icon keeps an empty slot the icon's width, so every row's text lines up */
-.ctxmenu .ic-slot{display:inline-block;width:18px;height:18px;flex:none}
+.ctxmenu .ic-slot{display:inline-block;width:max(18px,.85em);height:max(18px,.85em);flex:none}
 /* the toast after a watch (and after an add on Card search) */
 .toast.cards-toast{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;z-index:95}
 .toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
@@ -2322,29 +2360,77 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 """
 CSS += BOX_CSS
 
-# The bell's list (profile_page.py, static/bell.js): in the box on every page and on the
-# /notifications page. Unseen rows are tinted; a row links to its target where there is one.
+# The Alerts page and the bell's box (alerts_page.py, static/bell.js): one row an alert, its type's
+# icon and colour, its type and time on a small line, the title in bold and its words; unread rows
+# carry a dot and a tint; each kept row ends with its ⋮ (Mark read or unread, Dismiss).
 BELL_CSS = """
-.bell-list{list-style:none;margin:0;padding:0}
-.bell-part{font-size:.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
-  margin:.9rem 0 .2rem}
-.bell-part:first-child{margin-top:0}
-.bell-row{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.45rem 0;
-  border-top:1px solid var(--border-soft);text-decoration:none;color:var(--text)}
-.bell-list > li:first-child > .bell-row{border-top:0}
-.bell-row i{width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:grid;
-  place-items:center;font-style:normal;font-weight:900;flex:none;color:var(--text)}
-.bell-row .t{flex:1;min-width:0;overflow-wrap:anywhere}
-.bell-row .t .s{display:block;color:var(--text-muted);font-size:.86rem}
-.bell-row.new{background:var(--orange-tint);margin:0 -16px;padding:.45rem 16px}
-a.bell-row:hover .t{text-decoration:underline}
-.bell-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;
+.al-list{list-style:none;margin:0;padding:0}
+.al-row{position:relative;display:flex;align-items:stretch;gap:.25rem;
+  border-top:1px solid var(--border-soft);-webkit-touch-callout:none}
+.al-list > .al-row:first-child{border-top:0}
+.al-row.unread{background:var(--orange-tint)}
+.al-main{flex:1 1 auto;min-width:0;display:flex;gap:.75rem;align-items:flex-start;
+  padding:.7rem .5rem .7rem .75rem;color:var(--text);text-decoration:none;min-height:44px}
+.al-main:hover .al-title{text-decoration:underline}
+.al-ic{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;
+  background:var(--surface-2);color:var(--text)}
+.al-ic svg.i{width:20px;height:20px}
+.al-ic.k-waiting{background:var(--orange-tint);color:var(--orange-text)}
+.al-ic.k-price{background:var(--green-tint);color:var(--green-text)}
+.al-ic.k-report{background:var(--blue-tint);color:var(--blue-text)}
+.al-ic.k-account{background:var(--red-tint);color:var(--red-text)}
+.al-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:.1rem;overflow-wrap:anywhere}
+.al-meta{display:flex;flex-wrap:wrap;column-gap:.6rem;font-size:.86rem;color:var(--text-muted)}
+.al-type{font-weight:700;color:var(--text)}
+.al-title{font-weight:700;line-height:1.3}
+.al-row:not(.unread) .al-title{font-weight:600}
+.al-text{color:var(--text-muted);line-height:1.4}
+.al-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--orange);margin-top:.45rem}
+.al-row details.al-menu{flex:none;position:relative;align-self:center;margin-right:.25rem}
+.al-row details.al-menu > summary{list-style:none}
+.al-row details.al-menu > summary::-webkit-details-marker{display:none}
+.al-row details.al-menu .menu{position:absolute;right:0;top:calc(100% + .25rem);width:max-content;
+  max-width:min(20rem,calc(100vw - 16px))}
+.al-row details.al-menu .menu form{margin:0}
+.al-row details.al-menu .menu button{display:flex;align-items:center;gap:.6rem;width:100%;min-height:44px;
+  padding:0 1rem;border:0;border-radius:0;background:transparent;color:var(--text);box-shadow:none;
+  text-align:left;font-weight:400}
+.al-row details.al-menu .menu button:hover{background:var(--surface-3)}
+.al-empty{text-align:center;padding:1.5rem 1rem}
+.al-empty > svg.i{width:32px;height:32px;color:var(--green-text)}
+.al-empty p{margin:.35rem 0}
+.al-card{padding:0;overflow:hidden}
+.al-card > .notice{margin:.75rem}
+.al-head{flex-wrap:wrap;gap:.5rem 1rem}
+/* the three actions sit in one row or one above the other, never two and one alone (0.7.47
+   audit): the row needs --al-row (about 26em of their own text size, with room to spare), so
+   200% text stacks them sooner */
+.al-acts{--al-row:29em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
+  flex-wrap:wrap;gap:.5rem}
+.al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
+.al-acts form{margin:0;display:flex}
+.al-acts .btn,.al-acts button{margin:0;min-height:44px;display:inline-flex;align-items:center;gap:.4rem;
+  width:100%;justify-content:center;text-align:center}
+.al-linknote{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 .75rem}
+.al-linknote p{margin:0}
+.bell-badge{display:inline-grid;place-items:center;min-width:20px;min-height:20px;border-radius:10px;white-space:nowrap;
   background:var(--orange);color:var(--on-orange);font-size:.75rem;font-weight:900;padding:0 5px;
   vertical-align:middle;margin-left:.3rem;line-height:1}
-.bell-page .bell-row{padding:.45rem .5rem}  /* read and unread rows line up: the tint is a fill only */
-.bell-page .bell-row.new{margin:0}
+h1 .bell-badge{display:inline-block;font-size:.8rem;line-height:1.6;min-height:0;border-radius:999px;
+  padding:0 8px}
 .bell-foot{margin:.75rem 0 0}
+.mtgbox .body .al-list{margin:0 -16px}
+.mtgbox .body .al-row.unread{background:var(--orange-tint)}
 .mtgbox .body .bell-foot{margin-top:.75rem}
+/* the update strip's × (assistants.dismiss_form) */
+.notice.upd{position:relative;padding-right:calc(1rem + 44px)}
+.notice.upd form.nx{position:absolute;top:50%;right:.25rem;transform:translateY(-50%);margin:0}
+.notice.upd form.nx .close,.notice.once .close{width:44px;height:44px;min-height:44px;padding:0;border:0;
+  border-radius:50%;background:transparent;color:inherit;font-size:1.4rem;line-height:1;box-shadow:none}
+/* a one-time notice (a saved form's result): its × takes it away (static/feedback.js) */
+.notice.once{position:relative;padding-right:calc(1rem + 44px)}
+.notice.once > .close{position:absolute;top:50%;right:.25rem;transform:translateY(-50%);margin:0}
+.notice.once > .close::before{content:"×"}
 """
 CSS += BELL_CSS
 
@@ -2464,6 +2550,11 @@ SEARCH_PANEL_CSS = """
 /* the filter groups: whole groups in a fluid row, each at least --gw wide, growing to fill its row */
 .spanel .fgrid{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-start}
 .spanel .fgrid > *{flex:1 1 var(--gw,10.714em);min-width:0;margin:0}
+/* four groups or more: the colours take a line of their own and the rest share the next, rather
+   than the last group wrapping alone across the whole width (0.7.47 polish: Search decks' Owner) */
+.spanel .fgrid:has(> :nth-child(4)) > .fg.colors{flex-basis:100%}
+/* ... and when the rest cannot share one line either (large text), one a line, never two and one */
+@container (max-width:44em){.spanel .fgrid:has(> :nth-child(4)) > .fg{flex-basis:100%}}
 .spanel fieldset.fg{border:0;padding:0;margin:0;min-width:0;min-inline-size:0}
 .spanel .fg .l{display:block;font-weight:700;margin:0 0 .35rem;padding:0}
 .spanel .fg .l .hint{display:inline;font-weight:400;color:var(--text-muted);font-size:.86rem;margin:0}
@@ -2619,7 +2710,8 @@ SEARCH_PANEL_CSS = """
   .spanel .rbar .sortcw .msel-btn .msel-txt{white-space:normal;overflow:visible;text-overflow:clip}
   .spanel .sp-filters{display:none;position:fixed;inset:0;z-index:80;margin:0;background:var(--bg);
     overflow:auto;
-    overscroll-behavior:contain;padding:0 1rem calc(5.5rem + env(safe-area-inset-bottom))}
+    overscroll-behavior:contain;
+    padding:0 1rem calc(var(--sp-foot,5.5rem) + 1rem + env(safe-area-inset-bottom))}
   .spanel .sp-filters.open{display:block}
   /* a sheet holding only the card size (the Binder with no tags: "View") is a bottom sheet the
      height of its content over a scrim, not a full screen; its foot sits in it (polish re-check Q5) */
@@ -2985,7 +3077,7 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
-    ("/collection", "Binder", "collection"),
+    ("/binder", "Binder", "collection"),
     ("/proposals", "Assistant", "proposals"),
 ]
 # The pages one nav place stands for: Assistant's switch (Proposals, History, Reports)
@@ -3003,9 +3095,11 @@ BINDER_PAGES = (
 NAV_PLACE = {
     "/history": "/proposals",
     "/reports": "/proposals",
-    "/collection/lists": "/collection",
-    "/collection/wants": "/collection",
-    "/watchlist": "/collection",
+    "/collection": "/binder",
+    "/collection/lists": "/binder",
+    "/collection/wants": "/binder",
+    "/watchlist": "/binder",
+    "/binder/settings": "/binder",
 }
 # The pages that light the picture (the Account place)
 ACCOUNT_PAGES = ("/account", "/account/details")
@@ -3287,10 +3381,21 @@ def render(
     # Admins hear about a newer gateway release on every page (update_check.py); the admin overview
     # carries the steps, so it shows its own card instead of this line.
     found = update_check.newer() if signed_in and admin else None
+    if (
+        found
+        and sub
+        and update_check.dismissed_for is not None
+        and update_check.dismissed_for(sub) == found["version"]
+    ):
+        found = None  # its × was pressed for this release (home.py /home/dismiss); Alerts keeps it
     if found and "id='updates'" not in body:
+        from .assistants import dismiss_form
+
+        close = dismiss_form(csrf or "", "update", found["version"], "Dismiss the update notice")
         h1 = (
-            f"<div class='notice warn' role='status'>Gateway {html.escape(found['version'])} is available "
-            f"(this one runs {html.escape(__version__)}). <a href='/admin#updates'>How to update</a></div>"
+            f"<div class='notice warn upd' role='status' data-dismissable>Gateway "
+            f"{html.escape(found['version'])} is available (this one runs {html.escape(__version__)}). "
+            f"<a href='/admin#updates'>How to update</a>{close}</div>"
         ) + h1
     classes = " ".join(
         c

@@ -12,7 +12,7 @@ import pytest
 from .test_cardview_browser import PNG
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
-from .waits import redrawn
+from .waits import redrawn, sideways
 
 pytest.importorskip("playwright")
 
@@ -65,9 +65,7 @@ def test_card_viewer_watches_a_card_and_shows_its_price(server: Server) -> None:
         assert link.get_attribute("href") == f"/watchlist?open={wid}#wr-{wid}"
         box = link.bounding_box()  # a standard control: 39 px with a mouse, 44 px on touch
         assert box is not None and box["height"] >= 39, box
-        overflow = page.evaluate(
-            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
-        )
+        overflow = sideways(page)
         assert overflow == 0
         assert errors == []
         browser.close()
@@ -264,9 +262,7 @@ def test_load_more_adds_the_next_rows_in_place(server: Server, width: int) -> No
         page.wait_for_function(f"{rows} === 60", timeout=5000)
         assert "All 60 cards shown." in more.inner_text()
         assert page.get_by_role("link", name="Load more cards").count() == 0
-        over = page.evaluate(
-            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
-        )
+        over = sideways(page)
         assert over <= 0 and page.evaluate("window.__same === true")
         assert errors == [], errors
         browser.close()
@@ -313,9 +309,7 @@ def test_the_rows_menu_sits_beside_details_and_the_card_size_switch_is_on_the_pa
             assert abs(more["y"] - kebab["y"]) < 4, (width, more, kebab)  # on one line
             assert kebab["x"] >= more["x"] + more["width"] - 1, (width, more, kebab)  # beside, not under
             assert page.locator(".w-size .sizeseg").is_visible()
-            over = page.evaluate(
-                "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
-            )
+            over = sideways(page)
             assert over <= 0, width
             assert errors == []
             ctx.close()

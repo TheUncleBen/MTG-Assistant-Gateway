@@ -444,4 +444,112 @@
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
   }
+
+  // Rows of buttons that wrap never leave one alone on its last line (audit AU2: at 600 px the deck
+  // page's More and a report's Delete… sat by themselves under three buttons). Laid out as they
+  // are, a row whose last line holds less than half of its first becomes an even grid: four
+  // buttons two and two. Measured again whenever the row's room or its text size changes. A row
+  // that is a grid of its own (the deck page's buttons on a phone) is left as it is.
+  var EVEN_ROWS = ".banner .controls .primary, .rv-page .rv-acts, [data-even-rows]";
+  function rowItems(row) {
+    var out = [];
+    Array.prototype.forEach.call(row.children, function (c) {
+      var cs = getComputedStyle(c);
+      if (cs.display === "contents") { out = out.concat(rowItems(c)); return; }
+      if (cs.display === "none" || cs.position === "absolute" || cs.position === "fixed" || !c.getClientRects().length) return;
+      out.push(c);
+    });
+    return out;
+  }
+  function evenRow(row) {
+    row.classList.remove("even-rows");
+    Array.prototype.forEach.call(row.querySelectorAll(".even-span"), function (c) { c.classList.remove("even-span"); });
+    if (getComputedStyle(row).display !== "flex") return;
+    var items = rowItems(row);
+    if (items.length < 3) return;
+    var tops = items.map(function (c) { return Math.round(c.getBoundingClientRect().top); });
+    var seen = [];
+    tops.forEach(function (t) { if (seen.every(function (u) { return Math.abs(u - t) > 3; })) seen.push(t); });
+    var lines = seen.length;
+    if (lines < 2) return;
+    // a line holding one button beside a line of two or more: the one reads as left behind (the
+    // matrix's stranded check), whichever line it is on and however many lines there are
+    var counts = seen.map(function (u) { return tops.filter(function (t) { return Math.abs(t - u) <= 3; }).length; });
+    if (!(counts.some(function (n) { return n === 1; }) && counts.some(function (n) { return n >= 2; }))) return;
+    var cols = Math.ceil(items.length / lines);
+    row.style.setProperty("--even-cols", String(cols));
+    row.classList.add("even-rows");
+    // an odd one over in the last line takes the whole line rather than half of it
+    if (items.length % cols === 1) items[items.length - 1].classList.add("even-span");
+  }
+  if (window.ResizeObserver) {
+    var evenRO = new ResizeObserver(function (entries) {
+      var rows = [];
+      entries.forEach(function (e) {
+        var r = e.target.matches(EVEN_ROWS) ? e.target : e.target.querySelector(EVEN_ROWS);
+        if (r && rows.indexOf(r) < 0) rows.push(r);
+      });
+      rows.forEach(evenRow);
+    });
+    var watchRows = function () {
+      Array.prototype.forEach.call(document.querySelectorAll(EVEN_ROWS), function (row) {
+        if (row.__evenWatched) return;
+        row.__evenWatched = true;
+        evenRO.observe(row);
+        if (row.parentElement) evenRO.observe(row.parentElement);
+        evenRow(row);
+      });
+    };
+    watchRows();
+    // a row a script fills later (the deck page adds Test and play and More)
+    document.addEventListener("DOMContentLoaded", watchRows);
+    window.addEventListener("load", watchRows);
+  }
+})();
+
+/* One-time notices (0.7.47, the owner: "refresh does not get rid of the temporary notifications"): a
+   page shows a form's result from its address (?ok=, ?err=, ?done=, ?deleted=, ?saved=). Shown
+   once: a reload (also the app's pull to refresh) or a Back to such a page loads it again without
+   that part of the address, so the notice is gone; every other part stays (a filter, ?connect=1).
+   On the first showing nothing changes, so a page that reads its own address again (a live
+   review page, a late page) still has it. Each notice also gets a × that takes it away. */
+(function () {
+  "use strict";
+  var ONCE = ["ok", "err", "done", "deleted", "saved"];
+  if (!window.URLSearchParams) return;
+  var q = new URLSearchParams(location.search);
+  var had = ONCE.filter(function (k) { return q.has(k); });
+  if (!had.length) return;
+  var how = "";
+  try {
+    var nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    how = nav ? nav.type : (performance.navigation && performance.navigation.type === 1 ? "reload" : "");
+  } catch (e) { how = ""; }
+  if (how === "reload" || how === "back_forward") {
+    ONCE.forEach(function (k) { q.delete(k); });
+    var s = q.toString();
+    location.replace(location.pathname + (s ? "?" + s : "") + location.hash);
+    return;
+  }
+  function closeable() {
+    var main = document.querySelector("main") || document.body;
+    Array.prototype.forEach.call(main.querySelectorAll(".notice[role=status], .notice[role=alert]"), function (n) {
+      // a notice with a close of its own (the Binder's strips: .nx, [data-dismiss]; the update
+      // strip's form.nx) keeps that one: a second × would sit over its words or its Undo
+      if (n.querySelector(":scope > .close, :scope > .nx, :scope > form.nx, [data-dismiss]") ||
+          n.hasAttribute("data-dismissable") || n.closest(".mtgbox")) return;
+      n.classList.add("once");
+      var x = document.createElement("button");
+      x.type = "button";
+      x.className = "close icon-only";
+      x.setAttribute("aria-label", "Dismiss");
+      x.title = "Dismiss";
+      // the × is drawn by the style sheet (.notice.once > .close::before), so the notice's own
+      // words stay its text
+      x.addEventListener("click", function () { n.remove(); });
+      n.appendChild(x);
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", closeable);
+  else closeable();
 })();

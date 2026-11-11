@@ -18,17 +18,17 @@ def _kt(name: str) -> str:
     return (APP / name).read_text(encoding="utf-8")
 
 
-def test_a_forum_thread_never_offers_pull_to_refresh() -> None:
-    """A thread has a reply box and a contest entry: forms, which the app's own rule keeps a pull
-    away from. The forum's front page and its sections still offer it."""
+def test_a_forum_thread_offers_pull_to_refresh_and_guards_its_reply_box() -> None:
+    """0.7.47 (owner, 2026-11-08: every page): a forum thread offers the pull too; its reply box and
+    contest entry are guarded by the page itself (static/topbar.js refuses a pull while something
+    typed is unsent), not by the app's rule."""
     rule = _kt("PullRefresh.kt")
-    assert 'path.startsWith("/forum/")' not in rule
-    assert 'Regex("^/forum(/(?!thread(/|$))[^/]+/[^/]+)?$")' in rule
+    assert "/forum" not in rule.split("object PullRefresh")[1]
     test = (TESTS / "PullRefreshTest.kt").read_text(encoding="utf-8")
-    never = test.split("fun formsTheEditorTheScannerAndAThreadNeverOfferIt")[1].split("@Test")[0]
-    assert '"/forum/thread/123"' in never and '"/forum/thread/123/enter"' in never
-    offered = test.split("fun listPagesOfferIt")[1].split("@Test")[0]
-    assert '"/forum"' in offered and '"/forum/general/rules"' in offered
+    offered = test.split("fun everyPageOffersIt")[1].split("@Test")[0]
+    assert '"/forum"' in offered and '"/forum/general/rules"' in offered and '"/forum/thread/123"' in offered
+    js = (ROOT / "src/mtg_gateway/static/topbar.js").read_text(encoding="utf-8")
+    assert "unsent()" in js
 
 
 def test_a_lint_error_fails_the_build_and_ci_runs_lint() -> None:
@@ -159,3 +159,24 @@ def test_android_check_keeps_the_jvm_crash_log_and_bounds_the_daemon() -> None:
     props = (ROOT / "android/gradle.properties").read_text(encoding="utf-8")
     args = next(line for line in props.splitlines() if line.startswith("org.gradle.jvmargs="))
     assert "-Xmx3g" in args and "-XX:MaxMetaspaceSize=1g" in args and "-Dfile.encoding=UTF-8" in args
+
+
+def test_the_app_never_asks_to_install_apps() -> None:
+    """0.7.47 (owner approved, 2026-11-09, T-216 Play Protect): the app no longer installs its own
+    updates. It holds neither install permission, starts no PackageInstaller session, and saves the
+    checked update to Downloads (MediaStore) for the person to open."""
+    manifest = (ROOT / "android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    install = ("REQUEST_INSTALL_PACKAGES", "UPDATE_PACKAGES_WITHOUT_USER_ACTION", "REQUEST_DELETE_PACKAGES")
+    for perm in install:
+        assert perm not in manifest
+    assert "InstallResultReceiver" not in manifest
+    for src in APP.glob("*.kt"):
+        code = re.sub(r"/\*.*?\*/|//[^\n]*", "", src.read_text(encoding="utf-8"), flags=re.S)
+        assert "PackageInstaller" not in code, src.name
+        assert "ACTION_INSTALL_PACKAGE" not in code, src.name
+    updater = _kt("Updater.kt")
+    assert "MediaStore.Downloads.EXTERNAL_CONTENT_URI" in updater
+    assert "Environment.DIRECTORY_DOWNLOADS" in updater
+    assert "DownloadManager.ACTION_VIEW_DOWNLOADS" in updater
+    # the check before saving stays: a file that fails it is never saved
+    assert updater.index("verify(") < updater.index("saveToDownloads(apk")

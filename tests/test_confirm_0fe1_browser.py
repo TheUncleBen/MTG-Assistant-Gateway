@@ -19,7 +19,7 @@ from .test_overflow_sweep_browser import CARDS, SHEETS_LOADED, _seed, server  # 
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
 from .test_ui_standard_0746_browser import APP_UA
-from .waits import redrawn
+from .waits import quiet, redrawn
 
 pytest.importorskip("playwright")
 
@@ -71,6 +71,9 @@ def _ctx(
 
 def _goto(page, server: Server, path: str, zoom: str | None = None) -> None:  # noqa: F811
     server.db.delete_prefs("user-1", prefixes=("view.",))
+    # a sheet closed with Escape goes Back in history; a goto while that Back is pending is
+    # ERR_ABORTED (seen once in a full parallel run at /cards -> /search), so wait for it first
+    quiet(page)
     r = page.goto(f"{server.base}{path}", wait_until="networkidle")
     assert r is not None and r.status == 200, (path, r and r.status)
     page.wait_for_function(SHEETS_LOADED)

@@ -139,36 +139,22 @@ def test_the_list_and_every_page_fit_each_surface(
                 redrawn(page)
             if path == "/account/details":
                 # the list: four groups in the mockup's order, rows with values, no form on it
-                # (textContent: the style sets the headings in capitals), top to bottom on a phone;
-                # on a wide screen Archidekt over Your data, Assistant over This gateway (the columns
-                # balanced by their rows, review 2, L10)
+                # (textContent: the style sets the headings in capitals), top to bottom in one
+                # centred column on every screen (0.7.47: two columns left a hole on a desktop)
                 heads = page.evaluate(
                     "() => [...document.querySelectorAll('.ygrp')].map(g => [g.querySelector('h2')"
                     ".textContent.trim(), g.getBoundingClientRect().y, g.getBoundingClientRect().x])"
                 )
                 by_y = [h for h, _y, _x in sorted(heads, key=lambda t: (round(t[1]), t[2]))]
-                if width < 700:
-                    assert by_y == ["Archidekt", "Assistant", "This gateway", "Your data"]
-                else:
-                    xs = sorted({round(x) for _h, _y, x in heads})
-                    assert len(xs) == 2, heads
-                    left = sorted((h for h in heads if round(h[2]) == xs[0]), key=lambda t: t[1])
-                    right = sorted((h for h in heads if round(h[2]) == xs[1]), key=lambda t: t[1])
-                    assert [h for h, _y, _x in left] == ["Archidekt", "Your data"]
-                    assert [h for h, _y, _x in right] == ["Assistant", "This gateway"]
-                    assert heads[0][2] + 300 < xs[1], heads  # columns as wide as the Account page's
-                    # the columns balanced by their rows (8 and 7), every row one line tall, so
-                    # the two columns end within a row of each other (review 2, L10)
-                    rows = page.evaluate(
-                        "() => [...document.querySelectorAll('.ygrp .rows > .yrow, "
-                        ".ygrp .rows > details.yrow')].map(r => Math.round(r.getBoundingClientRect().height))"
+                assert by_y == ["Archidekt", "Assistant", "This gateway", "Your data"]
+                assert len({round(x) for _h, _y, x in heads}) == 1, heads
+                if width >= 900:
+                    box = page.evaluate(
+                        "() => { const r = document.querySelector('.ydetails').getBoundingClientRect();"
+                        " const m = document.querySelector('main').getBoundingClientRect();"
+                        " return [r.left - m.left, m.right - r.right]; }"
                     )
-                    assert max(rows) - min(rows) <= 2 and max(rows) <= 52, rows
-                    ends = page.evaluate(
-                        "() => [...document.querySelectorAll('.ycol')]"
-                        ".map(c => Math.round(c.getBoundingClientRect().bottom))"
-                    )
-                    assert len(ends) == 2 and abs(ends[0] - ends[1]) <= max(rows) + 2, (ends, rows)
+                    assert abs(box[0] - box[1]) <= 2, box  # centred in the page
                 # every group as wide as the list (one under the other on a phone)
                 widths = page.evaluate(
                     "() => [...document.querySelectorAll('.ygrp')].map(g => g.offsetWidth)"

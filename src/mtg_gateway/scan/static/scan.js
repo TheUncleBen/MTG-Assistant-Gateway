@@ -29,6 +29,20 @@
   // Drawn cards on the page's tests measure 70 to 115 in focus and 10 to 35 out of focus.
   const SHARP_MIN = 40;
 
+  // Finding cards by their picture (0.7.47, picture.py): the page watches the live camera, and when a
+  // card's outline holds still it sends the straightened card to the gateway, which compares its
+  // artwork with every printing's. Text recognition stays for the set and number line among
+  // printings that share one artwork, and for a gateway whose picture index isn't ready yet.
+  const PICTURES = !!cfg.pictures;
+  const SAT_KEY = 'mtg-scan-saturation'; // picture scanning: the saturation chosen, kept on this device
+  const AREA_KEY = 'mtg-scan-area';   // the scan area {x, y, w} as shares of the viewfinder
+  const WATCH_GAP_MS = 250;           // between looks at the live camera
+  const STEADY_SHIFT = 0.03;          // a card whose corners move less than this (share of the frame) is held still
+  const SAT_MIN = 0.5, SAT_MAX = 2;   // the saturation slider's range (1 = as the camera gives it)
+  const UNSURE_LOOKS = 4;             // pictures of one card that may disagree before the best guess is shown
+  const SEND_W = 488, SEND_H = 680;   // the straightened card sent to the gateway (a JPEG of about 50 KB)
+  const AREA_DEFAULT = { x: 0.5, y: 0.5, w: GUIDE_WIDTH };
+
   const ASK_DELETE = new URL(location.href).searchParams.get('delete'); // an assistant's delete link
   const state = {
     items: [],            // {quantity, name, status, note, card, foil}
@@ -57,6 +71,15 @@
     ocr: null,            // Tesseract worker
     ocrState: cfg.ocr ? 'idle' : 'missing',
     pending: null,        // last resolution shown in the camera result box
+    saturation: 1,        // picture scanning: colour strength, 1 = as the camera gives it (SAT_MIN..SAT_MAX)
+    lastAdded: null,      // picture scanning: {res, key, quantity} of the card the added bar shows
+    watching: false,      // the live camera is being watched for cards (picture scanning)
+    identifying: false,   // a picture is with the gateway right now
+    steady: { corners: null, n: 0 }, // the card outline in the last look, and looks in a row it held still
+    holdUntilGone: false, // the card in view was handled: nothing is sent until it leaves the frame
+    guesses: [],          // the cards the last unsure pictures pointed at
+    miss: null,           // {blob, note}: the picture no card matched, offered to keep for the admin
+    area: Object.assign({}, AREA_DEFAULT),
     installPrompt: null,
   };
 
@@ -168,6 +191,25 @@
     } catch (e) { /* ignore */ }
   }
 
+  function loadDeviceChoices() {
+    try {
+      const sat = parseFloat(localStorage.getItem(SAT_KEY));
+      if (isFinite(sat)) state.saturation = Math.max(SAT_MIN, Math.min(SAT_MAX, sat));
+      const a = JSON.parse(localStorage.getItem(AREA_KEY) || 'null');
+      if (a && [a.x, a.y, a.w].every((v) => typeof v === 'number' && isFinite(v))) state.area = clampArea(a);
+    } catch (e) { /* storage may be unavailable: the defaults stand */ }
+  }
+  function saveDeviceChoices() {
+    try { localStorage.setItem(SAT_KEY, String(state.saturation)); localStorage.setItem(AREA_KEY, JSON.stringify(state.area)); }
+    catch (e) { /* storage may be unavailable */ }
+  }
+  /* The scan area stays inside the viewfinder (3:4) and between a quarter and nine tenths of its width. */
+  function clampArea(a) {
+    const w = Math.max(0.25, Math.min(0.9, a.w));
+    const hw = w / 2, hh = (w * 88 / 63) * (3 / 4) / 2; // half the card's height as a share of the 3:4 box's height
+    return { w, x: Math.max(hw, Math.min(1 - hw, a.x)), y: Math.max(Math.min(hh, 0.5), Math.min(1 - Math.min(hh, 0.5), a.y)) };
+  }
+
   function addItem(res, quantity) {
     const qty = Math.max(1, quantity || res.quantity || 1);
     const card = res.card || null;
@@ -203,7 +245,9 @@
     const box = h('details', { class: 'card intro', id: 'intro', open: !!open },
       h('summary', { class: 'fold-btn' }, h('h2', { text: 'How scanning works' })),
       h('ol', { class: 'steps' },
-        step(1, 'Scan.', 'Hold a card in the frame with its title in the dashed box and tap the shutter, or switch on Auto and show cards one after another. No camera handy? Use the Type tab.'),
+        step(1, 'Scan.', PICTURES
+          ? 'Hold a card inside the frame and keep it still: it is found by its picture and added at once. If it is the wrong card or printing, tap Change. No camera handy? Use the Type tab.'
+          : 'Hold a card in the frame with its title in the dashed box and tap the shutter, or switch on Auto and show cards one after another. No camera handy? Use the Type tab.'),
         step(2, 'Check the list.', 'Fix a wrong match, pick the exact printing or foil, change quantities.'),
         step(3, 'Choose what to do with the cards.', 'Save them to your binder, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
       h('div', { class: 'list-actions' }, h('button', { onclick: () => { if (window.MtgPrefs) window.MtgPrefs.set(INTRO_KEY, true); box.remove(); } }, 'Got it')));
@@ -221,7 +265,8 @@
   function render() {
     root.textContent = '';
     if (!introSeen() && !state.items.length) {
-      root.append(introCard(introFirstVisit));
+      // With picture scanning the camera needs the room: the card starts folded to its title.
+      root.append(introCard(introFirstVisit && !PICTURES));
       if (introFirstVisit && window.MtgPrefs && introPref() === undefined) window.MtgPrefs.set(INTRO_KEY, 'seen');
     }
     const tabs = h('div', { class: 'hubseg tabs', role: 'tablist' },
@@ -296,7 +341,7 @@
   /* `focus` (a tap on a tab or on "Type the card name instead"): the Type tab puts the cursor in
      the name field, so the phone keyboard opens at once. A reload landing on the tab does not. */
   function showTab(id, opts) {
-    if (state.tab === 'camera' && id !== 'camera') { state.continuous = false; stopCamera(); }
+    if (state.tab === 'camera' && id !== 'camera') { state.continuous = false; state.watching = false; stopCamera(); }
     state.tab = id;
     root.querySelectorAll('[role=tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === id)));
     const panel = $('#panel');
@@ -317,9 +362,9 @@
   };
   const SET_CODE = /^[A-Z0-9]{2,6}$/;
 
-  /* One row that never wraps: the Set box (its × inside; "Set code, blank for any" is its tooltip,
-     and the help line is read out, not shown) and the Foil and Auto toggles. Inside the Android app
-     Auto opens the phone camera scanning on its own (see phoneCamera). */
+  /* The Set box (its × inside; "Set code, blank for any" is its tooltip, and the help line is read
+     out, not shown) and the Foil toggle; with text reading only (a gateway whose picture index is
+     not ready), the Auto toggle too. */
   const SET_HELP = 'Set code, blank for any';
   function renderScanOptions() {
     const bar = h('div', { class: 'scan-opts', role: 'group', 'aria-label': 'Scan options' });
@@ -344,32 +389,38 @@
     input.addEventListener('change', applySet);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applySet(); input.blur(); } });
     const sw = h('button', { type: 'button', id: 'foil-switch', class: 'switch', role: 'switch', 'aria-checked': scanOpts.foil() ? 'true' : 'false',
+      title: 'Count cards as foil unless the card says otherwise',
       onclick: () => { const on = sw.getAttribute('aria-checked') !== 'true'; sw.setAttribute('aria-checked', on ? 'true' : 'false'); scanOpts.setFoil(on); } },
       'Foil');
-    const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
-      title: phoneCamera() ? 'Scan with the phone camera, adding cards as they are read' : null,
-      onclick: () => {
-        if (phoneCamera()) openPhoneCamera(true);
-        else if (state.continuous) stopContinuous();
-        else if (!startContinuous()) setStatus('Open the camera first to scan continuously.');
-      } },
-      'Auto');
-    document.addEventListener('scan:continuous', (e) => {
-      auto.setAttribute('aria-checked', e.detail && e.detail.on ? 'true' : 'false');
-      const sh = $('#shutter'); if (sh) sh.classList.toggle('live', !!(e.detail && e.detail.on));
-    }, camSignal());
-    bar.append(field, help, sw, auto);
+    bar.append(field, help, sw);
+    if (!PICTURES) {
+      const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
+        title: phoneCamera() ? 'Scan with the phone camera, adding cards as they are read' : null,
+        onclick: () => {
+          if (phoneCamera()) openPhoneCamera(true);
+          else if (state.continuous) stopContinuous();
+          else if (!startContinuous()) setStatus('Open the camera first to scan continuously.');
+        } },
+        'Auto');
+      document.addEventListener('scan:continuous', (e) => {
+        auto.setAttribute('aria-checked', e.detail && e.detail.on ? 'true' : 'false');
+        const sh = $('#shutter'); if (sh) sh.classList.toggle('live', !!(e.detail && e.detail.on));
+      }, camSignal());
+      bar.append(auto);
+    }
     applySet();
     return bar;
   }
 
-  /* Inside the Android app (it provides window.MtgNative; a browser has none) the orange shutter,
-     the viewfinder and Auto open the phone's own camera, which has the torch strength, zoom and
-     exposure a page cannot reach, so the same button gives the best camera on each platform. The
-     page's own camera is not started there: the app's camera panel hands each photo to this page
-     (ScanGlue.kt). openCameraAuto (apps from 0.7.46) opens it with Auto on; an older app opens it
-     and Auto is switched on there. */
-  const phoneCamera = () => !!(window.MtgNative && typeof window.MtgNative.openCamera === 'function');
+  /* With picture scanning the page's own live camera is the scanner everywhere (it finds cards
+     while you hold them up), so the Android app shows this page as it is (MainActivity.startScan
+     asks window.__scan.ownCamera). Until the gateway's picture index is ready the page reads titles,
+     and inside the app (it provides window.MtgNative; a browser has none) the orange shutter, the
+     viewfinder and Auto open the phone's own camera, which has the torch strength, zoom and
+     exposure a page cannot reach; its camera panel hands each photo to this page (ScanGlue.kt).
+     openCameraAuto (apps from 0.7.46) opens it with Auto on; an older app opens it and Auto is
+     switched on there. */
+  const phoneCamera = () => !PICTURES && !!(window.MtgNative && typeof window.MtgNative.openCamera === 'function');
   function openPhoneCamera(auto) {
     const n = window.MtgNative;
     if (!n) return;
@@ -385,41 +436,55 @@
     if (camListeners) camListeners.abort();
     camListeners = new AbortController();
     const app = phoneCamera();
-    // In the app the viewfinder is one big button that opens the phone camera.
+    // In the app, while titles are read, the viewfinder is one big button that opens the phone camera.
     const video = app
       ? h('button', { type: 'button', class: 'phone-cam', id: 'open-phone-camera', onclick: () => openPhoneCamera(false) },
         h('span', { class: 'cap' }, cameraIcon(), 'Open the phone camera'))
       : h('video', { playsinline: true, autoplay: true, muted: true });
+    // "Flash" (the owner, 2026-11-10): the phone's flash light, kept on while the camera is open.
     const torch = h('button', { type: 'button', class: 'torch', id: 'torch', hidden: true, 'aria-pressed': 'false',
-      'aria-label': 'Torch', title: 'Torch',
+      'aria-label': 'Flash', title: 'Flash',
       onclick: () => setTorch(!getTorch()).then(() => torch.setAttribute('aria-pressed', getTorch() ? 'true' : 'false')) },
-      icon('sun'), h('span', { class: 'lbl', text: 'Torch' }));
+      icon('sun'), h('span', { class: 'lbl', text: 'Flash' }));
     // The glare pill sits over the bottom of the viewfinder, where the eye already is, and shows
     // whenever the status text carries the glare warning.
     const glare = h('span', { class: 'glare-hint', id: 'glare-hint', role: 'status', hidden: true },
       icon('alert'), 'Glare: tilt the card away from the light');
-    const cam = h('div', { class: 'camera' + (app ? ' app' : ''), id: 'camera' }, video,
-      h('div', { class: 'guide' }, h('div', { class: 'title' })),
-      h('div', { class: 'flash', id: 'flash' }), renderTally(), torch, glare);
-    // Under the viewfinder, not over it: at large text sizes it would cover the dashed name box.
-    const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: app
-      ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
+    const guide = h('div', { class: 'guide', id: 'scan-guide' }, PICTURES ? null : h('div', { class: 'title' }),
+      h('span', { class: 'grip', 'aria-hidden': 'true' }));
+    const areaBtn = h('button', { type: 'button', class: 'area-btn', id: 'area-btn', 'aria-pressed': 'false', 'aria-label': 'Scan area', hidden: app,
+      title: 'Move or resize the scan area', onclick: () => editArea(true) }, icon('edit'), h('span', { class: 'lbl', text: 'Scan area' }));
+    const zoom = h('div', { class: 'zoom-chips', id: 'zoom-chips', role: 'group', 'aria-label': 'Zoom', hidden: true });
+    const settingsBtn = PICTURES ? h('button', { type: 'button', class: 'cam-settings-btn', id: 'settings-btn', 'aria-label': 'Camera settings',
+      title: 'Camera settings', 'aria-haspopup': 'dialog', onclick: () => openSettings() }, icon('settings')) : null;
+    const cam = h('div', { class: 'camera' + (PICTURES ? ' pictures' : '') + (app ? ' app' : ''), id: 'camera' }, video, guide,
+      h('div', { class: 'flash', id: 'flash' }), renderTally(), torch, settingsBtn, areaBtn, zoom, glare, renderAreaBar());
+    placeGuide(guide);
+    bindPinch(cam);
+    if (PICTURES) {
+      renderPictureCamera(panel, cam, video);
+      return;
+    }
+    // Under the viewfinder, not over it: at large text sizes it would cover the scan area.
+    const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: app ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
       : 'Hold the phone about 15 cm (6 in) from the card, the card in the frame and its name in the dashed box.' });
-    const status = h('p', { class: 'muted', id: 'cam-status', text: '' });
+    const status = h('p', { class: 'muted', id: 'cam-status', role: 'status', text: '' });
     // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
-    // open the camera with one, the app's file chooser never does); the shutter is the camera.
+    // open the camera with one, the app's file chooser never does); the camera is the camera.
     const file = h('input', { type: 'file', accept: 'image/*', id: 'photo-file', class: 'sr',
       onchange: (e) => e.target.files[0] && scanFile(e.target.files[0]) });
+    // (With picture scanning there is no shutter at all: renderPictureCamera.)
     const shutterLabel = app ? 'Scan with the phone camera' : 'Scan card';
     const shutter = h('button', { class: 'shutter', id: 'shutter', title: shutterLabel, 'aria-label': shutterLabel,
-      onclick: () => (app ? openPhoneCamera(false) : captureFrame(video)) }, cameraIcon(), h('span', { class: 'sr', text: 'Scan' }));
+      onclick: () => (app ? openPhoneCamera(false) : captureFrame(video)) }, cameraIcon(), h('span', { class: 'sr', text: shutterLabel }));
     // Photo, the capture button in the middle, Type: one row.
     const controls = h('div', { class: 'controls' },
       h('label', { class: 'btn ctl', for: 'photo-file', title: 'Scan a photo from your pictures' }, icon('image'), h('span', { text: 'Photo' })), shutter,
       h('button', { class: 'ctl', title: 'Type the card name instead', onclick: () => showTab('type', { focus: true }) }, icon('edit'), h('span', { text: 'Type' })));
+    const options = renderScanOptions();
     // Status and the match result sit between the preview and the control bar,
     // so on a phone the thing to confirm is right above the thumb.
-    panel.append(h('div', { class: 'cam-panel' }, renderScanOptions(), cam, hint, status, h('div', { id: 'result' }), controls, file));
+    panel.append(h('div', { class: 'cam-panel' }, options, cam, hint, status, h('div', { id: 'result' }), controls, file));
     if (state.ocrState === 'missing') {
       status.textContent = 'On-device text recognition is not installed on this gateway; use Photo or Type, or ask the owner to run the asset fetch step.';
     }
@@ -432,6 +497,98 @@
     if (app) { if (cfg.ocr) ensureOcr(); }
     else startCamera(video).then(() => { if (cfg.ocr) ensureOcr(); });
     if (state.pending) showResult(state.pending);
+    else if (state.miss) showMiss(state.miss);
+  }
+
+  /* Picture scanning (the owner, 2026-11-10): the camera takes the screen and works on its own. Over its
+     corners only the count, Flash, Camera settings, Scan area and zoom; under it one thin bar with
+     the last card added (Change, Undo), or what to do. The rest (brightness, saturation, Set, Foil,
+     Photo, Type) is in Camera settings, so nothing sits over the card. */
+  function renderPictureCamera(panel, cam, video) {
+    const file = h('input', { type: 'file', accept: 'image/*', id: 'photo-file', class: 'sr',
+      onchange: (e) => { closeSettings(); if (e.target.files[0]) scanFile(e.target.files[0]); } });
+    const bar = h('div', { class: 'added-bar', id: 'added-bar' },
+      h('div', { class: 'txt' }, h('div', { class: 'what' }), h('span', { class: 'check', hidden: true, text: 'Check it' }),
+        h('p', { class: 'muted', id: 'cam-status', role: 'status', text: '' })),
+      h('button', { type: 'button', id: 'change-card', class: 'secondary', hidden: true, onclick: () => changeAdded() }, 'Change'),
+      h('button', { type: 'button', id: 'undo-card', class: 'secondary', hidden: true, onclick: undoAdded }, 'Undo'));
+    panel.append(h('div', { class: 'cam-panel pictures' }, cam, bar, h('div', { id: 'result' }), file, renderSettings()));
+    drawAdded();
+    applySaturation();
+    fitCamera(true);
+    window.addEventListener('resize', () => fitCamera(false), camSignal());
+    startCamera(video).then(() => { if (state.stream) startWatching(video); });
+    if (state.miss) showMiss(state.miss);
+  }
+  /* The camera fills the screen under the site's bar and the tabs, above the added bar (and the
+     phone's tab bar), never less than a usable 260 px. On opening, the page scrolls so the tabs sit
+     at the top and the whole camera is in view: the heading and the intro stay one scroll up. */
+  function fitCamera(scroll) {
+    const cam = $('#camera'); if (!cam || !cam.classList.contains('pictures')) return;
+    const bar = $('#added-bar');
+    const top = document.querySelector('.topbar');
+    const topH = top ? top.getBoundingClientRect().height : 0;
+    const tabs = root.querySelector('.tabs');
+    const tabbar = document.querySelector('.tabbar');
+    const tb = tabbar ? tabbar.getBoundingClientRect() : null;
+    const below = tb && tb.height && tb.top > window.innerHeight / 2 ? window.innerHeight - tb.top : 0;
+    const free = window.innerHeight - topH - (tabs ? tabs.offsetHeight + 8 : 0) - (bar ? bar.offsetHeight : 0) - below - 24;
+    // never past the bottom of the screen from where it sits now
+    const room = window.innerHeight - cam.getBoundingClientRect().top - (bar ? bar.offsetHeight + 8 : 0) - below - 12;
+    cam.style.height = Math.max(260, Math.round(scroll ? free : Math.min(free, room))) + 'px';
+    if (scroll && tabs) {
+      const r = cam.getBoundingClientRect();
+      const end = r.bottom + (bar ? bar.offsetHeight + 8 : 0);
+      // the tabs stay in view above it on a phone, where they are sticky
+      const target = getComputedStyle(tabs).position === 'sticky'
+        ? r.top + window.scrollY - topH - tabs.offsetHeight - 16
+        : tabs.getBoundingClientRect().top + window.scrollY - topH - 8;
+      if (end > window.innerHeight - below) window.scrollTo(0, Math.max(0, target));
+      // where the page could scroll to decides: the camera ends just above the added bar
+      const now = cam.getBoundingClientRect().top;
+      const fit = window.innerHeight - now - (bar ? bar.offsetHeight + 8 : 0) - below - 12;
+      cam.style.height = Math.max(260, Math.round(Math.min(fit, free + 200))) + 'px';
+    }
+  }
+  /* Colour strength: applied by the page to the preview and to every picture sent, the same on
+     every phone (a camera's own saturation control is rare and differs per phone). */
+  function applySaturation() {
+    const v = $('#camera video'); if (v) v.style.filter = state.saturation === 1 ? '' : 'saturate(' + state.saturation + ')';
+  }
+  function renderSettings() {
+    const pct = (v) => Math.round(v * 100) + '%';
+    const out = h('output', { text: pct(state.saturation) });
+    const sat = h('input', { type: 'range', min: String(SAT_MIN), max: String(SAT_MAX), step: '0.05', value: String(state.saturation),
+      'aria-label': 'Saturation', id: 'saturation',
+      oninput: (e) => { state.saturation = parseFloat(e.target.value) || 1; out.textContent = pct(state.saturation); applySaturation(); },
+      onchange: () => saveDeviceChoices() });
+    const reset = h('button', { type: 'button', class: 'reset', 'aria-label': 'Reset saturation', title: 'Reset saturation',
+      onclick: () => { state.saturation = 1; sat.value = '1'; out.textContent = pct(1); applySaturation(); saveDeviceChoices(); } }, icon('undo'));
+    const box = h('div', { class: 'scan-box cam-settings', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Camera settings' },
+      h('h2', { text: 'Camera settings' }),
+      h('div', { class: 'cam-ctl', id: 'cam-ctl', hidden: true }),
+      h('div', { class: 'cam-ctl' }, h('label', { class: 'ctl' }, h('span', { class: 'ico', 'aria-hidden': 'true' }, icon('image')),
+        h('span', { class: 'lbl', text: 'Saturation' }), sat, out, reset)),
+      renderScanOptions(),
+      h('div', { class: 'set-acts' },
+        h('label', { class: 'btn secondary', for: 'photo-file', title: 'Scan a photo from your pictures' }, icon('image'), h('span', { text: 'Scan a photo' })),
+        h('button', { type: 'button', class: 'secondary', onclick: () => { closeSettings(); showTab('type', { focus: true }); } }, icon('edit'), h('span', { text: 'Type a name' }))),
+      h('div', { class: 'acts' }, h('button', { type: 'button', class: 'primary', id: 'settings-done', onclick: () => closeSettings() }, 'Done')));
+    const scrim = h('div', { class: 'scan-box-scrim cam-settings-scrim', id: 'cam-settings', hidden: true,
+      onclick: (e) => { if (e.target === scrim) closeSettings(); } }, box);
+    scrim.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeSettings(); } });
+    return scrim;
+  }
+  function openSettings() {
+    const sc = $('#cam-settings'); if (!sc) return;
+    syncCameraUi();
+    sc.hidden = false; state.changing = true;
+    const first = sc.querySelector('input,button'); if (first) first.focus();
+  }
+  function closeSettings() {
+    const sc = $('#cam-settings'); if (!sc || sc.hidden) return;
+    sc.hidden = true; state.changing = false;
+    const b = $('#settings-btn'); if (b) b.focus();
   }
 
   /* Continuous mode: a toast over the viewfinder for each automatic add, with Undo. */
@@ -494,12 +651,13 @@
     return h('div', { class: 'unid', id: 'unid' }, toggle, tray);
   }
 
-  /* Zoom and brightness sliders, each only when the camera reports the range. */
+  /* The brightness slider, only when the camera reports the range; zoom is the chips over the
+     viewfinder and two fingers on it (renderZoomChips, bindPinch). */
   function renderCameraControls(box) {
     const ranges = cameraRanges();
     box.textContent = '';
+    const chips = $('#zoom-chips'); if (chips) renderZoomChips(chips, ranges.zoom);
     const specs = [
-      { key: 'zoom', label: 'Zoom', ico: 'search', fmt: (v) => v.toFixed(1) + 'x', reset: (r) => r.min },
       { key: 'exposureCompensation', label: 'Brightness', ico: 'sun', fmt: (v) => (v > 0 ? '+' : '') + v.toFixed(1),
         reset: (r) => Math.min(r.max, Math.max(r.min, 0)) },
     ];
@@ -671,7 +829,7 @@
       // In the app the hint under the viewfinder already says to tap the shutter. A scan that
       // waited for the engine (scanRegion, or Auto) goes on with its own words: Ready would
       // write over them.
-      if (!scanning()) setStatus(phoneCamera() ? '' : 'Ready. Hold the card flat and tap Scan.');
+      if (!scanning() && !PICTURES) setStatus(phoneCamera() ? '' : 'Ready. Hold the card flat and tap Scan.');
       emit('ocr', { state: 'ready', progress: 1 });
     } catch (err) {
       state.ocrState = 'failed';
@@ -688,14 +846,20 @@
     });
   }
 
-  /* Map the dashed title box (CSS percentages of the guide, which is centred
-     at GUIDE_WIDTH of the preview width with a 63:88 aspect) back to pixels of the
-     video frame, which is shown with object-fit: cover. */
+  /* Map the scan area (the guide, a 63:88 box the person can move and resize, see placeGuide) and
+     the dashed title box inside it back to pixels of the video frame, which is shown with
+     object-fit: cover. */
   function guideGeometry(video, el) {
     const vw = video.videoWidth, vh = video.videoHeight;
     const ew = el.clientWidth, eh = el.clientHeight;
     const scale = Math.max(ew / vw, eh / vh);
     const offX = (ew - vw * scale) / 2, offY = (eh - vh * scale) / 2;
+    // The scan area as drawn (it can be moved and resized); a centred box of GUIDE_WIDTH without one.
+    const guide = el.querySelector && el.querySelector('.guide');
+    if (guide && guide.offsetWidth) {
+      const r = guide.getBoundingClientRect(), c = el.getBoundingClientRect();
+      return { scale, offX, offY, gw: r.width, gh: r.height, gx: r.left - c.left, gy: r.top - c.top };
+    }
     const gw = ew * GUIDE_WIDTH, gh = gw * 88 / 63;
     return { scale, offX, offY, gw, gh, gx: (ew - gw) / 2, gy: (eh - gh) / 2 };
   }
@@ -890,6 +1054,19 @@
       const c = await photoCanvas(file, url);
       if (!c) { setStatus(unreadablePhoto(file)); return; }
       state.lastPicture = { w: c.width, h: c.height };
+      if (PICTURES) {
+        // Found by its picture: the card straightened from its edges, or failing that the middle of
+        // the photo in a card's shape.
+        const flatP = flattenCard(c, null);
+        let region = null;
+        if (!flatP) {
+          const w = Math.min(c.width, c.height * 63 / 88), hh = w * 88 / 63;
+          region = { x: (c.width - w) / 2, y: (c.height - hh) / 2, w, h: hh };
+        }
+        clearResult();
+        await identifyPicture(sendable(flatP ? flatP.canvas : c, region), flatP, { force: true, guide: !flatP });
+        return;
+      }
       // A photo of one card: find its edges anywhere in the picture and flatten it. Failing
       // that, assume the card fills the picture: title in the top band, info line bottom left.
       const flat = flattenCard(c, null);
@@ -1133,6 +1310,421 @@
     return true;
   }
 
+  // ------------------------------------------------------- picture scanning
+  /* The scan area: where the guide sits in the viewfinder ({x, y} its centre, w its width, all as
+     shares of the viewfinder), moved and resized by the person (phones put their cameras in
+     different places) and kept on this device. Cards are still found anywhere in view: the area
+     says where to hold them, and where the edge search looks first. */
+  function placeGuide(guide) {
+    const a = state.area;
+    guide.style.left = (a.x * 100) + '%';
+    guide.style.top = (a.y * 100) + '%';
+    guide.style.width = (a.w * 100) + '%';
+  }
+  function renderAreaBar() {
+    const done = h('button', { type: 'button', class: 'done', onclick: () => editArea(false) }, icon('check'), h('span', { text: 'Done' }));
+    const reset = h('button', { type: 'button', class: 'secondary', onclick: () => {
+      state.area = Object.assign({}, AREA_DEFAULT); saveDeviceChoices();
+      const g = $('#scan-guide'); if (g) placeGuide(g);
+    } }, 'Reset');
+    return h('div', { class: 'area-bar', id: 'area-bar', hidden: true },
+      h('span', { class: 'txt', text: 'Drag the frame to move it; drag its corner to resize. Arrow keys and + − work too.' }), reset, done);
+  }
+  function editArea(on) {
+    const cam = $('#camera'), guide = $('#scan-guide'), bar = $('#area-bar'), btn = $('#area-btn');
+    if (!cam || !guide) return;
+    cam.classList.toggle('editing', !!on);
+    if (bar) bar.hidden = !on;
+    if (btn) { btn.setAttribute('aria-pressed', on ? 'true' : 'false'); btn.hidden = !!on; }
+    if (on) {
+      guide.setAttribute('tabindex', '0'); guide.setAttribute('role', 'application');
+      guide.setAttribute('aria-label', 'Scan area. Arrow keys move it, plus and minus resize it.');
+      bindArea(cam, guide);
+      guide.focus();
+    } else {
+      guide.removeAttribute('tabindex'); guide.removeAttribute('role'); guide.removeAttribute('aria-label');
+      if (guide._areaOff) { guide._areaOff(); guide._areaOff = null; }
+      saveDeviceChoices();
+      if (btn) btn.focus();
+    }
+  }
+  function bindArea(cam, guide) {
+    if (guide._areaOff) return;
+    let drag = null;
+    const down = (e) => {
+      if (!cam.classList.contains('editing')) return;
+      const r = cam.getBoundingClientRect();
+      drag = { id: e.pointerId, resize: !!(e.target.closest && e.target.closest('.grip')), x0: e.clientX, y0: e.clientY,
+        a: Object.assign({}, state.area), W: r.width, H: r.height };
+      try { guide.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      e.preventDefault();
+    };
+    const move = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = (e.clientX - drag.x0) / drag.W, dy = (e.clientY - drag.y0) / drag.H;
+      state.area = clampArea(drag.resize ? Object.assign({}, drag.a, { w: drag.a.w + dx * 2 }) : { x: drag.a.x + dx, y: drag.a.y + dy, w: drag.a.w });
+      placeGuide(guide);
+    };
+    const up = (e) => { if (drag && e.pointerId === drag.id) { drag = null; saveDeviceChoices(); } };
+    const key = (e) => {
+      const step = e.shiftKey ? 0.1 : 0.02; const a = Object.assign({}, state.area);
+      if (e.key === 'ArrowLeft') a.x -= step; else if (e.key === 'ArrowRight') a.x += step;
+      else if (e.key === 'ArrowUp') a.y -= step; else if (e.key === 'ArrowDown') a.y += step;
+      else if (e.key === '+' || e.key === '=') a.w += step; else if (e.key === '-' || e.key === '_') a.w -= step;
+      else if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); editArea(false); return; }
+      else return;
+      e.preventDefault(); state.area = clampArea(a); placeGuide(guide); saveDeviceChoices();
+    };
+    guide.addEventListener('pointerdown', down); guide.addEventListener('pointermove', move);
+    guide.addEventListener('pointerup', up); guide.addEventListener('pointercancel', up);
+    guide.addEventListener('keydown', key);
+    guide._areaOff = () => {
+      guide.removeEventListener('pointerdown', down); guide.removeEventListener('pointermove', move);
+      guide.removeEventListener('pointerup', up); guide.removeEventListener('pointercancel', up);
+      guide.removeEventListener('keydown', key);
+    };
+  }
+
+  /* Zoom: a chip for each step the camera reports (0.6×, 1×, 2×, 3×...), and two fingers on the
+     viewfinder for anything between. Only where the camera reports a zoom range. */
+  function renderZoomChips(box, r) {
+    box.textContent = '';
+    if (!r) { box.hidden = true; return; }
+    const steps = [];
+    if (r.min < 1) steps.push(r.min);
+    [1, 2, 3, 5].forEach((v) => { if (v >= r.min && v <= r.max) steps.push(v); });
+    if (steps.length < 2) { box.hidden = true; return; }
+    const fmt = (v) => (Math.round(v * 10) / 10) + '×';
+    const mark = (now) => box.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', Math.abs(parseFloat(b.dataset.zoom) - now) < 0.05 ? 'true' : 'false'));
+    steps.slice(0, 5).forEach((v) => box.append(h('button', { type: 'button', 'data-zoom': String(v), 'aria-pressed': 'false',
+      'aria-label': 'Zoom ' + fmt(v), onclick: () => { setCamera({ zoom: v }).then(() => mark(v)); } }, fmt(v))));
+    mark(r.value);
+    box.hidden = false;
+  }
+  function bindPinch(cam) {
+    const pts = new Map(); let start = null;
+    const spread = () => { const p = [...pts.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); };
+    let last = 0;
+    cam.addEventListener('pointerdown', (e) => {
+      if (cam.classList.contains('editing') || e.pointerType !== 'touch') return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) { const r = cameraRanges().zoom; start = r ? { d: spread(), z: r.value } : null; }
+    });
+    cam.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size !== 2 || !start || !start.d) return;
+      const now = Date.now(); if (now - last < 80) return; last = now;
+      const z = start.z * spread() / start.d;
+      setCamera({ zoom: z }).then(() => { const box = $('#zoom-chips'); if (box) renderZoomChips(box, cameraRanges().zoom); });
+    });
+    const end = (e) => { pts.delete(e.pointerId); if (pts.size < 2) start = null; };
+    cam.addEventListener('pointerup', end); cam.addEventListener('pointercancel', end);
+  }
+
+  /* The live camera frame with its long side at most `max` px, and the scan area in its pixels. */
+  function grabFrame(video, max) {
+    const k = Math.min(1, max / Math.max(video.videoWidth, video.videoHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(video.videoWidth * k)); c.height = Math.max(1, Math.round(video.videoHeight * k));
+    // the page's tests draw the camera's picture here: headless Chromium's video of a canvas stream is black
+    const ctx = c.getContext('2d');
+    // the saturation chosen in Camera settings, as on the preview (applySaturation)
+    if (PICTURES && state.saturation !== 1) ctx.filter = 'saturate(' + state.saturation + ')';
+    ctx.drawImage(window.__scanFrameOverride ? window.__scanFrameOverride() : video, 0, 0, c.width, c.height);
+    const cam = $('#camera');
+    const g = cam ? guideRegion(video, cam) : { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight };
+    return { canvas: c, guide: { x: g.x * k, y: g.y * k, w: g.w * k, h: g.h * k } };
+  }
+  /* What is sent: the card (or the region) drawn at SEND_W × SEND_H. */
+  function sendable(source, region) {
+    const r = region || { x: 0, y: 0, w: source.width, h: source.height };
+    const c = document.createElement('canvas'); c.width = SEND_W; c.height = SEND_H;
+    const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(source, r.x, r.y, r.w, r.h, 0, 0, SEND_W, SEND_H);
+    return c;
+  }
+  const toJpeg = (canvas) => new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('the picture could not be prepared'))), 'image/jpeg', 0.85);
+  });
+  /* A picture as the request's whole body (identify, keep a miss). Errors carry the gateway's kind. */
+  async function postPicture(path, blob, headers) {
+    const resp = await fetch(path, { method: 'POST', credentials: 'same-origin', body: blob,
+      headers: Object.assign({ 'X-CSRF-Token': cfg.csrf, 'Content-Type': blob.type || 'image/jpeg' }, headers || {}) });
+    let data = null;
+    try { data = await resp.json(); } catch (e) { data = { ok: false, error: 'bad_response' }; }
+    if (resp.status === 401) {
+      clearDrafts();
+      location.href = (data && data.login) || '/login?next=/scan';
+      throw new Error('signed out');
+    }
+    if (!resp.ok || !data.ok) {
+      const err = new Error((data && data.message) || (data && data.error) || ('HTTP ' + resp.status));
+      err.kind = data && data.error; throw err;
+    }
+    return data;
+  }
+
+  /* The card held still: its corners moved less than STEADY_SHIFT of the frame since the last look. */
+  function steadyNow(corners, size) {
+    const last = state.steady.corners; state.steady.corners = corners;
+    if (!last || !corners) { state.steady.n = 0; return false; }
+    const d = Math.max(...corners.map((p, i) => Math.hypot(p.x - last[i].x, p.y - last[i].y))) / size;
+    state.steady.n = d < STEADY_SHIFT ? state.steady.n + 1 : 0;
+    return state.steady.n >= 1;
+  }
+
+  function startWatching(video) {
+    if (state.watching) return;
+    state.watching = true;
+    state.steady = { corners: null, n: 0 }; state.guesses = [];
+    setStatus('');
+    (async () => {
+      while (state.watching && state.tab === 'camera' && video.isConnected) {
+        if (!state.pending && !state.miss && !state.changing && !state.identifying && state.stream && video.videoWidth && !document.hidden
+          && !($('#camera') || {}).classList.contains('editing')) {
+          try { await watchFrame(video, false); } catch (e) { /* the next look tries again */ }
+        }
+        await sleep(WATCH_GAP_MS);
+      }
+      state.watching = false;
+    })();
+  }
+  async function watchFrame(video, force) {
+    const f = grabFrame(video, 1280);
+    state.lastPicture = { w: f.canvas.width, h: f.canvas.height };
+    const flat = flattenCard(f.canvas, f.guide);
+    if (!flat) {
+      state.steady = { corners: null, n: 0 };
+      noCardFrame();
+      if (state.noCardFrames >= NO_CARD_FRAMES) { state.holdUntilGone = false; state.guesses = []; }
+      if (!force) { if (!state.holdUntilGone && !state.identifying) setStatus(''); return 'no-card'; }
+      return identifyPicture(sendable(f.canvas, f.guide), null, { force: true, guide: true });
+    }
+    state.noCardFrames = 0;
+    const steady = steadyNow(flat.corners, Math.max(f.canvas.width, f.canvas.height));
+    if (!force && (state.holdUntilGone || !steady)) return 'waiting';
+    return identifyPicture(sendable(flat.canvas), flat, { force });
+  }
+
+  /* Ask the gateway which card the picture shows, then settle the printing and finish, then add
+     it (Add right away, sure cards only) or show it to check. */
+  async function identifyPicture(canvas, flat, opts) {
+    opts = opts || {};
+    state.identifying = true;
+    const cam = $('#camera'); if (cam) cam.classList.add('looking');
+    let blob, out;
+    try {
+      blob = await toJpeg(canvas);
+      out = await postPicture('/scan/api/identify', blob);
+    } catch (err) {
+      if (err && err.kind === 'busy') return 'busy';
+      setStatus('Scan failed: ' + why(err));
+      return 'error';
+    } finally {
+      state.identifying = false; if (cam) cam.classList.remove('looking');
+    }
+    state.stats.lookups++;
+    const guess = out.card ? out.card.oracle_id : null;
+    const agreed = state.guesses.length > 0 && state.guesses[state.guesses.length - 1] === guess;
+    const sure = !!out.card && !!out.sure && !opts.guide;
+    if (!sure && !opts.force && !agreed) {
+      state.guesses.push(guess);
+      if (state.guesses.length < UNSURE_LOOKS) { setStatus('Hold it still…'); return 'waiting'; }
+    }
+    state.guesses = [];
+    state.holdUntilGone = true;
+    if (!out.card) return pictureMiss(blob, flat);
+    const res = await pictureResult(out, flat, sure, opts);
+    if (state.tab !== 'camera') return 'gone';
+    // Every card found is added at once (the owner, 2026-11-10: like TCGplayer, no tap per card); one the
+    // gateway wasn't sure of, or whose printing the card couldn't settle, is marked Check, and the
+    // added bar's Change fixes the printing, art, finish or count.
+    const check = !sure || res.printingDoubt || !!res.note;
+    return addPicture(res, check) ? (check ? 'unsure' : 'added') : 'undone';
+  }
+
+  /* The gateway's answer as a result the sheet and the list understand. Printings that share the
+     artwork are told apart by the set lock, else by the set and number line read from the card
+     (among those printings only, so a half-read line still picks the right one); failing both,
+     the sheet asks. */
+  async function pictureResult(out, flat, sure, opts) {
+    const res = { card: out.card, status: sure ? 'picture' : 'picture_unsure', quantity: 1, input: {},
+      picture: { similarity: out.similarity, margin: out.margin, guide: !!(opts && opts.guide) },
+      others: out.others || [], sameArt: (out.same_art && out.same_art.length ? out.same_art : [out.card]),
+      printingDoubt: false, note: '' };
+    let info = null;
+    if (res.sameArt.length > 1) {
+      let pick = null;
+      if (state.setLock) { const inSet = res.sameArt.filter((c) => c.set === state.setLock); if (inSet.length === 1) pick = inSet[0]; }
+      if (!pick && flat && (cfg.ocr || window.__scanOcrOverride) && state.ocrState !== 'failed') {
+        setStatus('Reading the set and number…');
+        const region = flatInfoRegion(flat.canvas.width, flat.canvas.height);
+        info = await readInfoLine(flat.canvas, region);
+        pick = pickPrinting(res.sameArt, info);
+        if (!pick) { info = await readInfoLine(turned(flat.canvas), region); pick = pickPrinting(res.sameArt, info); }
+      }
+      if (pick) res.card = pick; else res.printingDoubt = true;
+    }
+    if (state.setLock && res.card.set !== state.setLock) {
+      res.note = 'Not a ' + state.setLock.toUpperCase() + ' printing, though the set is set to ' + state.setLock.toUpperCase() + '.';
+    }
+    res.foil = info && typeof info.foil === 'boolean' ? info.foil : !!state.foilDefault;
+    const can = foilChoices(res.card);
+    if (!can.nonfoil) res.foil = true; else if (!can.foil) res.foil = false;
+    return res;
+  }
+  function pickPrinting(cands, info) {
+    if (!info) return null;
+    const num = String(info.number || '').replace(/^0+(?=\d)/, '').toLowerCase();
+    const set = String(info.set || '').toLowerCase();
+    const cn = (c) => String(c.collector_number || '').toLowerCase();
+    const one = (list) => (list.length === 1 ? list[0] : null);
+    return one(cands.filter((c) => set && num && c.set === set && cn(c) === num))
+      || one(num ? cands.filter((c) => cn(c) === num) : [])
+      || one(set ? cands.filter((c) => c.set === set) : []);
+  }
+  /* What the list keeps: the exact printing when the picture or the set and number line settled it
+     (or the person chose it), else the card by name. */
+  function pictureItem(res) {
+    return Object.assign({}, res, { status: res.printingDoubt ? 'exact' : 'printing',
+      note: res.printingDoubt ? 'found by its picture; printing not settled'
+        : res.check ? 'found by its picture; check it' : 'found by its picture' });
+  }
+  /* Add a card found by its picture and show it in the added bar. A card the person removed with
+     Undo is not added again until it has left the frame. */
+  function addPicture(res, check) {
+    const key = lineKey(res);
+    if (key === state.rejectedKey) { setStatus('Removed ' + res.card.name + '. Move it away to add it again.'); return false; }
+    state.lastAutoKey = key; state.rejectedKey = null;
+    res.check = !!check;
+    addItem(pictureItem(res), 1);
+    state.autoAdded.push({ key, name: res.card.name, quantity: 1, at: Date.now() });
+    if (state.autoAdded.length > 50) state.autoAdded.shift();
+    state.lastAdded = { res, key, quantity: 1 };
+    setStatus('');
+    drawAdded();
+    buzz(check ? [20, 40, 20] : 30);
+    emit('auto-added', { name: res.card.name, card: res.card, foil: isFoil(res), total: totalCards(), worth: valueText() });
+    return true;
+  }
+  /* The added bar under the camera: the last card added, its printing and finish, Check when it
+     wants a look, Change and Undo; before the first card, what to do. */
+  function drawAdded() {
+    const bar = $('#added-bar'); if (!bar) return;
+    const txt = bar.querySelector('.what'); const change = $('#change-card'); const undo = $('#undo-card');
+    const tag = bar.querySelector('.check');
+    const last = state.lastAdded;
+    if (!last) {
+      txt.textContent = ''; txt.append(h('span', { class: 'name', text: 'Hold a card inside the frame.' }));
+      change.hidden = true; undo.hidden = true; tag.hidden = true; bar.classList.remove('has-card');
+      return;
+    }
+    const c = last.res.card;
+    txt.textContent = '';
+    txt.append(h('span', { class: 'lead', text: 'Added' }), ' ', h('span', { class: 'name', text: c.name }),
+      h('span', { class: 'where', text: [(c.set || '').toUpperCase() + ' ' + (c.collector_number || ''), isFoil(last.res) ? 'Foil' : ''].filter((x) => x.trim()).join(' · ') }));
+    tag.hidden = !last.res.check;
+    change.hidden = false; undo.hidden = false; bar.classList.add('has-card');
+  }
+  /* Undo from the added bar: takes the last card back off the list. */
+  function undoAdded() {
+    const rec = undoLastAdd();
+    state.lastAdded = null;
+    drawAdded();
+    if (rec) setStatus('Removed ' + rec.name + '. Move it away to add it again.');
+  }
+  /* Change from the added bar: the card's sheet (printing, art, finish, count, or another card) over
+     the page. Saving swaps the added line for the corrected one. */
+  function changeAdded(edited) {
+    const last = state.lastAdded; if (!last) return;
+    const res = edited || Object.assign({}, last.res, { quantity: last.quantity });
+    const opener = $('#change-card');
+    let close = null;
+    const take = () => {
+      const i = state.items.findIndex((it) => lineKey(it) === last.key);
+      if (i >= 0) {
+        state.items[i].quantity -= last.quantity;
+        if (state.items[i].quantity <= 0) state.items.splice(i, 1);
+      }
+      const j = state.autoAdded.map((r) => r.key).lastIndexOf(last.key);
+      if (j >= 0) state.autoAdded.splice(j, 1);
+    };
+    const draw = () => {
+      body.textContent = '';
+      body.append(pictureCard(res, {
+        saveLabel: 'Save', redraw: draw,
+        onAdd: (q) => {
+          take();
+          res.check = false;
+          const key = lineKey(res);
+          addItem(pictureItem(res), q);
+          state.autoAdded.push({ key, name: res.card.name, quantity: q, at: Date.now() });
+          state.lastAdded = { res, key, quantity: q };
+          drawAdded(); setStatus('Changed to ' + res.card.name + '.'); close();
+        },
+        onClose: () => close(),
+        onPrintings: () => { close(); openPicker(res, () => changeAdded(res)); },
+        onType: () => { take(); state.dirty = true; saveDraft(); renderBadge(); state.lastAdded = null; drawAdded(); close(); showTab('type', { focus: true }); },
+      }));
+    };
+    const body = h('div', { class: 'change-body' });
+    const sheet = h('div', { class: 'scan-box change-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Change this card' }, body);
+    const scrim = h('div', { class: 'scan-box-scrim' }, sheet);
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+    close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); state.changing = false; if (opener && opener.isConnected) opener.focus(); };
+    scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+    document.addEventListener('keydown', onKey);
+    state.changing = true;
+    draw();
+    root.append(scrim);
+    const first = sheet.querySelector('button'); if (first) first.focus();
+  }
+
+  /* No card matched the picture. A gateway that also reads titles tries the name; failing that,
+     the picture can be kept for the admin. */
+  async function pictureMiss(blob, flat) {
+    if (flat && cfg.ocr && state.ocrState !== 'failed') {
+      const r = flatRegions(flat);
+      await scanRegion(flat.canvas, r.title, r.info, flat);
+      if (state.pending && state.pending.card) return 'found';
+      clearResult();
+    }
+    state.miss = { blob, note: 'no match' };
+    showMiss(state.miss);
+    setStatus('No card matched this picture.');
+    buzz([20, 40, 20]);
+    return 'miss';
+  }
+  function clearResult() {
+    const box = $('#result'); if (box) box.textContent = '';
+    const panel = box && box.closest('.cam-panel'); if (panel) panel.classList.remove('has-result');
+    state.pending = null; state.miss = null;
+  }
+  function showMiss(miss) {
+    const box = $('#result'); if (!box) return;
+    box.textContent = '';
+    const panel = box.closest('.cam-panel'); if (panel) panel.classList.add('has-result');
+    const url = URL.createObjectURL(miss.blob);
+    const said = h('p', { class: 'muted kept', role: 'status' });
+    const keep = h('button', { type: 'button', class: 'secondary', id: 'keep-miss', onclick: async () => {
+      keep.disabled = true; said.textContent = 'Keeping the picture…';
+      try {
+        await postPicture('/scan/api/miss', miss.blob, { 'X-Scan-Note': miss.note || '' });
+        keep.hidden = true;
+        said.textContent = cfg.admin ? 'Kept. You can see it under Admin › Card scanner.' : 'Kept for the gateway’s admin, who can see why it was missed.';
+      } catch (err) { keep.disabled = false; said.textContent = 'Could not keep the picture: ' + why(err); }
+    } }, 'Keep this picture for the admin');
+    const again = h('button', { type: 'button', class: 'add', onclick: () => { clearResult(); state.holdUntilGone = false; setStatus(''); } }, 'Try again');
+    const typeIt = h('button', { type: 'button', class: 'secondary', onclick: () => { clearResult(); showTab('type', { focus: true }); } }, 'Type the name');
+    box.append(h('div', { class: 'card result is-not_found', id: 'miss' },
+      h('img', { src: url, alt: 'The picture that was looked at', onload: () => setTimeout(() => URL.revokeObjectURL(url), 1000) }),
+      h('div', { class: 'meta' }, h('h3', { text: 'No card found' }),
+        h('p', { class: 'muted', text: 'Hold the card flat inside the frame, out of glare, and try again, or type its name.' }),
+        h('div', { class: 'actions' }, again, typeIt, keep), said)));
+    if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
+  }
+
   // ------------------------------------------------------- continuous scan
   /* Confidence tiers. 'certain': two signals agree on the card (the title and the collector
      line, status 'printing'), or the title alone names a card that begins no other card's name
@@ -1322,6 +1914,14 @@
     const panel = box.closest('.cam-panel');
     const clear = () => { box.textContent = ''; if (panel) panel.classList.remove('has-result'); };
     if (panel) panel.classList.add('has-result');
+    if (res.picture) {
+      box.append(pictureCard(res, {
+        onAdd: (q) => { addItem(pictureItem(res), q); state.pending = null; clear(); setStatus('Added. Show the next card.'); buzz(30); },
+        onClose: () => { state.pending = null; clear(); setStatus(''); },
+        onType: () => { state.pending = null; clear(); showTab('type', { focus: true }); } }));
+      if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
+      return;
+    }
     box.append(resultCard(res, { onAdd: (q) => { addItem(res, q); state.pending = null; clear(); setStatus('Added. Next card.'); },
       onOther: () => { state.pending = null; clear(); showTab('type'); const inp = $('#type-input'); if (inp) { inp.value = (res.ocr && res.ocr.text) || (res.input && res.input.name) || ''; inp.dispatchEvent(new Event('input')); inp.focus(); } } }));
     if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
@@ -1361,6 +1961,75 @@
     wrap.append(meta);
     return wrap;
   }
+  /* The check sheet for a card found by its picture: the card, its printing (with the printings
+     that share its artwork one tap away, and every other printing behind "Other printings"), the
+     finish, the quantity, Add, and Not this card (the next closest cards, or type the name). */
+  function pictureCard(res, handlers) {
+    const card = res.card;
+    const redraw = handlers.redraw || (() => showResult(res));
+    const printings = handlers.onPrintings || (() => openPicker(res));
+    const qty = h('input', { type: 'number', min: '1', max: '999', value: String(res.quantity || 1), 'aria-label': 'Quantity',
+      onchange: () => { res.quantity = Math.max(1, Math.min(999, parseInt(qty.value, 10) || 1)); } });
+    const stepper = stepperFor(qty, (v) => { res.quantity = v; });
+    const meta = h('div', { class: 'meta' },
+      h('h3', { text: card.name }),
+      h('div', { class: 'muted', text: [card.type_line, card.set_name].filter(Boolean).join(' · ') }),
+      h('div', { class: 'status status-' + res.status, text: statusLabel(res) }));
+    if (res.note) meta.append(h('div', { class: 'note', text: res.note }));
+    // Printing: the set and number Add records; "Other printings" opens every printing.
+    const printRow = h('div', { class: 'sheet-row printing' }, h('span', { class: 'lbl', text: 'Printing' }),
+      h('span', { class: 'setcode', text: (card.set || '').toUpperCase() + ' ' + (card.collector_number || '') }),
+      h('button', { type: 'button', class: 'printings', onclick: printings }, 'Other printings'));
+    meta.append(printRow);
+    if (res.sameArt && res.sameArt.length > 1) {
+      if (res.printingDoubt) meta.append(h('div', { class: 'note', text: 'These printings share this artwork. Tap yours (its set and number are at the bottom left of the card).' }));
+      const chips = h('div', { class: 'chips same-art', role: 'group', 'aria-label': 'Printings with this artwork' });
+      res.sameArt.forEach((c) => chips.append(h('button', { type: 'button', class: 'secondary',
+        'aria-pressed': !res.printingDoubt && c.scryfall_id === card.scryfall_id ? 'true' : 'false',
+        title: [c.set_name, c.released_at ? String(c.released_at).slice(0, 4) : ''].filter(Boolean).join(', '),
+        onclick: () => { res.card = c; res.printingDoubt = false; const can = foilChoices(c);
+          if (!can.nonfoil) res.foil = true; else if (!can.foil) res.foil = false; redraw(); } },
+        (c.set || '').toUpperCase() + ' ' + (c.collector_number || ''))));
+      meta.append(chips);
+    }
+    // Finish: one switch of two; a printing made in one finish only shows that one.
+    const can = foilChoices(card);
+    const fin = h('div', { class: 'hubseg finish', role: 'radiogroup', 'aria-label': 'Finish' });
+    [['nonfoil', 'Non-foil', false], ['foil', 'Foil', true]].forEach(([k, label, on]) => {
+      fin.append(h('button', { type: 'button', role: 'radio', 'data-finish': k, 'aria-checked': isFoil(res) === on ? 'true' : 'false',
+        disabled: on ? !can.foil : !can.nonfoil, onclick: () => { res.foil = on; redraw(); } }, label));
+    });
+    meta.append(h('div', { class: 'sheet-row' }, h('span', { class: 'lbl', text: 'Finish' }), fin));
+    const price = linePrice({ card, foil: res.foil, quantity: 1 });
+    if (price != null) {
+      let money = '';
+      try { money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(price); } catch (e) { money = ''; }
+      if (money) meta.append(h('div', { class: 'muted price', text: money + ' each (Scryfall)' }));
+    }
+    const others = h('div', { class: 'others', hidden: true },
+      h('div', { class: 'suggest-label', text: 'Is it one of these?' }));
+    const otherChips = h('div', { class: 'chips' });
+    (res.others || []).forEach((o) => otherChips.append(h('button', { type: 'button', class: 'secondary', onclick: () => {
+      res.card = o; res.sameArt = [o]; res.printingDoubt = false; res.status = 'picture_choice'; res.note = '';
+      const c2 = foilChoices(o); if (!c2.nonfoil) res.foil = true; else if (!c2.foil) res.foil = false;
+      redraw();
+    } }, o.name + (o.set ? ' (' + o.set.toUpperCase() + ')' : ''))));
+    otherChips.append(h('button', { type: 'button', class: 'typebtn', onclick: handlers.onType }, 'Type the name'));
+    others.append(otherChips);
+    const notThis = h('button', { type: 'button', class: 'secondary', 'aria-expanded': 'false', onclick: () => {
+      others.hidden = !others.hidden; notThis.setAttribute('aria-expanded', others.hidden ? 'false' : 'true');
+    } }, 'Not this card');
+    const closeLabel = handlers.saveLabel ? 'Close without changing' : 'Close without adding';
+    const close = h('button', { type: 'button', class: 'close', 'aria-label': closeLabel, title: closeLabel, onclick: handlers.onClose }, icon('x'));
+    meta.append(h('div', { class: 'sheet-row' }, h('span', { class: 'lbl', text: 'Quantity' }), stepper),
+      h('div', { class: 'actions' }, h('button', { class: 'add', id: 'add-card', onclick: () => handlers.onAdd(parseInt(qty.value, 10) || 1) },
+        handlers.saveLabel || (res.printingDoubt ? 'Add by name' : 'Add')), notThis), others);
+    const wrap = h('div', { class: 'card result found is-' + res.status, id: 'found' }, close);
+    if (card.image_small) wrap.append(h('img', { src: card.image_small, alt: '' }));
+    wrap.append(meta);
+    return wrap;
+  }
+
   /* "CMR 472" and a foil mark: the exact printing that Add will record. */
   function printingLine(card, foil, onChange) {
     const line = h('div', { class: 'printing' });
@@ -1400,7 +2069,7 @@
     return h('div', { class: 'cardsize' }, h('span', { class: 'lbl', 'aria-hidden': 'true', text: 'Card size' }), seg);
   }
 
-  async function openPicker(target) {
+  async function openPicker(target, after) {
     closePicker();
     pickerOpener = document.activeElement;
     const card = (target && target.card) || {};
@@ -1430,8 +2099,10 @@
       const was = target.foil;
       target.foil = can.foil && can.nonfoil ? foil : !!can.foil && !can.nonfoil;
       if (!hk.choosePrinting(target, p)) { target.foil = was; status.textContent = 'Could not switch to that printing.'; return; }
+      if (target.picture) { target.status = 'picture_choice'; target.printingDoubt = false; target.note = ''; }
       closePicker();
-      if (target === state.pending) { showResult(target); setStatus('Printing set to ' + (p.set || '').toUpperCase() + ' ' + (p.collector_number || '') + '.'); }
+      if (after) after(p);
+      else if (target === state.pending) { showResult(target); setStatus('Printing set to ' + (p.set || '').toUpperCase() + ' ' + (p.collector_number || '') + '.'); }
       else showTab('list');
     };
     const draw = () => {
@@ -1464,7 +2135,8 @@
     } catch (err) { status.textContent = 'Could not load printings: ' + why(err); }
   }
   function statusLabel(res) {
-    return { exact: 'Exact match', printing: 'Matched by set and number', fuzzy: 'Closest match' + (res.note ? ': ' + res.note : ''),
+    return { picture: 'Found by its picture', picture_unsure: 'Best match: check it', picture_choice: 'Chosen by hand',
+      exact: 'Exact match', printing: 'Matched by set and number', fuzzy: 'Closest match' + (res.note ? ': ' + res.note : ''),
       ambiguous: 'Several cards match', not_found: 'Not found' + (res.note ? ': ' + res.note : ''),
       deferred: 'Not looked up yet' + (res.note ? ': ' + res.note : ''), error: 'Error',
       conflict: 'The set and number are a different card' + (res.note ? ': ' + res.note : '') }[res.status] || res.status;
@@ -1946,8 +2618,12 @@
     flattenCard, flatTitleRegion, flatInfoRegion, glareOf, torchSupported, setTorch, getTorch, cameraRanges, setCamera,
     tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, noOutlineFrame, nameIsComplete, ensureOcr,
     scanFile, guideTitleRegion, listValue, sharpnessOf, photoCanvas,
-    loadPrints, choosePrinting, setFoil, foilChoices, openPicker, closePicker };
+    loadPrints, choosePrinting, setFoil, foilChoices, openPicker, closePicker,
+    // picture scanning (0.7.47); ownCamera tells the Android app this page is the scanner itself,
+    // which it is once the picture index is ready (until then the app's own camera panel scans)
+    ownCamera: PICTURES, identifyPicture, pictureResult, pickPrinting, watchFrame, clampArea, editArea, showMiss, addPicture, changeAdded, undoAdded, openSettings, closeSettings };
 
   loadDraft();
+  loadDeviceChoices();
   render();
 })();

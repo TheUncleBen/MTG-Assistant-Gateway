@@ -102,6 +102,11 @@ result() { if [ "$2" = ok ]; then echo "PASS  $1"; else echo "FAIL  $1: $3"; FAI
 shot() { adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null || true; }
 # Wait up to $2 seconds for the command in $1 to succeed. The explicit return 0 matters: a loop that
 # ran its body ends with the body's last status, which here is the failed timeout test.
+# A sent message shows (or goes) within DELIVER seconds: past the app's own recovery from a
+# connection that went silent (Push.READ_TIMEOUT_MS, 90 s, then its alarm's slack and a reconnect),
+# so a stalled emulator tunnel is a slow pass, not a failure; anything else still fails.
+DELIVER=150
+RECOVER=$DELIVER
 until_ok() { local t=0; until eval "$1" >/dev/null 2>&1; do [ "$t" -ge "$2" ] && return 1; sleep 2; t=$((t + 2)); done; return 0; }
 # With pipefail, grep -q stopping early makes the writer fail (SIGPIPE) and so the whole check: the
 # greps below read all their input instead.
@@ -149,14 +154,28 @@ connected() { [ "$(state connections)" -ge 1 ]; }
 # that never comes back from a reboot hung the CI step until its 30 minutes ran out.
 boot() {
   timeout "${PUSH_TEST_BOOT_WAIT:-240}" adb wait-for-device || return 1
-  until_ok '[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]' 300 || return 1
+  until_ok '[ "$(timeout 10 adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]' 300 || return 1
   adb reverse "tcp:$PORT" "tcp:$PORT"
+}
+# After adb reboot the emulator sometimes boots but adb never sees it again (CI run 42712220091:
+# "did not come back", then the job hung). One bounded retry: restart adb's server, which finds the
+# emulator's console port again, and wait once more, longer. What adb sees goes in the run's files.
+boot_after_reboot() {
+  boot && return 0
+  { echo "first wait failed at $(date -u +%T)"; adb devices -l; } >> "$OUT/reboot.txt" 2>&1
+  timeout 20 adb kill-server >/dev/null 2>&1
+  timeout 20 adb start-server >/dev/null 2>&1
+  PUSH_TEST_BOOT_WAIT=$(( ${PUSH_TEST_BOOT_WAIT:-240} * 3 / 2 )) boot && return 0
+  { echo "second wait failed at $(date -u +%T)"; adb devices -l; } >> "$OUT/reboot.txt" 2>&1
+  return 1
 }
 
 PUSH_TEST_KEY="$KEY" PUSH_TEST_KEEPALIVE=5 PUSH_TEST_STATIC="$ROOT/../src/mtg_gateway/static" python3 "$HERE/push_test_gateway.py" "$CERTS/leaf.pem" "$CERTS/leaf.key" "$PORT" \
   > "$OUT/gateway.log" 2>&1 &
 GW=$!
-trap 'kill $GW 2>/dev/null; adb logcat -d > "$OUT/logcat.txt" 2>/dev/null' EXIT
+# Bounded: with no device (an emulator that didn't come back) adb logcat waits for one for ever,
+# which held a failed run until the job's 30 minutes ran out.
+trap 'kill $GW 2>/dev/null; timeout 30 adb logcat -d > "$OUT/logcat.txt" 2>/dev/null' EXIT
 sleep 1
 boot || { echo "FAIL  start: the emulator did not start"; exit 1; }
 
@@ -227,19 +246,33 @@ else
 fi
 adb shell input keyevent KEYCODE_HOME
 
+# -- a connection that stalls before its first message (CI, 0.7.47: the emulator's tunnel stopped
+#    passing the stream, the gateway kept writing to it, and what was sent meanwhile was lost). The
+#    app notices the silence (Push.READ_TIMEOUT_MS) and connects again from the gateway's time on
+#    the last line it got, so the message sent meanwhile still shows.
+before=$(state connects)
+ctl stall -d '{}' >/dev/null
+send m000AbCdEf "While stalled" "Sent on a stalled connection"
+if until_ok '[ "$(state connects)" -gt '"$before"' ] && shows "While stalled"' "$RECOVER" &&
+  [ "$(state last_since)" != None ]; then
+  result "a stalled connection loses nothing" ok
+else
+  result "a stalled connection loses nothing" no "not shown after connecting again (since: $(state last_since))"
+fi
+
 send m001AbCdEf "Test one" "The first message"
-if until_ok 'shows "Test one"' 30; then result "a message shows" ok; else result "a message shows" no "not posted"; fi
+if until_ok 'shows "Test one"' "$DELIVER"; then result "a message shows" ok; else result "a message shows" no "not posted"; fi
 shot 02-message
 
 # -- one message per deck: replaced as the count changes, removed when nothing waits
 send m002AbCdEf "1 change to Atraxa is waiting for you" "Open it." deck-42
-if ! until_ok 'shows "1 change to Atraxa is waiting for you"' 30; then
+if ! until_ok 'shows "1 change to Atraxa is waiting for you"' "$DELIVER"; then
   result "a deck's message is replaced" no "the deck's first message never showed"
 else
   send m003AbCdEf "2 changes to Atraxa are waiting for you" "Open it." deck-42
   # Waits for the end state: while Android swaps the message, dumpsys can list the new one before the
   # old one is gone.
-  if until_ok 'shows "2 changes to Atraxa are waiting for you" && ! shows "1 change to Atraxa is waiting for you"' 30; then
+  if until_ok 'shows "2 changes to Atraxa are waiting for you" && ! shows "1 change to Atraxa is waiting for you"' "$DELIVER"; then
     result "a deck's message is replaced" ok
   else
     result "a deck's message is replaced" no "both or neither in dumpsys"
@@ -250,7 +283,7 @@ if ! shows "2 changes to Atraxa are waiting for you"; then
   result "a withdrawn message goes" no "the deck's message was not shown to begin with"
 else
   ctl delete -d '{"sequence_id":"deck-42"}' >/dev/null
-  if until_ok '! shows "2 changes to Atraxa are waiting for you"' 30; then result "a withdrawn message goes" ok; else result "a withdrawn message goes" no "still shown"; fi
+  if until_ok '! shows "2 changes to Atraxa are waiting for you"' "$DELIVER"; then result "a withdrawn message goes" ok; else result "a withdrawn message goes" no "still shown"; fi
 fi
 
 # -- the app swiped away from Recents: the service keeps running
@@ -286,7 +319,7 @@ if [ "$in_recents_before" = no ]; then
   result "swiped away from Recents" no "the app was not in Recents to begin with; tasks listed: $(recents_headers)"
 elif ! until_ok '! in_recents' 10; then
   result "swiped away from Recents" no "the app was still in Recents after the $how: $(recents_tasks | tr '\n' ';')"
-elif running && until_ok 'shows "After swipe"' 30; then
+elif running && until_ok 'shows "After swipe"' "$DELIVER"; then
   result "swiped away from Recents (removed by $how)" ok
 else
   result "swiped away from Recents" no "service gone or message missing"
@@ -309,7 +342,7 @@ adb shell cmd statusbar collapse
 send m005AbCdEf "After dismiss" "Still here"
 if [ -z "$bounds" ]; then
   result "ongoing notification dismissed" no "the Always connected notification was not found to swipe away"
-elif running && until_ok 'shows "After dismiss"' 30; then
+elif running && until_ok 'shows "After dismiss"' "$DELIVER"; then
   result "ongoing notification dismissed" ok
 else
   result "ongoing notification dismissed" no "service gone or message missing (swipe target found: ${bounds:-no})"
@@ -332,18 +365,18 @@ before=$(state connects)
 adb install -r "$APK" >/dev/null
 if until_ok '[ "$(state connects)" -gt '"$before"' ] && connected' 90; then result "after an app update" ok; else result "after an app update" no "no new connection"; fi
 send m007AbCdEf "After update" "Still here"
-if until_ok 'shows "After update"' 30; then result "message after an update" ok; else result "message after an update" no "missing"; fi
+if until_ok 'shows "After update"' "$DELIVER"; then result "message after an update" ok; else result "message after an update" no "missing"; fi
 
 # -- a restart of the phone
 before=$(state connects)
 adb reboot
-if ! boot; then
+if ! boot_after_reboot; then
   result "after a reboot" no "the emulator did not come back from the reboot"
   exit 1
 fi
 if until_ok '[ "$(state connects)" -gt '"$before"' ] && connected' 180; then result "after a reboot" ok; else result "after a reboot" no "no connection after boot"; fi
 send m008AbCdEf "After reboot" "Still here"
-if until_ok 'shows "After reboot"' 30; then result "message after a reboot" ok; else result "message after a reboot" no "missing"; fi
+if until_ok 'shows "After reboot"' "$DELIVER"; then result "message after a reboot" ok; else result "message after a reboot" no "missing"; fi
 shot 04-after-reboot
 
 # -- missed while offline: since= brings it back once. The emulator reaches the stand-in through adb

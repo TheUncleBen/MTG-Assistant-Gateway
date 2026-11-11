@@ -60,6 +60,7 @@ FAILED_EVENTS = (
 SIGNIN_EVENTS = (
     "browser_login",
     "app_signin_tap_page",
+    "browser_session_ended",
     "login_ok",
     "login_denied",
     "login_rejected_group",
@@ -67,6 +68,7 @@ SIGNIN_EVENTS = (
     "login_rejected_issuer",
     "issuer_repinned",
     "tokens_issued",
+    "tokens_refreshed",
     "tokens_revoked",
     "refresh_rejected",
     "refresh_reuse_detected",
@@ -84,8 +86,9 @@ REPORT_EVENTS = (
 ADMIN_ACTIONS = ("admin_disable", "admin_enable", "admin_revoke", "admin_unlink", "admin_delete_data")
 # admin actions written once (no member copy): the admin page's "Admin actions" counts them too
 ADMIN_ONCE = ("setting_changed", "card_model_removed")
-# one-time upgrade entries with nothing for anyone to do: listed only when asked for by name
-QUIET_EVENTS = ("archidekt_sessions_sealed",)
+# one-time upgrade entries with nothing for anyone to do, and an assistant's routine token renewal
+# (hourly while in use): listed only when asked for by name
+QUIET_EVENTS = ("archidekt_sessions_sealed", "tokens_refreshed")
 
 # The admin's own row of an action on a member's account, as the admin page names it.
 ADMIN_PAGE_NAMES = {
@@ -118,11 +121,13 @@ ADMIN_ACTION_WORDS = {
 ICONS = {
     "browser_login": "login",
     "app_signin_tap_page": "login",
+    "browser_session_ended": "login",
     "login_ok": "login",
     "login_denied": "login",
     "issuer_repinned": "login",
     "signed_out_everywhere": "login",
     "tokens_issued": "link",
+    "tokens_refreshed": "link",
     "tokens_revoked": "link",
     "apps_disconnected": "link",
     "archidekt_linked": "link",
@@ -1013,7 +1018,7 @@ ACT_CSS = """
 .act-page .wdg .det{overflow-wrap:anywhere}
 @media (max-width:599.98px){
   /* two widgets a row on a phone, one when the text is large */
-  .act-page .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}}
+  .act-page .ui-widgets{--wdg-min:9rem}}
 /* the rows' layout follows the table's own width in its text (a container, as the lists' toolbars
    do): the lined-up columns while they fit, the two-line rows under 61em (a 900 px viewport at
    the pages' 14 px text) and the stacked rows under 40em (600 px). So at 200% text the When and

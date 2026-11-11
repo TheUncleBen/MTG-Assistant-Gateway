@@ -72,7 +72,11 @@ async def test_an_alert_opens_its_cards_row_even_past_the_first_screen(stack: St
     clock.next_day()
     stack.sf.prices[sol["id"]] = {"usd": "1.60"}
     assert (await stack.gw.prices.run_daily())["alerts"] == 1
-    assert stack.ntfy.messages[-1]["click"] == f"https://mtg.test/watchlist?open={wid}#wr-{wid}"
+    # the push opens through the Alerts page (marked read there), then the card's own row
+    click = stack.ntfy.messages[-1]["click"]
+    assert click.startswith("https://mtg.test/notifications/open/")
+    aid = int(click.rsplit("/", 1)[1])
+    assert stack.gw.db.gateway_alert("user-1", aid)["path"] == f"/watchlist?open={wid}#wr-{wid}"
 
 
 async def test_a_watched_row_with_no_name_does_not_stop_the_daily_check(

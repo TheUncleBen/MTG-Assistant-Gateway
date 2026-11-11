@@ -178,7 +178,7 @@ def test_an_older_database_gets_the_deck_after_column(tmp_path) -> None:
     raw.close()
     again = db_module.Database(str(path), upgrade_dir=tmp_path / "before-upgrade")
     try:
-        assert again.schema_version == db_module.SCHEMA_VERSION == 22
+        assert again.schema_version == db_module.SCHEMA_VERSION == 24
         assert "deck_after_json" in {r[1] for r in again._conn.execute("PRAGMA table_info(proposals)")}
     finally:
         again.close()

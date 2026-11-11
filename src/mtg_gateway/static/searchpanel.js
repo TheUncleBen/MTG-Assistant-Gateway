@@ -217,6 +217,15 @@
     if (!sheet) return;
     sheet.classList.add("open");
     document.documentElement.classList.add("sp-sheet-open");
+    // the sheet's room at its foot follows the foot's real height (theme --sp-foot): at 200% text
+    // its two buttons wrap onto two rows and covered the card size above (0.7.46 audit AM1)
+    var foot = $(".sp-sheet-foot", sheet);
+    if (foot && !sheet._footWatch && window.ResizeObserver) {
+      sheet._footWatch = new ResizeObserver(function () {
+        sheet.style.setProperty("--sp-foot", Math.ceil(foot.getBoundingClientRect().height) + "px");
+      });
+      sheet._footWatch.observe(foot);
+    }
     if (openBtn) openBtn.setAttribute("aria-expanded", "true");
     // a real backdrop under the sheet (theme .sp-scrim): a tap on it closes the sheet and never
     // reaches the page under it (audit B2); Escape and the focus return work as before

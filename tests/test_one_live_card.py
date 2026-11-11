@@ -438,7 +438,7 @@ async def test_a_card_from_before_card_numbers_still_gets_its_code_when_no_card_
 
 async def test_the_card_numbers_survive_in_the_database(stack: Stack) -> None:
     h = stack.h
-    assert db_module.SCHEMA_VERSION == 22
+    assert db_module.SCHEMA_VERSION == 24
     cols = {r[1] for r in h.db._conn.execute("PRAGMA table_info(proposals)")}
     assert "card_seqs" in cols
     token = await linked_user(stack)
@@ -460,7 +460,7 @@ def test_an_older_database_gets_the_card_numbers_column(tmp_path) -> None:
     raw.close()
     again = db_module.Database(str(path))
     try:
-        assert again.schema_version == 22
+        assert again.schema_version == 24
         assert "card_seqs" in {r[1] for r in again._conn.execute("PRAGMA table_info(proposals)")}
     finally:
         again.close()
@@ -664,7 +664,9 @@ def test_the_card_sent_to_the_chat_leaves_out_the_sources_comments_and_indentati
     from mtg_gateway.cards import card_html as any_card
 
     html = card_html()
-    assert len(html.encode()) < 68_000, len(html.encode())  # 85,318 bytes before
+    # 85,318 bytes before 0.7.46; 0.7.47's check before a card draws its list (no card spam) adds
+    # about 760 bytes, and saves an older card's whole list and pictures
+    assert len(html.encode()) < 68_800, len(html.encode())
     lines = html.split("\n")
     assert not [x for x in lines if x.strip().startswith(("//", "/*"))]
     assert not [x for x in lines if x != x.strip() or not x.strip()][:-1]

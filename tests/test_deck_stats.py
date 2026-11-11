@@ -785,12 +785,12 @@ def test_stats_panel_draws_the_controls_and_focus_targets() -> None:
 
     d = _extra_deck()
     html = stats_panel_html(d, compute(d))
-    # every variant is drawn; the toolbars wait for the script (hidden); None, Bar and all sources show
+    # every variant is drawn; the toolbars wait for the script (hidden); All cards, Bar and all sources show
     assert html.count("class='statctl'") == 2 and "aria-label='Mana curve by' hidden" in html
     for v in ("none", "type", "category"):
         assert f"data-curve='{v}'" in html
     assert "data-curve='type' hidden" in html and "data-src='lands' hidden" in html
-    assert "aria-pressed='true'>None</button>" in html and "aria-pressed='true'>Bar</button>" in html
+    assert "aria-pressed='true'>All cards</button>" in html and "aria-pressed='true'>Bar</button>" in html
     assert "data-set='lands' aria-pressed='false'" in html
     assert "aria-label='Mana curve by type, cards per mana value: 0: 1 (1 Creature); 1: 3" in html
     assert "<svg viewBox='0 0 100 100' role='img' aria-label='Mana cost by color:" in html

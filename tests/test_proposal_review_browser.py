@@ -12,6 +12,7 @@ import pytest
 
 from mtg_gateway.archidekt import art_url
 
+from .conftest import guard_ready_for_tap
 from .test_editor_browser import _link
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
@@ -259,6 +260,7 @@ def test_the_first_tap_on_a_locked_button_moves_neither_focus_nor_the_page(serve
             state = "() => ({y: Math.round(scrollY), active: document.activeElement.tagName})"
             before = page.evaluate(state)
             assert apply.evaluate("b => b.disabled")  # still locked: the page has not been touched
+            guard_ready_for_tap(page)
             box = apply.bounding_box()
             page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             # fixed wait: a negative check: the first tap moves no focus, scrolls nothing, sends nothing

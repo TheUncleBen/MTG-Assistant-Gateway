@@ -227,6 +227,7 @@
     closeBtn.addEventListener("click", function () { close(false); });
     head.appendChild(closeBtn);
     var faces = card.faces && card.faces.length > 1 ? card.faces : [{ type: card.type, text: card.text, pt: card.pt, loyalty: card.loyalty, flavor: card.flavor }];
+    if (card.ctx) side.appendChild(ctxBlock(card));
     var text = el("div", "cardtext");
     faces.forEach(function (f, i) {
       if (faces.length > 1 && i === faces.length - 1 && card.flavor && !f.flavor) f.flavor = card.flavor;
@@ -246,12 +247,12 @@
     if (printing && opener) {
       var prow = el("button", "printrow");
       prow.type = "button";
-      prow.setAttribute("aria-label", "Printing: " + printing + (price ? " · " + price : "") + ". See every printing");
+      prow.setAttribute("aria-label", "Printings: this one is " + printing + (price ? " · " + price : "") + ". See every printing");
       var pic2 = el("span", "pic");
       pic2.setAttribute("aria-hidden", "true");
       pic2.innerHTML = "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='8.5' cy='9.5' r='1.5'/><path d='m21 16-5-5-8 8'/></svg>";
       prow.appendChild(pic2);
-      prow.appendChild(el("span", "lbl", "Printing"));
+      prow.appendChild(el("span", "lbl", "Printings"));
       prow.appendChild(el("span", "val", printing + (price ? " · " + price : "")));
       var chev = el("span", "chev", "›");
       chev.setAttribute("aria-hidden", "true");
@@ -387,6 +388,22 @@
     box.appendChild(side);
     v.appendChild(box);
     return closeBtn;
+  }
+  /* "In this test": what the report's solo test did with the card, and its card model (the Card
+     models page: this card's own, or what card models are). */
+  function ctxBlock(card) {
+    var box = el("div", "cv-ctx");
+    box.appendChild(el("p", "k", "In this test"));
+    box.appendChild(el("p", "t", card.ctx));
+    if (card.ctxText) box.appendChild(el("p", "d", card.ctxText));
+    if (card.model) {
+      var a = el("a", "btn btn-plain small", card.model === "new" ? "What's a card model?" : "See its card model");
+      a.href = card.model === "new" ? "/history/models" : card.model;
+      if (card.model === "new") box.appendChild(el("p", "d", "A card model can teach the solo test what this card does."));
+      else box.appendChild(el("p", "d", "You have a card model for it now: your next quick solo test plays its effect."));
+      box.appendChild(a);
+    }
+    return box;
   }
   /* What the Printing row opens: the page's own opener (card.onPrintings; the deck page's, which
      can also put the printing in the deck), or the shared browse-and-watch sheet
@@ -624,7 +641,12 @@
       custom: node.hasAttribute("data-custom"),
       qty: node.getAttribute("data-qty") || "",
       cat: node.getAttribute("data-cat") || "",
-      label: node.getAttribute("data-label") || ""
+      label: node.getAttribute("data-label") || "",
+      // what a report's test did with the card (report_page.py _ctx): the group, why, and its card
+      // model ("new" when it has none)
+      ctx: node.getAttribute("data-ctx") || "",
+      ctxText: node.getAttribute("data-ctx-text") || "",
+      model: node.getAttribute("data-model") || ""
     };
   }
   window.MtgCardView = { text: extraFor, open: open, update: update, close: function () { close(false); }, fromElement: fromElement, mana: mana, symbolize: symbolize };

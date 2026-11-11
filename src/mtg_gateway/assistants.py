@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -128,11 +129,36 @@ def chosen_mode(db: Any, sub: str, client_id: str | None) -> str | None:
     return mode if modes.valid_mode(mode) else None
 
 
-def note_sign_in(db: Any, sub: str, client_id: str) -> None:
-    """An app signed in (new tokens): remember its assistant, which starts at the member's default."""
+def note_sign_in(db: Any, sub: str, client_id: str, family: str | None = None) -> None:
+    """An app signed in (new tokens): remember its assistant, which starts at the member's default.
+
+    Every new connection (``family``: a sign-in's token family never saved before) is the member's
+    New assistant alert (``db.on_new_assistant``, app._notify_events): the first one, a reconnect
+    after a disconnect, and a second sign-in beside a live one alike, since each is a new grant of
+    access. A refresh keeps its family and is never one (0.7.47 audit: the alert follows the
+    connection, not the assistant)."""
     key = assistant_key(db, client_id)
-    if key is not None:
-        db.note_assistant(sub, key, client_id)
+    if key is None:
+        return
+    new_row = db.note_assistant(sub, key, client_id)
+    if not (new_row if family is None else not db.family_known(family)):
+        return
+    hook = getattr(db, "on_new_assistant", None)  # the member's alert (app._notify_events)
+    if hook is not None:
+        try:
+            hook(sub, key, family or "")
+        except Exception:  # noqa: BLE001 - an alert never stops a sign-in
+            logging.getLogger(__name__).exception("new assistant alert failed")
+
+
+def alert_ukey(key: str, family: str = "") -> str:
+    """The key of an assistant's New assistant alert: one per connection (its token family)."""
+    return f"{alert_prefix(key)}{hashlib.sha256(family.encode()).hexdigest()[:16]}"
+
+
+def alert_prefix(key: str) -> str:
+    """What every New assistant alert of the assistant ``key`` starts with (Home's ×)."""
+    return f"assistant-{hashlib.sha256(key.encode()).hexdigest()[:16]}-"
 
 
 @dataclass
@@ -511,9 +537,11 @@ def app_html(
     )
 
 
-def home_notice(db: Any, sub: str, default: str, *, now: float) -> str:
+def home_notice(db: Any, sub: str, default: str, *, now: float, csrf: str = "") -> str:
     """Home's one notice for an assistant connected for the first time (until its page is opened,
-    or for NEW_DAYS): it names the default the assistant starts with; one button opens its page."""
+    its × is pressed, or for NEW_DAYS): it names the default the assistant starts with; one button
+    opens its page. The × posts /home/dismiss (static/bell.js sends it in place), so the notice
+    stays gone after a reload and on the member's other devices."""
     fresh = [a for a in connected(db, sub) if a.new and now - a.first_seen < NEW_DAYS * 86400]
     if not fresh:
         return ""
@@ -521,9 +549,26 @@ def home_notice(db: Any, sub: str, default: str, *, now: float) -> str:
     mode = mode_label(a.mode) if a.mode else mode_label(default)
     uses = f"It uses: {mode}." if a.mode else f"It uses your default: {mode}."
     return (
-        f"<div class='justin' role='status'>{logo(a)}<span class='t'><b>“{html.escape(a.name)}” "
+        f"<div class='justin' role='status' data-dismissable>{logo(a)}"
+        f"<span class='t'><b>“{html.escape(a.name)}” "
         f"connected {html.escape(ui.when_text(a.first_seen) or 'just now')}.</b> {html.escape(uses)}</span>"
-        f"<a class='btn btn-plain' href='{a.href}'>Change for “{html.escape(a.name)}”</a></div>"
+        f"<a class='btn btn-plain' href='{a.href}'>Change for “{html.escape(a.name)}”</a>"
+        f"{dismiss_form(csrf, 'assistant', a.key, f'Dismiss the notice about “{a.name}”')}</div>"
+    )
+
+
+def dismiss_form(csrf: str, what: str, key: str, words: str) -> str:
+    """A notice's ×: a small form to /home/dismiss (static/bell.js sends it and takes the notice
+    away in place; without scripts the page reloads without it)."""
+    if not csrf:
+        return ""
+    return (
+        "<form class='nx' method='post' action='/home/dismiss' data-dismiss>"
+        f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+        f"<input type='hidden' name='what' value='{html.escape(what)}'>"
+        f"<input type='hidden' name='key' value='{html.escape(key)}'>"
+        f"<button type='submit' class='close icon-only' aria-label='{html.escape(words)}' "
+        f"title='Dismiss'>×</button></form>"
     )
 
 
@@ -573,12 +618,15 @@ CSS = (
 .yhub .yme .alogo.big.oa img{width:60px;height:60px;margin:-10px}
 .yhub .yme .alogo.big.term svg.i{width:32px;height:32px}
 .yhub .yme b{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
-.ydisc{display:flex;justify-content:center;margin:.5rem 0 1rem}
-.ydisc .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:48px;
-  min-width:min(16rem,100%);padding:0 1.5rem;border-radius:14px;white-space:normal;text-align:center}
+/* the page's foot action spans the column, as Account's Sign out does (0.7.46: a 16rem button
+   centred under the rows, a pattern no other page had) */
+.ydisc{display:flex;flex-direction:column;align-items:stretch;margin:.5rem 0 1rem}
+.ydisc form{display:flex;flex-direction:column;margin:0}
+.ydisc .btn{display:flex;align-items:center;justify-content:center;gap:.5rem;min-height:50px;width:100%;
+  margin:0;padding:0 1.5rem;border-radius:14px;white-space:normal;text-align:center}
 .ydisc .btn svg.i{width:18px;height:18px;flex:none}
 /* a short page: one column, as wide as a phone screen at most */
-.yhub.ylone{max-width:40rem;margin:0}
+.yhub.ylone{max-width:42rem;margin:0 auto}
 .yhub.ylone .ycols{grid-template-columns:minmax(0,1fr)}
 .mtgbox .body form.inbox p{margin:0 0 .6rem;line-height:1.45}
 """
@@ -598,5 +646,12 @@ HOME_CSS = (
 .justin .t b{font-weight:700}
 .justin .btn{min-height:44px;white-space:normal;text-align:center}
 @media (max-width:599.98px){ .justin .btn{flex:1 1 100%;justify-content:center} }
+/* its ×: the top right corner at every width, out of the flow, 44 px (as a toast's) */
+.justin{position:relative;padding-right:calc(.9rem + 44px)}
+.justin form.nx{position:absolute;top:.25rem;right:.25rem;margin:0}
+.justin form.nx .close{width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:50%;
+  background:transparent;color:var(--text-muted);font-size:1.4rem;line-height:1;box-shadow:none}
+.justin form.nx .close:hover,.justin form.nx .close:focus-visible{background:var(--surface-2);
+  color:var(--text)}
 """
 )

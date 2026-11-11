@@ -17,7 +17,7 @@ is useful: a short title and line, and a link to the gateway page. Deck contents
 The token is sent only in the Authorization header and never logged;
 a failed publish is logged with the HTTP status alone.
 
-The Account page's Notifications card is here too (``account_card_html``, ``account_action``):
+The Account page's Push notifications card is here too (``account_card_html``, ``account_action``):
 the opt-in (one switch for the whole account), the events, Send test, the app's connect button,
 and the member's scheduled summary (summary.py), which is offered only when a notification
 server is set up, since the notifications are how it is sent.
@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import hmac
 import json
@@ -61,6 +62,144 @@ EVENTS = ("proposals", "reports", "prices", "alerts")  # the kinds a member can 
 # notify_prefs, so it needed no database upgrade; on unless the member unticked it.
 ALERTS_PREF = "notify.alerts"
 SUMMARY_CHOICES = ("off", "daily", "weekly")
+
+
+class Kind:
+    """One type of alert (0.7.47): what the Alerts page and the settings call it (``name``), the
+    word a push title starts with (``word``: "Price drop · Sol Ring"), its icon, the Android
+    channel the app shows it on (``channel``: the app maps the message's tag, the kind's key, to
+    its channel), and where it goes by default (``default``: off, list or push)."""
+
+    __slots__ = ("key", "name", "word", "icon", "default", "hint", "admin")
+
+    def __init__(
+        self, key: str, name: str, word: str, icon: str, default: str, hint: str, *, admin: bool = False
+    ) -> None:
+        self.key, self.name, self.word, self.icon = key, name, word, icon
+        self.default, self.hint, self.admin = default, hint, admin
+
+
+# Every type of alert, in the order the settings list them. "waiting" is read live (what waits
+# for the member's press now); every other kind is kept (Database.add_gateway_alert).
+KINDS: dict[str, Kind] = {
+    k.key: k
+    for k in (
+        Kind(
+            "waiting",
+            "Waiting for you",
+            "Review",
+            "proposals",
+            "push",
+            "An assistant left changes for you to apply or reject (one per deck).",
+        ),
+        Kind(
+            "applied",
+            "Applied for you",
+            "Applied",
+            "check",
+            "list",
+            "An assistant changed a deck without asking, as your approval mode allows.",
+        ),
+        Kind("report", "Deck reports", "Report ready", "report", "push", "A test or deck report finished."),
+        Kind("price", "Price alerts", "Price alert", "stats", "push", "A watched card crossed your alert."),
+        Kind(
+            "archidekt",
+            "From Archidekt",
+            "Archidekt",
+            "bell",
+            "push",
+            "A comment, a reply, a new follower or news in your Archidekt alerts.",
+        ),
+        Kind(
+            "account",
+            "New assistant",
+            "New assistant",
+            "shield",
+            "push",
+            "An assistant connected to your account: each new connection, never a renewal of its access.",
+        ),
+        Kind("summary", "Summaries", "Summary", "clock", "push", "Your daily or weekly summary."),
+        Kind(
+            "gateway",
+            "Gateway (admins)",
+            "Gateway",
+            "settings",
+            "push",
+            "A newer gateway release, or a nightly backup that failed.",
+            admin=True,
+        ),
+    )
+}
+DELIVERY = ("off", "list", "push")
+DELIVERY_WORDS = {"off": "Off", "list": "Alerts only", "push": "Alerts and push"}
+DELIVER_PREF = "notify.deliver"  # account_prefs: {kind: off | list | push}, kinds the member chose
+# The old push switches (notify_prefs on_*) and the kind each one was (before 0.7.47).
+OLD_SWITCHES = {
+    "waiting": "on_proposals",
+    "report": "on_reports",
+    "price": "on_prices",
+    "archidekt": "on_alerts",
+}
+# What an old switch left unticked meant: no push, and no place in the bell for a price alert or a
+# report; the waiting changes and Archidekt's alerts still showed there.
+UNTICKED = {"waiting": "list", "report": "off", "price": "off", "archidekt": "list"}
+# Old event names callers pass to Notifier.send, and the kind each one is.
+EVENT_KINDS = {
+    "proposals": "waiting",
+    "reports": "report",
+    "prices": "price",
+    "alerts": "archidekt",
+    "summary": "summary",
+}
+
+
+def kind_of(event: str) -> str:
+    return EVENT_KINDS.get(event, event)
+
+
+def push_title(kind: str, subject: str = "", word: str = "") -> str:
+    """A push title the member tells apart at a glance: the type first, then what it is about
+    ("Price drop · Darksteel Angel", "Report ready · Atraxa"); the type alone with no subject."""
+    k = KINDS.get(kind)
+    head = word or (k.word if k else "MTG Gateway")
+    subject = " ".join(str(subject or "").split())
+    return f"{head} · {subject}"[:120] if subject else head
+
+
+def deliveries(db: Database, sub: str, row: dict[str, Any] | None = None) -> dict[str, str]:
+    """Where each kind of alert goes for the member: off, list (the Alerts page only) or push
+    (the Alerts page and their phone, when push notifications are on). A kind they never chose
+    follows its old switch (off when they had unticked it), else the kind's default."""
+    saved = db.get_pref(sub, DELIVER_PREF)
+    saved = saved if isinstance(saved, dict) else {}
+    out = {}
+    for key, k in KINDS.items():
+        v = saved.get(key)
+        if v in DELIVERY:
+            out[key] = v
+            continue
+        old = OLD_SWITCHES.get(key)
+        if old == "on_alerts":
+            was = db.get_pref(sub, ALERTS_PREF)
+            out[key] = UNTICKED[key] if was is False else k.default
+        elif old and row is not None and not bool(row[old]):
+            out[key] = UNTICKED[key]
+        else:
+            out[key] = k.default
+    return out
+
+
+def save_deliveries(db: Database, sub: str, chosen: dict[str, str]) -> None:
+    """Store the member's choices (unknown kinds and values are left out), and keep the old
+    switches in step: on while the kind is pushed."""
+    now = deliveries(db, sub, _row(db, sub))
+    for key, v in chosen.items():
+        if key in KINDS and v in DELIVERY:
+            now[key] = v
+    db.set_pref(sub, DELIVER_PREF, now)
+    save_prefs(db, sub, **{old: now[k] == "push" for k, old in OLD_SWITCHES.items()})
+
+
 # The Account page's notices for the Notifications card and its summary (pages.py shows them).
 ACCOUNT_OK = {
     "notify_saved": "Push notifications saved.",
@@ -116,6 +255,8 @@ TEST_COOLDOWN = 60.0  # seconds between one member's Send test presses
 # The Android app's connection (notify.add_stream_route): the app sends the member's topic as its
 # key, and the gateway relays that topic from ntfy as one JSON object per line.
 STREAM_PATH = "/app/notifications/stream"
+# The app's Mark read on a message: the alert is read for the member everywhere (0.7.47)
+READ_PATH = "/app/notifications/read"
 # What the app is given of each ntfy event: the kinds it acts on and the fields it shows.
 STREAM_EVENTS = frozenset({"open", "keepalive", "message", "message_delete", "message_clear"})
 STREAM_FIELDS = ("id", "time", "event", "sequence_id", "title", "message", "click", "tags")
@@ -129,40 +270,36 @@ STREAM_MAX_TOTAL = 200
 # ``since``: an ntfy message id, or a Unix time; anything else starts from now.
 SINCE_RE = re.compile(r"^(?:[A-Za-z0-9]{8,24}|\d{9,11})$")
 # A deck's grouped message (Notifier.deck_waiting): a later one with the same id replaces it.
-GROUP_RE = re.compile(r"^deck-\d{1,12}$")
+# One kept alert's message is "a-<its id>": reading or dismissing the alert anywhere withdraws it.
+GROUP_RE = re.compile(r"^(?:deck|a)-\d{1,12}$")
 NEW_DECKS = "0"  # the group of new decks an assistant proposed: no deck of their own yet
 
 RECOUNT_DELAY = 1.0  # seconds: changes close together (an apply all, a sweep) are counted once
-# The website's bell keeps the newest of the gateway's own alerts per member (0.7.46 audit QG-16):
-# the kinds below; "proposals" is read live (what waits now) and "alerts" are Archidekt's own,
-# which the bell reads from Archidekt already; a test message is for the phone alone.
-KEPT_ALERTS = 50
-BELL_EVENTS = ("prices", "reports", "summary")
-# the Alerts page's Type filter (0.7.46 audit QG-25): value, words
-ALERT_TYPES = (
-    ("", "Every type"),
-    ("waiting", "Waiting for you"),
-    ("prices", "Price alerts"),
-    ("reports", "Deck reports"),
-    ("summary", "Summaries"),
-    ("archidekt", "From Archidekt"),
-)
-WAITING_TEXT = "Open it to look at the changes, then apply or reject them."
+# The Alerts page keeps the newest alerts per member that they have not dismissed (0.7.47: every
+# kind but "waiting", which is read live, and a test, which is for the phone alone).
+KEPT_ALERTS = 200
+WITHDRAW_MAX = 100  # Mark all read or Clear all withdraws the newest this many messages from the phone
+NOT_KEPT = ("waiting", "test")
+# the Alerts page's Type filter: value, words
+ALERT_TYPES = (("", "Every type"),) + tuple((k.key, k.name) for k in KINDS.values())
+
+
+def waiting_text(count: int, assistant: str = "") -> str:
+    """The line under a deck's waiting title: how many, from which assistant, and what to do."""
+    what = "1 change" if count == 1 else f"{count} changes"
+    by = f" from {assistant}" if assistant else ""
+    return f"{what}{by} to apply or reject."
 
 
 def waiting_title(count: int, deck_name: str) -> str:
-    """The title of a deck's message: "1 change to Atraxa is waiting for you", "2 changes to ... are"."""
-    name = " ".join(str(deck_name or "").split())[:80] or "your deck"
-    if count == 1:
-        return f"1 change to {name} is waiting for you"
-    return f"{count} changes to {name} are waiting for you"
+    """The title of a deck's message: "Review · Atraxa" (the count is in its line)."""
+    name = " ".join(str(deck_name or "").split())[:80] or "Unnamed deck"
+    return push_title("waiting", name)
 
 
 def new_decks_title(count: int) -> str:
     """The title of the message for new decks an assistant proposed."""
-    if count == 1:
-        return "1 new deck is waiting for you"
-    return f"{count} new decks are waiting for you"
+    return push_title("waiting", "1 new deck" if count == 1 else f"{count} new decks")
 
 
 # The job_runs row holding this database's key for marking the topics the gateway makes (new_topic)
@@ -219,25 +356,30 @@ def new_topic(db: Database, sub: str) -> str:
     return _new_topic(_topic_key(db), sub)
 
 
-def prefs(db: Database, sub: str) -> dict[str, Any]:
-    """The member's notification and summary choices (defaults when they never chose)."""
+def _row(db: Database, sub: str) -> dict[str, Any] | None:
     with db._lock:
         row = db._conn.execute("SELECT * FROM notify_prefs WHERE sub = ?", (sub,)).fetchone()
+    return None if row is None else dict(row)
+
+
+def prefs(db: Database, sub: str) -> dict[str, Any]:
+    """The member's notification and summary choices (defaults when they never chose).
+    ``deliver``: where each kind of alert goes (:func:`deliveries`); each old switch ``on_*`` is
+    True while its kind is pushed."""
+    row = _row(db, sub)
     if row is None:
-        return {
+        out: dict[str, Any] = {
             "ntfy_on": False,
             "ntfy_topic": None,
-            "on_proposals": True,
-            "on_reports": True,
-            "on_prices": True,
-            "on_alerts": db.get_pref(sub, ALERTS_PREF) is not False,
             "summary_every": "off",
             "summary_sent_day": None,
         }
-    out = dict(row)
-    for k in ("ntfy_on", "on_proposals", "on_reports", "on_prices"):
-        out[k] = bool(out[k])
-    out["on_alerts"] = db.get_pref(sub, ALERTS_PREF) is not False
+    else:
+        out = dict(row)
+        out["ntfy_on"] = bool(out["ntfy_on"])
+    out["deliver"] = deliveries(db, sub, row)
+    for kind, old in OLD_SWITCHES.items():
+        out[old] = out["deliver"][kind] == "push"
     return out
 
 
@@ -311,13 +453,9 @@ def topic_owner(db: Database, topic: str) -> tuple[str, bool] | None:
     return None if row is None else (row["sub"], bool(row["ntfy_on"]))
 
 
-TAGS = {
-    "proposals": "memo",
-    "reports": "bar_chart",
-    "prices": "chart_with_upwards_trend",
-    "summary": "calendar",
-    "alerts": "bell",
-}
+# A message's tag is its kind (KINDS): the app shows each kind on its own channel, in its own
+# group. A test has its own.
+TAGS = {**{k: k for k in KINDS}, "test": "test"}
 
 
 def _for_app(line: str) -> bytes | None:
@@ -381,6 +519,7 @@ class Notifier:
         self._dirty_lock = threading.Lock()
         self.recount_delay = RECOUNT_DELAY
         self._no_retry = asyncio.Event()  # set by drain: messages waiting to be sent again are given up
+        self.admin_check: Callable[[str], bool] | None = None
 
     def test_allowed(self, sub: str) -> bool:
         """True (and the member's next test held back for TEST_COOLDOWN) unless they pressed
@@ -507,32 +646,71 @@ class Notifier:
         *,
         retry: bool = False,
         still: Callable[[], bool] | None = None,
+        subject: str = "",
+        ukey: str | None = None,
     ) -> bool:
-        """Publish to the member's topic when they opted in and want this kind of event
-        (``event``: proposals, reports, prices, summary or test). A price alert, a finished
-        report and a summary are kept for the website's bell first (:func:`bell_rows`), push
-        or no push. ``retry``, ``still``: as for :meth:`publish` (a background message; never a
-        press that is answered with the outcome, such as Send test)."""
+        """One alert for the member: kept for their Alerts page and pushed to their phone, as
+        their choice for its kind says (``event``: a kind of :data:`KINDS`, an old event name
+        (:data:`EVENT_KINDS`), or test). ``subject``: the deck or card it is about. ``ukey``: a
+        key naming this alert, so the same one is kept and pushed once. A kept alert's push
+        opens it through /notifications/open/<id> (marked read there) and is withdrawn from the
+        phone once it is read or dismissed anywhere. True when the notification server took the
+        push. ``retry``, ``still``: as for :meth:`publish` (a background message; never a press
+        that is answered with the outcome, such as Send test)."""
         await dbwait.before_side_effect()  # a notification sent can't be taken back
+        kind = kind_of(event)
+        k = KINDS.get(kind)
+        if k is not None and k.admin and not self.is_admin(sub):
+            return False
         p = prefs(self.db, sub)
-        if event in BELL_EVENTS and p.get(f"on_{event}", True):
-            self.db.add_gateway_alert(sub, event, title, message, path, keep=KEPT_ALERTS)
-        if not self.enabled:
+        where = p["deliver"].get(kind, "push")
+        if where == "off":
+            return False
+        if kind not in NOT_KEPT:
+            # a write: off the loop, so another process holding the database's lock never stalls
+            # the gateway's pages while it waits (test_db_lock_jobs)
+            alert_id = await asyncio.to_thread(
+                functools.partial(
+                    self.db.add_gateway_alert,
+                    sub,
+                    event,
+                    title,
+                    message,
+                    path,
+                    keep=KEPT_ALERTS,
+                    kind=kind,
+                    subject=subject,
+                    ukey=ukey,
+                )
+            )
+            if alert_id is None:  # no such member, or this alert was kept (and pushed) before
+                return False
+            path = f"/notifications/open/{alert_id}"
+            group = group or f"a-{alert_id}"
+        if where != "push" or not self.enabled:
             return False
         if not p["ntfy_on"] or not p["ntfy_topic"]:
-            return False
-        if event in EVENTS and not p[f"on_{event}"]:
             return False
         return await self.publish(
             p["ntfy_topic"],
             title,
             message,
             path,
-            tags=TAGS.get(event, ""),
+            tags=TAGS.get(kind, ""),
             group=group,
             retry=retry,
             still=still,
         )
+
+    def is_admin(self, sub: str) -> bool:
+        """Whether the member is one of the gateway's admins (set by the app: ``admin_check``)."""
+        return bool(self.admin_check and self.admin_check(sub))
+
+    def withdraw_alerts(self, sub: str, ids: list[int]) -> None:
+        """Take the messages of these kept alerts off the member's phones (read or dismissed
+        elsewhere), the newest WITHDRAW_MAX of them."""
+        for i in sorted(ids, reverse=True)[:WITHDRAW_MAX]:
+            self.withdraw_soon(sub, f"a-{int(i)}")
 
     async def withdraw(self, sub: str, group: str, *, still: Callable[[], bool] | None = None) -> bool:
         """Remove the member's message of ``group`` from their phone (nothing waits there any
@@ -551,10 +729,19 @@ class Notifier:
         )
 
     def _background(self, work: Any) -> None:
+        """Run ``work`` on the gateway's loop: from a worker thread (an alert read on the Alerts
+        page, a sign-in) it is handed to the loop :meth:`start` remembered."""
         try:
             task = asyncio.get_running_loop().create_task(work)
-        except RuntimeError:  # no running loop (a synchronous caller): nothing is sent
-            work.close()
+        except RuntimeError:
+            loop = self._loop
+            if loop is not None and not loop.is_closed():
+                try:
+                    loop.call_soon_threadsafe(self._background, work)
+                    return
+                except RuntimeError:  # the loop closed in between
+                    pass
+            work.close()  # no loop to run it on (a script): nothing is sent
             return
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -569,12 +756,15 @@ class Notifier:
         group: str | None = None,
         *,
         still: Callable[[], bool] | None = None,
+        subject: str = "",
     ) -> None:
         """Send in the background: the caller (a proposal, a report) never waits for ntfy, and a
         message ntfy could not take for a passing reason is sent again later. An alert the bell
         keeps is recorded even with no push server."""
-        if self.enabled or event in BELL_EVENTS:
-            self._background(self.send(sub, event, title, message, path, group, retry=True, still=still))
+        if self.enabled or kind_of(event) not in NOT_KEPT:
+            self._background(
+                self.send(sub, event, title, message, path, group, retry=True, still=still, subject=subject)
+            )
 
     def withdraw_soon(self, sub: str, group: str, *, still: Callable[[], bool] | None = None) -> None:
         """:meth:`withdraw` in the background."""
@@ -606,7 +796,7 @@ class Notifier:
                 sub,
                 "proposals",
                 title,
-                WAITING_TEXT,
+                waiting_text(count),
                 path,
                 group,
                 still=lambda: self._waiting.get(key) == count,
@@ -949,6 +1139,36 @@ def add_stream_route(state: AppState, server: Any) -> None:
         )
 
 
+def add_read_route(state: AppState, server: Any) -> None:
+    """``POST`` :data:`READ_PATH`: the app's Mark read on one message. The app sends its key as
+    for the stream and ``{"tag": "a-<alert id>"}`` (the message's group); the member's alert is
+    marked read, so the Alerts page and the bell show it read and the member's other phones take
+    the message off. 401 for a key that is nobody's, 404 for an alert that is not theirs."""
+    from .membership import Membership
+
+    @server.custom_route(READ_PATH, methods=["POST"], include_in_schema=False)
+    async def notifications_read(request: Request) -> Response:
+        key = _bearer(request)
+        owner = topic_owner(state.db, key) if STRONG_TOPIC_RE.fullmatch(key) else None
+        if owner is None or not strong_topic(state.db, owner[0], key):
+            return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
+        sub = owner[0]
+        if state.membership is not None and await state.membership.check(sub) is Membership.REVOKED:
+            return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
+        try:
+            body = json.loads((await request.body())[:1024] or b"{}")
+        except ValueError:
+            body = None
+        tag = str(body.get("tag") or "") if isinstance(body, dict) else ""
+        m = re.fullmatch(r"a-(\d{1,12})", tag)
+        if m is None or state.db.alert_owner(int(m.group(1))) != sub:
+            return _refuse(404, "not_found", "That alert is not on this account.")
+        changed = state.db.set_gateway_alerts_read(sub, [int(m.group(1))])
+        if changed and state.notifier is not None:
+            state.notifier.withdraw_alerts(sub, changed)
+        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+
 class _Stream(StreamingResponse):
     """A StreamingResponse that also runs ``finish`` when the client left before the body started
     (the body's own ``finally`` never runs then), shielded from the request's cancellation."""
@@ -988,6 +1208,20 @@ ACCOUNT_CSS = """<style>
 .nf-card .part p{line-height:1.45}
 .nf-card .ui-actions{margin:.6rem 0 .25rem}
 .nf-card .notice{margin:0 0 .75rem}
+/* each type of alert: its name and what it is on the left, where it goes on the right; on a
+   phone the drop-down goes under the words, the row's full width */
+.nf-card .nf-kinds{margin:0;padding:0;border:0;min-width:0}
+.nf-card .nf-kinds legend{padding:0;margin:0 0 .25rem;font-weight:700;color:var(--text-muted);
+  font-size:.86rem;text-transform:uppercase;letter-spacing:.03em}
+.nf-card .nf-kind{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem 1rem;padding:.6rem 0;
+  border-top:1px solid var(--border-soft)}
+.nf-card .nf-kind:first-of-type{border-top:0}
+.nf-card .nf-kind .w{flex:1 1 16rem;min-width:0}
+.nf-card .nf-kind .w label{display:block;font-weight:700;overflow-wrap:anywhere}
+.nf-card .nf-kind .w small{display:block;color:var(--text-muted);font-size:.86rem;line-height:1.4;
+  overflow-wrap:anywhere}
+.nf-card .nf-kind select:not(.msel-native),.nf-card .nf-kind .msel-btn{flex:0 1 13rem;min-width:0;
+  min-height:44px}
 /* Summary: How often and Save summary on one line, at the end of what they act on */
 .nf-card .sum-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.5rem}
 .nf-card .sum-row .fld{flex:0 1 16rem;min-width:0}
@@ -1002,6 +1236,7 @@ ACCOUNT_CSS = """<style>
   .nf-card .ui-actions form button{flex:1 1 100%}
   .nf-card .sum-row .fld,.nf-card .sum-row button{flex:1 1 100%}
   .nf-card .nf-when{padding-left:1rem}
+  .nf-card .nf-kind select:not(.msel-native),.nf-card .nf-kind .msel-btn{flex:1 1 100%}
 }
 </style>"""
 
@@ -1135,6 +1370,33 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
     )
 
 
+def kinds_html(state: AppState, sub: str, p: dict[str, Any], *, push: bool) -> str:
+    """One row a type of alert, with where it goes: Off, Alerts only, or Alerts and push (only
+    while this gateway can push). Admins see the gateway's own alerts too."""
+    admin = state.notifier is not None and state.notifier.is_admin(sub)
+    choices = DELIVERY if push else ("off", "list")
+    rows = []
+    for k in KINDS.values():
+        if k.admin and not admin:
+            continue
+        if k.key == "price" and state.prices is None:
+            continue
+        now = p["deliver"].get(k.key, k.default)
+        if not push and now == "push":
+            now = "list"
+        opts = "".join(
+            f"<option value='{v}'{' selected' if v == now else ''}>{_esc(DELIVERY_WORDS[v])}</option>"
+            for v in choices
+        )
+        fid = f"nf-{k.key}"
+        rows.append(
+            f"<div class='nf-kind'><span class='w'><label for='{fid}'>{_esc(k.name)}</label>"
+            f"<small id='{fid}-h'>{_esc(k.hint)}</small></span>"
+            f"<select id='{fid}' name='deliver_{k.key}' aria-describedby='{fid}-h'>{opts}</select></div>"
+        )
+    return "<fieldset class='nf-kinds'><legend>Each type of alert</legend>" + "".join(rows) + "</fieldset>"
+
+
 def account_card_html(
     state: AppState,
     sub: str,
@@ -1144,30 +1406,30 @@ def account_card_html(
     err: str | None = None,
     heading: bool = True,
 ) -> str:
-    """The Account page's Notifications card and, beside it, the Summary card: a note when the
-    gateway has no notification server, otherwise the member's choices (one switch for the whole
-    account), "Your phones" (this phone's part inside the app), Send test, Disconnect my phones,
+    """The Notifications page (Account › Account details › Notifications, and the Alerts page's
+    Settings): where each type of alert goes (:func:`kinds_html`), the push switch for the whole
+    account, "Your phones" (this phone's part inside the app), Send test, Disconnect my phones,
     and the summary's own card. A notice from one of their forms (``ok`` / ``err``) shows inside
     the card it came from. ``heading`` False leaves out the card's own heading (its page names it)."""
     n = state.notifier
     h2 = "<h2 id='n-h'>Push notifications</h2>" if heading else ""
-    if n is None or not n.enabled:
-        watched = ", a watched card crosses your alert" if state.prices is not None else ""
-        return (
-            f"<div class='card' id='notifications'>{h2}<p class='muted'>This gateway "
-            "has no notification server set up, so the Android app can't get push notifications. The "
-            "person who runs "
-            "this gateway can turn them on. The app then tells you when an assistant leaves changes waiting "
-            f"for your press, a deck report finishes{watched}, something new arrives in your Archidekt "
-            "alerts or your summary is ready.</p></div>"
-        )
     p = prefs(state.db, sub)
-
-    def box(name: str, label: str, hint: str = "") -> str:
-        described = f" aria-describedby='{hint}'" if hint else ""
+    push = n is not None and n.enabled
+    named = "aria-labelledby='n-h'" if heading else "aria-label='Push notifications'"
+    save = (
+        "<div class='ui-actions'><button class='primary'>Save push notifications</button></div>"
+        "<p class='ui-hint'><a href='/notifications'>Open Alerts</a> to read, mark read or clear them.</p>"
+    )
+    if not push:
         return (
-            f"<label><input type='checkbox' name='{name}' value='1'{described}"
-            f"{' checked' if p[name] else ''}><span>{_esc(label)}</span></label>"
+            f"{ACCOUNT_CSS}<section class='card nf-card' id='notifications' {named}>"
+            f"<div class='gh'>{h2}</div>"
+            "<p class='intro'>Choose which alerts show under Alerts (the bell). This gateway has no "
+            "notification server set up, so the Android app can't get push notifications; the person who "
+            "runs this gateway can turn them on.</p>"
+            f"{_card_notice(ok, err, NOTIFY_NOTICES)}"
+            f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
+            f"{kinds_html(state, sub, p, push=False)}{save}</form></section>"
         )
 
     on = p["ntfy_on"] and bool(p["ntfy_topic"])
@@ -1191,44 +1453,40 @@ def account_card_html(
         if on
         else ""
     )
-    # Archidekt's own alerts (alerts_push.py): only a linked account has any to look at.
-    alerts_hint = (
-        "The gateway looks at Archidekt for you now and then while a phone is connected, so these come "
-        "a little after the site shows them."
-        if state.db.get_link(sub) is not None
-        else "Link your Archidekt account to get these."
-    )
-    alerts_box = (
-        f"{box('on_alerts', 'A new alert on Archidekt (a comment, a reply, a new follower)', 'n-alerts')}"
-        f"<p class='ui-hint nf-sub' id='n-alerts'>{alerts_hint}</p>"
-    )
-    # With watchlists off there is no price alert to choose; a choice made earlier is kept as it was.
-    prices_box = (
-        box("on_prices", "A watched card crossed my price alert")
-        if state.prices is not None
-        else ("<input type='hidden' name='on_prices' value='1'>" if p["on_prices"] else "")
-    )
     # inside the app the part is about this phone and has its own heading (_phone_html)
     head = "" if in_app() else "<h3>Your phones</h3>"
     phones = f"<div class='part'>{head}{phone}{test}</div>" if phone or test else ""
-    named = "aria-labelledby='n-h'" if heading else "aria-label='Push notifications'"
     return (
         f"{ACCOUNT_CSS}<section class='card nf-card' id='notifications' {named}>"
         f"<div class='gh'>{h2}{label('On', 'green', 'check') if on else ''}</div>"
-        "<p class='intro'>The gateway's Android app can show you a short message when something happens. "
-        "Each message says only what happened and links to the right page on this gateway. It never lists "
-        "your deck's cards. The choices below apply to your whole account and to every phone you connect.</p>"
+        "<p class='intro'>Every alert shows under Alerts (the bell), where you can read, mark read and clear "
+        "it. Choose which types also come to your phone as a push notification. A push names its type and "
+        "the deck or card first, and never lists your deck's cards. Reading an alert anywhere takes it off "
+        "your phones.</p>"
         f"{_card_notice(ok, err, NOTIFY_NOTICES)}"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
-        f"<div class='ui-checks master'>{box('ntfy_on', 'Send me push notifications')}</div>"
-        "<fieldset class='nf-when'><legend>When</legend><div class='ui-checks'>"
-        f"{box('on_proposals', 'An assistant left changes waiting for my press (one message per deck)')}"
-        f"{box('on_reports', 'A deck report finished (Forge runs that waited included)')}"
-        f"{prices_box}{alerts_box}</div></fieldset>"
-        "<div class='ui-actions'><button class='primary'>Save push notifications</button></div></form>"
+        f"<div class='ui-checks master'>{_master_box(p)}</div>"
+        f"{kinds_html(state, sub, p, push=True)}{save}</form>"
         f"{phones}</section>"
         f"{_summary_html(state, sub, p, csrf_in, on=on, notice=_card_notice(ok, err, SUMMARY_NOTICES))}"
     )
+
+
+def _master_box(p: dict[str, Any]) -> str:
+    return (
+        "<label><input type='checkbox' name='ntfy_on' value='1' aria-describedby='n-master'"
+        f"{' checked' if p['ntfy_on'] else ''}><span>Send me push notifications</span></label>"
+        "<p class='ui-hint nf-sub' id='n-master'>Off: nothing comes to your phones; every alert still shows "
+        "under Alerts.</p>"
+    )
+
+
+def chosen_deliveries(data: dict[str, str]) -> dict[str, str]:
+    """Where each kind goes, from the form: its drop-down (deliver_<kind>), or, from a form
+    before 0.7.47, its tick box (ticked: pushed, else off)."""
+    if any(k.startswith("deliver_") for k in data):
+        return {k: data[f"deliver_{k}"] for k in KINDS if data.get(f"deliver_{k}") in DELIVERY}
+    return {kind: "push" if data.get(old) == "1" else UNTICKED[kind] for kind, old in OLD_SWITCHES.items()}
 
 
 async def account_action(state: AppState, sub: str, action: str, data: dict[str, str]) -> str | None:
@@ -1237,8 +1495,13 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
     notifications on inside the app, the query also carries ``connect=1``: the page then presses
     Get notifications on this phone for the member (feedback.js)."""
     if action == "notify_save":
+        chosen = chosen_deliveries(data)
+        n = state.notifier
+        if n is None or not n.enabled:  # no push server: where alerts go, nothing else
+            save_deliveries(state.db, sub, {k: ("list" if v == "push" else v) for k, v in chosen.items()})
+            return "ok=notify_saved"
         on = data.get("ntfy_on") == "1"
-        alerts = data.get("on_alerts") == "1"
+        alerts = chosen.get("archidekt") == "push"
         before = prefs(state.db, sub)
         current = before["ntfy_topic"]
         if on and alerts and not (before["ntfy_on"] and before["on_alerts"]):
@@ -1249,16 +1512,8 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
         topic = (
             current if strong_topic(state.db, sub, current) else (new_topic(state.db, sub) if on else None)
         )
-        save_prefs(
-            state.db,
-            sub,
-            ntfy_on=on,
-            on_proposals=data.get("on_proposals") == "1",
-            on_reports=data.get("on_reports") == "1",
-            on_prices=data.get("on_prices") == "1",
-            on_alerts=alerts,
-            **({"ntfy_topic": topic} if topic else {}),
-        )
+        save_prefs(state.db, sub, ntfy_on=on, **({"ntfy_topic": topic} if topic else {}))
+        save_deliveries(state.db, sub, chosen)
         if not on:
             if state.notifier is not None:
                 state.notifier.kick(current)

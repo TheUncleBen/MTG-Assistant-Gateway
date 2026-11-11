@@ -158,8 +158,9 @@
     // the facts as balanced lines, so no dot ends a line and no fact is left alone (polish C1)
     var status = $("#gf-status");
     status.textContent = "";
-    [g.turn ? "Turn " + g.turn : "Opening hand", "Library " + g.library.length, "Hand " + g.hand.length,
-      "Graveyard " + g.graveyard.length, "Exile " + g.exile.length].forEach(function (fact) {
+    // the turn and the library only: each zone's heading carries its own count (0.7.47 polish: the
+    // hand, graveyard and exile were said twice, here and over their zones)
+    [g.turn ? "Turn " + g.turn : "Opening hand", "Library " + g.library.length].forEach(function (fact) {
       var span = document.createElement("span");
       span.textContent = fact;
       status.appendChild(span);

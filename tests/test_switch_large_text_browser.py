@@ -15,7 +15,8 @@ from .waits import redrawn
 
 pytest.importorskip("playwright")
 
-PAGES = ["/collection", "/collection/wants", "/watchlist", "/proposals", "/history", "/reports"]
+# One Binder (0.7.47): the Binder pages lead back with "‹ Binder" (no switch) while watchlists are on
+PAGES = ["/proposals", "/history", "/reports"]
 STATE = """() => {
   const n = document.querySelector('.hubseg'); const cur = n.querySelector('[aria-current=page]');
   const r = n.getBoundingClientRect(), c = cur.getBoundingClientRect();

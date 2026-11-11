@@ -76,8 +76,9 @@ import java.io.ByteArrayInputStream
  *   notifications on this phone asks for the notification permission, starts the service and asks
  *   once to let the app run in the background;
  * - the app's own updates from the gateway it is set up for ([Updater]): a bar offers a newer
- *   version, one tap installs it over this one. Checked at each cold launch and just after a
- *   sign-in (at most once an hour), on returning to the app (at most twice a day) and on request.
+ *   version, and Update saves it to Downloads for the person to open. Checked at each cold
+ *   launch and just after a sign-in (at most once an hour), on returning to the app (at most
+ *   twice a day) and on request.
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
  * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
@@ -109,7 +110,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var prefs: Prefs
     private lateinit var origin: String
     private lateinit var web: WebView
-    /** Pull to refresh over the page ([PullRefresh]): on for the list pages, off elsewhere. */
+    /** Pull to refresh over the page ([PullRefresh]): on for every gateway page but a few. */
     private lateinit var refresh: SwipeRefreshLayout
     /**
      * The page's word on the last touch: whether it may start a pull (static/topbar.js, through
@@ -366,7 +367,7 @@ class MainActivity : ComponentActivity() {
     // -- pull to refresh ----------------------------------------------------
 
     /**
-     * A pull from the top of a list page ([PullRefresh.offered], set per page in
+     * A pull from the top of a page ([PullRefresh.offered], set per page in
      * [Client.onPageStarted]) shows the orange disc under the page's own top bar and, let go past
      * the threshold, loads the page again with the pull's header ([pull]); the disc goes when the
      * new page has drawn or the load failed ([Client]). The layer only pulls when the page is at its top
@@ -601,7 +602,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Opens the phone-camera scan panel, going to the /scan page first if needed; with [auto], it
+     * Opens the scanner: the /scan page, which from gateway 0.7.47 is the scanner itself (its live
+     * camera). An older gateway's page gets the phone-camera scan panel over it; with [auto], that
      * starts scanning on its own (the page's Auto switch). Calls that resume a deferred open keep the
      * choice made when it was asked for.
      */
@@ -614,26 +616,41 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (onScanPage()) {
-            web.evaluateJavascript(ScanGlue.READY) { ready ->
-                if (ready == "true") {
-                    scanReloaded = false
-                    // Park the page on its list tab (stops its own camera) while the panel has the lens.
-                    web.evaluateJavascript(ScanGlue.BEGIN) {
-                        if (camera == null && !isDestroyed) openCamera(pendingAuto)
-                        pendingAuto = false
-                    }
-                } else if (!scanReloaded) {
-                    scanReloaded = true
-                    pendingCamera = true
-                    web.loadUrl(GatewayUrl.join(origin, "/scan"))
+            web.evaluateJavascript(ScanGlue.OWN_CAMERA) { own ->
+                // A gateway from 0.7.47 scans on the page itself, with the live camera that finds
+                // cards as they are held up: the page is the scanner, so nothing more opens.
+                if (own == "true") {
+                    pendingCamera = false
+                    pendingAuto = false
+                    web.evaluateJavascript(ScanGlue.SHOW_CAMERA, null)
                 } else {
-                    scanReloaded = false
-                    Toast.makeText(this, getString(R.string.scan_page_too_old), Toast.LENGTH_LONG).show()
+                    openPanelOnPage()
                 }
             }
         } else {
             pendingCamera = true
             web.loadUrl(GatewayUrl.join(origin, "/scan"))
+        }
+    }
+
+    /** An older gateway's /scan page: open the phone camera panel over it (see [startScan]). */
+    private fun openPanelOnPage() {
+        web.evaluateJavascript(ScanGlue.READY) { ready ->
+            if (ready == "true") {
+                scanReloaded = false
+                // Park the page on its list tab (stops its own camera) while the panel has the lens.
+                web.evaluateJavascript(ScanGlue.BEGIN) {
+                    if (camera == null && !isDestroyed) openCamera(pendingAuto)
+                    pendingAuto = false
+                }
+            } else if (!scanReloaded) {
+                scanReloaded = true
+                pendingCamera = true
+                web.loadUrl(GatewayUrl.join(origin, "/scan"))
+            } else {
+                scanReloaded = false
+                Toast.makeText(this, getString(R.string.scan_page_too_old), Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -1167,7 +1184,6 @@ class MainActivity : ComponentActivity() {
         web.onResume()
         camera?.resume()
         Updater.inFront = true
-        Updater.showPendingConfirmation(this)
         if (this::updater.isInitialized) updater.checkIfDue()
     }
 
@@ -1229,7 +1245,7 @@ class MainActivity : ComponentActivity() {
             // loading tells the app so itself (layer())
             layerOpen = false
             syncFab()
-            // pull to refresh on the list pages only; a new page starts with the touch allowed
+            // pull to refresh where the page offers it; a new page starts with the touch allowed
             pagePull = true
             refresh.isEnabled = allowed && PullRefresh.offered(origin, url)
             if (!allowed) {

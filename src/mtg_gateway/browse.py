@@ -1038,7 +1038,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         )
         return (
             f"<section class='profile'>{avatar_html(shown, 'xl')}<div class='who'>"
-            f"<h1 class='uname'>{_esc(shown)}</h1><p class='sub'>{line}</p></div>"
+            # a long name breaks after its underscores, never inside a word (0.7.47)
+            f"<h1 class='uname'>{_esc(shown).replace('_', '_<wbr>')}</h1><p class='sub'>{line}</p></div>"
             f"<div class='social'>{follow}"
             f"<a class='btn btn-plain ext' href='https://archidekt.com/u/{_esc(shown)}' "
             "target='_blank' rel='noreferrer noopener'>"

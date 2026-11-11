@@ -15,6 +15,7 @@ import pytest
 from .test_history_page import store_report
 from .test_scan_browser import _chromium_path
 from .test_social_browser import Server
+from .waits import sideways
 
 pytest.importorskip("playwright")
 
@@ -64,7 +65,7 @@ def _context(browser, server: Server, sid: str, width: int, scheme: str = "light
 
 
 def _no_sideways_scroll(page) -> None:
-    over = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    over = sideways(page)
     assert over <= 0, over
 
 

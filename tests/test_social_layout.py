@@ -51,7 +51,7 @@ async def test_deck_page_shows_like_bookmark_follow_and_comments(stack: Stack) -
         r = await b.http.get("/decks/43", headers=NAV)
         assert r.status_code == 200
         assert "data-social='follow' data-user='78' data-name='amy'" in r.text
-        assert "<b class='n'>0</b><span>Like</span>" in r.text
+        assert "<b class='n' hidden>0</b><span>Like</span>" in r.text
         # the user page carries a Follow button too, but not on your own profile
         r = await b.http.get("/users/amy", headers=NAV)
         assert "data-social='follow' data-user='78'" in r.text

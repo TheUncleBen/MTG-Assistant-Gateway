@@ -140,15 +140,14 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
             if stats.get("price_total") and stats.get("priced_cards") != 0
             else UNPRICED_HTML,
         ),
-        # the bracket set on the deck is the deck's bracket; else Archidekt's estimate
-        (
-            "Bracket" if stats.get("archidekt_bracket") else "Archidekt's estimate",
-            _num(stats.get("archidekt_bracket"), 0)
-            if stats.get("archidekt_bracket")
-            else (f"~{bracket.get('bracket')}" if bracket.get("bracket") else "–"),
-        ),
         ("Game changers", _num(len(stats.get("game_changers") or []), 0)),
     ]
+    # the bracket set on the deck is the deck's bracket; else Archidekt's estimate; neither known:
+    # no tile (never a bare dash)
+    if stats.get("archidekt_bracket"):
+        tiles.insert(4, ("Bracket", _num(stats.get("archidekt_bracket"), 0)))
+    elif bracket.get("bracket"):
+        tiles.insert(4, ("Archidekt's estimate", f"~{bracket.get('bracket')}"))
     tile_html = "".join(
         f"<div class='tile'><b>{v if k == 'Price' else _esc(v)}</b><span>{_esc(k)}</span></div>"
         for k, v in tiles
@@ -322,7 +321,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             current=current,
             heading=heading,
             main_class=main_class,
-            head_extra=(stylesheet_link("deck.css") if deck_css else "")
+            # deck.css carries the card viewer's own styles: every page with the viewer loads it
+            # (0.7.46's report page did not, and a tapped card opened as bare text under the page)
+            head_extra=(stylesheet_link("deck.css") if deck_css or viewer_only else "")
             + (f"<style>{extra_css}</style>" if extra_css else "")
             # ``viewer_only``: a page that shows cards but none of the deck page's own hooks
             # (Goldfish, Compare) loads the card viewer without deck.js
@@ -429,6 +430,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
 
     # The route modules import this module's helpers, so they are imported here, not at the top.
+    from .alerts_page import add_alerts_routes
     from .companion_decks import add_deck_routes
     from .companion_folders import add_folder_routes
     from .companion_history import add_history_routes
@@ -471,6 +473,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     add_history_routes(server, state, reports, h)
     add_lists_routes(server, state, h)
     add_profile_routes(server, state, h)
+    add_alerts_routes(server, state, h)
     add_forum_routes(server, state, h)
     add_shell_routes(server, h)
 
@@ -557,12 +560,15 @@ EVENT_LABELS = {
     "browser_login": "Signed in on the website",
     # the Android app's browser sign-in did not come back by itself (pages.login_app_return)
     "app_signin_tap_page": "App sign-in showed the “Open the app” page in the browser",
+    # a sign-in that ran out, noted when its browser or app came back (pages.login)
+    "browser_session_ended": "Signed out: the sign-in ran out",
     "login_ok": "Signed in",
     "login_denied": "Sign-in refused",
     "login_rejected_group": "Sign-in refused: not in an allowed group",
     "login_rejected_disabled": "Sign-in refused: account disabled",
     "login_rejected_issuer": "Sign-in refused: unexpected identity provider",
     "tokens_issued": "An assistant connected",
+    "tokens_refreshed": "An assistant renewed its access",
     "tokens_revoked": "An assistant's access was revoked",
     "refresh_rejected": "An assistant's expired access was refused",
     "refresh_reuse_detected": "A reused assistant token was refused",

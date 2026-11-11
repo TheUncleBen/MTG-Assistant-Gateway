@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mtg-gateway"
-version = "0.7.46"
+version = "0.7.47"
 description = "Authenticated MCP gateway for Magic: The Gathering deck research and editing"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "mcp>=2.3,<3",
     "httpx>=0.28,<1",
@@ -16,6 +16,10 @@ dependencies = [
     "cryptography>=43",
     "uvicorn[standard]>=0.30,<1",
     "pillow>=10,<13",
+    "segno>=1.6,<2",
+    # the card scanner's image model (scan/picture.py): Google's LiteRT interpreter, and numpy
+    "ai-edge-litert>=1.4,<2",
+    "numpy>=2,<3",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +39,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "mtg_gateway" = ["static/*", "static/cards/*", "static/logos/*"]  # scripts, the cards, app logos
-"mtg_gateway.scan" = ["static/*", "static/vendor/**/*"]
+"mtg_gateway.scan" = ["static/*", "static/vendor/**/*", "model/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

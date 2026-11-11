@@ -107,7 +107,7 @@ from .decklist import (
     parse_decklist,
     to_text,
 )
-from .timing import add_time, archidekt_time
+from .timing import add_time, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,13 @@ PLAN_FIRST_TEXT = (
     "first and send one proposal with every change: check_deck_changes checks a plan without a "
     "card in the chat, and amend_proposal changes a proposal that is still waiting. Many small "
     "proposals leave the deck half changed, often not legal, between them."
+)
+# The same hint for new decks (0.7.47, card spam): every propose_new_deck draws a card in the chat.
+PLAN_NEW_DECK_TEXT = (
+    "Your app has proposed {n} new decks in the last {minutes} minutes, and each one put a card in "
+    "the user's chat. Check a deck with check_new_deck before proposing it, change one that still "
+    "waits with amend_proposal (new_deck), and pass replaces when a new deck takes the place of one "
+    "that waits, rather than withdrawing it and proposing again."
 )
 
 
@@ -3710,6 +3717,9 @@ class DeckService:
         )
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
+        # An assistant's own apply that went through (apply via "mcp"): the member's "Applied for
+        # you" alert (app._notify_events); called with the member, the proposal row and the outcome.
+        self.on_applied: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None
         # called with (sub, deck) after a deck page read a deck (prices.PriceService.note_deck)
         self.read_hooks: list[Callable[[str, Deck], None]] = []
         from . import packages
@@ -4999,6 +5009,8 @@ class DeckService:
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "deck_id": deck.id})
         out = self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
         note = _with_warnings(self._rules_note(changes, rows, legality), names_note)
+        if not_made := await self._finishes_not_made(changes):
+            note = _with_warnings(note, {"finish_not_made": not_made, "warnings": not_made})
         return {**out, **note, "deck_after": after}
 
     async def _judge_rules(
@@ -6520,7 +6532,13 @@ class DeckService:
             self._running.pop(proposal_id, None)
             self._progress.pop(proposal_id, None)
             if not t.cancelled():
-                t.exception()  # retrieved here; the apply already recorded it on the proposal
+                # retrieved here; the apply already recorded it on the proposal
+                if t.exception() is None and via == "mcp" and self.on_applied is not None:
+                    out = t.result()
+                    try:
+                        self.on_applied(sub, row, out if isinstance(out, dict) else {})
+                    except Exception:  # an alert never touches the apply
+                        logger.exception("applied alert failed")
 
         task.add_done_callback(done)
         try:
@@ -7157,22 +7175,26 @@ class DeckService:
 
             return await account_lists.apply(self, sub, row, progress)
         changes = parse_changes(row["changes"], row_flags=True)  # stored: flags only from the deck page
-        deck = await self._current_deck_for(sub, row)
+        times = _StepTimes()
+        async with times.step("read"):
+            deck = await self._current_deck_for(sub, row)
         progress["read_rows"] = deck.rows_fingerprint()  # _deck_as_before: did a failed write land?
-        changes, left_out = await self._left_out(sub, row, deck, changes)
+        async with times.step("card_lookups"):
+            changes, left_out = await self._left_out(sub, row, deck, changes)
         _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
         recategorise, _cat_lines = category_plan(deck, changes)
         # Every printing is looked up before anything is written or backed up, so a printing
         # that does not exist (or is another card) refuses the proposal with nothing changed.
-        (
-            resolve,
-            modifiers,
-            pinned,
-            new_cats,
-            side_cats,
-            side_pinned,
-            side_modifiers,
-        ) = await self._resolve_adds(sub, deck, changes, after, after_side)
+        async with times.step("card_lookups"):
+            (
+                resolve,
+                modifiers,
+                pinned,
+                new_cats,
+                side_cats,
+                side_pinned,
+                side_modifiers,
+            ) = await self._resolve_adds(sub, deck, changes, after, after_side)
         payload = build_payload(
             deck,
             after,
@@ -7192,13 +7214,16 @@ class DeckService:
             row_counts(deck, target_rows(deck, changes)),
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
-        payload += await self._printing_entries(sub, deck, specs)
+        async with times.step("card_lookups"):
+            payload += await self._printing_entries(sub, deck, specs)
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
-        backup = await self._backup_shared(sub, row, deck, snapshot_id)
+        async with times.step("backup"):
+            backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         if not self._unchanged_since_read(backup):
-            await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+            async with times.step("read_again"):
+                await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
         if (kept := one_click.get()) is not None:
             kept["base"] = pickle.dumps(deck)  # the deck the write was worked out on (api.edit_deck)
         for r in row.get("rows") or []:
@@ -7210,8 +7235,10 @@ class DeckService:
                 )
         # A write Archidekt may have taken without answering does not end the apply here: the
         # read below says what the deck has now (0.7.46 audit PA-3)
-        unanswered = await _unless_unanswered(self._send(sub, deck.id, payload, progress))
-        verified = await _read_after(self.get_deck(sub, deck.id), unanswered)
+        async with times.step("write"):
+            unanswered = await _unless_unanswered(self._send(sub, deck.id, payload, progress))
+        async with times.step("read_back"):
+            verified = await _read_after(self.get_deck(sub, deck.id), unanswered)
         if (kept := one_click.get()) is not None:
             kept["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it (D-01)
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
@@ -7237,6 +7264,7 @@ class DeckService:
             "after_fingerprint": verified.fingerprint(),  # Undo: did the deck change since?
             **({"left_out": left_out} if left_out else {}),
             **({"answer_lost": True} if unanswered is not None else {}),
+            "seconds": times.result(),
         }
         if mismatches:
             progress.update(result)  # apply() records it with the error
@@ -8538,6 +8566,73 @@ class DeckService:
         self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
+    async def _printings_at_once(
+        self, sub: str, cards: list[dict[str, Any]]
+    ) -> dict[tuple[str, str, str], dict[str, Any]]:
+        """A new deck's Archidekt printings found in bulk, by row_key: one Scryfall collection
+        lookup names each row's printing (its set and number when the list gives them, else
+        Scryfall's printing for the name), then Archidekt answers for 60 Scryfall ids a request.
+        The owner, 10 Nov 2026: a 100-card new deck took 143 s to apply, nearly all of it one
+        paced card search per card. A name-only card whose Scryfall printing is not out yet is
+        left to the one-at-a-time search (it never lands as a preview copy), and so is any row
+        either lookup misses or that fails: nothing here refuses a card."""
+        if self.card_collection is None or not cards:
+            return {}
+        idents: dict[tuple[str, str, str], dict[str, str]] = {}
+        for c in cards:
+            code = str(c.get("set_code") or "").strip().lower()
+            number = str(c.get("collector_number") or "").strip()
+            if code and number:
+                idents.setdefault(row_key(c), {"set": code, "collector_number": number})
+            elif code:
+                idents.setdefault(row_key(c), {"name": str(c["name"]), "set": code})
+            else:
+                idents.setdefault(row_key(c), {"name": str(c["name"])})
+        try:
+            got, _missing = await self.card_collection(list(idents.values()))
+        except Exception:
+            logger.warning(
+                "bulk printing lookup for a new deck failed; looking up one at a time", exc_info=True
+            )
+            return {}
+        today = datetime.datetime.now(datetime.UTC).date().isoformat()
+        names = {row_key(c): str(c["name"]) for c in cards}
+        uid_of: dict[tuple[str, str, str], str] = {}
+        for key, ident in idents.items():
+            want = front_face(names[key]).casefold()
+            for card in got:
+                if not isinstance(card, dict) or not card.get("id"):
+                    continue
+                same_name = front_face(str(card.get("name") or "")).casefold() == want
+                if "collector_number" in ident:
+                    hit = (
+                        str(card.get("set") or "").lower() == ident["set"]
+                        and str(card.get("collector_number") or "").casefold()
+                        == ident["collector_number"].casefold()
+                        and same_name
+                    )
+                elif "set" in ident:
+                    hit = same_name and str(card.get("set") or "").lower() == ident["set"]
+                else:
+                    hit = same_name and str(card.get("released_at") or "")[:10] <= today
+                if hit:
+                    uid_of[key] = str(card["id"]).lower()
+                    break
+        if not uid_of:
+            return {}
+        wanted = {uid: names[key] for key, uid in uid_of.items()}
+        try:
+            by_uid = await self._call(sub, lambda token, *_: self.client.printings_by_uids(token, wanted))
+        except DeckError:
+            logger.warning("bulk Archidekt printing lookup failed; looking up one at a time", exc_info=True)
+            return {}
+        out: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for key, uid in uid_of.items():
+            if uid in by_uid:
+                # a row with a set was asked for that printing; a name-only row was not
+                out[key] = {**by_uid[uid], "exact_printing": bool(idents[key].get("set"))}
+        return out
+
     async def _apply_create(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
         spec = row["changes"]
         _token, link = self._token(sub)
@@ -8560,10 +8655,17 @@ class DeckService:
         modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
         found: dict[tuple[str, str, str], dict[str, Any]] = {}  # each printing looked up once
+        times = _StepTimes()
         progress["resolved_cards"], progress["of_cards"] = 0, len(cards)
+        # most printings in a few requests (one Scryfall lookup, one Archidekt request per 60
+        # cards); a card that misses goes the one-at-a-time way below, as before
+        async with times.step("card_lookups"):
+            ready = await self._printings_at_once(sub, cards)
         for c in cards:  # resolve every printing before creating anything
             card = found.get(row_key(c))
             repeat = card is not None
+            if card is None and row_key(c) in ready:
+                card = found[row_key(c)] = ready[row_key(c)]
             leave_out = may_leave_out and not c.get("set_code")
             if leave_out and c["name"] in gone:
                 progress["resolved_cards"] += 1
@@ -8574,15 +8676,16 @@ class DeckService:
                         NOT_ON_ARCHIDEKT
                     ):
                         raise DeckError("not_found", ".")
-                    card = await self._call(
-                        sub,
-                        lambda token, *_, c=c: self.client.resolve_card(
-                            token,
-                            c["name"],
-                            set_code=c.get("set_code") or None,
-                            collector_number=c.get("collector_number") or None,
-                        ),
-                    )
+                    async with times.step("card_lookups"):
+                        card = await self._call(
+                            sub,
+                            lambda token, *_, c=c: self.client.resolve_card(
+                                token,
+                                c["name"],
+                                set_code=c.get("set_code") or None,
+                                collector_number=c.get("collector_number") or None,
+                            ),
+                        )
                 except DeckError as exc:
                     if not (leave_out and exc.kind == "not_found"):
                         raise
@@ -8653,11 +8756,13 @@ class DeckService:
                     sub,
                     lambda token, *_, f=f: self.client.create_category(token, created.id, {**f, "id": None}),
                 )
-            await self._send_batched(sub, created.id, entries, progress)
+            async with times.step("write"):
+                await self._send_batched(sub, created.id, entries, progress)
         finally:
             self._being_made.pop(str(created.id), None)
             lock.release()
-        verified = await self.get_deck(sub, created.id)
+        async with times.step("read_back"):
+            verified = await self.get_deck(sub, created.id)
         want_folder = spec.get("folder_id")
         if want_folder is not None and verified.parent_folder != want_folder:
             # the create request names the folder as archidekt.com's form does; when the deck is not
@@ -8707,6 +8812,7 @@ class DeckService:
             "deck_url": f"https://archidekt.com/decks/{created.id}",
             "printing_notes": printing_notes,
             "sent_entries": len(entries),
+            "seconds": times.result(),
             "verified": not mismatches,
             "mismatched_cards": mismatches,
             **package_read,
@@ -9116,10 +9222,15 @@ class DeckService:
         out = await self._propose_linked(
             sub, deck_id, raw_changes, replaces=replaces, depends_on=depends_on, separate=separate
         )
+        return self.plan_hint(sub, _clean_deck_id(deck_id), out, PLAN_FIRST_TEXT)
+
+    def plan_hint(self, sub: str, target: str, out: dict[str, Any], text: str) -> dict[str, Any]:
+        """``out`` with ``plan_first`` (``text``) once an app has sent PLAN_FIRST_AFTER proposals
+        for ``target`` (a deck ID, or "new deck" for new decks) within PLAN_WINDOW_SECONDS."""
         client = current_client.get()
         if not out.get("ok", True) or client in (None, BROWSER_CLIENT, ADMIN_CLIENT):
             return out
-        key = (sub, client, _clean_deck_id(deck_id))
+        key = (sub, client, target)
         now = _plan_clock()
         recent = [t for t in self._plan_calls.get(key, []) if now - t <= PLAN_WINDOW_SECONDS] + [now]
         self._plan_calls[key] = recent
@@ -9130,7 +9241,7 @@ class DeckService:
         if len(recent) >= PLAN_FIRST_AFTER:
             out = {
                 **out,
-                "plan_first": PLAN_FIRST_TEXT.format(n=len(recent), minutes=PLAN_WINDOW_SECONDS // 60),
+                "plan_first": text.format(n=len(recent), minutes=PLAN_WINDOW_SECONDS // 60),
             }
         return out
 
@@ -9339,6 +9450,55 @@ class DeckService:
             carried = self.db.set_hold(pid, sub, str(held["status_reason"])) or carried
         return {**out, **self.describe(sub, pid)} if carried else out
 
+    async def _finishes_not_made(self, changes: list[Change]) -> list[str]:
+        """Each pinned printing a change asks for in a finish it is not made in, in words ("LEA 161
+        (Lightning Bolt) is not made in etched; it comes nonfoil."), from one Scryfall collection
+        lookup. Archidekt would take the row in a finish that printing never had. A lookup that
+        fails names nothing (nothing is refused for it)."""
+        wanted = [
+            c
+            for c in changes
+            if c.action in ("add", "set_printing", "set_finish")
+            and c.pinned
+            and (c.finish or "").casefold() in ("foil", "etched")
+        ]
+        if not wanted or self.card_collection is None:
+            return []
+        idents = list(
+            {
+                (str(c.set_code).lower(), str(c.collector_number)): {
+                    "set": str(c.set_code).lower(),
+                    "collector_number": str(c.collector_number),
+                }
+                for c in wanted
+            }.values()
+        )[:75]
+        try:
+            found, _missing = await self.card_collection(idents)
+        except Exception:
+            logger.warning("printing lookup for a plan's finishes failed", exc_info=True)
+            return []
+        made = {
+            (str(card.get("set") or "").lower(), str(card.get("collector_number") or "")): list(
+                card.get("finishes") or []
+            )
+            for card in found
+            if isinstance(card, dict)
+        }
+        out: list[str] = []
+        for c in wanted:
+            key = (str(c.set_code).lower(), str(c.collector_number))
+            finishes = made.get(key)
+            want = (c.finish or "").casefold()
+            if finishes and want not in finishes:
+                line = (
+                    f"{key[0].upper()} {key[1]} ({c.card_name}) is not made in {want}; it comes "
+                    f"{', '.join(finishes)}."
+                )
+                if line not in out:
+                    out.append(line)
+        return out
+
     async def check_plan(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
         """A planned deck edit checked before it is proposed, so the assistant fixes it or
         amends a waiting note instead of drawing a card for a proposal it then redoes. Saves
@@ -9401,6 +9561,15 @@ class DeckService:
                     "message": no_card_called(unknown, in_deck=True, meant=meant),
                     "unknown_cards": unknown,
                     **({"did_you_mean": meant} if meant else {}),
+                }
+            )
+        if changes and (not_made := await self._finishes_not_made(changes)):
+            problems.append(
+                {
+                    "error": "finish_not_made",
+                    "message": " ".join(not_made)
+                    + " Ask for a finish the printing has, or another printing.",
+                    "finish_not_made": not_made,
                 }
             )
         if missing:
@@ -12347,6 +12516,34 @@ NOTHING_WRITTEN = frozenset(
 )
 
 
+class _StepTimes:
+    """Where an apply's time went, step by step, for its result: each step's seconds and, of
+    them, the time spent waiting for a turn in the shared Archidekt pacer (the rest is
+    Archidekt answering, plus the gateway's own work). The owner, 10 Nov 2026: a two-card edit
+    took 34 s live and nothing said which step took it."""
+
+    def __init__(self) -> None:
+        self.started = time.monotonic()
+        self.steps: dict[str, float] = {}
+        self.waited = 0.0
+
+    @asynccontextmanager
+    async def step(self, name: str) -> AsyncIterator[None]:
+        began, wait0 = time.monotonic(), pacer_time.get()
+        try:
+            yield
+        finally:
+            self.steps[name] = round(self.steps.get(name, 0.0) + time.monotonic() - began, 1)
+            self.waited += pacer_time.get() - wait0
+
+    def result(self) -> dict[str, float]:
+        return {
+            **self.steps,
+            "total": round(time.monotonic() - self.started, 1),
+            "waiting_for_a_turn": round(self.waited, 1),
+        }
+
+
 async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any:
     """Await one write of an apply; ``progress["deck_written"]`` is set once the deck may have
     changed (the write succeeded, or failed in a way that may still have landed). A failure whose
@@ -13072,7 +13269,7 @@ def _next_step(
         else:
             why = " (their approval mode asks every time)" if mode == "manual" else ""
         return (
-            f"The user decides on the card shown with this result{why}, and you are told the outcome: "
+            f"The user decides on the proposal's card in the chat{why}, and you are told the outcome: "
             "say the change in one line, don't repeat the list, and don't call apply_proposal."
         )
     if state == "pending" and risk in modes.MEMBER_ONLY:

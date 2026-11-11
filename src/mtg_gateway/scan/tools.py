@@ -344,6 +344,10 @@ def add_scan_tools(
                     "status": r.status,
                     "note": r.note,
                     "card": None if r.status == "conflict" else r.card,
+                    # the finish asked for ('*F*'), as the printing allows: kept so the session's
+                    # decklist_text and changes add the foil copy. A name given without one stays
+                    # without one, even when its default printing comes in foil only.
+                    **({"foil": r.foil} if r.input.foil is not None and isinstance(r.foil, bool) else {}),
                 }
                 for r in results
             ]

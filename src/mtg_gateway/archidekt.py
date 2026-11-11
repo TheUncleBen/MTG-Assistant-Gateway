@@ -972,6 +972,8 @@ PAGE_BURST = 5
 # A sixth of the per-minute cap is kept for the reads of a member's own pages: background work may
 # use the rest, so a long apply or sync never leaves a page waiting for the next minute.
 PAGE_SHARE = 6
+# Archidekt's /cards/v2/ answers at most this many cards a page (checked live 2026-11-10).
+UID_PAGE = 60
 
 
 class Pacer:
@@ -2187,6 +2189,27 @@ class ArchidektClient(AccountRequests):
         if not hits:
             raise ArchidektError("not_found", f"Archidekt doesn't have “{name}”.")
         return _printing(_prefer_printing(hits, set_code, collector_number), exact=False)
+
+    async def printings_by_uids(self, token: str, wanted: dict[str, str]) -> dict[str, dict[str, Any]]:
+        """Archidekt's printing for many Scryfall ids at once, ``{uid: name}`` in, ``{uid:
+        printing}`` out (resolve_card's shape, ``exact_printing`` true). ``uids=`` takes a
+        comma-separated list and answers at most UID_PAGE a page (checked live 2026-11-10: 100
+        ids came back 60 on the first page with a next link), so a new deck's printings take one
+        request per UID_PAGE cards instead of one or two per card. A uid Archidekt does not have,
+        or whose card is not the one named, is left out (the caller looks that card up alone)."""
+        names = {
+            u.strip().lower(): n for u, n in wanted.items() if _SCRYFALL_ID_RE.fullmatch(u.strip().lower())
+        }
+        uids = sorted(names)
+        out: dict[str, dict[str, Any]] = {}
+        for start in range(0, len(uids), UID_PAGE):
+            part = uids[start : start + UID_PAGE]
+            for c in await self._cards(token, {"uids": ",".join(part), "pageSize": UID_PAGE}):
+                uid = str(c.get("uid") or "").lower()
+                if uid in names and uid not in out and _card_matches(c, names[uid]):
+                    with contextlib.suppress(ArchidektError):
+                        out[uid] = _printing(c, exact=True)
+        return out
 
     async def _require_printing(
         self, token: str, name: str, set_code: str | None, collector_number: str | None

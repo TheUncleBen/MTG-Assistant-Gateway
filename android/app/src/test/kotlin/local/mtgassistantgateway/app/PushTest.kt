@@ -57,6 +57,33 @@ class PushTest {
         assertNull(Push.since("1&x=2"))
     }
 
+    @Test fun beforeAnyMessageSinceIsTheLastLinesTime() {
+        // a stream that stalled before its first message: the next connection starts a minute
+        // before the gateway's time on the last line the app got, so nothing sent meanwhile is
+        // lost, even from an ntfy whose clock runs up to a minute behind the gateway's (audit AX3)
+        assertEquals(60L, Push.SINCE_MARGIN_S)
+        assertEquals("1794368980", Push.since(null, 1794369040L))
+        assertEquals("m1AbCdEf9", Push.since("m1AbCdEf9", 1794369040L)) // a message id wins
+        assertEquals("1794368980", Push.since("1&x=2", 1794369040L))
+        assertNull(Push.since(null, 5L)) // not a Unix time the gateway takes
+        assertNull(Push.since(null, null))
+    }
+
+    @Test fun aGatewayClockAheadOfNtfysStillGetsTheMessage() {
+        // the gateway's keepalive says 1794369040, while ntfy, 30 s behind, stamped the message
+        // sent meanwhile 1794369015: ntfy's since= (a time) brings it, as it is after the start
+        val since = Push.since(null, 1794369040L)!!.toLong()
+        assertTrue("since $since is after the message's time", 1794369015L >= since)
+    }
+
+    @Test fun lineTimeReadsTheGatewaysTime() {
+        assertEquals(1794369040L, Push.lineTime("""{"event":"keepalive","time":1794369040}"""))
+        assertEquals(1794369039L, Push.lineTime("""{"id":"open0001","time":1794369039,"event":"open"}"""))
+        assertNull(Push.lineTime("""{"event":"keepalive","time":5}"""))
+        assertNull(Push.lineTime("""{"event":"keepalive"}"""))
+        assertNull(Push.lineTime("not json"))
+    }
+
     @Test fun backoffDoublesUpToFiveMinutes() {
         assertEquals(listOf(5L, 10L, 20L, 40L, 80L, 160L, 300L, 300L, 300L), (1..9).map { Push.backoffSeconds(it, 0.0) })
         assertEquals(6L, Push.backoffSeconds(1, 1.0)) // up to a fifth more, spread over phones
@@ -98,5 +125,51 @@ class PushTest {
         val again = Push.Seen(seen.stored() + ",bad id,", size = 3)
         assertFalse(again.first("aaaaaaaa4"))
         assertTrue(again.first("aaaaaaaa1"))
+    }
+
+    // 0.7.47: each kind of alert has its own channel, group and words; a kept alert can be marked read
+    @Test fun aKeptAlertCarriesItsKindAndItsOwnTag() {
+        val a = Push.parse(
+            """{"id":"m4AbCdEf9","event":"message","sequence_id":"a-17","tags":["price"],""" +
+                """"title":"Price drop · Sol Ring","message":"$1.20 to $0.90: fell below $1.00.",""" +
+                """"click":"https://mtg.example.com/notifications/open/17"}""",
+        )
+        assertEquals(
+            Push.Action.Show(
+                "m4AbCdEf9", "a-17", "Price drop · Sol Ring", "$1.20 to $0.90: fell below $1.00.",
+                "https://mtg.example.com/notifications/open/17", "price",
+            ),
+            a,
+        )
+        assertEquals(Push.Action.Remove("a-17"), Push.parse("""{"event":"message_delete","sequence_id":"a-17"}"""))
+        // an unknown tag (a newer gateway's kind) is no kind: the general channel
+        val b = Push.parse("""{"id":"m5AbCdEf9","event":"message","tags":["sparkles"],"message":"x"}""") as Push.Action.Show
+        assertEquals("", b.kind)
+    }
+
+    @Test fun eachKindHasItsChannelAndLevel() {
+        assertEquals(Push.Channel("waiting", Push.Level.HIGH), Push.channelFor("waiting"))
+        assertEquals(Push.Channel("account", Push.Level.HIGH), Push.channelFor("account"))
+        assertEquals(Push.Channel("price", Push.Level.DEFAULT), Push.channelFor("price"))
+        assertEquals(Push.Channel("report", Push.Level.DEFAULT), Push.channelFor("report"))
+        assertEquals(Push.Channel("archidekt", Push.Level.DEFAULT), Push.channelFor("archidekt"))
+        assertEquals(Push.Channel("summary", Push.Level.LOW), Push.channelFor("summary"))
+        // a test, and a message from a gateway before 0.7.47: the old channel, as before
+        assertEquals(Push.Channel("messages", Push.Level.DEFAULT), Push.channelFor(""))
+        assertEquals(Push.Channel("messages", Push.Level.DEFAULT), Push.channelFor("test"))
+        assertEquals(Push.KINDS.keys, setOf("waiting", "applied", "report", "price", "archidekt", "account", "summary", "gateway"))
+    }
+
+    @Test fun aGroupSaysHowManyOfItsKind() {
+        assertEquals("3 price alerts", Push.groupText("price", 3))
+        assertEquals("2 changes waiting for you", Push.groupText("waiting", 2))
+        assertEquals("2 alerts", Push.groupText("", 2))
+    }
+
+    @Test fun onlyAKeptAlertCanBeMarkedRead() {
+        assertTrue(Push.markable("a-17"))
+        assertFalse(Push.markable("deck-42")) // what waits leaves once it is applied or rejected
+        assertFalse(Push.markable("m1AbCdEf9"))
+        assertEquals("""{"tag":"a-17"}""", Push.readBody("a-17"))
     }
 }

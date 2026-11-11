@@ -406,18 +406,15 @@ def _opens_by_itself(page: httpx.Response) -> bool:
     return "data-auto='1'" in m.group(0)
 
 
-async def test_the_return_page_opens_the_app_by_itself_only_after_a_fresh_sign_in(
-    harness: Harness, idp: FakeIdP
-) -> None:
-    """Any app can start a sign-in at /login?app_challenge=... with a plain link: a browser still
-    signed in at the identity provider passes straight through to the return page. So that page
-    opens the app by itself only when the leg asked for a sign-in of its own (prompt=login and
-    max_age=0, after a sign-out) and the ID token shows one made during the leg; otherwise it waits
-    for the tap under its warning, as in 0.7.45."""
+async def test_the_return_page_opens_the_app_by_itself_after_continue(harness: Harness, idp: FakeIdP) -> None:
+    """Owner, 2026-11-08 (T-212 failed again): "you're still having to click the button in order to
+    be redirected back to the app". Every leg now reaches the identity provider only through the
+    person's Continue (security review A-04), so the return page opens the app by itself after it,
+    with or without a new sign-in (app_signin.auto_return). The warning stays on the page."""
     _v, challenge = pair()
     async with client(harness) as browser:
         page = await browser_leg(harness, browser, challenge)  # no fresh sign-in asked for
-        assert not _opens_by_itself(page)
+        assert _opens_by_itself(page)
         assert "If you didn't start this sign-in from the MTG Assistant Gateway app, don't tap" in page.text
 
     _v, challenge = pair()
@@ -432,7 +429,7 @@ async def test_the_return_page_opens_the_app_by_itself_only_after_a_fresh_sign_i
         # the flag is the gateway's own, kept with the code: the address carries the code only
         assert to.query == "code=" + code_from(page)
 
-    # a provider that passed the browser through all the same (an old auth_time): the tap
+    # a provider that passed the browser through all the same (an old auth_time): still by itself
     idp.honours_prompt_login = False
     idp.auth_time = int(time.time()) - 600
     _v, challenge = pair()
@@ -441,7 +438,18 @@ async def test_the_return_page_opens_the_app_by_itself_only_after_a_fresh_sign_i
         cb = urlparse(await harness.idp_leg(r))
         to = urlparse((await browser.get(f"{cb.path}?{cb.query}")).headers["location"])
         page = await browser.get(f"{to.path}?{to.query}")
-        assert not _opens_by_itself(page) and code_from(page)
+        assert _opens_by_itself(page) and code_from(page)
+
+
+def test_auto_return_rule() -> None:
+    """The scheme leg still needs a new sign-in; an https or Custom Tab leg needs Continue."""
+    from mtg_gateway.app_signin import auto_return
+
+    assert auto_return(scheme=False, continued=True, new_sign_in=False)
+    assert not auto_return(scheme=False, continued=False, new_sign_in=False)
+    assert auto_return(scheme=False, continued=False, new_sign_in=True)
+    assert not auto_return(scheme=True, continued=True, new_sign_in=False)
+    assert auto_return(scheme=True, continued=True, new_sign_in=True)
 
 
 async def test_the_https_leg_needs_no_auth_time(harness: Harness, idp: FakeIdP) -> None:
@@ -523,13 +531,14 @@ async def test_fresh_custom_tab_leg_redirects_to_intent_with_fallback(harness: H
         done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
         assert done.status_code == 303 and "mtg_session=" in done.headers["set-cookie"]
 
-    # no sign-in during the leg (a browser still signed in at the provider): the page and its tap
+    # no sign-in during the leg (a browser still signed in at the provider, the app's own
+    # re-sign-in after a while away): after Continue the callback redirects to the app too
+    # (owner, 2026-11-08: no second tap)
     _v, challenge = pair()
     async with client(harness) as browser:
         back = await custom_tab_leg(harness, browser, challenge, fresh=False)
-        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
-        page = await browser.get(back.headers["location"])
-        assert not _opens_by_itself(page)
+        assert back.status_code == 303, back.headers
+        assert back.headers["location"].startswith("intent://signin?code="), back.headers
 
     # a fresh sign-in asked for, but the provider passed the browser through (an old auth_time)
     idp.honours_prompt_login = False
@@ -537,7 +546,7 @@ async def test_fresh_custom_tab_leg_redirects_to_intent_with_fallback(harness: H
     _v, challenge = pair()
     async with client(harness) as browser:
         back = await custom_tab_leg(harness, browser, challenge, fresh=True)
-        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
+        assert back.status_code == 303 and back.headers["location"].startswith("intent://signin?code=")
 
 
 async def test_the_auth_tab_leg_still_returns_on_the_gateways_address(harness: Harness) -> None:

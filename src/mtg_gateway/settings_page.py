@@ -154,7 +154,10 @@ TEXT: dict[str, tuple[str, str]] = {
         "Watchlist and price features",
         "Shows the Watchlist page, the price buttons and the watch tools.",
     ),
-    "watch_max_cards": ("Cards one member may watch", "0 turns card watching off."),
+    "watch_max_cards": (
+        "Cards one member may watch",
+        "0 means no limit. To switch watching off, use the Watchlists switch.",
+    ),
     "watch_max_decks": (
         "Decks one member may watch",
         "Each watched deck is read from Archidekt once a day. 0 turns deck watching off.",
@@ -259,7 +262,10 @@ SETTINGS_CSS = """
 /* the admin Settings page: one flat card per group, one row per setting,
    every control in the same 16rem column so the boxes, switches and lists line up */
 /* the form stays in the 52rem column under the tab bar (the page itself is 1200 px) */
-.set-page{max-width:52rem}
+.set-page{max-width:52rem;margin-left:auto;margin-right:auto}
+/* (0.7.47 polish) centred under the tab bar, not hugging its left; with room the group chips wrap
+   onto a second line rather than run out of the column with no sign that more follow */
+@media (min-width:900px){.set-nav{flex-wrap:wrap;overflow:visible}}
 .set-page .notice{margin:0 0 1rem}
 .set-nav{margin:0 0 1rem}
 .set-nav .ui-chip{background:var(--surface);min-height:var(--ctl)}
@@ -755,7 +761,7 @@ def _control(spec: SettingSpec, value: Any, *, locked: bool, described: str) -> 
         f"<span class='set-num{' has-u' if spec.unit else ''}'>"
         f"<input type='number' id='f-{key}' name='{name}' "
         f"value='{html.escape(shown_value)}' min='{lo}' max='{_plain(spec.hi)}' step='{step}' "
-        f"inputmode='{'numeric' if spec.kind == 'int' else 'decimal'}' "
+        f"inputmode='{'numeric' if spec.kind == 'int' else 'decimal'}' autocomplete='off' "
         f"aria-describedby='{described}{unit_id} r-{key}'{dis}>{unit}</span>"
         f"<p class='range' id='r-{key}'>Allowed: {html.escape(span)}</p>"
     )

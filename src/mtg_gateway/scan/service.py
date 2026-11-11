@@ -19,6 +19,7 @@ from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
 from .bulk import PrintingsCopy
+from .misses import MissStore
 from .names import NameCatalog, fold
 from .scryfall import (
     PRINT_BORDERS,
@@ -31,6 +32,7 @@ from .scryfall import (
     _Cache,
     default_printing,
     good_default,
+    same_name,
     summarize,
 )
 from .store import ScanStore
@@ -149,14 +151,14 @@ class ScanThresholds:
 # work; the resolver only calls it when the input carries an art hash.
 ArtMatcher = Callable[["CardInput", dict[str, Any]], Awaitable[dict[str, Any] | None]]
 
-# "2 Sol Ring (CMR) 472 *F*", "2x Sol Ring", "Sol Ring", "1 Fire // Ice [APC]"
+# "2 Sol Ring (CMR) 472 *F*", "1 Opt (xln) 65 *E*", "2x Sol Ring", "Sol Ring", "1 Fire // Ice [APC]"
 _LINE = re.compile(
     r"""^\s*
     (?:(?P<qty>\d{1,3})\s*[xX×]?\s+)?          # optional quantity
     (?P<name>\S(?:.*?\S)?)                      # name (lazy, cannot end in whitespace)
     (?:\s+[\(\[](?P<set>[A-Za-z0-9]{2,6})[\)\]]  # optional (SET) or [SET]
        (?:\s+(?P<num>[A-Za-z0-9★†\-]{1,8}))?)?   # optional collector number
-    (?:\s+\*F\*)?                               # optional foil marker
+    (?:\s+\*(?P<finish>[FE])\*)?                # optional foil (*F*) or etched (*E*) marker
     \s*$""",
     re.VERBOSE,
 )
@@ -182,6 +184,7 @@ class CardInput:
     foil: bool | None = None  # read from the info line's star, or set by the user; None = unknown
     lang: str = ""  # two-letter language from the info line, informational
     art_hash: str = ""  # optional artwork fingerprint for the art-match hook
+    etched: bool = False  # the line's *E*: the etched finish was asked for
 
     def as_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"quantity": self.quantity}
@@ -197,6 +200,8 @@ class CardInput:
             d["foil"] = self.foil
         if self.lang:
             d["lang"] = self.lang
+        if self.etched:
+            d["finish"] = "etched"
         return d
 
 
@@ -219,6 +224,9 @@ class Resolution:
     requested: dict[str, Any] | None = None
     # Newer printings passed over for the default (not out yet, or not on paper), newest first.
     newer: list[dict[str, Any]] = field(default_factory=list)
+    # The set and collector number asked for are no printing of the card: the match is the card by
+    # name (in that set when it has one), and someone should look at the printing.
+    printing_not_found: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         self._note_foil_disagreement()
@@ -233,12 +241,16 @@ class Resolution:
             "conflict": self.conflict,
             "art": self.art,
         }
+        if self.etched:
+            out["finish"] = "etched"
         if self.requested:
             out["requested"] = self.requested
         if self.newer:
             out["newer_printings"] = self.newer
         if self.finish_unavailable:
             out["finish_unavailable"] = True
+        if self.printing_not_found:
+            out["printing_not_found"] = True
         return out
 
     @property
@@ -258,11 +270,25 @@ class Resolution:
         return self.input.foil
 
     @property
+    def etched(self) -> bool:
+        """Etched was asked for (*E*) and the matched printing comes etched."""
+        return self.input.etched and "etched" in ((self.card or {}).get("finishes") or [])
+
+    @property
     def finish_unavailable(self) -> bool:
-        """Foil was asked for and the matched printing does not come in foil."""
+        """Foil or etched was asked for and the matched printing does not come in it."""
+        if self.card and self.input.etched:
+            return not self.etched
         return bool(self.card) and self.input.foil is True and self.foil is False
 
     def _note_foil_disagreement(self) -> None:
+        if self.card and self.input.etched and not self.etched:
+            finishes = (self.card or {}).get("finishes") or []
+            comes = ", ".join(finishes) or "in no listed finish"
+            msg = f"this printing has no etched finish (it comes {comes})"
+            if msg not in (self.note or ""):
+                self.note = f"{self.note}; {msg}" if self.note else msg
+            return
         got = self.foil
         if self.input.foil is not None and got is not None and got != self.input.foil:
             finishes = (self.card or {}).get("finishes") or []
@@ -298,7 +324,8 @@ def parse_text(text: str) -> list[CardInput]:
                 collector_number=_clean_number(m.group("num") or ""),
                 quantity=max(1, min(qty, 999)),
                 raw=line,
-                foil=True if "*F*" in line else None,
+                foil=True if m.group("finish") == "F" else None,
+                etched=m.group("finish") == "E",
             )
         )
     return out
@@ -363,7 +390,7 @@ def _clean_number(number: str) -> str:
 
 def _clean_name(name: str) -> str:
     name = re.sub(r"\s+", " ", name).strip().strip("\"'").strip()
-    name = re.sub(r"\s*\*F\*$", "", name)
+    name = re.sub(r"\s*\*[FE]\*$", "", name)
     return name
 
 
@@ -381,7 +408,8 @@ def decklist_text(items: list[dict[str, Any]]) -> str:
                 name=name,
                 set_code=card.get("set") or "",
                 collector_number=card.get("collector_number") or "",
-                foil=bool(it.get("foil")),
+                foil=bool(it.get("foil")) or it.get("finish") == "etched",
+                finish="Etched" if it.get("finish") == "etched" else ("Foil" if it.get("foil") else ""),
             )
         )
     return to_text(cards)
@@ -398,7 +426,8 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     counts: dict[str, int] = {}
     foils: dict[str, int] = {}
-    prints: dict[str, set[tuple[str, str, bool | None]]] = {}
+    etched: dict[str, int] = {}
+    prints: dict[str, set[tuple[str, str, bool | str | None]]] = {}
     by_name_only: set[str] = set()
     for it in items:
         card = it.get("card")
@@ -408,8 +437,10 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         counts[name] = counts.get(name, 0) + int(it.get("quantity", 1))
         if it.get("foil") is True:
             foils[name] = foils.get(name, 0) + int(it.get("quantity", 1))
+        if it.get("finish") == "etched":
+            etched[name] = etched.get(name, 0) + int(it.get("quantity", 1))
         if it.get("status") == "printing" and card.get("set") and card.get("collector_number"):
-            foil = it.get("foil")
+            foil = "etched" if it.get("finish") == "etched" else it.get("foil")
             prints.setdefault(name, set()).add(
                 (str(card["set"]), str(card["collector_number"]), foil if isinstance(foil, bool) else None)
             )
@@ -422,16 +453,21 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if name not in by_name_only and len(prints.get(name, ())) == 1:
             set_code, number, foil = next(iter(prints[name]))
             change.update({"set_code": set_code, "collector_number": number})
-            if foil is not None:  # an unknown finish is not a claim of "not foil"
+            if foil == "etched":
+                change["finish"] = "etched"
+            elif foil is not None:  # an unknown finish is not a claim of "not foil"
                 change["foil"] = foil
             piles.append((change, qty))
         else:
-            # a finish asked for is kept even when the printing is not: foil copies first
+            # a finish asked for is kept even when the printing is not: foil, then etched copies first
             foil_qty = foils.get(name, 0)
+            etched_qty = etched.get(name, 0)
             if foil_qty:
                 piles.append(({**change, "foil": True}, foil_qty))
-            if qty - foil_qty:
-                piles.append((change, qty - foil_qty))
+            if etched_qty:
+                piles.append(({**change, "finish": "etched"}, etched_qty))
+            if qty - foil_qty - etched_qty:
+                piles.append((change, qty - foil_qty - etched_qty))
         for pile, n in piles:
             # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
             while n > 99:
@@ -516,6 +552,10 @@ class ScanService:
         # the local copy of every printing, for when Scryfall can't answer (bulk.py); set by
         # add_scan beside the database, None without one
         self.copy: PrintingsCopy | None = None
+        # every printing's artwork, for finding a card by its picture (picture.py); set by add_scan
+        self.pictures: Any = None
+        self.misses = MissStore(db)  # pictures the scanner missed, kept for the admin (misses.py)
+        self._identifying: set[str] = set()  # members with a picture being looked at right now
         self.store = ScanStore(db)
         self._in_flight: set[str] = set()
         self.queue_wait = RESOLVE_WAIT_SECONDS
@@ -528,6 +568,87 @@ class ScanService:
         self._options_at = 0.0
         self._options_next_try = 0.0
         self._options_task: asyncio.Task[None] | None = None
+
+    # -- finding a card by its picture (picture.py) ----------------------------
+    def pictures_ready(self) -> bool:
+        return self.pictures is not None and self.copy is not None and self.pictures.ready()
+
+    def pictures_status(self) -> dict[str, Any]:
+        """For the page and Admin: whether pictures are used, and how far the index is."""
+        if self.pictures is None:
+            return {"state": "off", "have": 0, "want": None}
+        st = dict(self.pictures.status)
+        if not self.pictures.enabled:
+            st["state"] = "off"
+        st["ready"] = self.pictures_ready()
+        return st
+
+    async def identify(self, data: bytes, *, owner: str) -> dict[str, Any]:
+        """The card in a straightened picture the page sent (a JPEG): the closest printing as a
+        card summary (the shape ``resolve`` gives), whether the match is sure, the printings that
+        share its artwork (for the page to choose by the set and number line) and the closest other
+        cards. One picture per member at a time (``busy`` otherwise)."""
+        from . import picture as pic
+
+        if not self.pictures_ready():
+            raise ScanError("unavailable", "Finding cards by their picture isn't ready on this gateway yet.")
+        if len(data) > pic.MAX_UPLOAD:
+            raise ScanError("invalid", "The picture is too large.")
+        if owner in self._identifying:
+            raise ScanError("busy", "Still looking at the last picture.")
+        self._identifying.add(owner)
+        try:
+            image = await asyncio.to_thread(pic.decode_picture, data)
+            if image is None:
+                raise ScanError("invalid", "That isn't a picture the scanner can read.")
+            found = await asyncio.to_thread(self.pictures.identify, image)
+            if not found.get("sure"):
+                # a card held upside down is straightened upside down: try it the other way up and
+                # keep whichever way up is the clearer match
+                from PIL import Image
+
+                turned = await asyncio.to_thread(
+                    self.pictures.identify, image.transpose(Image.Transpose.ROTATE_180)
+                )
+                if turned.get("best") and (
+                    not found.get("best") or turned.get("margin", 0.0) > found.get("margin", 0.0)
+                ):
+                    found = turned
+        finally:
+            self._identifying.discard(owner)
+        best = found.get("best")
+        if not best:
+            return {"card": None, "sure": False, "margin": 0.0, "same_art": [], "others": []}
+        copy = self.copy
+        assert copy is not None
+
+        def rows() -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[dict[str, Any]]]:
+            card = copy.printing_now(best["set"], best["collector_number"])
+            same = [
+                r
+                for a in found["same_art"]
+                if (r := copy.printing_now(a["set"], a["collector_number"])) is not None
+            ]
+            others = []
+            for o in found["others"]:
+                r = copy.printing_now(o["set"], o["collector_number"])
+                if r is not None:
+                    others.append({**r, "similarity": o["similarity"]})
+            return card, same, others
+
+        card, same, others = await asyncio.to_thread(rows)
+        if card is None:
+            return {"card": None, "sure": False, "margin": 0.0, "same_art": [], "others": []}
+        # newest first, as the printing picker lists them
+        same.sort(key=lambda r: str(r.get("released_at") or ""), reverse=True)
+        return {
+            "card": card,
+            "sure": bool(found["sure"]),
+            "margin": found["margin"],
+            "similarity": best["similarity"],
+            "same_art": same,
+            "others": others,
+        }
 
     # -- resolution -----------------------------------------------------------
     async def resolve(
@@ -693,7 +814,7 @@ class ScanService:
                         results[j] = self._deferred(inputs[j], "budget")
                 break
             if i in checks:
-                inp = CardInput(inp.name, "", "", inp.quantity, inp.raw, inp.foil, inp.lang, inp.art_hash)
+                inp = replace(inp, set_code="", collector_number="")
             before = budget.lookups
             try:
                 async with asyncio.timeout(max(0.0, budget.deadline - time.monotonic())):
@@ -927,8 +1048,20 @@ class ScanService:
                     inp, "not_found", note=str(exc), suggestions=sugg[:MAX_SUGGESTIONS], completions=sugg
                 )
         summary = summarize(card)
+        missed = bool(inp.set_code and inp.collector_number) and not (
+            str(card.get("set") or "").lower() == inp.set_code
+            and str(card.get("collector_number") or "") == inp.collector_number
+        )
+        if missed and not note:
+            # e.g. "Sol Ring (CMR) 9999": the batched pass found no such printing, the name did
+            note = (
+                f"{inp.set_code.upper()} {inp.collector_number} is no printing of {card['name']}; "
+                f"matched {str(card.get('set') or '').upper()} {card.get('collector_number')} instead; "
+            )
         if _same_name(inp.name, card["name"]):
-            return Resolution(inp, "exact", summary, note.rstrip("; "))
+            res = Resolution(inp, "exact", summary, note.rstrip("; "))
+            res.printing_not_found = missed
+            return res
         score = _similarity(inp.name, card["name"])
         if score >= self.t.fuzzy_confident_similarity:
             # Close enough that a second lookup for alternatives would be wasted pacing time.
@@ -1278,7 +1411,7 @@ class ScanService:
         missing: list[str] = []
         for n in wanted:
             hit = self.scryfall.cards.get(f"peek:{_norm(n)}")
-            if hit is not None:
+            if hit is not None and same_name(n, str(hit.get("name") or "")):
                 out[_norm(n)] = hit
             else:
                 missing.append(n)
@@ -1290,12 +1423,31 @@ class ScanService:
                 if exc.kind in ("unavailable", "rate_limited"):
                     raise ScanError(exc.kind, str(exc)) from exc
                 found = []
+            # Scryfall matches a name with its punctuation ignored ("Goblin" finds "_____ Goblin"):
+            # a card counts only for the name it really has (same_name).
             for card in found:
                 summary = summarize(card)
-                if summary.get("name"):
-                    key = _norm(str(summary["name"]))
-                    out[key] = summary
-                    self.scryfall.cards.put(f"peek:{key}", summary)
+                got = str(summary.get("name") or "")
+                for n in missing:
+                    if _norm(n) not in out and same_name(n, got):
+                        out[_norm(n)] = summary
+                        self.scryfall.cards.put(f"peek:{_norm(n)}", summary)
+            # A token or an emblem ("Goblin", "Treasure"): the collection lookup leaves them out, so
+            # a short list (the printing picker asks for one name) looks for the exact name, tokens
+            # included. Never for a long list: each is one more request.
+            left = [n for n in missing if _norm(n) not in out]
+            if 0 < len(left) <= PEEK_EXTRAS:
+                for n in left:
+                    try:
+                        with self._lookup_slot(owner):
+                            card = await self.scryfall.exact_card(n)
+                    except ScryfallError as exc:
+                        if exc.kind in ("unavailable", "rate_limited"):
+                            raise ScanError(exc.kind, str(exc)) from exc
+                        continue
+                    summary = summarize(card)
+                    out[_norm(n)] = summary
+                    self.scryfall.cards.put(f"peek:{_norm(n)}", summary)
         return [out[_norm(n)] for n in wanted if _norm(n) in out]
 
     async def search_cards(
@@ -1428,7 +1580,7 @@ class ScanService:
             "needs_review": [
                 i
                 for i, r in enumerate(results)
-                if r.status not in ("exact", "printing") or r.finish_unavailable
+                if r.status not in ("exact", "printing") or r.finish_unavailable or r.printing_not_found
             ],
             "status_counts": {k: v for k, v in counts.items() if v},
             "cards": items,
@@ -1556,8 +1708,19 @@ class ScanService:
         for name in names[:MAX_CARD_CHECK_LOOKUPS]:
             try:
                 card = await self.scryfall.named(name, fuzzy=True)
-            except ScryfallError:
-                continue
+            except ScryfallError as exc:
+                if exc.kind != "not_found":
+                    continue
+                # Scryfall's fuzzy match gives up on a swapped pair ("Sol Rnig"); resolve_cards'
+                # own recovery (letter swaps, then the name's first letters) still places it.
+                budget = _Budget(MAX_RECOVERY_LOOKUPS_PER_CALL, time.monotonic() + self.call_seconds)
+                try:
+                    res = await self._recover(CardInput(name=name), "", budget)
+                except ScanError:
+                    res = None
+                if res is None or not res.card:
+                    continue
+                card = res.card
             found = str(card.get("name") or "")
             if found and found.casefold() != name.casefold():
                 out[name] = found
@@ -1626,6 +1789,9 @@ def _matches_ident(card: dict[str, Any], ident: dict[str, Any]) -> bool:
 
 def _ident_key(ident: dict[str, Any]) -> str:
     return "|".join(f"{k}={str(v).lower()}" for k, v in sorted(ident.items()))
+
+
+PEEK_EXTRAS = 2  # names a peek looks up among tokens and emblems when the collection lookup misses them
 
 
 def _norm(s: str) -> str:

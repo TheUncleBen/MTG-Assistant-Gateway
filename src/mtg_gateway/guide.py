@@ -55,8 +55,10 @@ GUIDE_CSS = """
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
 .gsearch .status:empty{display:none}
 /* the contents page: a card a part, its topics as rows */
-.gcontents{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem;
-  margin-top:1rem}
+/* (0.7.47 polish) the four parts one, two or four a row, never three and one left alone */
+.gcontents{display:grid;gap:1rem;margin-top:1rem;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,max(18rem,calc(50% - .5rem))),1fr))}
+@container (min-width:76rem){.gcontents{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .gcontents .gpart{margin:0}
 .gtoc{list-style:none;margin:0;padding:0}
 .gtoc li{margin:0}
@@ -585,6 +587,14 @@ def build(
         "what moved since, and <strong>Put this list back (review first)</strong> makes a proposal you "
         "confirm like any other. <strong>Since your last test</strong> sets its numbers beside the "
         "deck's test before.</span></li></ol>"
+        "<p>Some cards the solo test can't play on its own: it lists them under <strong>Played without "
+        "their effect</strong>, and tapping one says what the test did with it. A <strong>card "
+        "model</strong> teaches it one such card: a short description of the card's effect that your "
+        "assistant writes and the gateway checks. Looking a card up changes nothing; a card model "
+        "changes how your own solo tests play it. <a href='/history/models'>Card models</a> explains "
+        "them and lists yours, each with what is saved, a request to have your assistant change it, "
+        "and Remove. <strong>Shortcuts the solo test takes</strong> lists the rules it simplifies to "
+        "play quickly, and which way each can push the numbers.</p>"
         "<p>The website starts every kind of test an assistant can: a pasted list (<strong>Test a "
         "pasted list</strong> on Reports), a waiting proposal (<strong>Test this change</strong> on its "
         "page, played against the deck as it is now), a snapshot (<strong>Test this version</strong> "
@@ -783,8 +793,12 @@ def build(
         "account. <a href='/precons'>Precons</a> lists every preconstructed deck Archidekt knows, by set.</p>"
     )
     how_scan = (
-        "<p><a href='/scan'>Scan</a> turns physical cards into a list with your phone camera. Text "
-        "recognition runs on the phone; the card is then matched on Scryfall through the gateway.</p>"
+        "<p><a href='/scan'>Scan</a> turns physical cards into a list with your phone camera. Once the "
+        "gateway has learned every printing's picture, hold a card inside the frame and keep it still: it "
+        "is found by its picture and added at once. The bar under the camera shows the card added; "
+        "<strong>Change</strong> fixes its printing, finish, count or the card itself, and "
+        "<strong>Undo</strong> takes it back. Until then the page reads the title on the phone and "
+        "matches it on Scryfall through the gateway, as below.</p>"
         "<ol class='steps'>"
         "<li><span><strong>Camera.</strong> Hold a card in the frame with its title in the dashed box and "
         "tap the shutter, or switch on <strong>Auto</strong> and show cards one after another: sure "
@@ -798,9 +812,8 @@ def build(
         "<a href='/collection'>binder</a>, add them to one of your decks, start a new deck from them, "
         "or save the scan for later (your assistant can pick it up too).</span></li></ol>"
         "<p>You can also type or paste names instead of using the camera, and earlier scans are listed "
-        "under <strong>Sessions</strong>. In the Android app the orange shutter and <strong>Auto</strong> "
-        "on the Scan page, and <strong>Scan with the app's camera</strong> on the Account page, use the "
-        "phone's own camera, with its torch brightness and zoom.</p>"
+        "under <strong>Sessions</strong>. In the Android app <strong>Scan cards</strong> on the Account "
+        "page opens the same Scan page, with the same camera.</p>"
         "<p>A scan is a draft that stays here as long as you like, up to a whole deck: fix misread cards, "
         "printings and quantities first, then send it to your binder or a deck, which removes the "
         "draft. Nothing expires; you delete what you do not want.</p>"
@@ -874,17 +887,20 @@ def build(
     how_app = (
         "<p>The <a href='/install?for=android'>Android app</a> shows these same pages as a "
         "native-feeling app with the phone "
-        "camera built in. Sign in once, then it opens on your home page. The app's own actions (Scan with "
-        "the app's camera, Reload, Open a copied link, Change gateway, Check for app updates) are under "
+        "camera built in. Sign in once, then it opens on your home page. The app's own actions (Scan "
+        "cards, Reload, Open a copied link, Change gateway, Check for app updates) are under "
         "This app on the <a href='/account'>Account</a> page. A deck's Share opens the phone's own share "
         "sheet. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
         "open in the app.</p>"
         "<p>The app can also send you <strong>push notifications</strong>: when an assistant leaves "
-        "changes waiting for you, a deck report finishes, a watched price crosses your price alert, or "
-        "something new arrives in your Archidekt Alerts (a comment, a reply, a new follower). Turn them "
-        "on, and choose which, in the Push notifications card on the "
-        "<a href='/account/details/notifications'>Account</a> page inside the app. Pressing one "
-        "opens the right page here.</p>"
+        "changes waiting for you, a deck report finishes, a watched price crosses your price alert, a new "
+        "assistant connects, or something new arrives in your Archidekt alerts (a comment, a reply, a new "
+        "follower). Each one says its type first, then the deck or card it is about (Price drop, then "
+        "Sol Ring), and each type has its own channel in Android's settings. Turn them on, and choose "
+        "which types, under <a href='/account/details/notifications'>Push notifications</a> inside the app. "
+        "Pressing one opens the right page here and marks it read; Mark read on the notification does "
+        "the same without opening it. Every alert is also under <a href='/notifications'>Alerts</a>, the "
+        "bell, where you can mark them read, dismiss them or clear them all.</p>"
         "<p>On a foldable, the folded screen has the tabs at the bottom and the unfolded screen moves them "
         "to a rail down the left edge, like other Android apps; the layout follows the window, so split "
         "screen and pop-up windows work too. While scanning, half-folding the phone puts the camera on "

@@ -17,6 +17,7 @@ import pytest
 
 from .test_deck_menu_browser import Server, _chromium
 from .test_deck_views_browser import _error, _menu_page, _open_menu
+from .waits import sideways
 
 pytest.importorskip("playwright")
 
@@ -61,11 +62,12 @@ OVERLAP = """() => {
   return 0;
 }"""
 
-# the link colour a plain <a> gets, compared with an element's own
+# a colour in the blue hue of a link the site did not style
 IS_BLUE = """(el) => {
-  const probe = document.createElement('a'); probe.href = '#'; document.body.appendChild(probe);
-  const link = getComputedStyle(probe).color; probe.remove();
-  return getComputedStyle(el).color === link;
+  // blue: the hue a browser's or a site's link colour has (0.7.47: the site's links are the text
+  // colour, so a link drawn blue is one the site did not style)
+  const [r, g, b] = getComputedStyle(el).color.match(/[\\d.]+/g).map(Number);
+  return b > r + 40 && b > g + 15;
 }"""
 
 
@@ -136,9 +138,7 @@ def test_deck_page_notes_after_instant_saves(
         assert wb is not None and wb["height"] >= (44 if width < 900 else 32)
         top = pinned.bounding_box()
         assert top is not None and top["y"] >= 0
-        assert (
-            page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
-        )
+        assert sideways(page) <= 0
         if SHOTS:
             page.screenshot(
                 path=str(Path(SHOTS) / f"deck-toasts-{width}-{scheme}{'-z200' if big else ''}.png")

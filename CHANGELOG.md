@@ -7,6 +7,247 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.47] - 2026-11-11
+
+Proposal cards in Claude and ChatGPT no longer fill the chat: only the newest card of a change
+that still waits draws in full. Signing in to the Android app comes back to the app by itself
+after Continue, and every page in the app can be pulled down to refresh. Every page reads as one app on every screen: centred on a laptop
+and a wide desktop, one column where two left holes, plain words where program values or
+placeholders showed, and no blue links. The Binder is one page for every card you own or want,
+with lists for both, Select for bulk changes, price alerts that follow your own defaults, and no
+watch limit. Every alert is in one place: the bell opens Alerts, where each one can be read,
+marked read, dismissed or cleared, on every device at once, and each push says at a glance
+what it is ("Price drop · Sol Ring"). The scanner finds cards by their picture while you hold them up, the same in the browser and the app, and lets you swap the printing, finish or card before it adds one.
+
+### Upgrade notes
+- **The database goes to schema 24** at the first start (the gateway saves a copy first, as in
+  [docs/UPGRADING.md](docs/UPGRADING.md)): lists can hold cards you own, each watched card
+  knows whether it follows your price alert defaults, and each alert knows its type and whether
+  it was read or dismissed. Alerts already seen in the bell count as read. Cards whose alerts match the default they
+  were given follow the new defaults (10% under and 20% over the price when added); cards with
+  alerts of their own keep them.
+- **The card watch limit is off by default.** The **Cards one member may watch** setting
+  (Settings › Watchlists and prices) now means "no limit" at 0 and is 0 unless you saved a
+  number; a number you saved stays. To turn watching
+  off, use the **Watchlists** switch.
+- **Members choose where each type of alert goes** under Account › Push notifications: Off, Alerts
+  only, or Alerts and push. What they had unticked before stays out of their pushes. Every type
+  is pushed by default except changes an assistant applied without asking (Alerts only).
+- **Members update the Android app** for a notification category per type, grouped messages
+  and Mark read on each push. An older app still shows the pushes, without these.
+- **The research image is `1.3.2-mag8`.** The example stack and compose files name it; change it
+  if you pinned the image yourself.
+- **The scanner learns every printing's picture once, in the background.** A few minutes after
+  the first start the gateway fetches Scryfall's small picture of each paper printing (about
+  100,000 pictures, roughly 1.5 GB in all, about 8 a second, so several hours) and keeps a
+  summary of each artwork in the data folder, `<MTG_DATA_DIR>/scan-pictures.sqlite` (about
+  150 MB for 100,000 printings). After that it only fetches new printings. Until the first round
+  is done the scanner reads card titles as before; Admin › Card scanner shows how far it is. It
+  uses the daily printings copy, so **Keep a local copy of card printings** (Settings, General)
+  must stay on, and `MTG_SCAN_ART_ENABLED=false` turns it off. If you restrict outbound traffic,
+  allow `cards.scryfall.io`. The summary is not part of the backup (Scryfall gives it again);
+  deleting the file is safe and starts the fetching over.
+- **About 50 to 60 MB more memory** (measured on an x86 machine, not yet on a Pi): the summary
+  in memory (about 27 MB for 100,000 printings) and the picture model with its runtime (about
+  20 MB, loaded at the first scan). The default `MTG_MEMORY_LIMIT` of 256 MB stays the limit;
+  check the gateway's memory on your own setup before lowering it.
+- The image gains Google's MediaPipe image model (`mobilenet_v3_small.tflite`, about 4 MB,
+  Apache-2.0) and the LiteRT runtime that runs it, fetched and checked at build time with the text
+  recognition files. The missed pictures table is created at
+  start, outside the schema steps.
+- The Android app opens the page's own scanner once the gateway has learned the card pictures.
+  Until then, and in an app from before 0.7.47, the app's own camera panel scans as before.
+- No new environment variables.
+
+### Changed
+- **The scanner finds a card by its picture, while you hold it up.** Hold a card inside the
+  frame and keep it still for a moment: the page sends the straightened card to the gateway,
+  which compares its artwork with every printing's (in a test on 8,474 printings with made-up
+  phone photos, the right card 99 times in 100; real phones still to be measured). No title
+  reading, no button to press, and the same scanner in the browser and the Android app (the big
+  button that opened a separate camera is gone once the pictures are learned). Each card found is
+  added at once; the bar under the camera shows it, with **Change** (the printing, the finish,
+  the count, or another card: "Not this card" lists the next closest ones) and **Undo**. A card
+  the gateway isn't sure of is added too, marked **Check it**. Printings that share one artwork
+  (reprints) are told apart by the set and number at the bottom left of the card, or the set
+  lock; when neither can, the card is kept by name and marked **Check it**. The camera takes the
+  screen: only the count, **Flash** (was Torch), **Camera settings**, **Scan area** and zoom sit
+  on its corners. Zoom chips (where the camera reports a zoom range) and two fingers on the
+  viewfinder zoom; **Scan area** moves and resizes the frame, kept on the device. Camera settings
+  holds brightness (where the camera reports it), **Saturation** (applied by the page, kept on
+  the device), Set, Foil, a photo from your pictures, and typing a name. Title reading stays for
+  photos the picture can't place.
+- **A card the scanner can't find can be kept for the admin** ("Keep this picture for the
+  admin") instead of a message asking you to send photos to whoever runs the gateway. The new
+  **Admin › Card scanner** page shows the pictures kept, who kept them and when, with Delete, and
+  how far the picture index has got. Pictures are deleted after 30 days, at most 500 are kept,
+  one member can keep 50 a day, and they go with a member's data when it is deleted.
+- **A new deck is made in seconds.** Applying a new deck looked its cards up on Archidekt one at a
+  time, which took over two minutes for a 100-card deck. The printings now come from one card
+  lookup and one Archidekt request per 60 cards; a card those miss is still looked up on its own.
+- An applied proposal's result says where its time went (`seconds`: card lookups, the backup
+  copy, the write, the read-back, and the time spent waiting for a turn to ask Archidekt).
+- **Alerts is the one place for every alert.** The bell and Alerts on the rail open one list,
+  newest first: changes waiting for you, changes applied for you, finished reports, price
+  alerts, Archidekt's alerts, a new assistant, your summary and, for admins, a newer release or
+  a failed backup. Each row names its type, opens its page and is marked read there; its ⋮ (or
+  a right-click, or a press and hold) marks it read or unread or dismisses it, and **Mark all
+  read** and **Clear all** act on every row, with Undo. Read and dismissed follow you to every
+  device, and a push you read or dismissed anywhere leaves your phones. Type, Show (All or
+  Unread) and search narrow the list. Assistants read the gateway's own alerts too.
+- **Each push says what it is.** Titles start with the type and name the deck or card ("Review ·
+  Atraxa", "Price drop · Sol Ring", "Archidekt · Forum reply", "Report ready · Atraxa"). On
+  Android, Waiting for you and New assistant pop up, summaries are silent, and the rest make a
+  sound without popping up; each type can be changed in Android's settings for the app.
+- **Home's notices can be dismissed for good.** A newly connected assistant's notice and the
+  admin's newer-release notice have a ×, kept on every device. Needs you has one row for new
+  alerts in place of separate price and Archidekt rows. A page's "Saved." notice is gone after
+  a reload.
+- **One Binder.** Binder opens one page for every card you own or want: All cards, Owned, Want,
+  Price alerts and your lists beside one list of rows (side by side on a computer or an open
+  Fold, one at a time on a phone). A printing you own and watch is one row with its price, its
+  move over a week, the copies you own, its alert prices and its list. **Select** ticks rows for
+  Price alerts, Add to list, Watch, Stop watching, Tag on Archidekt (adds a binder tag; the
+  others stay) and Remove from binder, each with Undo. The Archidekt collection page, Archidekt
+  lists, Decks I watch and Watch settings are under More, and their pages lead back with
+  "‹ Binder".
+- **Lists hold cards you own and cards you want.** Archidekt's binder tags stay Archidekt's and
+  are a filter on the Binder.
+- **Price alerts by default: 10% under and 20% over the price when added, moves under $0.50
+  ignored**, so a cheap card does not alert on a few cents. **Watch settings** shows what your
+  defaults mean in dollars, and cards that use them change when you save new ones.
+- **No watch limit by default**; the owner can still set one.
+- **No more walls of proposal cards in Claude and ChatGPT.** A proposal card in the chat now
+  shows one line until it has checked that it is the newest card of a change that still waits.
+  Only that card draws its list, pictures and buttons; a card for a change that was updated,
+  withdrawn, replaced, applied or rejected stays one line and never loads its pictures, so a
+  long chat stays light. If the check can't get through within a few seconds, the card shows in
+  full as before (Approve always checks once more).
+- From the third new deck one assistant proposes within 5 minutes, the result tells it that each
+  one put a card in your chat and to check first and change the waiting one instead
+  (`plan_first`, as for deck edits). `withdraw_proposal` tells assistants to amend a waiting
+  proposal rather than withdraw it and propose again.
+- **Signing in to the Android app returns to the app by itself** after you press Continue on
+  "Sign in to the app?", also when the sign-in passes straight through because you are still
+  signed in at your sign-in provider: no second tap on "Open the app".
+- **Pull to refresh on every page of the Android app**, except the scanner, the sign-in pages and
+  a goldfish game. A pull waits while something you typed or changed is not saved, while a save
+  is on its way, or while you hold a card.
+- **The Android app no longer installs its own updates.** Update still downloads the new app and
+  checks it, then saves it to Downloads and opens the Downloads view: open the file there to
+  update. The app no longer asks for permission to install apps.
+- **A QR code on the Android setup page.** Read on a computer, the Android section of the setup
+  page shows a QR code of its own address: point the phone's camera at it to open the page on the
+  phone. Phones don't show it.
+- A sign-in that runs out now leaves a line in your activity ("Signed out: the sign-in ran out")
+  saying whether it was unused too long or reached its longest, and how long it lasted.
+- **Pages are centred on wide screens**, beside the Fold's side rail too. Account, Account details
+  and Binder › Lists are one centred column of grouped rows on every screen, with Sign out as a
+  full-width row; Deck settings, Admin settings and the proposal review sit in the middle of the
+  page.
+- **The card viewer is a list of grouped rows**: Printings first, then the deck's actions (Copies,
+  Move to, Add to binder, Edit in deck editor, and Remove from deck last, in red), then Rulings,
+  Price history and the sites. On a narrow screen or with large text it is one column.
+- **Links are the text's colour, underlined**, orange on hover, on the website and in reports.
+- **Clearer numbers and labels**: a deck category reads "12 cards · $34.50" (no "Qty:"); the deck
+  header leaves out a cost nobody knows and a salt sum of 0; a deck with no likes shows no "0";
+  Binder, card search and Watchlist rows leave out a price nobody knows instead of "unknown" in
+  every row (the Binder's Value tile says it once); a list that fits on one page shows no pager;
+  Admin says "Off: no backup folder is set up" in plain words instead of setting names; "Not
+  connected yet" replaces "None connected", the curve's "None" is "All cards" and the colour
+  tag's "None" is "No color tag". The per-category "drag cards here" hint is gone, and the deck
+  page's "Hold a card to move it" line shows on a member's first three deck pages only.
+- **No holes beside short panels**: the deck editor's categories are one column at the page's
+  width; rows of key numbers share their last line (five tiles no longer leave a gap at the
+  bottom right); the Guide's four parts are one, two or four a row; Home keeps one column when
+  large text leaves no room for two.
+- **Rows of buttons and fields share their line** when they wrap, so no button sits alone on a
+  line and no filter stretches alone across one; Goldfish's buttons share their lines on a phone,
+  and its status line says the turn and the library (each zone's heading has its own count).
+
+- **Card models explained, and yours to review.** Card models (in the navigation) is now a page
+  of its own: what a card model is, how it differs from looking a card up, how to add, change and
+  remove one, and who sees them. Each of your card models opens to what your solo tests do with it
+  in plain words ("When it enters: draw 2 cards."), the exact saved data, **Open card**, **Ask your
+  assistant to change it** (a request to paste into Claude or ChatGPT that holds what is saved
+  now) and **Remove**; its menu (right-click, press and hold, ⋮) has the same. A model saved for
+  an older version of the solo test says so. The report page and the Goldfish page link to it.
+- **Shortcuts the solo test takes** (was "Shortcuts the model takes") on a report: each shortcut
+  says whether your results may look better or worse than real games because of it (or the
+  effect is small either way) and why, with its cards as names you can tap, the ones that can
+  make results look better first. The summary above the groups says how many cards a shortcut touched. Markdown and HTML
+  exports list the same.
+- **A card tapped in a report says what the test did with it**: played without its effect, needs
+  opponents, never mattered, or which shortcut, and for a card played without its effect, a link to
+  its card model or to what card models are.
+- A report's validation says its verdict once (the label), with the cards listed under the line
+  that names them; the solo test's warning reads "Not found on Scryfall, so the solo test played
+  without them"; the deck statistics leave out the bracket when none is set or estimated (no bare
+  dash); the solo test's seven numbers share the last line instead of leaving one alone.
+
+### Fixed
+- Activity no longer shows “An assistant connected” each time an assistant renews its access,
+  about once an hour. A renewal is listed as “An assistant renewed its access”, shown only when
+  you pick it by name.
+- **A card tapped in a report opened as bare text under the page** (its name twice, a boxed ×,
+  unstyled rows). The report page and Card models now load the card viewer's styles, as the
+  deck pages do.
+- **Menus open at their buttons.** A ⋮ menu, and the deck page's Test and play and Deck tools
+  menus, open just under their button, or just over it near the bottom of the window. Before,
+  they were pushed up over the button.
+  On a phone, the More sheet rises from the More tab instead of the middle of the screen.
+- Menu items line up: at large text every item's icon is the same size, so the words start in one
+  column, and the Binder's More menu on a phone keeps its icons.
+- Assistants' Guided setup and Disconnect all assistants span the column, as Sign out does on
+  Account.
+- In Deck stats, Lands only lines up with the row above when large text wraps it to its own line.
+- On an open Fold, a small tablet or a split screen (600 to 900 px):
+  - A row of buttons no longer leaves one alone on its last line. The deck page's buttons and a
+    report's Markdown, HTML page, Copy and Delete… sit two and two.
+  - The deck editor's card rows stack, so a card's name is never squeezed until it breaks inside
+    a word.
+  - At large text, the editor's "Also keep a backup copy" and the buttons in Deck settings wrap
+    their words instead of running past the window.
+  - In the grid view at large text, the tiles grow with the text, so a long card name stays whole.
+- Deck settings shows its list of sections only when there is room for it on both sides of the
+  settings. In a narrower window or at large text the settings are one centred column, instead of
+  being pushed to the right by the list.
+- The Android app no longer loses a push sent while its connection to the gateway had gone
+  quiet before the first push arrived: it connects again from where that connection stopped.
+- A list line marked `*E*` (etched) keeps its etched finish in `resolve_cards`, scan sessions and
+  new decks, and says so when the printing has no etched finish.
+- A set and collector number that are no printing of the named card are flagged in
+  `resolve_cards` instead of quietly matching another printing.
+- `check_deck_changes` suggests the card it means for a misspelled name, as `resolve_cards` does,
+  and names an asked finish (foil or etched) that the printing is not made in; a proposal with
+  one says so too.
+- `validate_decklist` names a split card as the list did ("Fire // Ice", not "Fire").
+- An error page from the research service reads as one plain sentence, and a precon file name
+  that doesn't exist says so and points to `precon_search`.
+- `scryfall_price_list` passes over a newest printing that has no price yet; `edhrec_combos` says
+  its deck counts are across all of EDHREC.
+- `get_summary` says which printing of a watched card it means when two are watched, and
+  `watch_card` says that a watch by name follows the cheapest printing.
+- An amended proposal's "what changed" no longer lists a row as both added and dropped when only
+  its rule warning changed.
+- A proposal's next step reads as one plain sentence.
+- At 200% text on a small phone, a filter sheet's Clear filters and Show results no longer
+  cover the sheet's last control (the card size).
+- Long names break between their parts instead of inside a word (a member's name, a printing's
+  set and rarity).
+- Number fields in Admin settings no longer look like payment fields to the browser.
+- A report whose solo test failed always says its own reason: two failed reports opened one
+  after the other could show the first one's reason on both.
+- A token's exact name finds the token: "Goblin" opens Goblin tokens, not "_____ Goblin", and a
+  card's back face or second half ("Insectile Aberration", "Ice") finds its card. An exact lookup
+  with a set code keeps that set.
+- Anything a page marks as hidden stays hidden (the deck header's "Est unknown" showed anyway).
+- A scan session an assistant saves keeps each card's foil ("*F*"), so a deck or binder made
+  from it adds the foil copy.
+- A deck made or edited from a scan session says which scanned cards were left out because no
+  card was found for them yet.
+- A deck-size note says "1 card", not "1 cards".
+
 ## [0.7.46] - 2026-10-28
 
 Assistants keep one live card per change in the chat, proposals never apply themselves, and tool

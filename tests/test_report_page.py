@@ -132,7 +132,7 @@ def test_sections_are_flat_and_the_groups_are_inset_lists() -> None:
         ("Played without their effect", "32 of 98 cards (33% of the deck)"),
         ("Needs opponents", "17 of 98 cards (17% of the deck)"),
         ("Played with their effect but never mattered", heads[2][1]),
-        ("Shortcuts the model takes", heads[3][1]),
+        ("Shortcuts the solo test takes", heads[3][1]),
     ]
     assert model.count("<span class='disc'>Details") == 4
     assert model.count("<details class='ig-info'>") == 4  # all closed: no wall of text
@@ -175,7 +175,7 @@ def test_card_lists_keep_even_rows_and_name_the_commander() -> None:
     two = rp.model_section_html(
         {"deck_size": 60, "honesty": {"unrecognized": [{"name": "Opt", "copies": 4}]}}
     )
-    assert "class='cardlink' data-card='Opt'>4× Opt</button>" in two
+    assert re.search(r"class='cardlink' data-card='Opt'[^>]*>4× Opt</button>", two)
     assert "drawn 0%" not in html
     # the commanders are marked from the report's own data: the run's commander (Liesa, drawn 0% in
     # the fixture) and the deck's commanders

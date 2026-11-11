@@ -42,7 +42,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route, request_response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, smallpage, theme, ui
+from . import __version__, assistants, notify, smallpage, theme, ui
 from .admin import add_admin_routes
 from .alerts_push import AlertWatch
 from .api import add_api_routes
@@ -66,6 +66,7 @@ from .auth_provider import (
     cookie_name,
 )
 from .backup import nightly_loop, purge_loop
+from .binder_hub import add_binder_routes
 from .browse import add_browse_routes, add_browse_tools
 from .cards import (
     CardLinks,
@@ -97,7 +98,7 @@ from .latepage import LatePageMiddleware, LateStore, add_late_routes
 from .membership import SIGN_IN_AGAIN, Membership, MembershipChecker, session_holder
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
-from .notify import Notifier, add_stream_route, replace_old_topics
+from .notify import Notifier, add_read_route, add_stream_route, replace_old_topics
 from .oidc import OIDCClient
 from .pages import SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
@@ -1047,7 +1048,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             await asyncio.to_thread(state.decks.purge_expired_links)
         except Exception:  # never keep the gateway from starting; the hourly round tries again
             logger.exception("sealing or purging stored Archidekt sessions failed")
-        tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
+        tasks = [asyncio.create_task(purge_loop(state.db, also=hourly_purge(state)))]
         # the decks of changes cut off by the last shutdown (or the backstop) are read back
         tasks.append(asyncio.create_task(state.decks.read_back_loop()))
         if state.reports is not None:
@@ -1057,6 +1058,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             if state.scan.copy is not None:
                 # the local copy of Scryfall's printings, refreshed daily (scan/bulk.py)
                 tasks.append(asyncio.create_task(state.scan.copy.loop(), context=contextvars.Context()))
+            if getattr(state.scan, "pictures", None) is not None:
+                # every printing's artwork, for the scanner (scan/picture.py)
+                tasks.append(asyncio.create_task(state.scan.pictures.loop(), context=contextvars.Context()))
         if state.sweep is None:
             state.sweep = AuthentikSweep(s, state.db, state.decks)
         if state.sweep.enabled:
@@ -1082,6 +1086,13 @@ def build_mcp_server(state: AppState) -> MCPServer:
         # in a context of its own (never inside a member's apply or slot)
         tasks.append(asyncio.create_task(state.decks.backup_delete_loop(), context=contextvars.Context()))
         updates = UpdateChecker(s.update_check)
+        updates.on_newer = lambda found: admin_alert(
+            state,
+            notify.push_title("gateway", f"Update {found['version']}"),
+            f"Gateway {found['version']} is available (this one runs {__version__}). The steps are on Admin.",
+            f"update-{found['version']}",
+            "/admin#updates",
+        )
         if updates.enabled:
             tasks.append(asyncio.create_task(updates.loop()))
         if s.backup_dir is not None:
@@ -1089,7 +1100,17 @@ def build_mcp_server(state: AppState) -> MCPServer:
             tasks.append(
                 asyncio.create_task(
                     nightly_loop(
-                        state.db, s.backup_dir, s.backup_hour_utc, s.backup_keep_days, s.backup_copy_dir
+                        state.db,
+                        s.backup_dir,
+                        s.backup_hour_utc,
+                        s.backup_keep_days,
+                        s.backup_copy_dir,
+                        on_failed=lambda error: admin_alert(
+                            state,
+                            notify.push_title("gateway", "Backup failed"),
+                            f"Tonight's backup failed ({error}). The gateway's log says why.",
+                            f"backup-{time.strftime('%Y-%m-%d', time.gmtime())}",
+                        ),
                     )
                 )
             )
@@ -1273,6 +1294,15 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # (prices.py), which exist only with MTG_WATCHLISTS_ENABLED: off, there is no price service, so
     # no Watchlist page or API, no watch tools and no daily price check. Stored rows stay.
     state.notifier = Notifier(s.ntfy_url, s.ntfy_token, state.db, s.public_url)
+
+    def is_admin(sub: str) -> bool:  # the gateway's own alerts (KINDS "gateway") reach admins only
+        user = state.db.get_user(sub) or {}
+        return bool(s.admin_group and s.admin_group in (user.get("groups") or []))
+
+    state.notifier.admin_check = is_admin
+    from . import update_check
+
+    update_check.dismissed_for = lambda sub: state.db.get_pref(sub, "update.dismissed")
     # every start: only a topic the gateway made is an app's key; a replaced one goes from the
     # copies saved at database upgrades too
     if replace_old_topics(state.db):
@@ -1294,6 +1324,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     state.db.price_days = s.price_history_days
     _notify_events(state)
     add_watchlist_routes(server, state)
+    add_binder_routes(server, state)
     add_watchlist_tools(server, state)
     add_summary_tool(server, state)
     # Every tool's input schema self-contained: nested shapes (a deck change, the simulator's
@@ -1312,6 +1343,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
 
     add_gateway_routes(state, h)
     add_stream_route(state, server)  # the Android app's notifications (notify.py)
+    add_read_route(state, server)  # the app's Mark read on a message (notify.py)
 
     return server
 
@@ -1367,6 +1399,22 @@ WAITING_SETTINGS = frozenset(
 )
 
 
+async def admin_alert(state: AppState, title: str, message: str, ukey: str, path: str = "/admin") -> None:
+    """A gateway alert (notify.KINDS "gateway") for every admin, kept once per ``ukey``."""
+    s = state.settings
+    if state.notifier is None or not s.admin_group:
+        return
+    with state.db._lock:
+        rows = state.db._conn.execute("SELECT sub, groups_json FROM users").fetchall()
+    for r in rows:
+        try:
+            groups = json.loads(r["groups_json"] or "[]")
+        except ValueError:
+            continue
+        if isinstance(groups, list) and s.admin_group in groups:
+            await state.notifier.send(r["sub"], "gateway", title, message, path, ukey=ukey, retry=True)
+
+
 def _notify_events(state: AppState) -> None:
     """Hook the member's notifications (notify.py) to the events they may ask for: one message per
     deck while an assistant's changes wait there for their own press, kept in step with every
@@ -1388,16 +1436,75 @@ def _notify_events(state: AppState) -> None:
         state.live.on_change.append(setting_changed)
 
     def report_finished(sub: str, report_id: str) -> None:
+        name, line = state.reports.finished_words(report_id) if state.reports is not None else ("", "")
         notifier.soon(
             sub,
-            "reports",
-            "Deck report finished",
-            "A deck report is ready to read.",
+            "report",
+            notify.push_title("report", name),
+            line or "A deck report is ready to read.",
             f"/history/reports/{report_id}",
+            subject=name,
         )
 
     if state.reports is not None:
         state.reports.on_finished = report_finished
+
+    def assistant_named(sub: str, key: str | None = None, client_id: str | None = None) -> Any:
+        if key is None and client_id:
+            key = assistants.assistant_key(state.db, client_id)
+        return next((a for a in assistants.connected(state.db, sub) if a.key == key), None)
+
+    def new_assistant(sub: str, key: str, family: str = "") -> None:
+        # read once the sign-in's tokens are saved (the send runs after this call returns)
+        async def go() -> None:
+            a = assistant_named(sub, key)
+            name = a.name if a else "An assistant"
+            own = state.db.assistant_mode(sub, key)
+            mode = assistants.mode_label(own if own else state.decks.mode_of(sub))
+            await notifier.send(
+                sub,
+                "account",
+                notify.push_title("account", name),
+                f"“{name}” can now use your account. Its approval mode: {mode}.",
+                a.href if a else assistants.PAGE,
+                subject=name,
+                ukey=assistants.alert_ukey(key, family),
+                retry=True,
+            )
+
+        notifier._background(go())
+
+    state.db.on_new_assistant = new_assistant
+
+    def applied_for_you(sub: str, row: dict[str, Any], _out: dict[str, Any]) -> None:
+        a = assistant_named(sub, client_id=row.get("created_by_client"))
+        who = a.name if a else "An assistant"
+        name = str(row.get("deck_name") or "") or "Unnamed deck"
+        notifier.soon(
+            sub,
+            "applied",
+            notify.push_title("applied", name),
+            f"{who} applied changes without asking, as your approval mode allows. Undo from History.",
+            f"/proposals/{row['id']}",
+            subject=name,
+        )
+
+    state.decks.on_applied = applied_for_you
+
+
+def hourly_purge(state: Any) -> Callable[[], None]:
+    """What the hourly purge does besides the database's own expiry: the expired Archidekt sessions,
+    and the scanner's missed pictures past their 30 days (scan/misses.py), so they go on time even
+    when no one keeps another picture or opens Admin › Card scanner."""
+
+    def run() -> None:
+        try:
+            state.decks.purge_expired_links()
+        finally:
+            if getattr(state, "scan", None) is not None:
+                state.scan.misses.purge()
+
+    return run
 
 
 def create_app(

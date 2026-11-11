@@ -53,7 +53,35 @@ like an app.
 
 What's on it:
 
-- **Camera.** Hold a card in the card-shaped frame with its title inside the
+- **Finding cards by their picture (from 0.7.47).** Once the gateway has
+  learned every printing's picture ([below](#finding-cards-by-their-picture)),
+  the camera works this way, in the browser and in the Android app alike:
+  hold a card inside the frame and keep it still for a moment. The page
+  finds the card's outline, straightens it and sends that picture (a JPEG of
+  about 50 KB) to the gateway, which compares its artwork with every
+  printing's. The card is added at once, with no button to press. The bar
+  under the camera shows the card added, its printing and finish, with
+  **Change** (its printing, with the printings that share its artwork one tap
+  away and **Other printings** for the rest, the finish, the quantity, and
+  **Not this card** with the next closest cards) and **Undo**. A card the
+  gateway isn't sure of is added too, marked **Check it**. The same card
+  isn't sent again until it has left the frame. Printings that share one
+  artwork (reprints) are told apart by the set and number at the bottom left
+  of the card, read on the phone among those printings only; the **Set** box
+  picks too, and when neither can, the card is kept by name and marked
+  **Check it**. The camera takes the screen: over its corners only the
+  running count, **Flash**, **Camera settings**, **Scan area** and zoom.
+  Zoom chips (0.6×, 1×, 2× and so on, where the camera reports a zoom range)
+  and two fingers on the viewfinder zoom; **Scan area** moves the frame (drag)
+  and resizes it (its corner), kept on the device. **Camera settings** holds
+  brightness (where the camera reports it), **Saturation** (applied by the
+  page to the preview and to the picture sent, kept on the device), Set,
+  Foil, **Scan a photo** and **Type a name**. When no card matches, the
+  page tries the title, and failing that offers **Keep this picture for the
+  admin**: the picture goes to Admin › Card scanner for 30 days. Until the
+  gateway has learned the pictures, the camera reads titles as described
+  next.
+- **Camera (reading titles).** Hold a card in the card-shaped frame with its title inside the
   dashed box and tap the shutter. Filling the frame holds the phone about
   15 cm (6 in) from the card, in the browser and in the Android app alike: a
   card there fills about 40% of the picture's width, which reads well, and
@@ -86,13 +114,14 @@ What's on it:
   many cards the scan holds ("12 cards"); tap it to open the list. Once the
   gateway prices scanned cards, the scan's value will show next to the
   count.
-- **In the Android app.** The orange shutter and the viewfinder open the
-  phone's own camera, with its torch brightness, zoom and exposure, and
-  **Auto** opens it scanning on its own (see [ANDROID.md](ANDROID.md#3-scanning-with-the-phone-camera)).
-  The page's own camera isn't started inside the app.
-- **Torch, zoom and brightness.** A Torch button turns the phone's flash
-  on, and Zoom and Brightness sliders appear, each only when the camera
-  reports it. Chrome on Android usually offers all three; iOS Safari has no
+- **In the Android app.** Once the gateway has learned the card pictures
+  (0.7.47) the app shows this page as it is, with its own live camera.
+  Until then, and against an older gateway, the orange shutter and the viewfinder open the phone's own camera panel, with its
+  torch brightness, zoom and exposure, and **Auto** opens it scanning on its
+  own (see [ANDROID.md](ANDROID.md#3-scanning-with-the-phone-camera)).
+- **Flash, zoom and brightness.** A Flash button (called Torch before
+  0.7.47) turns the phone's flash light on, zoom chips appear over the viewfinder and a Brightness slider under
+  it, each only when the camera reports it. Chrome on Android usually offers all three; iOS Safari has no
   torch and offers zoom from Safari 17 (going by the browsers' published
   capabilities, not tested on every phone).
 - **Artwork check.** When the card was straightened, the page also makes a
@@ -238,8 +267,14 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
 
 ## Privacy and network
 
-- Photos never leave the phone. Only the recognised text goes to the
-  gateway. The gateway asks Scryfall (`api.scryfall.com`) for card data with
+- When the gateway finds cards by their picture, the page sends the
+  straightened card it sees (a JPEG of about 50 KB, the card only, cut out of
+  the frame) to the gateway, which compares it in memory and doesn't keep
+  it. A picture is kept only when you press **Keep this picture for the
+  admin**: then the gateway's admins can see it, with your name, under
+  Admin › Card scanner for 30 days (it is deleted with your data too).
+  Nothing is sent to Scryfall or anyone else. Reading titles, photos never
+  leave the phone; only the recognised text goes to the gateway. The gateway asks Scryfall (`api.scryfall.com`) for card data with
   the headers Scryfall's API guidelines ask for, at most ten requests a
   second across the whole gateway, and caches results for a day.
 - Card pictures on the page load straight from Scryfall's image host
@@ -248,6 +283,44 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   by the gateway itself under `/scan/static/vendor/` and cached by a service
   worker after the first visit. No CDN is involved. The page's Content
   Security Policy only allows scripts and workers from the gateway itself.
+
+## Finding cards by their picture
+
+The gateway keeps a summary of every paper printing's artwork, used to find
+a card from the picture the page sends (`scan/picture.py`).
+
+- **How it's built.** A few minutes after a start, and then hourly, the
+  gateway goes through the daily printings copy (below) and fetches
+  Scryfall's `small` picture (146 × 204) of each printing it hasn't seen,
+  from `cards.scryfall.io`, about 8 a second for the whole gateway, four at a
+  time, with its own User-Agent. A "slow down" answer pauses every fetch for
+  five minutes; a picture that fails is tried again a day later. Each
+  picture's art box goes through Google's MediaPipe image model
+  (`mobilenet_v3_small.tflite`, run by the LiteRT runtime), and its 1,024
+  numbers are kept in `<MTG_DATA_DIR>/scan-pictures.sqlite` (about 1.5 KB a
+  printing, about 150 MB for 100,000). The pictures themselves aren't kept.
+  The first round fetches about 100,000 pictures (roughly 1.5 GB, several
+  hours); later rounds only new printings.
+- **When it's used.** Only once a round has learned at least 95% of the
+  copy's printings; until then the page reads titles. Admin › Card scanner
+  shows how far it has got. It needs the printings copy (**Keep a local copy
+  of card printings**) and the artwork check (`MTG_SCAN_ART_ENABLED`); with
+  either off it is off.
+- **The search.** The art box of the sent picture goes through the same
+  model; a short summary of every row (128 numbers, kept in memory, about
+  27 MB for 100,000 printings) finds the 200 closest, and those are compared
+  in full. A card is **sure** when the best match beats the closest other
+  card by 0.06; below a similarity of 0.45 nothing matches. A card that
+  isn't sure is also tried upside down. In our test (8,474 printings of 16
+  recent sets, 300 made-up phone photos built from card pictures) it found
+  the right card 298 times out of 300, and every one of the 286 it called
+  sure was right. Made-up photos aren't real ones, the whole catalogue is about twelve times larger,
+  and foil cards weren't tested, so the numbers will move once measured on
+  real phones.
+- **Memory.** About 27 MB for the summary and about 20 MB for the model
+  once the first scan loads it (measured on an x86 machine).
+- **Missed pictures.** At most 500 kept, 50 a day per member, each deleted
+  after 30 days or with the member's data.
 
 ## Operator notes
 

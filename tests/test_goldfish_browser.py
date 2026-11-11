@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from .test_deck_menu_browser import Server, _chromium, _overflow, _page
-from .test_deck_views_browser import _shot
-from .waits import expect, quiet
+from .test_deck_views_browser import SHOTS, _shot
+from .waits import expect, quiet, redrawn
 
 pytest.importorskip("playwright")
 
@@ -413,19 +413,30 @@ def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme:
         for zoom in (None, TEXT_200):
             if zoom:
                 page.evaluate(zoom)
+                redrawn(page)
             for size in ("s", "m", "l"):
                 page.locator(f".gf-size [data-card-size-set={size}]").click()
+                # the page's resize work (the top bar's fit) runs in the next frame: measure the
+                # end state, not the frame between (2 px wide at 344 px under a loaded machine)
+                redrawn(page)
                 got = page.evaluate(SIZE_STATE)
                 assert got["segInside"] and got["whole"], (size, zoom is not None, got)
                 assert got["contrast"] >= 4.5, (size, zoom is not None, got)
                 # (the switch sits at the end of the game's button row now, so it is no longer
                 # left-aligned with the first button)
                 assert got["row"] or zoom is not None, (size, zoom is not None, got)
-                assert _overflow(page) == 0, (size, zoom is not None)
+                assert _overflow(page) == 0, (size, zoom is not None, page.evaluate(PAST_EDGE))
             _contrast_ok(page)
         _shot(page, f"goldfish-size-{width}-{scheme}")
         browser.close()
     assert errors == []
+
+
+# What reaches past the window's right edge, for the message of a failed overflow check.
+PAST_EDGE = """() => { const vw = document.documentElement.clientWidth;
+  return [...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > vw + 0.5)
+    .slice(0, 6)
+    .map(e => e.tagName + '.' + e.className + ' ' + Math.round(e.getBoundingClientRect().right)); }"""
 
 
 # Each cell's ⋮ against its card: label, size, and whether the two overlap or leave the window.
@@ -476,5 +487,59 @@ def test_each_goldfish_card_has_a_menu_button_beside_it(server: Server, width: i
         assert page.locator("#gf-hand .gf-card .kebab").count() == 0
         page.locator(".gf-size [data-card-size-set=s]").click()
         assert not any(k["shown"] for k in page.evaluate(KEBABS))
+        browser.close()
+    assert errors == []
+
+
+# Every card placeholder (a card without its picture) against its card: how far it reaches past
+# the card's right edge, and past the window's.
+PH_INSIDE = """(sel) => [...document.querySelectorAll(sel)].map(p => {
+  const r = p.getBoundingClientRect(), c = p.parentElement.getBoundingClientRect();
+  return { name: p.textContent.trim().slice(0, 40), past: Math.round(r.right - c.right),
+           window: Math.round(r.right - document.documentElement.clientWidth) };
+})"""
+
+
+@pytest.mark.parametrize(
+    ("path", "sel"),
+    [
+        ("/decks/42/goldfish", ".gf-card > .ph"),
+        ("/decks/42?view=grid", ".deckview .c > .ph"),
+        ("/decks/42?view=stacks", ".deckview .c > .ph"),
+    ],
+)
+def test_a_card_placeholder_stays_inside_its_card_at_200_percent_text(
+    server: Server, path: str, sel: str
+) -> None:
+    """Audit AT1 (0.7.47): a card shown without its picture keeps its words inside the card on a
+    344 px phone with 200% text, at every card size. Every card is checked, so the shuffle never
+    decides whether a long name lands in the row's last place (the Goldfish check failed only when
+    one did: 2 px past the window)."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import TEXT_200
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 344)
+        # no picture ever loads: every card shows its placeholder
+        page.context.route(re.compile(r"https://cards\.scryfall\.io/.*"), lambda route: route.abort())
+        page.goto(f"{server.base}{path}", wait_until="networkidle")
+        page.evaluate(TEXT_200)
+        redrawn(page)
+        for size in ("s", "m", "l"):
+            # (on the deck page at 344 px the switch sits in the view menu: the same click handler)
+            page.evaluate("(s) => document.querySelector(`[data-card-size-set=${s}]`).click()", size)
+            redrawn(page)
+            assert page.get_attribute("html", "data-card-size") == size
+            got = page.evaluate(PH_INSIDE, sel)
+            assert got, (path, size, "no placeholder drawn")
+            if SHOTS:  # the whole page: the cards sit below the guide on a phone
+                name = path.split("/")[-1].replace("?", "-")
+                page.screenshot(path=f"{SHOTS}/ph-{name}-{size}.png", full_page=True)
+            wide = [g for g in got if g["past"] > 0 or g["window"] > 0]
+            assert wide == [], (path, size, wide)
+            assert _overflow(page) == 0, (path, size, page.evaluate(PAST_EDGE))
         browser.close()
     assert errors == []

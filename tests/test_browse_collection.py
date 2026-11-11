@@ -60,7 +60,7 @@ async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) ->
         r = await b.http.get("/", headers=NAV)
         assert r.status_code == 200
         nav = r.text[r.text.index("<nav class='site'") : r.text.index("</nav>")]
-        for href in ("/decks", "/search", "/collection", "/scan", "/proposals", "/precons", "/forum"):
+        for href in ("/decks", "/search", "/binder", "/scan", "/proposals", "/precons", "/forum"):
             assert f"href='{href}'" in nav, href
         assert "href='/lists'" not in nav  # My lists lives under Account (decision C8)
         assert "class='tabbar'" in r.text and re.search(r"<body class='[^']*\bhome\b", r.text)

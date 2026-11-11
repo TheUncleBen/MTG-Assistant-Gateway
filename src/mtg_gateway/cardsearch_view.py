@@ -14,8 +14,8 @@ from . import cardquery as cq
 from . import prefs, ui
 from . import searchpanel as sp
 from .deckpage import mana_html
-from .theme import UNPRICED_HTML, icon
 from .theme import esc as _esc
+from .theme import icon
 
 VIEWS = ("grid", "list")
 
@@ -747,8 +747,8 @@ def card_row_html(
         f"<span class='ty'>{_esc(card.get('type_line') or '')}{(' · ' + _esc(stats)) if stats else ''}</span>"
         f"<span class='set num' title='{_esc(card.get('set_name') or '')}'>{_esc(where)}</span>"
         f"<span class='rar'>{_esc(rarity)}</span>"
-        f"<span class='price num'>{_esc(price) if price else UNPRICED_HTML}</span>"
-        "</span>"
+        + (f"<span class='price num'>{_esc(price)}</span>" if price else "")
+        + "</span>"
         + (
             ""
             if watched is None

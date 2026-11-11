@@ -27,6 +27,12 @@ EARLY_STYLE = """new MutationObserver(function (list) {
   }); });
 }).observe(document, {childList: true, subtree: true});"""
 
+# every transition that starts, from the first moment: one that ran and ended before a test looked
+# (a short fade on a busy machine) is still seen
+RUNS = """window.__runs = [];
+document.addEventListener('transitionrun', function (e) {
+  window.__runs.push(e.target.tagName + '.' + e.target.className + ' ' + e.propertyName); }, true);"""
+
 RUNNING = """() => document.getAnimations().filter(a => a.transitionProperty)
   .map(a => a.effect.target.tagName + '.' + a.effect.target.className + ' ' + a.transitionProperty)"""
 
@@ -41,6 +47,7 @@ def test_nothing_fades_in_from_the_browsers_own_colours(idp_server, scheme: str)
         try:
             ctx = browser.new_context(viewport={"width": 412, "height": 800}, color_scheme=scheme)
             ctx.add_init_script(EARLY_STYLE)
+            ctx.add_init_script(RUNS)
             page = ctx.new_page()
 
             def late(route, _request=None) -> None:
@@ -51,13 +58,15 @@ def test_nothing_fades_in_from_the_browsers_own_colours(idp_server, scheme: str)
             page.route("**/static/site.css*", late)
             page.goto(_leg_url(idp_server.base))
             assert page.evaluate(RUNNING) == []
+            assert page.evaluate("() => window.__runs") == []  # none ran and ended before the look
             cancel = page.get_by_role("button", name="Cancel")
             assert cancel.evaluate("e => getComputedStyle(e).backgroundColor") == "rgba(0, 0, 0, 0)"
             # once the page is in, a hover still fades
             poll(page, lambda: page.evaluate("() => !document.documentElement.classList.contains('preload')"))
             page.get_by_role("button", name="Continue").hover()
-            running = page.evaluate(RUNNING)
-            assert any(a.startswith("BUTTON.primary ") for a in running), running
+            # the hover's fade started (seen by its transitionrun, not by catching it while it runs:
+            # on a loaded CI runner it had ended before the look, CI run 42784510079)
+            page.wait_for_function("() => window.__runs.some(a => a.startsWith('BUTTON.primary '))")
             ctx.close()
         finally:
             browser.close()

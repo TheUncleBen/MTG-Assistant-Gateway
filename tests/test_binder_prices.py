@@ -360,9 +360,11 @@ async def test_nothing_is_read_or_priced_for_a_binder_nobody_opened(stack: Stack
 # -- c) the Watchlist's size ----------------------------------------------------------------------
 
 
-def test_the_limits_are_5000_cards_and_100_decks() -> None:
+def test_cards_have_no_limit_by_default_and_decks_100() -> None:
+    # 0.7.47 (the owner's decision 3): 0 is no limit, and the owner can still set one
     assert (
-        MANAGED_SETTINGS["watch_max_cards"].default == 5000 and MANAGED_SETTINGS["watch_max_cards"].hi == 5000
+        MANAGED_SETTINGS["watch_max_cards"].default == 0
+        and MANAGED_SETTINGS["watch_max_cards"].hi == 1_000_000
     )
     assert (
         MANAGED_SETTINGS["watch_max_decks"].default == 100 and MANAGED_SETTINGS["watch_max_decks"].hi == 100
@@ -422,7 +424,7 @@ async def test_the_watchlist_page_reads_a_fixed_number_of_queries_whatever_its_s
         _seed_watches(stack, 300)
         many, page = await _queries(stack, b, "/watchlist")
         assert many == few, (few, many)
-        assert "You may watch up to 5000 cards and 100 decks" in page or "5,000" in page
+        assert "You may watch as many cards as you like and up to 100 decks." in page
         # 25 rows a screen; the decks have their own Load more
         assert page.count("class='tr' id='wr-w_") == 25
         assert page.count("id='wr-d") == 25 and "Load more decks" in page
@@ -606,7 +608,7 @@ async def test_the_watch_form_remembers_finish_and_alert_and_menus_use_them(
             headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
         )
         assert r.status_code == 200, r.text
-        assert r.json()["watch"]["alerts"] == {"pct": 15, "drop": 10}
+        assert r.json()["watch"]["alerts"] == {"pct": 15, "drop": 10, "rise": 20}
     finally:
         await b.aclose()
 

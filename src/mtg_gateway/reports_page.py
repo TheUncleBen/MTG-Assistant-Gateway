@@ -584,8 +584,7 @@ def paste_test_html(csrf: str) -> str:
 # by the dashboard pages.
 PHONE_WIDGETS_CSS = """
 @media (max-width:599.98px){
-  .gb-dash .ui-widgets{
-    grid-template-columns:repeat(auto-fit,minmax(min(100%,max(8.5em,calc(50% - .25rem))),1fr))}
+  .gb-dash .ui-widgets{--wdg-min:max(8.5em,calc(50% - .25rem))}
 }
 /* a label in a narrow table cell wraps (large text) instead of running out of its column */
 .gb-dash .ui-table .ui-lbl{white-space:normal;height:auto;min-height:24px;line-height:1.2}

@@ -96,7 +96,12 @@ TEMPLATES_NONE_LEFT = "Every template's name is already a category in this deck.
 SETTINGS_CSS = """
 .ds-wrap{display:grid;grid-template-columns:minmax(0,52rem);justify-content:center;gap:24px}
 .ds-nav{display:none}
-@media (min-width:1100px){.ds-wrap{grid-template-columns:11rem minmax(0,52rem)}
+/* the section list shows only with room for it and for an empty track its width on the right, which
+   keeps the settings themselves in the middle of the window, under the page's heading. Without
+   that room (a narrower window, or large text) the page is one centred column: a list on the left
+   alone pushed the settings to the right (0.7.47 UI sweep; at 200% text, audit AW1) */
+@media (min-width:1280px){main.wrap:has(> .ds-wrap){max-width:calc(74rem + 48px + 2 * var(--gutter))}}
+@container (min-width:calc(74rem + 48px)){.ds-wrap{grid-template-columns:11rem minmax(0,52rem) 11rem}
   .ds-nav{display:block;position:sticky;top:12px;align-self:start;margin-top:118px}}
 .ds-nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--border-soft)}
 .ds-nav a{display:flex;align-items:center;min-height:44px;padding:0 .75rem;color:var(--text-muted);
@@ -192,7 +197,10 @@ SETTINGS_CSS = """
 /* the box (or the themed select's button, or the suggest wrapper) takes the room, the button its
    own; at large text the button wraps under the box instead of leaving the window */
 .ds .ds-inline > *{flex:1 1 12rem;min-width:0}
-.ds .ds-inline > .btn,.ds .ds-inline > button{flex:0 0 auto;width:auto;margin:0;white-space:nowrap}
+/* as wide as its words, on one line while that fits its row; wider than the row, it wraps its
+   words instead of running out of the window (600 px at 200% text: 35 px, audit AU2) */
+.ds .ds-inline > .btn,.ds .ds-inline > button{flex:0 0 auto;width:auto;margin:0;max-width:100%;
+  white-space:normal}
 .ds .ds-inline .msel-btn,.ds .ui-row .ctl .msel-btn{max-width:100%}
 .ds ul.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .75rem;padding:0}
 .ds .follownote{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;margin:.75rem 0 0}

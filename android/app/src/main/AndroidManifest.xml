@@ -6,11 +6,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- The app installs its own updates, the APK the gateway it is set up for ships (Updater.kt). Android asks
-         the person once to allow installs from this app; from Android 12 an app updating itself may
-         then skip the confirmation, which is what the second permission asks for. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- No install permissions: the app saves a checked update to Downloads and the person opens it
+         there, so Android's own installer does the update (Updater.kt). -->
     <!-- The app reloads a page that failed to load once the phone's network comes back (Q63,
          MainActivity.watchNetwork). A normal permission: granted at install, never asked. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -136,10 +133,10 @@
             android:name="local.mtgassistantgateway.app.NotifyService$Tick"
             android:exported="false" />
 
-        <!-- PackageInstaller's answer to an update (Updater.kt). Not exported: only the install
-             session's own PendingIntent reaches it. -->
+        <!-- A notification's Mark read (NotifyService.MarkRead). Not exported: only the app's own
+             notifications reach it. -->
         <receiver
-            android:name="local.mtgassistantgateway.app.Updater$InstallResultReceiver"
+            android:name="local.mtgassistantgateway.app.NotifyService$MarkRead"
             android:exported="false" />
 
         <!-- The share sheet's Copy gateway link and Copy deck list (DeckShare.kt). Not exported:

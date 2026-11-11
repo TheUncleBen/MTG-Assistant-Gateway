@@ -260,7 +260,12 @@
   }
   function signInAction() { return Fetch.signInLink("btn"); }
   var editUrl = "/api/v1/decks/" + enc(deckId) + "/edit";
-  var saving = false;
+  var saving = false, awaiting = 0;
+  // The app's pull to refresh waits while a save is on its way or a quantity step waits to be sent
+  // (static/topbar.js): a pull would load the page over it.
+  (window.mtgHolds = window.mtgHolds || []).push(function () {
+    return saving || awaiting > 0 || histBusy || qtySteps.some(function (s) { return s.timer || s.queued; });
+  });
   // -- a change big enough to ask first (modes.hand_edit_confirm): the endpoint made the proposal
   // and waits for the answer. A removal asks in the shared box, which ends on the solid red button;
   // a commander question keeps the page's own dialog strip. The proposal made for the check is
@@ -350,7 +355,11 @@
       saving = false;
       // Archidekt is slow and the save carries on behind: the page stays on the deck, keeps its
       // Saving note and draws the row once the save ends (0.7.46 audit D-07)
-      if (d.ok && d.status === 202 && d.proposal_id) return awaitApply(d.proposal_id, changes, undoChanges, opts);
+      if (d.ok && d.status === 202 && d.proposal_id) {
+        awaiting++;
+        var done = function () { awaiting--; };
+        return awaitApply(d.proposal_id, changes, undoChanges, opts).then(function (x) { done(); return x; }, function (e) { done(); throw e; });
+      }
       if (d.ok && d.proposal_id) { location.href = "/proposals/" + enc(d.proposal_id); return d; }  // writes are off: kept for review
       var failed = new Error(d.message || "The change could not be saved.");
       failed.code = d.error || "";
@@ -955,7 +964,7 @@
     title.title = name;
     h2.appendChild(title);
     head.appendChild(h2);
-    head.appendChild(el("div", "meta", "Qty: 0"));
+    head.appendChild(el("div", "meta", "0 cards"));
     st.appendChild(head);
     var rows = cards.classList.contains("text") || cards.classList.contains("table") || cards.classList.contains("brewer");
     var list = rows ? el("ul", "plain rows") : el("div", "cards");
@@ -1261,7 +1270,7 @@
         if (!isNaN(p)) { price += p * n; priced = true; }
       });
       var meta = $(".stackhead .meta", st);
-      if (meta) meta.textContent = "Qty: " + qty + (priced && price ? " · Price: " + money(price) : "");
+      if (meta) meta.textContent = qty + (qty === 1 ? " card" : " cards") + (priced && price ? " · " + money(price) : "");
     });
   }
   function swapHtml(selector, html, insertInto, before) {
@@ -1290,7 +1299,11 @@
       // the phone's short count ("100 cards", deckpage.banner_html)
       else if (/^[\d,]+ cards?$/.test(t) && sp.classList.contains("sm") && st.card_count !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.card_count, "card") : st.card_count + " cards";
       else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) setCost(b, st); }
-      else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = st.salt_text || Number(st.salt_total).toFixed(1); }
+      else if (/^Salt sum:/.test(t) && st.salt_total !== undefined) {
+        // shown only with some salt (deckpage.banner_html leaves 0 and unknown out)
+        sp.hidden = !(Number(st.salt_total) > 0);
+        var s2 = $("b", sp); if (s2 && st.salt_total !== null) s2.textContent = st.salt_text || Number(st.salt_total).toFixed(1);
+      }
     });
     // the deck's date, as Archidekt stamped this save (deckpage.updated_when)
     var when = $(".banner .row > span > time.ui-when");
@@ -1308,6 +1321,8 @@
   // no card priced: a muted "unknown" with its tooltip, as deckpage.est_cost_html draws it (polish C7)
   function setCost(b, st) {
     if (!b) return;
+    var cost = b.closest(".banner .cost");
+    if (cost) cost.hidden = st.priced_cards === 0;  // deckpage.banner_html leaves an unknown cost out
     b.textContent = "";
     if (st.priced_cards === 0) {
       var u = document.createElement("span");
@@ -2763,13 +2778,26 @@
         items.push(Menu.item("Undo", "history", undoLast, { disabled: !undoBtnEl || undoBtnEl.disabled, title: "Nothing to undo" }));
         items.push(Menu.item("Redo", "history", redoLast, { disabled: !redoBtnEl || redoBtnEl.disabled, title: "Nothing to redo" }));
         var r = moreBtn.getBoundingClientRect();
-        Menu.open({ head: "Deck tools", label: "Deck tools", items: items, focusBack: moreBtn }, r.left, r.bottom + 4);
+        Menu.open({ head: "Deck tools", label: "Deck tools", items: items, focusBack: moreBtn, anchor: moreBtn }, r.left, r.bottom + 4);
       });
       controls.appendChild(moreBtn);
     }
     toolbar.classList.add("compact");
-    // the one "hold a card to move it" line, above the cards, on a touch phone
-    if (canDrag && touch && narrow()) {
+    // the one "hold a card to move it" line, above the cards, on a touch phone: for a member's first
+    // three deck pages only, then it has said its piece (0.7.47 polish: a permanent hint is noise)
+    // (counted once a browser session, so the page keeps its shape on Back within one)
+    var hintSeen = 0, hintNow = false;
+    try {
+      hintNow = sessionStorage.getItem("mtg.movehint.now") === "1";
+      hintSeen = parseInt(localStorage.getItem("mtg.movehint.seen") || "0", 10) || 0;
+    } catch (e) { hintSeen = 0; }
+    if (canDrag && touch && narrow() && (hintNow || hintSeen < 3)) {
+      try {
+        if (!hintNow) {
+          localStorage.setItem("mtg.movehint.seen", String(hintSeen + 1));
+          sessionStorage.setItem("mtg.movehint.now", "1");
+        }
+      } catch (e) { /* private mode */ }
       var hint = el("p", "movehint", "Hold a card to move it to another category.");
       cards.parentNode.insertBefore(hint, cards);
       cards.setAttribute("data-hint-top", "");
@@ -3084,6 +3112,7 @@
         all.filter(function (x) { return x.name === (name || c.name); })[0] || null;
     }
     window.addEventListener("beforeunload", function (ev) { if (busy) { ev.preventDefault(); ev.returnValue = ""; } });
+    (window.mtgHolds = window.mtgHolds || []).push(function () { return busy > 0; });  // no pull to refresh mid-save (static/topbar.js)
     function post(fields) {
       var fd = new URLSearchParams();
       fd.set("csrf", CSRF); fd.set("json", "1"); fd.set("page", "deck");
@@ -3948,7 +3977,7 @@
       var edh = $("a[data-edhplay]", testDd);
       if (edh) t.push(item("Play on EDHPlay", "play", function () { Menu.whenClosed(function () { edh.click(); }); }));
       var r = testBtn.getBoundingClientRect();
-      Menu.open({ head: "Test and play", label: "Test and play: " + d.name, items: t, focusBack: testBtn }, r.left, r.bottom + 4);
+      Menu.open({ head: "Test and play", label: "Test and play: " + d.name, items: t, focusBack: testBtn, anchor: testBtn }, r.left, r.bottom + 4);
     });
   }
 

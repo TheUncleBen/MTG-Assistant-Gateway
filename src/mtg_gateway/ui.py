@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
+from . import theme
 from .theme import (
     ASSISTANT_PAGES,
     SPINNER,
@@ -415,8 +416,10 @@ def binder_head(
     actions_html: str = "",
     badges: Mapping[str, int] | None = None,
 ) -> str:
-    """The head of the Binder place's pages (Cards, Lists, Watchlist; decision C8 and mockup
-    screen 8): their switch, which names the page, so the page's heading is for screen readers
+    """The head of the Binder place's pages (Cards, Lists, Watchlist). With watchlists on (One
+    Binder, 0.7.47) they open from the Binder page: "‹ Binder" back, then the page's heading and
+    actions. Off, there is no Binder page, so the head is their switch (decision C8 and mockup
+    screen 8), which names the page, so the page's heading is for screen readers
     only, the page's actions at the row's end (the one orange button among them), then the purpose
     line. ``current``: the page's path (theme.BINDER_PAGES). ``badges``: a count on a switch part
     (Cards 18, Watchlist 3), by path, when the page knows it cheaply."""
@@ -433,6 +436,17 @@ def binder_head(
         + "</a>"
         for href, text, _ic in binder_pages()
     )
+    if theme.WATCHLISTS:
+        # One Binder (0.7.47): these pages open from the Binder page, so the head is the way back,
+        # then the page's own name (the Binder's word for it) with its count
+        name = title.removeprefix("Binder: ")
+        name = {"Cards": "Archidekt collection", "Lists": "Archidekt lists"}.get(name, name)
+        n = counts.get(current)
+        cn = f" <span class='cn'>{n:,}</span>" if n else ""
+        return (
+            f"<p class='bn-up'><a class='bn-back' href='/binder'>{icon('back')}Binder</a></p>"
+            f"<div class='ui-head phead bnhead'><h1>{esc(name)}{cn}</h1>{acts}</div>{line}"
+        )
     switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
     return (
         f"<div class='ui-head phead hubhead'><h1 class='sr-only'>{esc(title)}</h1>{switch}{acts}</div>{line}"
@@ -732,6 +746,10 @@ def pager(
     nothing is capped silently. Empty when the list is."""
     if total <= 0:
         return ""
+    if newer_href is None and older_href is None and offset <= 0:
+        # one page: the list's heading already counts it, and two dead buttons under a short list
+        # read as broken ("1–1 of 1 ← Newer Older →": the 0.7.47 UI sweep); a cap note still shows
+        return f"<p class='ui-pager-note muted small'>{esc(note)}</p>" if note else ""
     start = max(0, offset) + 1
     end = min(total, max(0, offset) + per_page)
     info = f"{start:,}–{end:,} of {total:,}" + (f" · {esc(note)}" if note else "")

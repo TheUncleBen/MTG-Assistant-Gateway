@@ -109,6 +109,8 @@ def test_select_ticks_the_rows_and_the_bar_changes_and_removes_them(
         page.wait_for_load_state("networkidle")
         notice = page.locator("#col-notes .notice.ok")
         assert notice.inner_text().strip().startswith("3 cards removed from your binder.")
+        # one × only: the strip's own (a second, added for one-time notices, covered Undo on CI)
+        assert notice.locator("button.nx").count() == 1 and notice.locator(".close").count() == 0
         assert len(rows) == 1
         _shot(page, f"binder-select-{view}-{width}-{theme}-removed")
         notice.locator("button", has_text="Undo").click()

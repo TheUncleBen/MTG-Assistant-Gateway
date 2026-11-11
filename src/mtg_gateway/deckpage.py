@@ -518,9 +518,15 @@ def banner_html(
         f"<span class='sm'>{plural(size, 'card')}</span>"
         "</div><div class='row'>"
         f"<span class='lg'>Size: {size}</span>"
-        "<span><span class='lg'>Est cost: </span><span class='sm'>Est </span>"
+        # no card priced yet: the cost is left out rather than shown as "Est unknown" (the owner, 0.7.46
+        # checklist: every display of information cleaned up); the page's script shows it once a
+        # price arrives
+        f"<span class='cost'{'' if stats.get('priced_cards') else ' hidden'}>"
+        "<span class='lg'>Est cost: </span><span class='sm'>Est </span>"
         f"<b class='orange'>{est_cost_html(stats)}</b><span class='lg'> (Archidekt prices)</span></span>"
-        "<span><span class='lg'>Salt sum: </span><span class='sm'>Salt </span>"
+        # no salt known, or none at all: left out too ("Salt 0.0" read as a placeholder: 0.7.47 polish)
+        f"<span class='salt'{'' if (stats.get('salt_total') or 0) > 0 else ' hidden'}>"
+        "<span class='lg'>Salt sum: </span><span class='sm'>Salt </span>"
         f"<b class='orange'>{esc(salt)}</b></span>"
         "</div></div>"
     )
@@ -820,7 +826,8 @@ def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True, waiting: 
         f"<button type='button' class='soc{' on' if liked else ''}' data-social='vote' "
         f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}'"
         f"{title(like_tip)}>"
-        f"{icon('heart')}<b class='n'>{deck.points}</b>"
+        # no likes yet: no "0" beside the heart (0.7.47 polish: a zero read as noise)
+        f"{icon('heart')}<b class='n'{'' if deck.points else ' hidden'}>{deck.points}</b>"
         f"<span>{'Voted down' if down else 'Liked' if liked else 'Like'}</span></button>"
     )
     marked = deck.bookmarked
@@ -1444,7 +1451,10 @@ def cards_html(
         head = (
             f"<div class='stackhead'><h2><span class='title{strike}' title='{esc(name)}'>{esc(name)}</span>"
             f"{menu}</h2>"
-            f"<div class='meta'>Qty: {qty}" + (f" · Price: {money(price)}" if price else "") + "</div></div>"
+            # "4 cards · $12.30": the count and the price as words, not "Qty: 4 · Price: $12.30"
+            f"<div class='meta'>{plural(qty, 'card')}"
+            + (f" · {money(price)}" if price else "")
+            + "</div></div>"
         )
         if view in ROW_VIEWS:
             body = (
@@ -1767,7 +1777,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
 # out-of-identity pips, quantities by subtype and keyword; a click on a chart part focuses its
 # cards). Every variant is drawn here; static/deckstats.js only shows one and filters the list.
 
-CURVE_MODES = (("none", "None"), ("type", "Type"), ("category", "Category"))
+CURVE_MODES = (("none", "All cards"), ("type", "Type"), ("category", "Category"))
 SERIES_SLOTS = 7  # categorical colours k1..k7; any further group folds into "Other" (k0)
 
 
@@ -2836,6 +2846,8 @@ GOLDFISH_CSS = """
 .gf-controls [hidden]{display:none}
 .gf-controls button{margin:0}
 .gf-size{margin-left:auto}
+/* a phone: the game's buttons share their lines evenly instead of one a line (0.7.47 polish) */
+@media (max-width:599.98px){.gf-controls > button{flex:1 1 auto}}
 .gf-size .cardsize{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;
   margin:0}
 .gf-size .cardsize .lbl{color:var(--text-muted)}
@@ -2852,6 +2864,11 @@ GOLDFISH_CSS = """
 .gf-row{--gw:130px;display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--gw),1fr));gap:.5rem;
   align-items:start;min-height:2rem}
 html[data-card-size=s] .gf-row{--gw:92px} html[data-card-size=l] .gf-row{--gw:180px}
+/* a row with a card shown without its picture: as wide as above at the usual text size, wider
+   at large text (200%), so a long word in a card's name or type stays whole (0.7.47 join: "Reclamation"
+   broke inside the word on an open Fold and a laptop) */
+.gf-row:has(.ph){--gw:max(130px,8.125em)} html[data-card-size=s] .gf-row:has(.ph){--gw:max(92px,5.75em)}
+html[data-card-size=l] .gf-row:has(.ph){--gw:max(180px,11.25em)}
 .gf-row + .gf-row{margin-top:.75rem;padding-top:.75rem;border-top:1px dashed var(--border)}
 .gf-empty{color:var(--text-muted);margin:0;grid-column:1 / -1}
 .gf-piles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:0 1rem}
@@ -2864,10 +2881,13 @@ html[data-card-size=s] .gf-c .kebab{display:none}
   background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
   user-select:none;-webkit-touch-callout:none;transition:transform .15s}
 .gf-card img{width:100%;height:100%;object-fit:cover;display:block}
+/* a card without a picture keeps its words inside the card at every size and text size: a word
+   wider than the card breaks rather than pushing the placeholder past the card (and, on the last
+   card of a row at 344 px with 200% text, past the window) */
 .gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;min-height:100%;padding:.35rem;
-  font-size:.78rem;text-align:left;line-height:1.2}
-.gf-card .ph .nm{overflow-wrap:break-word}
-.gf-card .ph .ty{color:var(--text);overflow-wrap:break-word}
+  font-size:.78rem;text-align:left;line-height:1.2;min-width:0;max-width:100%;box-sizing:border-box}
+.gf-card .ph .nm{min-width:0;overflow-wrap:anywhere}
+.gf-card .ph .ty{color:var(--text);min-width:0;overflow-wrap:anywhere}
 /* a placeholder tile (no picture) grows taller than the card's ratio when its words need it
    (200% text), instead of clipping them (final polish P-12) */
 .gf-card:has(> .ph){min-height:auto;overflow:visible;display:flex;flex-direction:column}
@@ -2902,6 +2922,14 @@ html[data-card-size=s] .gf-c .kebab{display:none}
   .gf-row{gap:4px;grid-template-columns:repeat(4,minmax(0,1fr))}
   html[data-card-size=s] .gf-row{grid-template-columns:repeat(7,minmax(0,1fr))}
   html[data-card-size=l] .gf-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+  /* a row with a card shown without its picture: the same 7, 4 or 3 a row at the usual text size,
+     fewer when the text is larger (200%), so the card's words keep whole syllables rather than two
+     letters a line */
+  .gf-row:has(.ph){grid-template-columns:repeat(auto-fill,minmax(max(calc((100% - 12px) / 4),4em),1fr))}
+  html[data-card-size=s] .gf-row:has(.ph){
+    grid-template-columns:repeat(auto-fill,minmax(max(calc((100% - 24px) / 7),2.6em),1fr))}
+  html[data-card-size=l] .gf-row:has(.ph){
+    grid-template-columns:repeat(auto-fill,minmax(max(calc((100% - 8px) / 3),5.5em),1fr))}
   .gf-card .ph{padding:3px;font-size:.6rem}
   .gf-size{margin-left:0;flex-basis:100%}
 }
@@ -3287,6 +3315,7 @@ DECK_CSS = (
 .banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:1.143rem;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
 .banner .row b.orange{color:#ffa94d;font-weight:700}  /* 4.5:1 on the banner's grey (audit D14) */
+.banner .row > .cost[hidden]{display:none}
 /* muted words on the banner ("unknown" for a price nobody knows): the page's muted grey is 1.5:1
    on the shade in the light theme (polish R2), so the banner's white at reduced opacity, which
    follows the shade and keeps 4.5:1 across the whole gradient as the row's #d6d6d6 does */
@@ -3778,7 +3807,8 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 /* a tile without a picture: its name starts below the 38 px quantity corner (and clear of the
    30 px companion corner), and its type line sits above the owned dot and the finish badge in the
    bottom corners, at every card size (0.7.43: the dot sat on "Artifact") */
-.deckview .c .ph{position:relative;min-height:100%;display:flex;flex-direction:column;
+.deckview .c .ph{position:relative;min-height:100%;min-width:0;max-width:100%;box-sizing:border-box;
+  display:flex;flex-direction:column;
   justify-content:space-between;
   padding:max(12%,3.04em) 8% max(8%,2.33em);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
@@ -3810,9 +3840,6 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .c.dragging{opacity:.4}
 .deckview .row.dragging{outline:2px dashed var(--orange);outline-offset:-2px;background:var(--surface-2)}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to move them';
-  color:var(--text-muted)}
-@media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
    darkened page; the image column grows with the window, the text column scrolls on its own. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
@@ -3842,6 +3869,16 @@ html.cardview-open{overflow:hidden}
 .cardview .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
 .cardview .cardtext{overflow:auto;min-height:0;padding-right:.25rem;overscroll-behavior:contain}
+/* "In this test" (a report's card: report_page.py _ctx, cardview.js ctxBlock) */
+.cardview .cv-ctx{border:1px solid var(--border-soft);border-left:3px solid var(--orange);
+  border-radius:var(--radius);background:var(--surface-2);padding:.6rem .8rem;margin:0 0 .75rem}
+.cardview .cv-ctx p{margin:0;overflow-wrap:anywhere}
+.cardview .cv-ctx .k{font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--text-muted)}
+.cardview .cv-ctx .t{font-weight:700;margin:.1rem 0 .2rem}
+.cardview .cv-ctx .d{color:var(--text-muted);font-size:.93rem;line-height:1.45}
+.cardview .cv-ctx .d+.d{margin-top:.35rem}
+.cardview .cv-ctx .btn{margin:.5rem 0 0;min-height:44px}
 .cardview h4{margin:.9rem 0 .2rem;font-size:1.05rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .cardview .face:first-child h4{margin-top:0}
 .cardview .typeline{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:0 0 .5rem;
@@ -3880,7 +3917,7 @@ html.cardview-open{overflow:hidden}
 .cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--orange)}
 .cardview .printrow .pic{display:inline-flex;flex:none;color:var(--orange-text)}
 .cardview .printrow .lbl{flex:none;color:var(--text-muted);font-weight:700}
-.cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:break-word}
 .cardview .printrow .chev{flex:none;color:var(--text-muted);font-size:1.4rem;line-height:1}
 /* the action rows: [− n +] [Move to…] [Remove], then (after .br) [Add to binder] [Edit in deck editor] */
 .cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;padding-top:.25rem}
@@ -4000,7 +4037,10 @@ html.cardview-open{overflow:hidden}
 .cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
   font-variant-numeric:tabular-nums}
 /* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
-.deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
+/* a column grows with the text (7.2em is under 170 px at the normal size), so at 200% a tile without
+   a picture still holds a one-word name ("Terramorphic") whole (884 px, audit AU2) */
+.deckview.grid .cards{display:grid;gap:1rem;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(170px,7.2em)),1fr))}
 @media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
   .deckview.stacks{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem} }
 /* a stack never widens its column past the window (its header's name ellipsises; 0.7.29 fix: at
@@ -4055,7 +4095,9 @@ html.cardview-open{overflow:hidden}
 .statctl .seg2 button{margin:0;border-radius:0}
 .statctl .seg2 button:first-child{border-radius:var(--radius) 0 0 var(--radius)}
 .statctl .seg2 button:last-child{border-radius:0 var(--radius) var(--radius) 0;margin-left:-1px}
-.statctl button[data-set=lands]{margin-left:.5rem}
+/* the space before Lands only is the switch's trailing margin: wrapped to a line of its own (large
+   text on a phone), Lands only starts at the line's edge, not .5rem in (0.7.47) */
+.statctl .seg2{margin-right:.5rem}
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
 .k5{background:#e87ba4} .k6{background:#9085e9} .k7{background:#e34948} .k0{background:#8a8a8a}
@@ -4094,6 +4136,10 @@ html.cardview-open{overflow:hidden}
 .statfocus span{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
 .statfocus button{min-height:32px}
 /* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
+/* the deck's tiles wrap as a row whose last line shares its width (0.7.47 polish: a grid's columns
+   left a hole beside the last tiles at large text) */
+.panel.stats .tiles{display:flex;flex-wrap:wrap}
+.panel.stats .tiles > *{flex:1 1 min(100%,6.5rem);min-width:0}
 /* fixed columns: the numbers' column is narrow, the names have the rest, and a name breaks between
    its words ("Enchantment" stays whole at large text); only a word longer than the whole column
    (an unbroken category name) breaks inside */
@@ -4256,8 +4302,10 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   html:has(.editbar){scroll-padding-top:120px} }
 .editbar button{margin:0}
 .editbar .count{color:inherit;opacity:.85}
+/* one line while it fits, its words wrapped inside the bar when not (600 px at 200% text ran it
+   11 px out of the window, audit AU2) */
 .editbar .backup{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.9rem;
-  opacity:.9;white-space:nowrap}
+  opacity:.9;max-width:100%}
 .editbar .backup input{margin:0}
 .editbar .status{margin:0;flex-basis:100%}
 .editbar .status:empty{display:none}
@@ -4311,9 +4359,11 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   .addbox form.addcard{grid-template-columns:1fr}
   .addbox form.addcard .go{justify-content:space-between}
   .addbox form.addcard .go button{flex:1} }
-/* categories side by side on wide screens, one column on phones */
-.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,36rem),1fr));gap:1rem;
-  align-items:start}
+/* (0.7.47) one category under another on every screen: side by side, a short category beside a
+   long one left a screen-high hole under it, and balanced columns cost five times the layout time */
+/* the same width as Add a card and the toolbar above (a narrower centred column made two widths
+   on one page: 0.7.47 polish) */
+.cats.existing{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}
 .cats.existing > details.cat{margin:0}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}
 .addbox form.scanpick button{margin:0}
@@ -4477,10 +4527,10 @@ html.printpick-open{overflow:hidden}
   gap:.4rem;width:100%;height:auto;min-width:0;margin:0;padding:.4rem;border:2px solid var(--border-soft);
   border-radius:8px;background:var(--surface-2);color:var(--text);text-align:left;font-weight:400;
   cursor:pointer}
-.pptile:hover{border-color:var(--link);background:var(--surface-2);color:var(--text)}
+.pptile:hover{border-color:var(--orange);background:var(--surface-2);color:var(--text)}
 .pptile:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .pptile.current,.pptile.picked{border-color:var(--orange)}
-.pptile.on{border-color:var(--link);box-shadow:0 0 0 2px var(--link)}
+.pptile.on{border-color:var(--orange);box-shadow:0 0 0 2px var(--orange)}
 .pptile .ppimg{display:block;width:100%;aspect-ratio:5/7;border-radius:4.5%;overflow:hidden;
   background:var(--surface-3)}
 .pptile .ppimg img{display:block;width:100%;height:100%;object-fit:cover}
@@ -4639,7 +4689,10 @@ html.printpick-open{overflow:hidden}
    narrower list, the count on a row of its own. The widths are in rem, so they grow with the
    text; at the normal text size neither applies where the rule above does not. */
 ul.erows{container-type:inline-size}
-@container (max-width:30rem){
+/* 38rem: the picture, the count, the category and the menu take about 28rem, which leaves the name
+   10rem at least; at 30rem an open Fold's 462 px list (600 px window) left it 61 px and every name
+   broke inside its words (audit AU2) */
+@container (max-width:38rem){
   .erow{grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
@@ -4654,6 +4707,62 @@ ul.erows{container-type:inline-size}
 /* The phone's one-row save bar wraps with large text rather than run off the screen. */
 .editor{container-type:inline-size}
 @container (max-width:17rem){ .editbar{flex-wrap:wrap} .editbar .review{flex:1 1 auto} }
+/* The card viewer's actions and links as grouped lists, the Account page's iOS rows (the owner, 0.7.46
+   checklist: the menu a tap on a card opens "needs a revision with all of our current UI
+   standards"): Printings, then the deck's actions (Copies − n +, Move to…, Add to binder, Edit in
+   deck editor, Remove from deck last in red), then Rulings, Price history and the sites. Each row
+   is 48 px, its words at the left; no pile of bordered buttons. */
+.cardview .printrow,.cardview .more,.cardview .acts{border:1px solid var(--border-soft);border-radius:14px;
+  background:var(--surface-2)}
+.cardview .printrow{min-height:48px;padding:.35rem 1rem;flex-wrap:wrap;row-gap:.15rem}
+/* large text: the printing's set and rarity go under the label rather than one letter a line */
+.cardview .printrow .val{flex:1 1 7em}
+.cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--border-soft);
+  background:var(--surface-3)}
+.cardview .more,.cardview .acts{display:flex;flex-direction:column;flex-wrap:nowrap;gap:0;padding:0;
+  overflow:hidden}
+.cardview .more > *,.cardview .acts > *{display:flex;align-items:center;justify-content:flex-start;gap:.6rem;
+  width:100%;min-height:48px;margin:0;padding:0 1rem;border:0;border-radius:0;background:transparent;
+  color:var(--text);font:inherit;font-weight:400;text-align:left;text-decoration:none;box-shadow:none;
+  flex:none}
+.cardview .more > * + *,.cardview .acts > * + *{border-top:1px solid var(--border-soft)}
+.cardview .more > :is(a,button):hover,.cardview .acts > :is(a,button):hover,
+.cardview .more > :is(a,button):focus-visible,.cardview .acts > :is(a,button):focus-visible{
+  background:var(--surface-3);color:var(--text)}
+.cardview .acts > .btn,.cardview .acts > button,.cardview .acts > a{justify-content:flex-start;
+  text-align:left}
+.cardview .acts .br{display:none}
+/* each row 48 px (44 px at least on a touch screen): the viewer's own .btn.small rules (40 px) must
+   not win over the row's height */
+.cardview .more > :is(a,button,.btn),.cardview .acts > :is(a,button,.btn){min-height:48px;height:auto}
+/* large text (the window under 22 of its own ems: 200% on a phone, a narrow window at 150%): the
+   picture, the name and the rows one under another, each the full width, so no word breaks in two
+   beside the picture (0.7.47 UI sweep: "Tyrant", "Creature", "Mythic") */
+.cardview{container-type:inline-size}
+@container (max-width:22em){
+  .cardview .box{grid-template-columns:minmax(0,1fr);grid-template-areas:'head' 'pic' 'info'}
+  .cardview .pane{width:min(100%,16rem);justify-self:center}
+  .cardview .head{flex-direction:row;align-items:flex-start} }
+/* the grid's cards one a row when two would leave each under 10 of its own ems (200% text on a
+   phone): a card name in two columns broke mid-word ("Terramorphic", "Wickerbough") */
+.deckview.grid{container-type:inline-size}
+@container (max-width:20em){ .deckview.grid .cards{grid-template-columns:minmax(0,1fr)} }
+/* what can be done with the card comes before where to read more about it */
+.cardview .info > .acts{order:1}.cardview .info > .more,.cardview .info > .rulings,
+.cardview .info > .prices{order:2}
+.cardview .acts .btn-outline-danger{order:99;color:var(--danger-text);font-weight:700}
+/* the red row lights up rather than darkens: red on the grey hover face was 3.6:1 (a tap leaves
+   the row hovered on a phone) */
+.cardview .acts .btn-outline-danger:hover,.cardview .acts .btn-outline-danger:focus-visible{
+  color:var(--danger-text);background:var(--surface)}
+/* Copies: the word at the left, − n + at the right of its row */
+.cardview .acts .qtyctl{display:flex;flex:none;gap:.5rem}
+.cardview .acts .qtyctl::before{content:"Copies";flex:1 1 auto}
+.cardview .acts .qtyctl button{display:inline-flex;align-items:center;justify-content:center;width:44px;
+  min-width:44px;height:36px;min-height:36px;padding:0;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface);font-size:1.2rem;font-weight:700}
+@media (pointer:coarse){ .cardview .acts .qtyctl button{height:44px;min-height:44px} }
+.cardview .rulings{border-top:0}
 """
     + DECK_CSS_A
     + DECK_CSS_C

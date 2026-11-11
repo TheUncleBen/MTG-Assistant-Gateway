@@ -32,7 +32,7 @@ def test_the_html_file_carries_the_sites_colours_for_both_schemes() -> None:
     css = doc.split("<style>", 1)[1].split("</style>", 1)[0]
     # the light set (the system's light setting) and the dark set, word for word from the theme
     assert "@media (prefers-color-scheme: light)" in css and theme._LIGHT.strip() in css
-    for token in ("--link:#73a8dc", "--blue-text:#7fb0ff", "--card-border:#525252", "--radius-panel:3px"):
+    for token in ("--link:#e3e3e3", "--blue-text:#7fb0ff", "--card-border:#525252", "--radius-panel:3px"):
         assert token in css, token
     # the old export palette is gone
     assert "#2a66c9" not in css and "#a65400" not in css and "#146b3f" not in css

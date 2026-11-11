@@ -142,6 +142,12 @@ button:disabled{opacity:1;cursor:wait}
   // This card's own number among the cards drawn for its proposal in this chat (the result that
   // drew it says so); a read that names a higher one means a newer card is below
   var mySeq = 0, stepped = false;
+  // A card drawn waiting draws one line (no list, pictures or buttons) until its first read says
+  // it is still the newest card of a change that still waits: a chat where the assistant drew ten
+  // cards loads the pictures of one. A read that fails, or none within CHECK_WAIT_MS, draws it
+  // whole from its own result, as before (Approve reads it once more anyway).
+  var checking = false, drawn = null, checkTimer = null;
+  var CHECK_WAIT_MS = 4000;
   // this card's own Approve or Apply all decided it: it keeps the outcome
   var pressedHere = false;
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
@@ -401,8 +407,10 @@ button:disabled{opacity:1;cursor:wait}
     // Approve applied it, keeps what was done.
     var drawnWaiting = !sc0.state || sc0.state === "pending";
     var compact = sc.state && sc.state !== "pending" && sc.state !== "applying" && drawnWaiting && !pressedHere;
-    $("card").className = "card" + (compact ? " stub" : "");
+    var hold = checking && !compact;
+    $("card").className = "card" + (compact || hold ? " stub" : "");
     if (compact) { list.replaceChildren(); proposal = slim(sc); release(live(sc)); }
+    else if (hold) list.replaceChildren();
     else renderRows(list, rows, total > COLLAPSE_AT ? COLLAPSE_AT : rows.length, total, sc.rows_summary);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
@@ -412,7 +420,8 @@ button:disabled{opacity:1;cursor:wait}
       var days = Math.round(mins / 1440);
       foot.push("expires in " + (mins >= 2880 ? days + " days" : mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
     }
-    $("foot").textContent = compact ? "" : foot.join(" · ");
+    $("foot").textContent = compact || hold ? "" : foot.join(" · ");
+    if (hold) { $("actions").replaceChildren(); $("also").className = "also hidden"; setStatus("Checking this is the newest version…", ""); reportSize(); return; }
     renderActions();
     renderAlso();
     if (sc.state === "applying") { setStatus(progressText(sc), ""); pollApplying(sc.proposal_id); }
@@ -557,6 +566,13 @@ button:disabled{opacity:1;cursor:wait}
     if (!p || p.state !== "replaced") return false;
     return !p.expires_at || Number(p.expires_at) * 1000 > Date.now();
   }
+  // The first read is in, failed or is late: the card is checked. draw: draw it whole from the
+  // result that drew it (a read that changes nothing, or none); otherwise the read draws it.
+  function settle(draw) {
+    if (!checking) return;
+    checking = false; clearTimeout(checkTimer);
+    if (draw && !stepped) render(drawn);
+  }
   function refresh() {
     var p = proposal;
     if (stepped || !live(p) || !p.proposal_id || refreshing || busy) return;
@@ -565,9 +581,11 @@ button:disabled{opacity:1;cursor:wait}
       .then(function (res) {
         refreshing = false;
         var sc = scOf(res);
-        if (sc.ok === false || (res && res.isError) || !sc.state) { retryLater(); return; }
+        if (sc.ok === false || (res && res.isError) || !sc.state) { settle(1); retryLater(); return; }
         failures = 0;
-        if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
+        if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) { settle(1); return; }
+        var was = checking;
+        settle();
         if (seqOf(res) > mySeq && (sc.state === "pending" || sc.state === "applying")) {
           stepAside(sc);
           return;
@@ -585,17 +603,17 @@ button:disabled{opacity:1;cursor:wait}
         if (sc.state === "pending") {
           // still waiting, but held, waiting for another change or linked to a replace since the
           // card was drawn (a restart, another app): draw that, keeping this card's codes
-          if (!moved(p, sc)) return;
+          if (!moved(p, sc)) { if (was) render(drawn); return; }
           show(Object.assign({}, p, sc), codesMeta());
           return;
         }
         // still withdrawn or replaced
-        if (sc.state === p.state) return;
+        if (sc.state === p.state) { if (was) render(drawn); return; }
         askWhy(false);
         approval = null;
         show(sc);
       })
-      .catch(function () { refreshing = false; retryLater(); });
+      .catch(function () { refreshing = false; settle(1); retryLater(); });
   }
   // The read did not get through (the host refused it, or the gateway could not be reached):
   // try again a little later, each wait twice the last. After a few misses the card says it can't
@@ -1163,10 +1181,13 @@ button:disabled{opacity:1;cursor:wait}
 
   // no project name in the app's name: the file is public
   B.start("Proposal card", function (params) {
-    var first = (params && params.structuredContent) || {};
-    mySeq = seqOf(params); sc0 = first;
+    var sc = (params && params.structuredContent) || {};
+    mySeq = seqOf(params); sc0 = sc;
     // a newer card is below: the host showing this one again changes nothing
     if (stepped) return;
+    drawn = params; clearTimeout(checkTimer);
+    checking = sc.state === "pending" && !!sc.proposal_id;
+    if (checking) checkTimer = setTimeout(function () { settle(1); }, CHECK_WAIT_MS);
     render(params); refresh();
   }, {
     connectError: "This card could not connect to the chat. Use the review page in your browser."

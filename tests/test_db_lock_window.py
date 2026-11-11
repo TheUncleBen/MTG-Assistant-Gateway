@@ -12,6 +12,7 @@ seconds; the order of events is the same as with the real ones."""
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 import threading
@@ -130,6 +131,7 @@ async def test_a_refresh_caught_by_the_lock_keeps_the_member_signed_in(
     db = gw.db
     orig = dbmod.Database.revoke_generation
     holders: list[subprocess.Popen[str]] = []
+    starters: list[threading.Thread] = []  # each starts a holder, which may come after the refresh
 
     def revoke_then_lock(self, family: str, created_at: int) -> None:
         orig(self, family, created_at)
@@ -146,13 +148,20 @@ async def test_a_refresh_caught_by_the_lock_keeps_the_member_signed_in(
             p.stdout.readline()
             ready.set()
 
-        threading.Thread(target=take, daemon=True).start()
+        t = threading.Thread(target=take, daemon=True)
+        starters.append(t)
+        t.start()
         if not self._conn.in_transaction:  # the lock can be taken now: wait until it is
             assert ready.wait(30)
 
     monkeypatch.setattr(dbmod.Database, "revoke_generation", revoke_then_lock)
     first = await _refresh(gw, client, t1["refresh_token"])
     monkeypatch.setattr(dbmod.Database, "revoke_generation", orig)
+    # every holder started before any is waited for: one started late still held the lock at the
+    # check below (0.7.47 audit AX1, under load)
+    for t in starters:
+        t.join(timeout=30)
+        assert not t.is_alive()
     for p in holders:
         p.wait(timeout=30)
     if first.status_code == 200:
@@ -165,7 +174,11 @@ async def test_a_refresh_caught_by_the_lock_keeps_the_member_signed_in(
     assert (await gw.mcp(t2["access_token"], "tools/list")).status_code == 200
     t3 = await _refresh(gw, client, t2["refresh_token"])
     assert t3.status_code == 200, t3.text
-    assert db.write_free()
+    # nothing is left holding the lock: the holders are gone and the refreshes left no
+    # transaction open. Waited for briefly, not asked once: the sign-in's New assistant alert is
+    # kept on a worker thread (Notifier.send, db.add_gateway_alert), and on a busy machine that
+    # short write may hold the lock at that very moment, then lets go (0.7.47 audit AX1)
+    assert await asyncio.to_thread(db.wait_write_free, 5.0)
 
 
 async def test_a_refresh_while_the_lock_is_held_is_told_busy_and_the_token_still_works(

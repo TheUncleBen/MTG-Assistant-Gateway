@@ -55,8 +55,10 @@ browser's text zoom up to 200%, wrapping rather than running off the screen.
 
 What needs you, then your newest decks. **Needs you** has one row for each
 thing waiting, and only while there is one: proposals waiting for your press
-(Review them), Forge tests running, new alerts on Archidekt, and watched
-cards past one of your alert lines. Under it, **My decks** shows your newest
+(Review them), Forge tests running, and one row with the number of new
+alerts (price alerts, finished reports, Archidekt's alerts and the rest, all
+on the Alerts page). A notice such as a newly connected assistant has a ×
+that hides it for good, on every device. Under it, **My decks** shows your newest
 decks with their cover art (a row to swipe on a phone) and All decks. The
 search box at the top suggests your own decks first, then cards and public
 decks. **Connect an AI assistant**, with the connector URL and the guided
@@ -172,6 +174,21 @@ One deck:
   free one, 20 life, on the play, sideboard left out. A Commander-format
   deck without a card in its Commander category, or a smaller deck without
   one, gets no solo test and the report says why.
+- A report's **What the quick solo test leaves out** lists the cards the solo
+  test played without their effect, those that need opponents, those that
+  never mattered, and **Shortcuts the solo test takes**: each rule it
+  simplifies, whether it may make your results look better or worse than real games, and the cards it touched.
+  Tap a card in any of them and the card's panel says what the test did with
+  it.
+- A **card model** is a short description of one card's effect, in the solo
+  test's own terms, that your assistant writes and the gateway checks
+  (**Copy a request for your assistant** under the cards played without their
+  effect). Your later solo tests then play that card with its effect. Looking
+  a card up changes nothing; a card model changes only how your own solo
+  tests play it, never the card, your deck or Forge games. **Card models**
+  (in the navigation) explains them and lists yours: open one to see what
+  your solo tests do with it in plain words and exactly what is saved, ask
+  your assistant to change it, or remove it.
 - When the gateway runs Forge, a Commander deck's report also has Forge
   games against three precons. They are picked for the bracket set on the
   deck in Archidekt, or, when none is set, for Archidekt's estimate from
@@ -353,6 +370,29 @@ scans are listed under **Sessions**. The details are in
 
 ## Binder
 
+With watchlists on, **Binder** opens one page for every card you own or want.
+On the left (on a phone, first) are **All cards**, **Owned**, **Want**,
+**Price alerts** (cards past their alert price now), your lists, and under
+More: **Archidekt collection**, Decks I watch, **Watch settings** and
+Archidekt lists. On the right is
+one list: a printing you own and watch is one row, with its price, its move
+over a week, how many copies you own, its alert prices and its list. A tap
+opens the card. **Select** ticks rows for the bar: **Price alerts** (your
+defaults, or alerts of their own), **Add to list**, **Watch**, and under ⋯
+**Stop watching**, **Tag on Archidekt** (adds a binder tag, the others stay)
+and **Remove from binder**. Each change offers **Undo**.
+
+- **Lists** hold cards you own and cards you want; a card is in one list at a
+  time. Lists live on the gateway; Archidekt's binder tags stay Archidekt's,
+  as a filter.
+- **Watch settings** hold your price alert defaults: shipped as 10% under and
+  20% over the price a card had when you watched it, with moves under $0.50
+  ignored. Cards that use your defaults change when you change them; cards
+  you gave alerts of their own keep them.
+
+The rest of this section is the **Archidekt collection** page (Binder › More,
+and the page Binder opens when watchlists are off).
+
 **Binder** is the list of cards you own (your Archidekt collection), shown and edited here through the account you linked, and what
 you add here appears on archidekt.com at once. With watchlists on, the
 gateway keeps a copy of it as last read whole, to work out its value (below). Scan a pile and save it, add cards by name, or mark a
@@ -527,51 +567,84 @@ and Watchlist) keeps the price of cards and decks you choose, once a day:
   table under **Price history table**.
 - **Price alert**: a move of more than a percentage from one day to the
   next, or a price it rises above or falls below. Price alerts reach you through
-  the bell at the top and push notifications (below).
+  the Alerts page (the bell at the top) and push notifications (below).
 - **Stop watching**, from a row's menu or from the bar after ticking several
   cards, goes at once; the message offers **Undo** for a while, which brings
   the cards back with their alerts, their list and their price history.
 
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
-are checked once a day; the operator sets how many cards and decks you may
-watch (up to 5,000 cards and 100 decks) and how long prices are kept (a year unless they changed it). Your
+are checked once a day; you may watch as many cards as you like unless the
+operator set a limit, and up to 100 decks and how long prices are kept (a year unless they changed it). Your
 assistant can do the same: watch a card or a deck, stop watching, list your
 watchlist and read a card's price history. The watchlist changes nothing on
 Archidekt, so it needs no proposal.
 
-## Push notifications and summaries
+## Alerts and push notifications
 
-The **Push notifications** card on your Account page can send you a short message
-in the gateway's Android app when an assistant leaves changes waiting for
-your press (one message per deck, such as "2 changes to Atraxa are waiting
-for you"), a deck report finishes (Forge runs that waited in the queue
-included), a watched card crosses your price alert, or something new
-arrives in your Archidekt alerts (a comment, a reply, a new follower). There are no
-push notifications on iPhone. Open your Account page in the app, tick **Send me
-push notifications**, choose which of these you want, and save, then press
-**Get push notifications on this phone**. On Android 13 and later the app asks
-you to allow push notifications, and it asks once to run in the background.
-Android then shows a quiet "Always connected" notification while the app
-listens. **Send test** checks it, and
-**Disconnect my phones** stops every phone you connected. Messages say only
-what happened and link to the page here; they never list a deck's cards.
+**Alerts** (the bell at the top, and Alerts on the rail) is the one place for
+everything the gateway tells you, newest first, each row starting with its
+type:
 
-**A new alert on Archidekt** is ticked unless you untick it, and works once
-your Archidekt account is linked. Archidekt can't tell the gateway when
-something new arrives, so while a phone of yours is connected the gateway
-looks at your Archidekt alert count now and then, in the background and
-after everyone's own pages. Each new alert comes once, in Archidekt's own
-words; pressing it opens the deck, forum thread or profile here, or the
-Alerts list for news and contests. Several at once come as one message.
-Alerts that were already there when you turned this on, and ones you have
-read in the gateway's Alerts, are not sent.
+| Type | What it is | Example |
+| --- | --- | --- |
+| Waiting for you | An assistant left changes for you to apply or reject, one row per deck, there only while they wait | Review · Atraxa |
+| Applied for you | An assistant changed a deck without asking, as your approval mode allows | Applied · Atraxa |
+| Deck reports | A test or deck report finished | Report ready · Atraxa |
+| Price alerts | A watched card crossed your alert | Price drop · Sol Ring |
+| From Archidekt | A comment, a reply, a new follower or news in your Archidekt alerts | Archidekt · Forum reply |
+| New assistant | An assistant connected to your account (every new connection; renewing its access is not one) | New assistant · Claude |
+| Summaries | Your daily or weekly summary | Summary · This week |
+| Gateway (admins) | A newer gateway release, or a nightly backup that failed (admins only) | Gateway · Update 0.7.48 |
 
-The **bell** at the top, and the **Alerts** page it opens, carry the
-gateway's own alerts beside Archidekt's, with or without push notifications:
-a price alert that fired, a deck report that finished, your summary, and what
-waits for your press right now. The kinds you untick under Push notifications stay
-out of it, the gateway keeps its newest 50, and the count clears once you
-open the list. The Alerts page has a search box and a **Type** filter.
+Opening a row takes you to its page and marks it read. Each row's ⋮ (or a
+right-click, or a press and hold) has **Mark read** or **Mark unread** and
+**Dismiss**; **Mark all read** and **Clear all** act on every row, and the
+message that follows offers **Undo**. Read and dismissed are kept on the
+gateway, so a reload, another tab or another device shows the same, and the
+phone's push for an alert you read or dismissed anywhere is taken off your
+phones. The **Type** and **Show** (All or Unread) filters and the search box
+narrow the list. The count on the bell is what came since you last opened
+the list. The gateway keeps your newest 200 alerts, and dismissed ones for
+30 days so Undo can bring them back. Alerts from Archidekt are read from
+Archidekt: marking them read or dismissing them here doesn't change them on
+archidekt.com.
+
+**Push notifications** on your Account page chooses, for each type, **Off**,
+**Alerts only** (on the Alerts page, no push) or **Alerts and push**. Every
+type is pushed by default except Applied for you (Alerts only).
+
+**Push notifications** come in the gateway's Android app. There are no push
+notifications on iPhone. Open your Account page in the app, tick **Send me
+push notifications**, save, then press **Get push notifications on this
+phone**. On Android 13 and later the app asks you to allow push
+notifications, and it asks once to run in the background. Android then shows
+a quiet "Always connected" notification while the app listens. **Send test**
+checks it, and **Disconnect my phones** stops every phone you connected.
+
+Each push's title starts with its type and names the deck or card it is
+about, such as "Price drop · Sol Ring", and its line says what happened.
+Pressing it opens the page here and marks the alert read; **Mark read** on
+the push does the same without opening it. Each type has its own Android
+notification category in Android's settings for the app, so
+you can change how each one sounds there: Waiting for you and New assistant
+pop up on the screen; Deck reports, Price alerts, From Archidekt, Applied
+for you and Gateway make a sound without popping up; Summaries arrive
+silently. Several of one type are grouped under one heading. Messages say
+only what happened and link to the page here; they never list a deck's
+cards.
+
+**From Archidekt** works once your Archidekt account is linked. Archidekt
+can't tell the gateway when something new arrives, so while a phone of yours
+is connected the gateway looks at your Archidekt alert count now and then, in
+the background and after everyone's own pages. Each new alert comes once, in
+Archidekt's own words; pressing it opens the deck, forum thread or profile
+here, or the Alerts page for news and contests. More than three at once come
+as one message. Alerts that were already there when you turned this on, and
+ones you have read in the gateway's Alerts, are not sent.
+
+Your assistant can read your alerts too (get_my_notifications): Archidekt's,
+and the gateway's own with their type, title, words and whether you read
+them. Reading them changes nothing.
 
 The summary is part of the **Push notifications** card, so it is there only when
 the gateway has a notification server set up (without one, the card only

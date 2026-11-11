@@ -75,7 +75,7 @@ def test_the_rail_has_forum_before_alerts_and_the_phone_bar_keeps_it_in_more(ser
     assert tabs == [
         ("/", ""),
         ("/decks", ""),
-        ("/collection", ""),
+        ("/binder", ""),
         ("/proposals", ""),
         ("/scan", "railonly"),
         ("/precons", "railonly"),
@@ -94,31 +94,29 @@ def test_watchlist_and_every_list_light_binder_and_account_lights_the_picture(se
     for path in ("/watchlist", "/collection/wants", "/collection/lists", "/lists/templates"):
         page = c.get(path).text
         nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
-        assert "<a href='/collection' aria-current='page'>Binder</a>" in nav, path
+        assert "<a href='/binder' aria-current='page'>Binder</a>" in nav, path
         assert not re.search(r"class='icon-btn acct' href='/account'[^>]*aria-current=page", page), path
     page = c.get("/account/details").text
     assert "class='icon-btn acct' href='/account' aria-label='Account' title='Account'" in page
     assert re.search(r"class='icon-btn acct' href='/account'[^>]*aria-current=page", page)
 
 
-async def test_binder_pages_share_one_switch(member: Browser) -> None:
+async def test_binder_pages_lead_back_to_the_binder(member: Browser) -> None:
+    """One Binder (0.7.47): with watchlists on, the Binder page is the place, and the pages it opens
+    have "‹ Binder" back and their own name instead of the old switch."""
+    back = "<a class='bn-back' href='/binder'>"
     cards = (await member.http.get("/collection")).text
-    assert _switch(cards) == ["/collection", "/collection/lists", "/watchlist"]
-    assert "<h1 class='sr-only'>Binder: Cards</h1>" in cards
-    assert re.search(r"<a href='/collection' aria-current=page>Cards(<span class='cn'>|</a>)", cards)
+    assert back in cards and "<h1>Archidekt collection" in cards
+    assert "<nav class='hubseg' aria-label='Binder'>" not in cards
     hub = (await member.http.get("/collection/lists")).text
-    assert _switch(hub) == ["/collection", "/collection/lists", "/watchlist"]
-    assert "<a href='/collection/lists' aria-current=page>Lists</a>" in hub
-    assert "<h1 class='sr-only'>Binder: Lists</h1>" in hub
-    assert "<h2>Your Archidekt lists</h2>" in hub and "<h2>Watchlist lists</h2>" in hub
+    assert back in hub and "<h1>Archidekt lists</h1>" in hub
+    assert "<h2>Your Archidekt lists</h2>" in hub and "<h2>Watchlist lists</h2>" not in hub
     wants = (await member.http.get("/collection/wants")).text
-    assert _switch(wants) == ["/collection", "/collection/lists", "/watchlist"]
-    assert "<a href='/collection/lists' aria-current=page>Lists</a>" in wants  # the pins are a list
-    assert "<h1 class='sr-only'>Binder: Pinned cards</h1>" in wants
+    assert back in wants and "<h1>Pinned cards</h1>" in wants
     assert "Sol Ring" in wants and "for Meren" in wants  # the pin seeded on Archidekt
     assert "href='/collection/wants?remove=31'" in wants  # the row's menu stays on this page
     watch = (await member.http.get("/watchlist")).text
-    assert "<a href='/watchlist' aria-current=page>Watchlist</a>" in watch
+    assert back in watch and "<h1>Watchlist" in watch
 
 
 async def test_old_pins_addresses_land_on_wants_and_a_save_comes_back_there(

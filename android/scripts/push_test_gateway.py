@@ -9,6 +9,8 @@ then the messages the test sends. The test drives it on the same port:
   POST /control/delete   {"sequence_id"}                             withdraw a deck's message
   POST /control/refuse   {"status", "error"}                         refuse from now on, end streams
   POST /control/drop                                                 end streams (the app reconnects)
+  POST /control/stall                       the open streams stop writing but stay open (a stalled
+                                            connection: the app must notice and connect again)
   POST /control/press    {"name"}                     the page clicks its button for that app method
   GET  /control/state    {"connections", "connects", "last_since", "pages": {path: requests}, "seen"}
 
@@ -35,23 +37,23 @@ KEEPALIVE = float(os.environ.get("PUSH_TEST_KEEPALIVE", "5"))
 STATIC = os.environ.get("PUSH_TEST_STATIC", "")
 # The App rows of the gateway's Account page (account_hub.py), as the app's buttons
 PAGE = (
-    "<!doctype html><meta name='viewport' content='width=device-width'><title>Test gateway</title>"
-    "<style>button{display:block;font-size:20px;margin:16px;padding:12px}[hidden]{display:none}</style>"
-    "<p>Test gateway.</p>"
-    "<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
-    "<button type='button' data-native='reload'>Reload</button>"
-    "<button type='button' data-native='changeGateway'>Change gateway</button>"
-    "<script src='/static/feedback.js'></script>"
+    b"<!doctype html><meta name='viewport' content='width=device-width'><title>Test gateway</title>"
+    b"<style>button{display:block;font-size:20px;margin:16px;padding:12px}[hidden]{display:none}</style>"
+    b"<p>Test gateway.</p>"
+    b"<button type='button' data-native='openCamera'>Scan cards</button>"
+    b"<button type='button' data-native='reload'>Reload</button>"
+    b"<button type='button' data-native='changeGateway'>Change gateway</button>"
+    b"<script src='/static/feedback.js'></script>"
     # Reports what it shows, and clicks a button when the test asks (POST /control/press)
-    "<script>(function(){"
-    "function shown(){return Array.prototype.filter.call(document.querySelectorAll('[data-native]'),"
-    "function(b){return !b.hidden;}).map(function(b){return b.getAttribute('data-native');}).join(',');}"
-    "setTimeout(function(){fetch('/control/seen?bridge='+(window.MtgNative?1:0)+'&shown='+shown());},500);"
-    "setInterval(function(){fetch('/control/press').then(function(r){return r.json();}).then(function(j){"
-    "var b=j.name&&document.querySelector('[data-native=\"'+j.name+'\"]');if(b)b.click();})"
-    ".catch(function(){});},500);"
-    "})();</script>"
-).encode()
+    b"<script>(function(){"
+    b"function shown(){return Array.prototype.filter.call(document.querySelectorAll('[data-native]'),"
+    b"function(b){return !b.hidden;}).map(function(b){return b.getAttribute('data-native');}).join(',');}"
+    b"setTimeout(function(){fetch('/control/seen?bridge='+(window.MtgNative?1:0)+'&shown='+shown());},500);"
+    b"setInterval(function(){fetch('/control/press').then(function(r){return r.json();}).then(function(j){"
+    b"var b=j.name&&document.querySelector('[data-native=\"'+j.name+'\"]');if(b)b.click();})"
+    b".catch(function(){});},500);"
+    b"})();</script>"
+)
 
 lock = threading.Lock()
 streams: list[queue.Queue] = []
@@ -144,7 +146,9 @@ class Handler(BaseHTTPRequestHandler):
             state["connects"] += 1
             state["last_since"] = since
             missed = []
-            if since:
+            if since and since.isdigit():  # a Unix time, as ntfy and the gateway take it
+                missed = [m for m in history if m["time"] >= int(since)]
+            elif since:
                 ids = [m["id"] for m in history]
                 missed = history[ids.index(since) + 1 :] if since in ids else []
             streams.append(q)
@@ -162,6 +166,15 @@ class Handler(BaseHTTPRequestHandler):
                 except queue.Empty:
                     ev = {"event": "keepalive", "time": int(time.time())}
                 if ev.get("event") == "end":
+                    return
+                if ev.get("event") == "stall":
+                    # silent from now on, and no longer counted or sent to; held open until the
+                    # app gives up on it and closes it (its read timeout)
+                    with lock:
+                        if q in streams:
+                            streams.remove(q)
+                    while self.rfile.read(1):
+                        pass
                     return
                 self._line(ev)
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, OSError):
@@ -203,6 +216,8 @@ class Handler(BaseHTTPRequestHandler):
                 state["press"] = body.get("name")
         elif self.path == "/control/drop":
             _publish({"event": "end"})
+        elif self.path == "/control/stall":
+            _publish({"event": "stall"})
         elif self.path == "/control/refuse":
             with lock:
                 state["refuse"] = body

@@ -32,7 +32,7 @@ from .test_unanswered_writes import ONE
 async def test_reads_answer_at_once_while_another_process_holds_the_lock(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
-    browser = Browser(h)
+    browser = Browser(h, follow_late=False)
     await browser.login()
     for path in ("/decks", "/account", "/"):  # warm: first reads, caches
         assert (await browser.http.get(path)).status_code == 200
@@ -80,7 +80,7 @@ async def test_a_read_that_needs_a_write_runs_again_once_the_lock_is_free(stack:
     after the lock, and the page drawn then is the one the member sees."""
     h = stack.h
     await linked_user(stack)
-    browser = Browser(h)
+    browser = Browser(h, follow_late=False)
     await browser.login()
     calls = {"n": 0}
     real = Database.hold_blocked

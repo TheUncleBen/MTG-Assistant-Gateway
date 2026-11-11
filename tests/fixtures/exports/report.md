@@ -63,7 +63,7 @@ Played with their effect: 49 of 98 cards (50% of the deck). Known: 66 of 98 card
 
 **Played without their effect: 32 of 98 cards (33% of the deck).**
 
-The solo test found these cards and their exact text, but has no description yet of what they do, so it drew and cast them without their effect. Whatever they would do in a real game is missing from the numbers above. Your assistant may be able to describe some of them from their exact text, in a form the solo test can play. Many cards need things the solo test does not model, such as opponents to interact with.
+The solo test found these cards and their exact text, but has no card model for them (a short description of what a card does, in the solo test's own terms), so it drew and cast them without their effect. Whatever they would do in a real game is missing from the numbers above. Your assistant may be able to write card models for some of them from their exact text. Many cards need things the solo test does not model, such as opponents to interact with.
 
 - Aegis of the Gods
 - Ajani, Caller of the Pride
@@ -150,16 +150,16 @@ These cards were understood, drawn and played, and nothing they do changed a sol
 - Vampire Nighthawk
 - Vault of the Archangel
 
-**Shortcuts the model takes: 6.**
+**Shortcuts the solo test takes: 6.**
 
-Simplifications applied to these cards; they play a little better or worse than in a real game.
+To play hundreds of games quickly, the solo test bends a few rules. For example, it lets a mana creature tap for mana the turn it arrives, which the real rules don't allow. A shortcut like that makes the deck look a little better than it would play at a table; others make it look a little worse. Each shortcut below says which, why, and which of your cards it touched. Which way each one leans is our best judgment from what the shortcut does, not a measurement.
 
-- Treated as producing any color: Lotus Field, Opaline Unicorn, Transguild Promenade
-- Mana creatures can tap for mana the turn they arrive: Opaline Unicorn
-- Equipment text beyond its bonus is ignored: Leather Armor, Plate Armor
-- Fetch lands find a land that enters tapped, in your main phase: Evolving Wilds
-- Hybrid and Phyrexian costs paid with one color: Norn's Annex
-- Extra card text ignored: Black Dragon Gate, Dungeon Map, Leechridden Swamp, Lotus Field, Nephalia Academy, Orzhov Keyrune, The Soul Stone, Transguild Promenade, Vault of the Archangel
+- Treated as producing any color (Results may look better): Lotus Field, Opaline Unicorn, Transguild Promenade. They can pay for any spell, so the deck casts on curve more often than it might at a table.
+- Mana creatures can tap for mana the turn they arrive (Results may look better): Opaline Unicorn. They tap for mana the turn they arrive, a turn earlier than the real rules allow without haste.
+- Equipment text beyond its bonus is ignored (Results may look worse): Leather Armor, Plate Armor. Only the bonus counts; anything else the Equipment does is missing.
+- Extra card text ignored (Results may look worse): Black Dragon Gate, Dungeon Map, Leechridden Swamp, Lotus Field, Nephalia Academy, Orzhov Keyrune, The Soul Stone, Transguild Promenade, Vault of the Archangel. Only the parts the solo test understands are played; the rest of the card's text does nothing.
+- Fetch lands find a land that enters tapped, in your main phase (Small effect either way): Evolving Wilds. Close to a real fetch, but the land always arrives tapped.
+- Hybrid and Phyrexian costs paid with one color (Small effect either way): Norn's Annex. Paid with one of the colors only, never with life or the other color.
 
 ## Validation: issues found
 

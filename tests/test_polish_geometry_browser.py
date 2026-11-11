@@ -92,6 +92,7 @@ def test_the_deck_page_banner_list_and_tools_line_up(server: Server, width: int)
     from playwright.sync_api import sync_playwright
 
     sid, _pending = _seed(server)
+    server.ark.votes[("someone-else", 300042)] = 1  # a Like count to line up (a zero is not shown)
     exe = _exe()
     with sync_playwright() as p:
         browser, page, errors = _open(p, exe, server, sid, width, dark=width == 412)

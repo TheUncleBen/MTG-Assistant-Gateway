@@ -138,3 +138,15 @@ def history_step(page, js: str = "() => history.forward()") -> None:  # noqa: AN
     page.evaluate(js)
     page.wait_for_function("() => window.__popCount >= 1")
     quiet(page)
+
+
+SIDEWAYS_JS = "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+
+
+def sideways(page) -> int:  # noqa: ANN001
+    """How far the page scrolls sideways (0: it does not), measured once it has settled: a card's
+    transition caught halfway (a size change, a tap) can stick out for a frame on a busy machine
+    (goldfish's card size at 200% text measured 2 px in a full parallel run and 0 alone). Every
+    browser test measures sideways scrolling through this (tests/test_no_fixed_waits.py)."""
+    settled(page, scripts=False)
+    return page.evaluate(SIDEWAYS_JS)

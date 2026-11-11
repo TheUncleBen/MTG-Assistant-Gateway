@@ -131,18 +131,15 @@ def test_a_closed_drop_down_takes_no_room() -> None:
 # -- the Account page ------------------------------------------------------------------------------
 
 
-def test_balance_centres_the_smallest_of_an_odd_number_and_keeps_your_account_top_left() -> None:
-    rows = lambda n: [account_hub._row(f"r{i}", "x", "/") for i in range(n)]  # noqa: E731
-    # a member on the website: Guide, Assistant skill and Android app beside Your account
-    gs = [(0, "Your account", rows(3)), (1, "Look", rows(2)), (2, "Assistants and apps", rows(3))]
-    cols, lone = account_hub.balance(gs)
-    assert [g[1] for g in lone] == ["Look"]
-    assert cols[0][0][1] == "Your account" and [g[1] for g in cols[1]] == ["Assistants and apps"]
-    gs.append((3, "This app", rows(5)))
-    cols, lone = account_hub.balance(gs)
-    assert lone == [] and cols[0][0][1] == "Your account"
-    heights = [sum(len(g[2]) + 1 for g in c) for c in cols]
-    assert abs(heights[0] - heights[1]) <= 3, heights
+def test_the_account_hub_is_one_centred_column_on_every_screen() -> None:
+    """Two columns side by side left a hole under the shorter one on a desktop (the owner, 0.7.46
+    checklist: "that spacing"): the groups are one centred column, in their own order, as iOS
+    Settings draws them."""
+    css = account_hub.HUB_CSS
+    assert ".yhub{max-width:42rem;margin:0 auto}" in css
+    assert ".ycols{display:grid;grid-template-columns:minmax(0,1fr);" in css
+    assert "minmax(0,1fr) minmax(0,1fr)" not in css and "ylone" not in css
+    assert not hasattr(account_hub, "balance")
 
 
 def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: Server) -> None:
@@ -347,7 +344,8 @@ def test_the_deck_pills_share_one_row_on_a_phone() -> None:
 
 def test_menu_icons_read_at_3_to_1_on_the_light_menu() -> None:
     """The bright orange was 1.8:1 on the light menu's #dedede; --orange-text (#944b00) is 4:1."""
-    assert ".ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange-text);" in theme.CSS
+    rule = theme.CSS.split(".ctxmenu .ic,.ctxmenu .i{", 1)[1].split("}", 1)[0]
+    assert "color:var(--orange-text);" in rule
     assert ".mtgbox .tree svg{width:18px;height:18px;flex:none;color:var(--orange-text);" in theme.CSS
 
 

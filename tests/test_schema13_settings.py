@@ -127,7 +127,7 @@ def test_a_large_0_7_28_database_is_upgraded_to_13_and_keeps_every_row(
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 22
+        assert new.schema_version == db_module.SCHEMA_VERSION == 24
         c = new._conn
         (count,) = c.execute("SELECT COUNT(*) FROM snapshots").fetchone()
         assert count == db_module._STEP_13_BATCH * 5 + 38
@@ -499,7 +499,6 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
         "archidekt_max_per_minute",
         "archidekt_retries",
         "scan_art_images_per_hour",
-        "watch_max_cards",  # each watched card is priced through Scryfall daily
         "watch_max_decks",  # each watched deck is read from Archidekt daily
     )
     faster_when_lower = (
@@ -523,6 +522,11 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
     for key in faster_when_lower:
         spec = MANAGED_SETTINGS[key]
         assert spec.lo == spec.default, key
+    # watch_max_cards: no limit by default (the owner's choice, 0.7.47). More cards never make the
+    # calls faster: the daily check prices them 75 a request at the single-lookup pace, so it only
+    # takes longer; 0 is no limit and a number caps it.
+    cards = MANAGED_SETTINGS["watch_max_cards"]
+    assert cards.default == 0 and cards.lo == 0 and cards.parse("0") == 0 and cards.parse(5000) == 5000
     assert MANAGED_SETTINGS["archidekt_calls_per_10_min"].default == 120
     # deck sync: 0 turns it off; anything else is every 30 minutes or less often
     sync = MANAGED_SETTINGS["deck_sync_minutes"]
@@ -924,8 +928,8 @@ def test_settings_refusals_read_as_the_pages_do() -> None:
         MANAGED_SETTINGS["backup_keep_days"].parse(5000)
     with pytest.raises(SettingError, match="^archidekt_min_interval must be between 1 and 10 seconds$"):
         MANAGED_SETTINGS["archidekt_min_interval"].parse(0.5)
-    with pytest.raises(SettingError, match="^watch_max_cards must be between 0 and 5,000$"):
-        MANAGED_SETTINGS["watch_max_cards"].parse(5001)
+    with pytest.raises(SettingError, match="^watch_max_cards must be between 0 and 1,000,000$"):
+        MANAGED_SETTINGS["watch_max_cards"].parse(1_000_001)
     with pytest.raises(SettingError) as refused:
         MANAGED_SETTINGS["approval_mode_default"].parse("yolo")
     assert refused.value.message == (

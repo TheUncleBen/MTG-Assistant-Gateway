@@ -46,7 +46,8 @@ Open your gateway in the phone's browser, sign in, go to **Account**, then
 **Get the Android app** (the Android section of the setup page,
 `/install?for=android`; `/app` leads there). It shows the version, the SHA-256
 of the file, the SHA-256 fingerprint of the app's signing certificate, and one
-download button. Then:
+download button. Reading that page on a computer, it also shows a QR code: point the phone's camera
+at it to open the page on the phone. Then:
 
 1. Compare the signing certificate SHA-256 on that page with the one published in
    the project's GitHub release for that version (in the release notes and in
@@ -75,8 +76,9 @@ download button. Then:
    opens in your phone's browser ([Sign-in](#2-using-it) below).
 
 **Updates** come to the app by themselves ([Updates](#updates) below): when a
-newer version is out, a bar at the top offers it and **Update** installs it over
-the one you have, keeping your settings and sign-in. **Change gateway** on the
+newer version is out, a bar at the top offers it, **Update** saves it to your
+Downloads, and opening it there installs it over the one you have, keeping your
+settings and sign-in. **Change gateway** on the
 Account page (your picture, top right), under This app, brings the address screen back; over
 a page that isn't the gateway's (the sign-in page, say) it is in the round
 button's menu at the bottom right.
@@ -95,26 +97,28 @@ app**. When there is a newer version, a bar at the top says **Version x.y.z of
 the app is available**:
 
 1. Tap **Update**. The app downloads the gateway's
-   `/app/mtg-assistant-gateway.apk` and checks it before installing anything:
+   `/app/mtg-assistant-gateway.apk` and checks it before saving anything:
    it must have the size and SHA-256 the gateway gave, be this app (the same
    package ID) in the version the gateway names, and be signed with the same
-   certificate as the app you have. If any of that fails, nothing is installed
+   certificate as the app you have. If any of that fails, nothing is saved
    and the app says why.
-2. The first time, Android asks you to allow installs from MTG Assistant
-   Gateway ("Install unknown apps"). Allow it, go back, and confirm. On a
-   Samsung Galaxy phone, Auto Blocker must be off for this, as for the first
-   install. If Play Protect offers to scan the update, scanning it or not are
-   both fine.
-3. Android installs the update over the app and closes it. Open the app again
-   from its icon. Your gateway address and sign-in are kept.
+2. The app saves the checked file to your **Downloads** as
+   `MTG-Gateway-x.y.z.apk` and opens your Downloads. (If the phone has no
+   Downloads view, open the file from your Files app.)
+3. Tap the file and choose **Update**. Android asks once to allow installs from
+   the app you opened it with (Files or Downloads), as for the first install. On a
+   Samsung Galaxy phone, Auto Blocker must be off for this. If Play Protect offers
+   to scan the update, scanning it or not are both fine. Your gateway address and
+   sign-in are kept; open the app again from its icon.
 
-From Android 12, after that first permission, Android may install later
-updates without asking again, because the app is updating itself
-(`PackageInstaller.SessionParams.setRequireUserAction`). Android still makes
-that call: on some phones and versions it asks every time, and the app shows
-its confirmation when it does. **Later** hides the bar, and the app does not
-offer that version again on its own for three days; **Check for app updates**
-on the Account page still offers it.
+Since 0.7.47 the app does not install updates itself and does not ask for the
+permissions to (`REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION`):
+an app that can install apps is one of the things Play Protect weighs when it
+warns about an app from outside Google Play. Google does not publish exactly what
+it weighs, so this alone may not clear the warning. Saving to Downloads needs no
+storage permission on Android 10 and later. **Later** hides the bar, and the app
+does not offer that version again on its own for three days; **Check for app
+updates** on the Account page still offers it.
 
 What it sends: one request to your own gateway, with the sign-in the app
 already holds, and the download from the same gateway. Nothing goes to GitHub
@@ -216,8 +220,8 @@ add MTG Assistant Gateway to **Never sleeping apps**. Make sure it is not in
 the Account page says this too.
 
 The same connection brings new Archidekt alerts (comments, replies,
-follows) from 0.7.46, while **A new alert on Archidekt** is ticked on the
-card: the gateway looks for them only for members whose phone is connected
+follows) from 0.7.46, while **From Archidekt** is set to **Alerts and push** on
+the card: the gateway looks for them only for members whose phone is connected
 now or was in the last 12 hours. Nothing in the app changed for this; a
 pressed alert opens its deck, forum thread or profile in the app.
 
@@ -240,7 +244,7 @@ The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
 - **This app, on the Account page** (your picture, top right):
-  *Scan with the app's camera*, *Reload*, *Open a copied link*, *Change gateway*
+  *Scan cards*, *Reload*, *Open a copied link*, *Change gateway*
   and *Check for app updates* (with the installed version). They are in the
   app's own menu too, and in the round button's menu (the round button shows
   only over pages that aren't the gateway's).
@@ -379,13 +383,21 @@ else your gateway serves. A few things are native:
 
 ## 3. Scanning with the phone camera
 
+**Once the gateway finds cards by their picture (0.7.47), the app doesn't open
+a camera of its own.** The `/scan` page finds cards with its own live camera,
+and the app shows that page as it is: the menu's **Scan cards** opens it, and
+the camera starts there (the app asks for the camera permission the first
+time). What follows is how the app scans while the gateway still reads titles:
+an older gateway, or a 0.7.47 gateway still learning the card pictures after an
+upgrade.
+
 The gateway's `/scan` page already reads cards from a photo (see
 [SCANNING.md](SCANNING.md)). The app's camera screen just takes a better photo
 than a browser can, then hands it to that page, which keeps running underneath:
 
 1. On the scan page, the orange shutter or the viewfinder (inside the app they
    open the phone camera, and the page doesn't start a camera of its own), or
-   the menu's **Scan with the app's camera**. The app opens `/scan` if you
+   the menu's **Scan cards**. The app opens `/scan` if you
    aren't on it. The page's **Auto** switch opens the phone camera with Auto
    already on (step 4).
 2. Fill the dashed card outline with the card: that holds the phone about
@@ -393,8 +405,9 @@ than a browser can, then hands it to that page, which keeps running underneath:
    focuses. Controls, each shown only when
    the camera reports it (the app uses CameraX, Google's camera library, and
    asks it what the camera can do):
-   - **Torch** on/off (the button reads *Torch: On* or *Torch: Off*).
-   - **Torch brightness** slider. Shown when CameraX reports adjustable
+   - **Flash** on/off (the button reads *Flash: On* or *Flash: Off*; called
+     Torch before 0.7.47).
+   - **Flash brightness** slider. Shown when CameraX reports adjustable
      torch strength, which it does on Android 15 or later for cameras with more
      than one level. Earlier Android versions can only set torch strength while
      no app has the camera open, so with the preview running the slider isn't
@@ -756,9 +769,8 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   ones already shown (not the messages themselves),
   and whether it has already asked Android for the notification permission
   and to run in the background. It asks for internet and
-  camera, and for the two permissions that let it install its own updates
-  (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
-  installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
+  camera (it does not ask to install apps: an update is saved to your Downloads
+  and you open it there), and for
   the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
   only to notice the connection coming back while a page has failed to load.
   For push notifications it asks for `POST_NOTIFICATIONS` (to show your messages;

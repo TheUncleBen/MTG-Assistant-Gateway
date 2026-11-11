@@ -564,9 +564,13 @@ async def test_next_step_is_one_plain_sentence_for_an_app_known_to_show_cards(st
     p = await _propose(h, claude, [_add("Arcane Signet")])
     assert p["ok"] and p["state"] == "pending", p
     step = p["next_step"]
-    assert step.startswith("The user decides on the card shown with this result"), step
+    assert step.startswith("The user decides on the proposal's card in the chat"), step
     assert "If your app" not in step and "Otherwise" not in step, step
     assert step.count(". ") == 0 and step.endswith("."), step  # one sentence
+    # proposal_status draws no card: its next_step must not speak of a card "shown with this result"
+    # (live 0.7.46 did)
+    status = structured(await call(h, claude, "proposal_status", {"proposal_id": p["proposal_id"]}))
+    assert "with this result" not in status["next_step"], status["next_step"]
     other = await _token_for_app(h, "https://client.test/cb")
     q = await _propose(h, other, [_add("Sol Ring")])
     assert "If your app" not in q["next_step"] and "review link" in q["next_step"], q["next_step"]

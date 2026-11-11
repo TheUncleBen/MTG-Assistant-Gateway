@@ -64,7 +64,8 @@ async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack:
     assert "Two shops, in order." not in defaults
     assert ">EDH bracket</option>" in defaults and "EDH Bracket Info" not in defaults
     notes = (await member.http.get("/notifications")).text
-    assert "Alerts from this gateway and from Archidekt." in notes and "bell holds" not in notes
+    assert "What needs you and what happened, from this gateway and from Archidekt." in notes
+    assert "bell holds" not in notes
     lists = (await member.http.get("/lists/custom")).text
     assert "Cards you made on Archidekt." in lists and "made up" not in lists
     # the card viewer's note on a custom card (static/cardview.js): no claim about price lists

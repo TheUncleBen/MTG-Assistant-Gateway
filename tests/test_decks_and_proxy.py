@@ -71,12 +71,47 @@ def structured(result: dict) -> dict:
     return result["structuredContent"]
 
 
-class Browser:
-    """A browser with its own cookie jar against the gateway."""
+class _FollowLate(httpx.AsyncBaseTransport):
+    """What static/feedback.js does with a slow page's frame (latepage.py): wait on its /late/ key,
+    then load the address again for the finished page. A page that takes longer than LATE_AFTER
+    under a loaded test run (the full suite on every core) otherwise hands a test the frame instead
+    of the page it asked for, a flake by timing rather than by code."""
 
-    def __init__(self, h: Harness):
+    def __init__(self, inner: httpx.AsyncBaseTransport):
+        self.inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        resp = await self.inner.handle_async_request(request)
+        if request.method != "GET":
+            return resp
+        raw = b"".join([part async for part in resp.aiter_raw()])
+        await resp.aclose()
+        # the body as sent (gzip and all) goes back to the client, which decodes it as usual
+        if "text/html" not in resp.headers.get("content-type", ""):
+            return httpx.Response(resp.status_code, headers=resp.headers, stream=httpx.ByteStream(raw))
+        text = httpx.Response(200, headers=resp.headers, content=raw)
+        late = re.search(rb"data-late='(/late/[A-Za-z0-9_-]+)'", await text.aread())
+        if late is None:
+            return httpx.Response(resp.status_code, headers=resp.headers, stream=httpx.ByteStream(raw))
+        wait = httpx.Request("GET", request.url.copy_with(path=late.group(1).decode(), query=None))
+        wait.headers.update({k: v for k, v in request.headers.items() if k.lower() == "cookie"})
+        await (await self.inner.handle_async_request(wait)).aread()
+        return await self.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self.inner.aclose()
+
+
+class Browser:
+    """A browser with its own cookie jar against the gateway. ``follow_late``: a slow page's frame
+    is followed to the finished page as the site's script does (off for the tests of the frame)."""
+
+    def __init__(self, h: Harness, *, follow_late: bool = True):
         self.h = h
-        self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=h.app), base_url=GATEWAY)
+        transport: httpx.AsyncBaseTransport = httpx.ASGITransport(app=h.app)
+        if follow_late:
+            transport = _FollowLate(transport)
+        self.http = httpx.AsyncClient(transport=transport, base_url=GATEWAY)
 
     async def login(self, next_path: str = "/account") -> httpx.Response:
         r = await self.http.get("/login", params={"next": next_path})
@@ -2133,3 +2168,43 @@ async def test_compare_advice_is_true_to_bracket_matched_forge(stack: Stack) -> 
     report = tools["run_deck_report"]
     assert "forge" in report["inputSchema"]["properties"] and "Preflight only" in report["description"]
     assert "60-card deck's report, or one with no commander marked, never starts it" in report["description"]
+
+
+async def test_validate_decklist_names_a_two_part_card_as_the_list_did(stack: Stack) -> None:
+    """Live 0.7.46: "1 Fire // Ice" in a G/U list came back as "Fire (has R)", because the proxy
+    sends front faces; the answer now names the card as the list did."""
+    out = await call(
+        stack.h,
+        await mcp_token(stack.h),
+        "validate_decklist",
+        {"decklist": "1 Fire // Ice\n1 Forest", "commander": "Tatyova, Benthic Druid"},
+    )
+    text = out["content"][0]["text"]
+    assert "  - Fire // Ice (has R)" in text, text
+    assert "- Fire (has R)" not in text, text
+
+
+def test_an_upstream_error_page_becomes_one_plain_sentence() -> None:
+    """Live 0.7.46: precon_decklist with a fileName MTGJSON lacks answered with MTGJSON's whole 404
+    web page ("MTGJSON API error (404): <!DOCTYPE html>…") in the chat."""
+    from mcp import types
+
+    from mtg_gateway.mf_proxy import _plain_error_page
+
+    page = (
+        "MTGJSON API error (404): <!DOCTYPE html>\n<html lang='en-US'><head><title>404</title></head></html>"
+    )
+    result = types.CallToolResult(content=[types.TextContent(type="text", text=page)], isError=True)
+    out = _plain_error_page(result, "precon_decklist", {"params": {"file_name": "NoSuchPrecon_XYZ"}})
+    text = out.content[0].text
+    assert "<" not in text, text
+    assert text == (
+        "MTGJSON API error (404): No precon has the fileName “NoSuchPrecon_XYZ”: precon_search lists "
+        "each precon's fileName."
+    ), text
+    other = _plain_error_page(
+        types.CallToolResult(content=[types.TextContent(type="text", text=page.replace("404", "502"))]),
+        "edhrec_commander",
+        {"name": "x"},
+    )
+    assert other.content[0].text.endswith("error page; try again later."), other.content[0].text

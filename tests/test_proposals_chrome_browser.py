@@ -10,6 +10,7 @@ import re
 
 import pytest
 
+from .conftest import guard_ready_for_tap
 from .test_cardsearch_browser import PNG
 from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_scan_browser import _chromium_path
@@ -98,6 +99,7 @@ def test_a_locked_apply_wears_a_lock_until_the_guard_opens(server: Server, width
         if width < 900:
             assert "tap once to unlock" in text and "mouse" not in text, text
             # the unlocking tap: the buttons look pressed until the guard opens
+            guard_ready_for_tap(page)
             box = apply.bounding_box()
             page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             assert form.evaluate("f => f.classList.contains('unlocking')")

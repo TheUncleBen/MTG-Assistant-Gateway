@@ -38,7 +38,7 @@ def _sol(stack: Stack) -> dict:
 def test_the_schema_grows_lists_and_the_price_when_added(tmp_path: Path) -> None:
     d = Database(tmp_path / "w.sqlite")
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 22
+        assert d.schema_version == db_module.SCHEMA_VERSION == 24
         cols = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_cards)")}
         assert {"list_name", "added_price", "added_currency", "alert_drop_pct", "alert_rise_pct"} <= cols
         lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
@@ -75,7 +75,7 @@ def test_schema_21_adds_the_lists_to_a_schema_20_database(
     monkeypatch.undo()
     d = Database(path, upgrade_dir=tmp_path / "before-upgrade")
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 22
+        assert d.schema_version == db_module.SCHEMA_VERSION == 24
         lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
         assert lists == {"sub", "name", "created_at"}
         row = d._conn.execute("SELECT list_name, added_price FROM watch_cards WHERE id = 'w1'").fetchone()
@@ -85,8 +85,8 @@ def test_schema_21_adds_the_lists_to_a_schema_20_database(
 
 
 def test_the_shipped_default_is_one_easy_to_flip_constant() -> None:
-    assert prices.DEFAULT_ALERTS == {"drop": 10.0}
-    assert set(prices.DEFAULT_ALERTS) <= set(prices.ALERT_KINDS)
+    assert prices.DEFAULT_ALERTS == {"drop": 10.0, "rise": 20.0, "floor": 0.5}  # 0.7.47 decision 2
+    assert set(prices.DEFAULT_ALERTS) <= set(prices.DEFAULT_KEYS)
     assert prices.ALERT_COLUMNS["drop"] == "alert_drop_pct" and prices.ALERT_COLUMNS["pct"] == "alert_pct"
     # drop is a share of the price when added: at most 100%
     with pytest.raises(Exception, match="at most 100"):
@@ -108,10 +108,14 @@ async def test_a_new_watch_gets_the_default_alert_and_the_price_it_was_added_at(
         assert w["added_price"] == 1.28 and w["added_currency"] == "usd"
         page = (await b.http.get("/watchlist")).text
         # the row's alert pill: the short form, the full words as its tooltip (polish B8)
-        assert "title='Drops 10% below $1.28'>" in page and "−10% below $1.28</span>" in page
+        # 0.7.47: the alert says the prices it fires at ($1.28 added, the $0.50 floor)
+        assert "Under $0.78</span>" in page and "Over $1.78</span>" in page
         assert "With a price alert <span class='n'>1</span>" in page
         api = (await b.http.get("/watchlist/api/card", params={"name": "Sol Ring"})).json()
-        assert api["watches"][0]["alerts"] == {"drop": 10.0} and api["watches"][0]["added_price"] == 1.28
+        assert (
+            api["watches"][0]["alerts"] == {"drop": 10.0, "rise": 20.0}
+            and api["watches"][0]["added_price"] == 1.28
+        )
     finally:
         await b.aclose()
     sol = _sol(stack)
@@ -119,12 +123,15 @@ async def test_a_new_watch_gets_the_default_alert_and_the_price_it_was_added_at(
     stack.sf.prices[sol["id"]] = {"usd": "1.20"}  # down 6%: not yet
     assert (await stack.gw.prices.run_daily())["alerts"] == 0
     clock.next_day()
-    stack.sf.prices[sol["id"]] = {"usd": "1.10"}  # down 14% from $1.28: the alert
+    stack.sf.prices[sol["id"]] = {"usd": "1.10"}  # down 14%, but only $0.18: under the $0.50 floor
+    assert (await stack.gw.prices.run_daily())["alerts"] == 0
+    clock.next_day()
+    stack.sf.prices[sol["id"]] = {"usd": "0.75"}  # $0.53 under $1.28: the alert (0.7.47 floor)
     assert (await stack.gw.prices.run_daily())["alerts"] == 1
     msg = stack.ntfy.messages[-1]
-    assert msg["message"] == "Sol Ring fell 10% below the $1.28 it was added at: $1.20 to $1.10."
+    assert msg["message"] == "$1.10 to $0.75: fell under $0.78, its alert below the $1.28 it was added at."
     clock.next_day()
-    stack.sf.prices[sol["id"]] = {"usd": "1.05"}  # already below: not again
+    stack.sf.prices[sol["id"]] = {"usd": "0.70"}  # already below: not again
     assert (await stack.gw.prices.run_daily())["alerts"] == 0
 
 
@@ -152,12 +159,15 @@ async def test_alert_defaults_are_the_members_own_once_saved(stack: Stack, monke
     Clock(monkeypatch)
     b = await _browser(stack, link=True)
     try:
-        assert prefs.alert_defaults(stack.h.db, SUB) == {"drop": 10.0}
+        assert prefs.alert_defaults(stack.h.db, SUB) == {"drop": 10.0, "rise": 20.0, "floor": 0.5}
         page = (await b.http.get("/watchlist?box=defaults")).text
         box = page.split("id='w-defaults'")[1].split("</form>")[0]
         assert "data-open" in box.split(">")[0]
         assert "name='alert_drop' inputmode='decimal' maxlength='10' value='10'" in box  # not "10.0"
-        assert "Price alert: Drops 10% below the price when added (your defaults)." in page
+        assert (
+            "Price alert: Drops 10% below the price when added, rises 20% above the price when added, "
+            "moves under $0.50 ignored (your defaults)." in page
+        )
         r = await _post(
             b,
             "/watchlist",
@@ -170,7 +180,8 @@ async def test_alert_defaults_are_the_members_own_once_saved(stack: Stack, monke
             },
         )
         assert r.status_code == 303 and r.headers["location"] == "/watchlist?ok=defaults_saved", r.text
-        assert prefs.alert_defaults(stack.h.db, SUB) == {"rise": 25.0, "pct": 15.0}
+        # a form without the floor box keeps the floor the member had (the shipped $0.50 here)
+        assert prefs.alert_defaults(stack.h.db, SUB) == {"rise": 25.0, "pct": 15.0, "floor": 0.5}
         page = (await b.http.get(r.headers["location"])).text
         assert "Price alert defaults saved. They apply to every card you watch from now on." in page
         assert "name='alert_rise' inputmode='decimal' maxlength='10' value='25'" in page
@@ -192,7 +203,9 @@ async def test_alert_defaults_are_the_members_own_once_saved(stack: Stack, monke
         assert r.status_code == 400 and "at most 100" in r.text
         # no alert at all is a default too
         r = await _post(b, "/watchlist", {"action": "defaults"})
-        assert r.status_code == 303 and prefs.alert_defaults(stack.h.db, SUB) == {}
+        assert r.status_code == 303 and prefs.alert_defaults(stack.h.db, SUB) == {
+            "floor": 0.5
+        }  # no alert; floor kept
     finally:
         await b.aclose()
 
@@ -433,12 +446,10 @@ async def test_a_box_in_the_address_draws_open_and_the_way_back_is_kept(stack: S
         assert arch.count("<a class='yrow' href=") == 6 and "lp-tabs" not in arch
         assert "<div class='rows lp-hubrows' data-counts='/lists/api/counts'>" in arch
         assert "href='/collection/wants'" in arch and "Pinned cards" in arch
-        rows = hub.split("<h2>Watchlist lists</h2>")[1].split("</section>")[0]
-        assert "<span>Soon</span>" in rows and "<span>Later</span>" in rows
-        assert "href='/watchlist?list=Soon'" in rows and "aria-label='Menu for the list Soon'" in rows
-        assert "href='/watchlist?box=rename&amp;list=Soon'" in rows and "Delete list…" in rows
-        assert "New list…" in rows and "data-box-open='wl-new'" in rows
-        assert "Not in a list" not in rows  # nothing watched outside a list yet
+        # One Binder (0.7.47): the gateway's own lists are on the Binder page, not on this hub
+        assert "Watchlist lists" not in hub
+        binder = (await b.http.get("/binder")).text
+        assert "Soon" in binder and "Later" in binder and "New list…" in binder
     finally:
         await b.aclose()
 
@@ -458,7 +469,11 @@ async def test_the_assistant_watches_into_a_list_with_a_drop_alert(stack: Stack,
     assert out["watch"]["alerts"] == {"drop": 25.0} and out["watch"]["list"] == "Meren wants"
     assert out["watch"]["added_price"] == out["watch"]["price"] == 1.22  # the cheapest printing today
     plain = structured(await call(h, token, "watch_card", {"name": "Sol Ring"}))
-    assert plain["ok"] and plain["watch"]["alerts"] == {"drop": 10.0} and plain["watch"]["list"] == ""
+    assert (
+        plain["ok"]
+        and plain["watch"]["alerts"] == {"drop": 10.0, "rise": 20.0}
+        and plain["watch"]["list"] == ""
+    )
     listed = structured(await call(h, token, "list_watchlist"))
     assert {c["name"]: c["list"] for c in listed["cards"]} == {"Sol Ring": "", "Sol Talisman": "Meren wants"}
     assert listed["lists"] == [{"name": "Meren wants", "count": 1}]
@@ -480,7 +495,7 @@ async def test_clear_alerts_on_a_new_watch_means_no_alerts(stack: Stack, monkeyp
     assert fresh["watch"]["alerts"] == {}, fresh["watch"]
     # the default still applies to a new watch that does not ask for none
     other = structured(await call(h, token, "watch_card", {"name": "Sol Talisman"}))
-    assert other["watch"]["alerts"] == {"drop": 10.0}, other["watch"]
+    assert other["watch"]["alerts"] == {"drop": 10.0, "rise": 20.0}, other["watch"]
     # and clear_alerts with one alert named keeps that one alone, new or not
     one = structured(
         await call(h, token, "watch_card", {"name": "Sol Talisman", "alert_below": 2, "clear_alerts": True})
