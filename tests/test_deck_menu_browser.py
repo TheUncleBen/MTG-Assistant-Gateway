@@ -157,7 +157,13 @@ def _chromium() -> None:
 
 
 def _overflow(page) -> int:
-    return page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    """How far the page runs past the window, measured once layout has settled: after two frames,
+    so a script that rearranges a row on resize (static/feedback.js evenRow) has had its turn (a
+    full parallel run once caught 3 px mid-change after a click at 200% text)."""
+    return page.evaluate(
+        "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => "
+        "r(document.documentElement.scrollWidth - document.documentElement.clientWidth))))"
+    )
 
 
 @pytest.mark.parametrize(("width", "view"), [(390, "text"), (1366, "grid")])
