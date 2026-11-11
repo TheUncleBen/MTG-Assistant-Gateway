@@ -300,3 +300,32 @@ def test_off_centre_leaves_a_row_of_controls_at_the_left(text: int) -> None:
         found = [f for f in found if f["kind"] == "off-centre"]
         browser.close()
     assert not found, found
+
+
+PANELS_AND_A_BUTTON = """
+<!doctype html><html><head><meta name=viewport content='width=device-width'>
+<style>body{margin:0;font:16px sans-serif;background:#fff;color:#111}
+main{max-width:1000px;margin:0 auto;padding:0 16px}
+.row{display:flex;gap:12px} .panel{width:260px;height:160px;background:#eee;border-radius:8px}
+.row > button{width:220px;min-height:44px;background:#ddd;border:1px solid #999}
+</style></head><body><main><h1>Stats</h1>
+<div class=row><div class=panel>Entries</div><div class=panel>Value</div><button>Refresh</button></div>
+</main></body></html>
+"""
+
+
+def test_off_centre_still_sees_lopsided_panels_beside_a_button() -> None:
+    """Only a row made of controls alone is a form row. Panels that fill the left and leave the
+    right empty are lopsided even when the row also holds a button (re-audit AX2)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.set_content(PANELS_AND_A_BUTTON)
+        found = page.evaluate(M.CHECKS, {"touch": False, "text": 1})
+        browser.close()
+    assert any(f["kind"] == "off-centre" and "panels" in f["msg"] for f in found), found
