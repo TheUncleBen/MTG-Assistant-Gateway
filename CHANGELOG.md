@@ -68,6 +68,9 @@ placeholders showed, and no blue links.
   and its status line says the turn and the library (each zone's heading has its own count).
 
 ### Fixed
+- Activity no longer shows “An assistant connected” each time an assistant renews its access,
+  about once an hour. A renewal is listed as “An assistant renewed its access”, shown only when
+  you pick it by name.
 - **Menus open at their buttons.** A ⋮ menu, and the deck page's Test and play and Deck tools
   menus, open just under their button, or just over it near the bottom of the window. Before,
   they were pushed up over the button.
