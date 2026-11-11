@@ -4309,6 +4309,10 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .editbar .backup input{margin:0}
 .editbar .status{margin:0;flex-basis:100%}
 .editbar .status:empty{display:none}
+/* Card size reads on the bar's one line, its label beside the switch as the Goldfish page has it:
+   stacked, it alone made the bar two lines tall (0.7.48 review) */
+@media (min-width:600px){ .editbar .field.cardsize{flex-direction:row;align-items:center;gap:.5rem;margin:0}
+  .editbar .field.cardsize .lbl{margin:0} }
 /* a question in the save bar (Save anyway? / Discard the unsaved changes?): its own full-width row,
    in the body text colour (--orange-text on the tinted grey bar is 3.9:1 in the light theme) */
 .editbar .confirmbar{flex-basis:100%;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0;
