@@ -932,9 +932,15 @@ details.raw{margin:.5rem 0 0}
     border:1px solid var(--card-border);border-radius:var(--radius-lg);box-shadow:var(--shadow)}
   body:not(.has-tabbar) .apply form.guarded .choice{bottom:calc(.5rem + env(safe-area-inset-bottom))}
   .apply form.guarded .choice .btn-plain{display:none}  /* Not now: the tab bar and Back lead out */
+  /* very large text: the bar would cover a third of the screen and the proposal with it, so it
+     sits in the page instead (static/clickguard.js marks the form) */
+  .apply form.guarded.tall .choice{position:static;margin:.9rem 0 0;padding:0;background:none;border:0;
+    box-shadow:none}
+  .apply form.guarded.tall .choice .btn-plain{display:inline-flex}
   /* the page's last lines scroll above the bar */
-  main.wrap:has(.apply form.guarded){padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
-  .has-tabbar main.wrap:has(.apply form.guarded){
+  main.wrap:has(.apply form.guarded:not(.tall)){
+    padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
+  .has-tabbar main.wrap:has(.apply form.guarded:not(.tall)){
     padding-bottom:calc(5.5rem + 9rem + env(safe-area-inset-bottom))} }
 /* Locked (until the click guard unlocks them), Apply and Reject keep their own look: the orange
    and the red, not faded, not outlined (a dashed outline read as disabled, re-audit N16); the lock

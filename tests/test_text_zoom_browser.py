@@ -337,3 +337,37 @@ def test_names_and_headings_keep_whole_words_at_200_percent_on_narrow_phones(ser
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 80 else ""
     assert problems == [], "\n".join(problems[:80]) + more
+
+
+def test_the_apply_box_leaves_the_foot_of_a_phone_when_large_text_makes_it_tall(server: Server) -> None:  # noqa: F811
+    """On a phone Apply and Reject are pinned to the foot of the screen. At 200% text the box grew
+    to almost half the screen and covered the proposal it is about (0.7.48 review): it now sits in
+    the page under the proposal. At the normal size it stays pinned."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, pending = _seed(server)
+    box = """() => { const c = document.querySelector('.apply form.guarded .choice');
+      const r = c.getBoundingClientRect();
+      return {position: getComputedStyle(c).position, share: r.height / innerHeight,
+              notNow: getComputedStyle(c.querySelector('.btn-plain')).display}; }"""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 412, "height": 915}, has_touch=True, is_mobile=True)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/proposals/{pending}", wait_until="networkidle")
+        normal = page.evaluate(box)
+        assert normal["position"] == "fixed" and normal["share"] < 1 / 3 and normal["notNow"] == "none", (
+            normal
+        )
+        page.evaluate(TEXT_200)
+        page.wait_for_function(
+            "() => getComputedStyle(document.querySelector('.apply form.guarded .choice')).position"
+            " === 'static'"
+        )
+        large = page.evaluate(box)
+        assert large["position"] == "static" and large["notNow"] != "none", large
+        browser.close()
