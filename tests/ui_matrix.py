@@ -43,6 +43,11 @@ What is measured, beyond the overflow sweep's sideways scroll, clipping and over
 * ``plural``: "1 cards", "1 decks" and the like.
 * ``target``: on a touch screen, a control smaller than 44 × 44 px.
 * ``mid-word``: a word of 4 to 12 letters drawn across two lines.
+* ``tall-chip``: a chip or pill (a painted, rounded box, or one whose class names it a chip, pill,
+  badge or tag) much taller than its one line of words, or with its words off its middle (0.7.47's
+  Legal in chips on a touch screen).
+* ``clipped``: a box that hides part of what it holds behind its own edge, or a scroller squeezed
+  to under three lines (0.7.47's card viewer on an open Fold: rules text cut, rows clipped).
 * ``payment-autofill``: a text box a phone could take for a payment card field (its name, id,
   label or placeholder says card number, cvc, expiry…) without an autocomplete that rules it out.
 """
@@ -636,6 +641,66 @@ CHECKS = (
         const k = name(el) + m[0];
         if (!seenW.has(k)) { seenW.add(k); add('mid-word', el, '"' + m[0] + '" broken across two lines'); }
       }
+    }
+  }
+
+  // --- a chip or pill much taller than its one line of words, or its words stuck at its top
+  // (0.7.47's Legal in chips: a 44 px touch rule on words that are not a control, so each format
+  // sat at the top of an empty pill). Pill-shaped: rounded by a quarter of its height or more, or
+  // a class that names it a chip, pill, badge or tag.
+  const seenP = new Set();
+  for (const el of document.querySelectorAll('body *')) {
+    if (!visible(el) || el.children.length > 2 || el.closest('svg')) continue;
+    const txt = (el.innerText || '').trim();
+    if (!txt || txt.includes('\n')) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'inline' || cs.display === 'contents') continue;
+    const r = el.getBoundingClientRect();
+    const named = /(^|[-_ ])(chip|pill|badge|tag)s?($|[-_ ])/i.test(el.className && el.className.baseVal === undefined ? el.className : '');
+    const round = parseFloat(cs.borderTopLeftRadius) >= r.height / 4 && parseFloat(cs.borderTopLeftRadius) >= 6;
+    const painted = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || parseFloat(cs.borderTopWidth) > 0;
+    if (!(painted && (named || round))) continue;
+    const rg = document.createRange(); rg.selectNodeContents(el);
+    const lines = [...rg.getClientRects()].filter(x => x.width > 0 && x.height > 0);
+    if (!lines.length) continue;
+    const top = Math.min(...lines.map(x => x.top)), bottom = Math.max(...lines.map(x => x.bottom));
+    if (bottom - top > lines[0].height * 1.5) continue;  // more than one line
+    const innerTop = r.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop);
+    const innerBottom = r.bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom);
+    const above = top - innerTop, below = innerBottom - bottom;
+    const control = el.matches('a, button, summary, label, [role=button], [role=tab], input, select');
+    const k = name(el).split(' "')[0];
+    if (seenP.has(k)) continue;
+    if (Math.abs(above - below) > 8) {
+      seenP.add(k); add('tall-chip', el, 'its words sit ' + Math.round(above) + 'px from the top and ' + Math.round(below) + 'px from the bottom');
+    } else if (!control && r.height > (bottom - top) * 1.9 + 4) {
+      seenP.add(k); add('tall-chip', el, Math.round(r.height) + 'px tall for a ' + Math.round(bottom - top) + 'px line of words');
+    }
+  }
+
+  // --- content cut off: a box that hides part of what is in it, or a scroller squeezed to a sliver
+  // (0.7.47's card viewer on an open Fold: the rules text cut to one line, Add to binder and EDHREC
+  // clipped at the bottom of their groups). An ellipsis, a line clamp and a picture are meant.
+  const seenX = new Set();
+  for (const el of document.querySelectorAll('body *')) {
+    if (!visible(el) || el.matches('img, svg, canvas, video, picture, iframe, textarea, select, input, option')) continue;
+    const cs = getComputedStyle(el);
+    const oy = cs.overflowY;
+    if (!/(hidden|clip|auto|scroll)/.test(oy)) continue;
+    if (el.scrollHeight - el.clientHeight <= 2 || el.clientHeight === 0) continue;
+    if (cs.textOverflow === 'ellipsis' || cs.webkitLineClamp !== 'none' && cs.webkitLineClamp) continue;
+    if (el.closest('.sr-only') || el === document.body || el === document.documentElement) continue;
+    // what hides only an empty or decorative overhang (a picture's corner, a focus ring) is fine
+    if (!(el.innerText || '').trim()) continue;
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+    const k = name(el).split(' "')[0];
+    if (seenX.has(k)) continue;
+    if (/(hidden|clip)/.test(oy)) {
+      // a panel that hides what it holds behind its own edge (a closed fold-out is height 0 and skipped)
+      if (el.scrollHeight - el.clientHeight > Math.max(4, lh * 0.5)) {
+        seenX.add(k); add('clipped', el, 'shows ' + el.clientHeight + ' of its ' + el.scrollHeight + 'px'); }
+    } else if (el.clientHeight < lh * 3 + 8) {
+      seenX.add(k); add('clipped', el, 'a scroller squeezed to ' + el.clientHeight + 'px for ' + el.scrollHeight + 'px of content');
     }
   }
 

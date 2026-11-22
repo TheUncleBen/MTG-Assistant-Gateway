@@ -98,6 +98,23 @@
     hide();
   }
 
+  /* An answer that opened under its row and runs past the bottom of what scrolls: brought up, the
+     row at the top where the answer is taller than the view, so the row that asked stays in sight */
+  function reveal(row, box) {
+    if (box.hidden) return;
+    var h = window.innerHeight || document.documentElement.clientHeight, top = 0;
+    for (var a = box.parentElement; a && a !== document.body; a = a.parentElement) {
+      if (/(auto|scroll)/.test(getComputedStyle(a).overflowY) && a.scrollHeight > a.clientHeight) {
+        var ar = a.getBoundingClientRect();
+        h = Math.min(h, ar.bottom);
+        top = Math.max(top, ar.top);
+      }
+    }
+    var r = box.getBoundingClientRect();
+    if (r.bottom <= h) return;
+    var tall = r.bottom - row.getBoundingClientRect().top > h - top;
+    (tall ? row : box).scrollIntoView({ block: tall ? "start" : "end" });
+  }
   function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
   // a printing as every screen writes it: "SLD 1074" (the pages' data-set) reads "SLD #1074"
   function printLabel(set) { return String(set || "").trim().replace(/^([A-Za-z0-9]{2,6}) +(\S+)$/, "$1 #$2"); }
@@ -301,7 +318,7 @@
       v.appendChild(box);
       return closeBtn;
     }
-    var rbtn = el("button", "btn small", "Rulings");
+    var rbtn = el("button", "btn small disc", "Rulings");
     rbtn.type = "button";
     rbtn.setAttribute("aria-expanded", "false");
     var rbox = el("div", "rulings");
@@ -331,7 +348,9 @@
         }
         rbox.setAttribute("data-done", "1");
         var rows = x.d.rulings || [];
-        if (!rows.length) { rbox.appendChild(el("p", "muted", "This card has no rulings.")); return; }
+        // Scryfall lists the rulings Wizards of the Coast publishes; most cards have none, which
+        // read as a fault in 0.7.47's "This card has no rulings." (the owner, Liesa)
+        if (!rows.length) { rbox.appendChild(el("p", "muted", "No official rulings have been published for this card.")); reveal(rbtn, rbox); return; }
         var list = el("ul");
         rows.forEach(function (r) {
           var li = el("li");
@@ -345,12 +364,16 @@
           list.appendChild(li);
         });
         rbox.appendChild(list);
+        reveal(rbtn, rbox);
       });
     });
+    // each answer opens right under its own row, inside the group (0.7.48: it showed at the bottom
+    // of the viewer, away from the row that was tapped)
     more.appendChild(rbtn);
+    more.appendChild(rbox);
     // Price history and Watch this card only when the gateway has watchlists on (theme.py marks <body>)
     var pbtn = document.body.hasAttribute("data-watchlist") ? priceButton(card) : null;
-    if (pbtn) more.appendChild(pbtn);
+    if (pbtn) { more.appendChild(pbtn); more.appendChild(pbtn.box); }
     more.appendChild(outLink("EDHREC", card.links && card.links.edhrec || edhrecUrl(card.name || "")));
     // Scryfall as a pill with the other sites (no plain link under the actions); TCGplayer, read
     // with the card's links, goes before it
@@ -364,11 +387,7 @@
         more.insertBefore(t, scryPill);
       }
     }
-    if (card.name) {
-      side.appendChild(more);
-      side.appendChild(rbox);
-      if (pbtn) side.appendChild(pbtn.box);
-    }
+    if (card.name) side.appendChild(more);
     offerLinks(card.links);
     offerBack(card.back_img || card.back);
     if (card.name && (!card.links || (!card.back_img && !card.back && card.faces && card.faces.length > 1))) {
@@ -511,7 +530,7 @@
     return (cur === "eur" ? "€" : "$") + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function priceButton(card) {
-    var btn = el("button", "btn small", "Price history");
+    var btn = el("button", "btn small disc", "Price history");
     btn.type = "button";
     btn.setAttribute("aria-expanded", "false");
     var box = el("div", "rulings prices");
@@ -600,6 +619,7 @@
           return;
         }
         show(x.d.watches || [], x.d.owned || null);
+        reveal(btn, box);
       }).catch(function () {
         box.textContent = "";
         box.appendChild(el("p", "notice error", "No connection. Press Price history again to retry."));

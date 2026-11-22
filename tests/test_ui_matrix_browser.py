@@ -4,7 +4,8 @@ and a laptop, in the light
 and the dark theme, with the phone also at 200% text, and none may show a finding: content leaning
 to one side or lopsided, a hole beside a shorter panel, a control stranded on a line of its own, a
 blue link, text under 4.5:1, a browser-drawn control, a raw program value or a "1 cards", a touch
-target under 44 px, a word broken in two, or a box a phone could take for a payment card field.
+target under 44 px, a word broken in two, a box a phone could take for a payment card field, a
+chip much taller than its words, or content cut off by its box.
 
 ``python -m tests.ui_matrix OUT_DIR`` runs the whole matrix (twelve screens) with screenshots before
 a push; this is its CI share, split by screen so pytest-xdist runs the parts side by side. Skipped
@@ -64,6 +65,9 @@ a.blue{color:#1d55b3} .faint{color:#bbb}
 <div style='width:70px;overflow-wrap:anywhere;font-size:20px'>Cultivating</div>
 <div style='width:1400px;height:2px'></div>
 <div style='width:860px'><div><button style='width:400px'>Sign out</button></div></div>
+<style>.chip{display:inline-block;min-height:44px;border-radius:16px;background:#ddd}</style>
+<p><span class=chip>Legacy</span></p>
+<div style='height:30px;overflow:hidden;line-height:20px'>one<br>two<br>three<br>four</div>
 </main></body></html>
 """
 
@@ -96,6 +100,8 @@ def test_the_checks_find_each_kind_of_problem() -> None:
         "mid-word",
         "overflow",
         "loose-button",
+        "tall-chip",
+        "clipped",
     ):
         assert kind in kinds, (kind, kinds)
 
