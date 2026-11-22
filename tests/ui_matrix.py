@@ -180,8 +180,13 @@ def pages(pending: str) -> list[str]:
 # States reached from a page, swept like pages: "path#state" opens the path, then runs the state's
 # script (a tap on a card, a hold's menu, a filter sheet) and waits for what it opens.
 STATES = {
+    # the sample card is given the formats of a card legal almost everywhere, so the viewer's Legal
+    # in chips are drawn and measured (0.7.47's were 44 px tall pills on a touch screen)
     "viewer": (
-        "document.querySelector('.deckview .row, .deckview .c').click()",
+        "(() => { const r = document.querySelector('.deckview .row, .deckview .c');"
+        " if (!r.getAttribute('data-legal')) r.setAttribute('data-legal', 'commander,duel,legacy,vintage,"
+        "oathbreaker,penny,canlander,1v1,historic,historicbrawl,timeless,gladiator,pioneer,modern');"
+        " r.click(); })()",
         ".cardview.open, .cardview[open], .cardview",
     ),
     "cardmenu": (
@@ -654,7 +659,7 @@ CHECKS = (
     const txt = (el.innerText || '').trim();
     if (!txt || txt.includes('\n')) continue;
     const cs = getComputedStyle(el);
-    if (cs.display === 'inline' || cs.display === 'contents') continue;
+    if (cs.display === 'inline' || cs.display === 'contents' || cs.clipPath !== 'none') continue;  // a shaped corner badge
     const r = el.getBoundingClientRect();
     const named = /(^|[-_ ])(chip|pill|badge|tag)s?($|[-_ ])/i.test(el.className && el.className.baseVal === undefined ? el.className : '');
     const round = parseFloat(cs.borderTopLeftRadius) >= r.height / 4 && parseFloat(cs.borderTopLeftRadius) >= 6;
@@ -668,7 +673,7 @@ CHECKS = (
     const innerTop = r.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop);
     const innerBottom = r.bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom);
     const above = top - innerTop, below = innerBottom - bottom;
-    const control = el.matches('a, button, summary, label, [role=button], [role=tab], input, select');
+    const control = !!el.closest('a, button, summary, label, [role=button], [role=tab], input, select');
     const k = name(el).split(' "')[0];
     if (seenP.has(k)) continue;
     if (Math.abs(above - below) > 8) {
@@ -690,15 +695,31 @@ CHECKS = (
     if (el.scrollHeight - el.clientHeight <= 2 || el.clientHeight === 0) continue;
     if (cs.textOverflow === 'ellipsis' || cs.webkitLineClamp !== 'none' && cs.webkitLineClamp) continue;
     if (el.closest('.sr-only') || el === document.body || el === document.documentElement) continue;
+    // a label kept for screen readers only (shrunk to a pixel, or clipped away on purpose)
+    if (el.clientHeight <= 2 || el.clientWidth <= 2 || (cs.clip !== 'auto' && cs.position === 'absolute')) continue;
     // what hides only an empty or decorative overhang (a picture's corner, a focus ring) is fine
     if (!(el.innerText || '').trim()) continue;
     const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
     const k = name(el).split(' "')[0];
     if (seenX.has(k)) continue;
     if (/(hidden|clip)/.test(oy)) {
-      // a panel that hides what it holds behind its own edge (a closed fold-out is height 0 and skipped)
-      if (el.scrollHeight - el.clientHeight > Math.max(4, lh * 0.5)) {
-        seenX.add(k); add('clipped', el, 'shows ' + el.clientHeight + ' of its ' + el.scrollHeight + 'px'); }
+      // a panel that cuts a line of its words in two at its bottom edge (a closed fold-out is height
+      // 0 and skipped; a whole item moved out of sight on purpose, as the brand's word wrapping to
+      // a hidden second line, is not cut)
+      if (el.scrollHeight - el.clientHeight <= Math.max(4, lh * 0.5)) continue;
+      const edge = el.getBoundingClientRect().top + el.clientTop + el.clientHeight;
+      const wT = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let cut = null;
+      for (let t = wT.nextNode(); t && !cut; t = wT.nextNode()) {
+        if (!t.nodeValue.trim() || !t.parentElement || !visible(t.parentElement)) continue;
+        let inner = false;  // inside a scroller of its own within the box: scrolled to, not cut
+        for (let q = t.parentElement; q && q !== el; q = q.parentElement)
+          if (/(auto|scroll)/.test(getComputedStyle(q).overflowY)) { inner = true; break; }
+        if (inner) continue;
+        const rg = document.createRange(); rg.selectNodeContents(t);
+        for (const q of rg.getClientRects()) if (q.height > 0 && q.top < edge - 2 && q.bottom > edge + 2) { cut = t; break; }
+      }
+      if (cut) { seenX.add(k); add('clipped', el, 'cuts "' + cut.nodeValue.trim().slice(0, 24) + '" at its bottom edge (shows ' + el.clientHeight + ' of its ' + el.scrollHeight + 'px)'); }
     } else if (el.clientHeight < lh * 3 + 8) {
       seenX.add(k); add('clipped', el, 'a scroller squeezed to ' + el.clientHeight + 'px for ' + el.scrollHeight + 'px of content');
     }

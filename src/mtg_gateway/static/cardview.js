@@ -269,8 +269,12 @@
       pic2.setAttribute("aria-hidden", "true");
       pic2.innerHTML = "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='8.5' cy='9.5' r='1.5'/><path d='m21 16-5-5-8 8'/></svg>";
       prow.appendChild(pic2);
-      prow.appendChild(el("span", "lbl", "Printings"));
-      prow.appendChild(el("span", "val", printing + (price ? " · " + price : "")));
+      // the label and the printing wrap inside their own span with large text, so the chevron
+      // stays at the row's right end instead of falling onto a line of its own
+      var words = el("span", "txt");
+      words.appendChild(el("span", "lbl", "Printings"));
+      words.appendChild(el("span", "val", printing + (price ? " · " + price : "")));
+      prow.appendChild(words);
       var chev = el("span", "chev", "›");
       chev.setAttribute("aria-hidden", "true");
       prow.appendChild(chev);
@@ -318,7 +322,7 @@
       v.appendChild(box);
       return closeBtn;
     }
-    var rbtn = el("button", "btn small disc", "Rulings");
+    var rbtn = el("button", "btn small cv-disc", "Rulings");
     rbtn.type = "button";
     rbtn.setAttribute("aria-expanded", "false");
     var rbox = el("div", "rulings");
@@ -530,7 +534,7 @@
     return (cur === "eur" ? "€" : "$") + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function priceButton(card) {
-    var btn = el("button", "btn small disc", "Price history");
+    var btn = el("button", "btn small cv-disc", "Price history");
     btn.type = "button";
     btn.setAttribute("aria-expanded", "false");
     var box = el("div", "rulings prices");

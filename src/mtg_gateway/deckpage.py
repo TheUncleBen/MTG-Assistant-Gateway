@@ -3924,6 +3924,7 @@ html.cardview-open{overflow:hidden}
   border-radius:var(--radius);background:var(--surface-2);cursor:pointer}
 .cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--orange)}
 .cardview .printrow .pic{display:inline-flex;flex:none;color:var(--orange-text)}
+.cardview .printrow .pic svg{width:max(18px,1.15em);height:max(18px,1.15em)}
 .cardview .printrow .lbl{flex:none;color:var(--text-muted);font-weight:700}
 .cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:break-word}
 .cardview .printrow .chev{flex:none;color:var(--text-muted);font-size:1.4rem;line-height:1}
@@ -3945,6 +3946,13 @@ html.cardview-open{overflow:hidden}
   .cardview .more .btn{min-height:44px} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
+/* beside the text, the picture is never taller than the window leaves it (a laptop at 200% text cut
+   its foot off): narrower instead, in the middle of its column */
+@media (min-width:701px){
+  .cardview .pane > img,.cardview .pane > .ph{width:min(100%,calc((100vh - 6rem) * 5 / 7));
+    width:min(100%,calc((100dvh - 6rem) * 5 / 7));margin-inline:auto}
+  .cardview .pane:has(.flip:not([hidden])) > :is(img,.ph){
+    width:min(100%,calc((100dvh - 9.5rem) * 5 / 7))} }
 /* the card menu (deck.js): its base is theme.CARD_MENU_CSS */
 /* the menu's head: the card's name, and on your own deck its count with − and + at the end */
 /* the head row (mockup screen 3): the card's name with its count and − and + beside it */
@@ -4726,7 +4734,9 @@ ul.erows{container-type:inline-size}
    is 48 px, its words at the left; no pile of bordered buttons. */
 .cardview .printrow,.cardview .more,.cardview .acts{border:1px solid var(--border-soft);border-radius:14px;
   background:var(--surface-2)}
-.cardview .printrow{min-height:48px;padding:.35rem 1rem;flex-wrap:wrap;row-gap:.15rem}
+.cardview .printrow{min-height:48px;padding:.35rem 1rem}
+.cardview .printrow .txt{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;
+  gap:.15rem .6rem}
 /* large text: the printing's set and rarity go under the label rather than one letter a line */
 .cardview .printrow .val{flex:1 1 7em}
 .cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--border-soft);
@@ -4789,11 +4799,11 @@ ul.erows{container-type:inline-size}
 .cardview .more > .rulings[hidden]{display:none}
 .cardview .more > .rulings p{margin:.15rem 0}
 .cardview .more > .rulings .btn{min-height:44px;margin:.4rem 0 0}
-.cardview .more > .disc::after{content:"";flex:none;margin-left:auto;width:.5rem;height:.5rem;
+.cardview .more > .cv-disc::after{content:"";flex:none;margin-left:auto;width:.5rem;height:.5rem;
   border:solid var(--text-muted);border-width:0 2px 2px 0;transform:rotate(-45deg);
   transition:transform .15s ease}
-.cardview .more > .disc[aria-expanded=true]::after{transform:rotate(45deg)}
-@media (prefers-reduced-motion:reduce){ .cardview .more > .disc::after{transition:none} }
+.cardview .more > .cv-disc[aria-expanded=true]::after{transform:rotate(45deg)}
+@media (prefers-reduced-motion:reduce){ .cardview .more > .cv-disc::after{transition:none} }
 """
     + DECK_CSS_A
     + DECK_CSS_C
