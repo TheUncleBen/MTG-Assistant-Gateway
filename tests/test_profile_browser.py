@@ -202,10 +202,13 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         assert rows.count() == 4 and page.locator(".mtgbox .al-row.unread").count() == 3
         assert page.locator(".bell-badge").inner_text() == "3 unread"
         assert "Deck comment" in box.inner_text()  # the type word above, the alert's own title
-        assert "Open all alerts to filter them or clear them." in box.inner_text()
+        # Mark all read and Clear all in the box itself (0.7.48)
+        assert box.locator("[data-al-all='read_all']").is_enabled()
+        assert box.locator("[data-al-all='clear_all']").is_enabled()
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
-        assert min(_targets(page, ".mtgbox .al-main, .mtgbox .al-menu > summary, .mtgbox .acts .btn")) >= 43.5
+        targets = ".mtgbox .al-main, .mtgbox .al-kebab, .mtgbox [data-al-all], .mtgbox .acts .btn"
+        assert min(_targets(page, targets)) >= 43.5
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert not badge.is_visible()

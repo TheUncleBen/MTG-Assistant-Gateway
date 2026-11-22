@@ -35,8 +35,15 @@ odd input gets a plain answer instead of an error page, and a connected app read
   still found by its name.
 - A weekly summary whose Monday was missed goes out the next day. The first one after you turn
   it on still waits for a Monday.
+- Alerts: the bell's list has Mark all read and Clear all, with Undo, as the Alerts page has.
+  Rows are lighter: an unread one has an orange edge and a dot by its type, not a heavy tint.
+- A summary's title names its day ("Daily, Nov 22") instead of "Today" on every one, older ones
+  too, and its text leaves out what is zero.
 
 ### Fixed
+- **An alert's ⋮ menu opens.** In the bell's list it opened hidden behind the list, and the
+  Undo after a dismissal was hidden too.
+- The Alerts page's buttons keep their words on one line.
 - **The card viewer shows the whole card on an open Fold and a laptop.** A card with long rules
   text and many formats squeezed the viewer's text: the rules were cut to a line and the last
   actions (Add to binder, EDHREC) were clipped. The text column now scrolls as one piece, and at

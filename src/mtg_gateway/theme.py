@@ -2368,13 +2368,22 @@ CSS += BOX_CSS
 
 # The Alerts page and the bell's box (alerts_page.py, static/bell.js): one row an alert, its type's
 # icon and colour, its type and time on a small line, the title in bold and its words; unread rows
-# carry a dot and a tint; each kept row ends with its ⋮ (Mark read or unread, Dismiss).
+# carry a dot before the type word, an orange edge and a light tint; each kept row ends with its ⋮
+# (Mark read or unread, Dismiss).
 BELL_CSS = """
+/* While a box is open, a menu opened from it sits over it: a row's ⋮ in the bell's box opened its
+   menu behind the box (0.7.48). Only then: the deck page layers its own toasts around the menu's
+   usual place (deckpage.py). The box says what was done, and its Undo, in its own note. */
+body:has(.mtgbox-scrim) .ctxmenu{z-index:97}
+body:has(.mtgbox-scrim) .cs-scrim{z-index:96}
 .al-list{list-style:none;margin:0;padding:0}
 .al-row{position:relative;display:flex;align-items:stretch;gap:.25rem;
   border-top:1px solid var(--border-soft);-webkit-touch-callout:none}
 .al-list > .al-row:first-child{border-top:0}
-.al-row.unread{background:var(--orange-tint)}
+/* unread: an orange edge and a light tint (the full --orange-tint made a page of unread rows one
+   heavy brown block, 0.7.48) */
+.al-row.unread{background:color-mix(in srgb,var(--orange) 4%,transparent);
+  box-shadow:inset 3px 0 0 var(--orange)}
 .al-main{flex:1 1 auto;min-width:0;display:flex;gap:.75rem;align-items:flex-start;
   padding:.7rem .5rem .7rem .75rem;color:var(--text);text-decoration:none;min-height:44px}
 .al-main:hover .al-title{text-decoration:underline}
@@ -2386,13 +2395,13 @@ BELL_CSS = """
 .al-ic.k-report{background:var(--blue-tint);color:var(--blue-text)}
 .al-ic.k-account{background:var(--red-tint);color:var(--red-text)}
 .al-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:.1rem;overflow-wrap:anywhere}
-.al-meta{display:flex;flex-wrap:wrap;column-gap:.6rem;font-size:.86rem;color:var(--text-muted)}
+.al-meta{display:flex;flex-wrap:wrap;align-items:center;column-gap:.6rem;font-size:.86rem;color:var(--text-muted)}
 .al-type{font-weight:700;color:var(--text)}
 .al-title{font-weight:700;line-height:1.3}
 .al-row:not(.unread) .al-title{font-weight:600}
 .al-text{color:var(--text-muted);line-height:1.4}
-.al-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--orange);margin-top:.45rem}
-.al-row details.al-menu{flex:none;position:relative;align-self:center;margin-right:.25rem}
+.al-dot{flex:none;width:max(8px,.5em);height:max(8px,.5em);border-radius:50%;background:var(--orange);margin-right:-.3rem}
+.al-row details.al-menu,.al-row .al-kebab{flex:none;position:relative;align-self:center;margin-right:.25rem}
 .al-row details.al-menu > summary{list-style:none}
 .al-row details.al-menu > summary::-webkit-details-marker{display:none}
 .al-row details.al-menu .menu{position:absolute;right:0;top:calc(100% + .25rem);width:max-content;
@@ -2426,8 +2435,17 @@ BELL_CSS = """
 h1 .bell-badge{display:inline-block;font-size:.8rem;line-height:1.6;min-height:0;border-radius:999px;
   padding:0 8px}
 .bell-foot{margin:.75rem 0 0}
-.mtgbox .body .al-list{margin:0 -16px}
-.mtgbox .body .al-row.unread{background:var(--orange-tint)}
+/* the bell's box: Mark all read and Clear all over a framed list; each row's words two lines at
+   most (the page shows them whole). The box's own list indent (.mtgbox .body ul) and the old
+   negative margin pushed the rows out of the box's left side, where they were cut. */
+.al-boxacts{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .6rem}
+.al-boxacts button{flex:1 1 auto;margin:0;min-height:44px;display:inline-flex;align-items:center;
+  justify-content:center;gap:.4rem;text-align:center}
+.al-boxlist{border:1px solid var(--border-soft);border-radius:var(--radius-lg,12px);overflow:hidden}
+.al-boxlist > .notice{margin:.6rem}
+.mtgbox .body .al-list{margin:0;padding:0}
+.mtgbox .body .al-list > li{margin:0}
+.al-boxlist .al-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .mtgbox .body .bell-foot{margin-top:.75rem}
 /* the update strip's × (assistants.dismiss_form) */
 .notice.upd{position:relative;padding-right:calc(1rem + 44px)}
