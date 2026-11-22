@@ -110,10 +110,9 @@ def test_the_bell_box_reads_marks_and_clears_with_undo(
             _press(page.get_by_role("menuitem", name="Dismiss"), touch)
             page.wait_for_selector(f".mtgbox .al-row[data-alert='{a2}']", state="detached")
             assert server.db.gateway_alert("user-1", a2)["dismissed_at"] is not None
-            # the toast's Undo is over the box too, and puts the row back in the box
-            undo = page.locator(".toast").get_by_role("button", name="Undo")
+            # Undo is in the box itself (a keyboard reaches it there), and puts the row back
+            undo = box.get_by_role("button", name="Undo")
             undo.wait_for()
-            assert page.evaluate(ON_TOP, ".toast") == "top"
             _press(undo, touch)
             page.wait_for_selector(f".mtgbox .al-row[data-alert='{a2}']")
             assert server.db.gateway_alert("user-1", a2)["dismissed_at"] is None
@@ -125,7 +124,7 @@ def test_the_bell_box_reads_marks_and_clears_with_undo(
             box.get_by_text("You're all caught up.").wait_for()
             assert server.db.gateway_alerts("user-1") == []
             assert box.locator("[data-al-all='clear_all']").is_disabled()
-            _press(page.locator(".toast").get_by_role("button", name="Undo"), touch)
+            _press(box.get_by_role("button", name="Undo"), touch)
             page.wait_for_selector(".mtgbox .al-row[data-alert]")
             assert len(server.db.gateway_alerts("user-1")) == 3
             assert box.is_visible()  # Undo never left the box
@@ -194,6 +193,98 @@ def test_the_page_actions_keep_their_words_on_one_line(server: Server, width: in
                 "document.documentElement.scrollWidth - document.documentElement.clientWidth"
             )
             assert over <= 0, over
+            assert errors == []
+        finally:
+            browser.close()
+
+
+def test_the_box_counts_every_unread_alert_and_its_rows_sit_together(server: Server) -> None:
+    """The box shows the newest 8: its "N unread" and Mark all read go by every alert, and they
+    follow each row marked read or unread. Rows touch (no gap broke the unread edge); a row
+    marked read says so to a screen reader; Undo is reached with the keyboard."""
+    from playwright.sync_api import sync_playwright
+
+    sid = server.sign_in()
+    ids = [
+        server.db.add_gateway_alert("user-1", "price", f"Price drop · Card {i}", "m", "/", kind="price")
+        for i in range(10)
+    ]
+    newest = ids[2:]  # the 8 the box shows
+    server.db.set_gateway_alerts_read("user-1", newest[1:])  # 1 shown unread, 2 older unread
+    exe = _exe()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 1280, "light", False, False, exe)
+        try:
+            page.goto(f"{server.base}/decks")
+            page.wait_for_load_state("load")
+            page.locator("[data-bell]:visible").first.click()
+            box = page.locator(".mtgbox.al-box")
+            box.locator(".al-row").first.wait_for()
+            badge = box.locator(".bh .bell-badge")
+            assert badge.inner_text() == "3 unread"
+            gap = page.evaluate(
+                "(() => { const r = [...document.querySelectorAll('.mtgbox .al-row')]"
+                ".map(e => e.getBoundingClientRect());"
+                " return Math.max(...r.slice(1).map((x, i) => x.top - r[i].bottom),"
+                " r[0].top - document.querySelector('.al-boxlist').getBoundingClientRect().top - 1); })()"
+            )
+            assert gap <= 0.5, gap
+            first = box.locator(f".al-row[data-alert='{newest[0]}']")
+            first.locator(".al-kebab").click()
+            page.get_by_role("menuitem", name="Mark read").click()
+            page.wait_for_selector(f".mtgbox .al-row.unread[data-alert='{newest[0]}']", state="detached")
+            assert badge.inner_text() == "2 unread"
+            srs = first.locator(".al-meta .sr-only").all_inner_texts()
+            assert srs[0].strip() == "," and srs[-1].strip() == ", Read", srs
+            # the older two are still unread: Mark all read stays on
+            assert box.locator("[data-al-all='read_all']").is_enabled()
+            # unread again: the count follows
+            first.locator(".al-kebab").click()
+            page.get_by_role("menuitem", name="Mark unread").click()
+            page.wait_for_selector(f".mtgbox .al-row.unread[data-alert='{newest[0]}']")
+            assert badge.inner_text() == "3 unread"
+            box.locator("[data-al-all='read_all']").click()
+            page.wait_for_selector(".mtgbox .al-row.unread", state="detached")
+            assert badge.count() == 0
+            assert box.locator("[data-al-all='read_all']").is_disabled()
+            # Undo of Mark all read, from the keyboard
+            undo = box.get_by_role("button", name="Undo")
+            undo.focus()
+            page.keyboard.press("Enter")
+            page.wait_for_selector(".mtgbox .al-row.unread")
+            assert box.locator(".bh .bell-badge").inner_text() == "3 unread"
+            assert errors == []
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize("width", [320, 884])
+def test_the_box_buttons_keep_their_words_on_one_line_at_200_percent(server: Server, width: int) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from .ui_matrix import TEXT_200
+
+    sid = server.sign_in()
+    _alerts(server)
+    exe = _exe()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, width, "dark", True, False, exe)
+        try:
+            page.goto(f"{server.base}/decks")
+            page.wait_for_load_state("load")
+            page.evaluate(TEXT_200)
+            page.locator("[data-bell]:visible").first.tap()
+            page.locator(".mtgbox.al-box .al-row").first.wait_for()
+            lines = page.evaluate(
+                "[...document.querySelectorAll('.al-boxacts button')].map(b => {"
+                " const t = [...b.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).pop();"
+                " const r = document.createRange(); r.selectNodeContents(t);"
+                " const tops = new Set([...r.getClientRects()].filter(x => x.width > 1)"
+                ".map(x => Math.round(x.top)));"
+                " const o = b.getBoundingClientRect();"
+                " return [b.textContent.trim(), tops.size, o.right <= innerWidth + 0.5]; })"
+            )
+            assert [t for t, n, fits in lines if n != 1 or not fits] == [], lines
             assert errors == []
         finally:
             browser.close()

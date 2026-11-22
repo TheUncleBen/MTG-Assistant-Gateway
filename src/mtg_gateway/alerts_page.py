@@ -112,12 +112,22 @@ def waiting_rows(waiting: dict[str, tuple[str, int, str]]) -> list[dict[str, Any
     return out
 
 
+def _shown_title(a: dict[str, Any], kind: str) -> str:
+    """The title as the list shows it (and its search reads it): a summary's names its day."""
+    if kind != "summary":
+        return a["title"]
+    head, sep, rest = a["title"].partition(" \u00b7 ")
+    if not sep:
+        return a["title"]
+    return f"{head} \u00b7 {summary_title(rest, a.get('created_at'))}"
+
+
 def kept_rows(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             "id": a["id"],
-            "kind": a.get("kind") or notify.kind_of(a.get("event") or ""),
-            "title": a["title"],
+            "kind": (kind := a.get("kind") or notify.kind_of(a.get("event") or "")),
+            "title": _shown_title(a, kind),
             "message": a["message"],
             "href": f"/notifications/open/{a['id']}",
             "created_at": a["created_at"],
@@ -196,10 +206,11 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 
 
 def summary_title(title: str, created_at: float | None, now: float | None = None) -> str:
-    """A summary kept before 0.7.48 named its day "Today" or "This week" forever; it shows the
-    member's own day it came instead ("Daily, Nov 20"), as new ones are titled
-    (summary.push_title)."""
-    span = _OLD_SUMMARY.get(title.strip())
+    """A summary's day as the member's own ("Daily, Nov 20"): one kept before 0.7.48 named its
+    day "Today" or "This week" forever, and a new one is titled by the server's (UTC) day when it
+    was sent (summary.push_title), which is the next day for a member west of UTC in the evening."""
+    text = title.strip()
+    span = _OLD_SUMMARY.get(text) or next((w for w in ("Daily", "Weekly") if text.startswith(w + ", ")), None)
     if span is None or not created_at:
         return title
     day = localday.day_of(created_at)
@@ -333,6 +344,13 @@ def act(state: Any, sub: str, action: str, ids: list[int]) -> list[int]:
     return changed
 
 
+def kept_counts(state: Any, sub: str) -> dict[str, int]:
+    """The member's kept alerts and how many are unread, every one of them (the bell's box shows
+    the newest 8: its "N unread", Mark all read and Clear all go by these)."""
+    kept = state.db.gateway_alerts(sub)
+    return {"kept": len(kept), "kept_unread": sum(1 for a in kept if a.get("read_at") is None)}
+
+
 def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     decks = h.decks
     page = h.page
@@ -389,7 +407,14 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             shown = rows[:BOX_ROWS]
             body = err + list_html(shown, filtered=False, csrf_in=csrf_in)
             return JSONResponse(
-                {"ok": True, "unseen": unseen, "unread": unread, "total": len(rows), "html": body},
+                {
+                    "ok": True,
+                    "unseen": unseen,
+                    "unread": unread,
+                    "total": len(rows),
+                    "html": body,
+                    **kept_counts(state, sub),
+                },
                 headers=NO_STORE,
             )
         qp = request.query_params
@@ -511,6 +536,7 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     "changed": changed,
                     "message": DONE_WORDS[action],
                     "unseen": state.db.unseen_gateway_alerts(sub),
+                    **kept_counts(state, sub),
                 },
                 headers=NO_STORE,
             )

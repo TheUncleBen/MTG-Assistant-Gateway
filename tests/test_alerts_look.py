@@ -116,3 +116,44 @@ def test_the_unread_dot_sits_by_the_type_word() -> None:
     html = alerts_page.row_html(row, now=_ts(2026, 11, 22))
     meta = html.split("<span class='al-meta'>", 1)[1].split("<b class='al-title'>", 1)[0]
     assert "al-dot" in meta and meta.index("al-dot") < meta.index("al-type")
+
+
+def test_search_finds_a_summary_by_the_title_it_shows() -> None:
+    rows = alerts_page.kept_rows(
+        [
+            {
+                "id": 1,
+                "kind": "summary",
+                "title": "Summary · Today",
+                "message": "m",
+                "path": "/",
+                "created_at": _ts(2026, 11, 20),
+                "read_at": None,
+            },
+        ]
+    )
+    assert alerts_page.narrow(rows, q="daily") == rows
+    assert alerts_page.narrow(rows, q="nov 20") == rows
+    assert alerts_page.narrow(rows, q="today") == []
+
+
+def test_a_new_summary_title_shows_the_members_own_day_too() -> None:
+    tok = localday.set_offset(-6 * 3600)  # sent 03:00 UTC Nov 22: Nov 21 in CST
+    try:
+        row = alerts_page.kept_rows(
+            [
+                {
+                    "id": 1,
+                    "kind": "summary",
+                    "title": "Summary · Daily, Nov 22",
+                    "message": "m",
+                    "path": "/",
+                    "created_at": _ts(2026, 11, 22, 3),
+                    "read_at": None,
+                }
+            ]
+        )[0]
+        html = alerts_page.row_html(row, now=_ts(2026, 11, 22, 12))
+    finally:
+        localday.reset_offset(tok)
+    assert "<b class='al-title'>Daily, Nov 21</b>" in html

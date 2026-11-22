@@ -2371,12 +2371,11 @@ CSS += BOX_CSS
 # carry a dot before the type word, an orange edge and a light tint; each kept row ends with its ⋮
 # (Mark read or unread, Dismiss).
 BELL_CSS = """
-/* While a box is open, a menu opened from it and a toast (Undo) sit over it: a row's ⋮ in the
-   bell's box opened its menu behind the box, and the toast's Undo was under its backdrop (0.7.48).
-   Only then: the deck page layers its own toasts around the menu's usual place (deckpage.py). */
+/* While a box is open, a menu opened from it sits over it: a row's ⋮ in the bell's box opened its
+   menu behind the box (0.7.48). Only then: the deck page layers its own toasts around the menu's
+   usual place (deckpage.py). The box says what was done, and its Undo, in its own note. */
 body:has(.mtgbox-scrim) .ctxmenu{z-index:97}
 body:has(.mtgbox-scrim) .cs-scrim{z-index:96}
-body:has(.mtgbox-scrim) .toast{z-index:98}
 .al-list{list-style:none;margin:0;padding:0}
 .al-row{position:relative;display:flex;align-items:stretch;gap:.25rem;
   border-top:1px solid var(--border-soft);-webkit-touch-callout:none}
@@ -2445,6 +2444,7 @@ h1 .bell-badge{display:inline-block;font-size:.8rem;line-height:1.6;min-height:0
 .al-boxlist{border:1px solid var(--border-soft);border-radius:var(--radius-lg,12px);overflow:hidden}
 .al-boxlist > .notice{margin:.6rem}
 .mtgbox .body .al-list{margin:0;padding:0}
+.mtgbox .body .al-list > li{margin:0}
 .al-boxlist .al-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .mtgbox .body .bell-foot{margin-top:.75rem}
 /* the update strip's × (assistants.dismiss_form) */

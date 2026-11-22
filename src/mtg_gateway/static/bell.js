@@ -120,8 +120,10 @@
       dot.setAttribute("aria-hidden", "true");
       if (meta) meta.insertBefore(dot, meta.firstChild);
     }
-    var sr = row.querySelector(".al-meta .sr-only");
-    if (sr) sr.textContent = read ? " · Read" : " · Unread";
+    // the last of the line's words for readers is its state (the first is the ", " after the type)
+    var srs = row.querySelectorAll(".al-meta .sr-only");
+    var sr = srs.length ? srs[srs.length - 1] : null;
+    if (sr) sr.textContent = read ? ", Read" : ", Unread";
     // the no-script menu's first form says what it does now
     var f = row.querySelector(".al-menu form");
     if (f) {
@@ -134,14 +136,29 @@
     ids.forEach(function (i) { want[String(i)] = true; });
     return $$(".al-row[data-alert]").filter(function (r) { return want[r.getAttribute("data-alert")]; });
   }
+  function boxOpen() { return !!(shown && shown.box.panel.isConnected); }
+  // The bell's box shows the newest 8: its "N unread" (with the changes waiting now, always
+  // unread), Mark all read and Clear all go by every kept alert, as the server counts them.
+  function boxCounts(d) {
+    if (!boxOpen() || !d || typeof d.kept_unread !== "number") return;
+    shown.kept = d.kept;
+    shown.unread = d.kept_unread;
+    var h = shown.box.panel.querySelector(".bh h2");
+    var badge = h && h.querySelector(".bell-badge");
+    var n = d.kept_unread + $$(".al-row.live", shown.box.panel).length;
+    if (!n) { if (badge) h.removeChild(badge); return; }
+    if (!badge && h) { h.appendChild(document.createTextNode(" ")); badge = h.appendChild(el("span", "bell-badge")); }
+    if (badge) badge.textContent = n + " unread";
+  }
   function settle(d) {
     forget();
     if (d && typeof d.unseen === "number") { setCount(d.unseen); keep(d.unseen); }
-    var all = $$("[data-al-all]");
-    all.forEach(function (b) {
+    boxCounts(d);
+    $$("[data-al-all]").forEach(function (b) {
       var what = b.getAttribute("data-al-all");
-      if (what === "read_all") b.disabled = !document.querySelector(".al-row.unread[data-alert]");
-      if (what === "clear_all") b.disabled = !document.querySelector(".al-row[data-alert]");
+      var inBox = boxOpen() && shown.box.panel.contains(b) && typeof shown.kept === "number";
+      if (what === "read_all") b.disabled = inBox ? !shown.unread : !document.querySelector(".al-row.unread[data-alert]");
+      if (what === "clear_all") b.disabled = inBox ? !shown.kept : !document.querySelector(".al-row[data-alert]");
     });
   }
   function undoButton(ids, action) {
@@ -153,7 +170,11 @@
         if (!d || !d.ok) { failed(d); return; }
         // the rows come back where they were: in the bell's box, read again there (the box stays
         // open); on the page, the page again
-        if (shown && shown.box.panel.isConnected) { fill(shown.box); return; }
+        if (boxOpen()) {
+          var box = shown.box;
+          fill(box).then(function () { box.note(d.message || "Done."); });
+          return;
+        }
         location.reload();
       });
     });
@@ -171,12 +192,15 @@
         emptyIfNone();
       }
       settle(d);
-      // the box's "N unread" goes once nothing in it is unread
-      var badge = shown && shown.box.panel.isConnected ? shown.box.panel.querySelector(".bh .bell-badge") : null;
-      if (badge && !shown.box.panel.querySelector(".al-row.unread")) badge.parentNode.removeChild(badge);
       var undo = { dismiss: "undo", clear_all: "undo", read_all: "unread" }[action];
+      var extra = undo && changed.length ? [undoButton(changed, undo)] : [];
+      // In the bell's box, what was done and its Undo show in the box: a toast sits outside the
+      // box, where the box keeps the keyboard from reaching it.
+      if (boxOpen()) {
+        shown.box.note(d.message || "Done.", false, extra);
+        return;
+      }
       if (Menu && Menu.toast) {
-        var extra = undo && changed.length ? [undoButton(changed, undo)] : [];
         Menu.toast(d.message || "Done.", { ok: true, actions: extra });
       }
     });
@@ -275,10 +299,7 @@
         var list = el("div", "al-boxlist");
         list.innerHTML = d.html;
         wrap.appendChild(list);
-        var h = box.panel.querySelector(".bh h2");
-        var badge = h && h.querySelector(".bell-badge");
-        if (badge) h.removeChild(badge);
-        if (h && d.unread > 0) h.appendChild(el("span", "bell-badge", d.unread + " unread"));
+        box.note("");
         if (d.total > 8) {
           wrap.appendChild(el("p", "muted small bell-foot", "The newest 8 of " + d.total + ". Open all alerts for the rest, or to filter them."));
         }
@@ -287,7 +308,8 @@
       }
       box.setBody(wrap);
       bindRows(wrap);
-      settle(null);
+      // the list's own counts (not its "unseen": that was read before the list marked it seen)
+      settle(d && d.ok ? { kept: d.kept, kept_unread: d.kept_unread } : null);
       box.focusFirst();
     }, function (err) {
       if (err && err.signedOut && window.MtgFetch) box.setBody(window.MtgFetch.signedOut("the list"));
