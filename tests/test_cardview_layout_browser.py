@@ -40,6 +40,10 @@ SCREENS = [
     (1280, 800, False, 1),  # a laptop
     (390, 844, True, 1),  # a phone
     (390, 844, True, 2),
+    # a window just over the phone's 700 px at a raised text size: the viewer, the window less its
+    # padding, was under 701 px, so the stacked layout did not come and the text ran off the edge
+    (701, 900, False, 1.5),
+    (760, 900, False, 1.75),
 ]
 
 
@@ -53,7 +57,7 @@ def server(tmp_path: Path):
         s.stop()
 
 
-def _open_long_card(p, exe: str, server: Server, sid: str, width: int, height: int, touch: bool, text: int):  # noqa: ANN001
+def _open_long_card(p, exe: str, server: Server, sid: str, width: int, height: int, touch: bool, text: float):  # noqa: ANN001
     browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
     kw: dict = {"viewport": {"width": width, "height": height}}
     if touch:
@@ -82,10 +86,13 @@ def _open_long_card(p, exe: str, server: Server, sid: str, width: int, height: i
     page.wait_for_selector(".cardview.open", timeout=3000)
     settled(page)
     if text > 1:
-        page.evaluate(TEXT_200)
+        page.evaluate(SCALE, text)
         settled(page)
     return browser, page
 
+
+# Scales every element's font size, as TEXT_200 (tests/ui_matrix.py) does at 2, by any factor.
+SCALE = TEXT_200.replace("() =>", "(k) =>").replace("sizes[i] * 2", "sizes[i] * k")
 
 # What the viewer hides: a box whose content is taller than the box (cut, or a scroller squeezed
 # inside the viewer), and a chip whose box is much taller than its one line of words.
@@ -124,7 +131,7 @@ MEASURE = """
 
 @pytest.mark.parametrize(("width", "height", "touch", "text"), SCREENS)
 def test_a_long_card_shows_all_of_its_text_and_rows(
-    server: Server, width: int, height: int, touch: bool, text: int
+    server: Server, width: int, height: int, touch: bool, text: float
 ) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -134,6 +141,13 @@ def test_a_long_card_shows_all_of_its_text_and_rows(
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
         browser, page = _open_long_card(p, exe, server, sid, width, height, touch, text)
+        # measured first: MEASURE scrolls each row into view, which slides a cut-off column back in
+        over = page.evaluate(
+            "() => { const b = document.querySelector('.cardview .box').getBoundingClientRect();"
+            " const i = document.querySelector('.cardview .info').getBoundingClientRect();"
+            " return Math.round(i.right - b.right); }"
+        )
+        assert over <= 0, f"the text column runs {over}px past the viewer's right edge"
         m = page.evaluate(MEASURE)
         assert m["cut"] == [], m["cut"]
         assert m["tallChips"] == [], m["tallChips"]

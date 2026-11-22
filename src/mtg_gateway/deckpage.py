@@ -4758,13 +4758,14 @@ ul.erows{container-type:inline-size}
    not win over the row's height */
 .cardview .more > :is(a,button,.btn),.cardview .acts > :is(a,button,.btn){min-height:48px;height:auto}
 /* large text (the window under 22 of its own ems: 200% on a phone, a narrow window at 150%; or
-   a window over 700 px but under 36 rem, where the picture's 14 and the text's 16 rem columns do
-   not fit beside each other: an open Fold at 200% ran the text column off the viewer's right edge,
-   0.7.48; a phone has its own two columns under 700 px): the picture, the
+   a viewer 600 px or wider but under 36 rem, where the picture's 14 and the text's 16 rem columns
+   do not fit beside each other: an open Fold at 200% ran the text column off the viewer's right
+   edge, 0.7.48. The viewer is the window less its 3 rem of padding above 700 px, so the bound is
+   600 px, not 701; at 100% text 36 rem is 576 px and this never fires): the picture, the
    name and the rows one under another, each the full width, so no word breaks in two beside the
    picture (0.7.47 UI sweep: "Tyrant", "Creature", "Mythic") */
 .cardview{container-type:inline-size}
-@container (max-width:22em) or ((min-width:701px) and (max-width:36rem)){
+@container (max-width:22em) or ((min-width:600px) and (max-width:36rem)){
   .cardview .box{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;
     grid-template-areas:'head' 'pic' 'info';overflow:auto;overscroll-behavior:contain}
   .cardview .info{overflow:visible}
