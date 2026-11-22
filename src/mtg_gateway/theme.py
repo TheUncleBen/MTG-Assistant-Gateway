@@ -1013,7 +1013,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 /* Touch screens: every control at least 44 px tall (the release's rule), including the small
    ones a mouse never minds: the editor's add-to chips, the deck page's category
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
-  .addbox button.tchip,.popular a,.cardview .chip{min-height:44px}
+  .addbox button.tchip,.popular a{min-height:44px}
   .switch{min-height:44px;min-width:44px}
   .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:auto}
   /* kept a list item (a flex summary loses its native fold-out marker in Chromium); the padding
