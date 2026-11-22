@@ -1630,8 +1630,15 @@ class FakeArchidekt:
                         # not counted in the deck on archidekt.com (verified on existing decks
                         # 2026-10-07); whether a brand-new deck gets that flag the same way is
                         # not verified live.
+                        # premier_templates: whether archidekt.com gives a new category the
+                        # Premier flag of the member's template of that name is NOT verified live;
+                        # a test sets it to check the gateway notices if it does.
                         deck["categories"].append(
-                            {"name": cat, "isPremier": False, "includedInDeck": cat != "Maybeboard"}
+                            {
+                                "name": cat,
+                                "isPremier": cat in getattr(self, "premier_templates", ()),
+                                "includedInDeck": cat != "Maybeboard",
+                            }
                         )
         deck["cards"] = [c for c in deck["cards"] if c["quantity"] > 0]
         deck["updatedAt"] = "2026-10-03T00:00:00Z"

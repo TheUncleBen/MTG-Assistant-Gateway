@@ -93,7 +93,7 @@ def test_the_history_purpose_line_links_to_proposals(server: Server) -> None:
     page = _client(server).get("/history").text
     # History is the decks' timeline (owner decision C7); the changes still waiting are on Proposals,
     # named in plain words (the tab is in the switch above; no capsule mid-sentence, 0.7.46)
-    assert "Changes still waiting for you are under Proposals.</p>" in page
+    assert "Waiting changes are under Proposals.</p>" in page
     assert "&lt;a href" not in page
 
 

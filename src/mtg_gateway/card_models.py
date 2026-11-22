@@ -32,6 +32,8 @@ import re
 import time
 from typing import Any
 
+from .digits import is_digits
+
 logger = logging.getLogger(__name__)
 
 # On from 0.7.30: each member keeps their own, in schema 14's per-member table.
@@ -215,7 +217,7 @@ def _trigger(card: str, raw: Any) -> dict[str, Any]:
         head, _, arg = str(raw["if"]).partition(":")
         _choice(card, "if", head, CONDITIONS)
         if head == "power_gte":
-            if not arg.isdigit() or not 0 <= int(arg) <= MAX_STAT:
+            if not is_digits(arg) or not 0 <= int(arg) <= MAX_STAT:
                 raise ModelError(f"{card}: if must be power_gte:<0 to {MAX_STAT}>")
             out["if"] = f"power_gte:{int(arg)}"
         else:

@@ -266,10 +266,8 @@ def clean_query(raw: str | None) -> str:
 
 
 START_HTML = (
-    "<section class='panel'><h2>Find a card</h2><p class='muted'>Type part of a card name, or pick "
-    "any filter: the cards that match show here as you go. Every field of Scryfall's advanced search "
-    "is under Filters and More filters. Paper cards only, unless you pick Arena or Magic Online under "
-    "Games.</p></section>"
+    "<section class='panel'><h2>Find a card</h2><p class='muted'>Type a card name or pick a filter. "
+    "Paper cards only, unless Games says otherwise.</p></section>"
 )
 NO_MATCH_HTML = (
     "<section class='panel'><p class='muted'>No card matches these filters. Check the spelling, or "

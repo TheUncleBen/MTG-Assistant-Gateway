@@ -156,6 +156,32 @@
       check();
     }
   };
+  // A phone pins Apply and Reject to the foot of the screen (theme.py). With very large text the
+  // box grows past a third of the screen and hides the proposal it is about: it then sits in the
+  // page under the proposal and scrolls like everything else. Once in the page it stays there
+  // (the hint leaving on unlock must not move the buttons under a finger) until the width changes.
+  var fitWidth = window.innerWidth;
+  function fitChoice(again) {
+    var guarded = document.querySelectorAll(".apply form.guarded");
+    for (var i = 0; i < guarded.length; i++) {
+      var box = guarded[i].querySelector(".choice");
+      if (!box) continue;
+      if (again) guarded[i].classList.remove("tall");
+      if (getComputedStyle(box).position === "fixed" &&
+          box.getBoundingClientRect().height > window.innerHeight / 3) guarded[i].classList.add("tall");
+    }
+  }
+  fitChoice(false);
+  if (window.ResizeObserver) {
+    var watcher = new ResizeObserver(function () { fitChoice(false); });
+    var boxes = document.querySelectorAll(".apply form.guarded .choice");
+    for (var b = 0; b < boxes.length; b++) watcher.observe(boxes[b]);
+  }
+  window.addEventListener("resize", function () {
+    if (window.innerWidth === fitWidth) return;  // a phone's address bar sliding away is not a new layout
+    fitWidth = window.innerWidth;
+    fitChoice(true);
+  });
   lock();
   check();
   setInterval(check, 100);

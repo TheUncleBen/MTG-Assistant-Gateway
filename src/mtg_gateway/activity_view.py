@@ -1423,8 +1423,8 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
         "<div class='act-page act-member'>"
         + ui.page_head(
             "My activity",
-            "Everything done in your name on this gateway: sign-ins, which assistant proposed and applied "
-            "what, links and unlinks, and anything an administrator did to your account. Kept for a year.",
+            # two lines on a phone at most (the page-intro rule); the rows say the rest
+            "Sign-ins, assistants' changes, links and administrator actions in your name. Kept for a year.",
         )
         + ui.widgets(cards)
         + top_html

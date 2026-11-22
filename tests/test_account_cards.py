@@ -100,7 +100,7 @@ async def test_send_it_now_sends_the_summary_the_card_shows(stack: Stack, monkey
         assert r.headers["location"] == f"{N}?ok=summary_sent#summary"
         assert len(stack.ntfy.messages) == sent + 1
         msg = stack.ntfy.messages[-1]
-        assert msg["title"] == "Summary · Today" and msg["click"].startswith(
+        assert msg["title"] == "Summary · Daily, Oct 12" and msg["click"].startswith(
             "https://mtg.test/notifications/open/"
         )
         # it is kept under Alerts too, and opens the summary through it (marked read there)
@@ -123,7 +123,7 @@ async def test_send_it_now_sends_the_summary_the_card_shows(stack: Stack, monkey
         summ = _card((await b.http.get(N)).text, "summary")
         assert "<h3>The last 7 days</h3>" in summ and "as your weekly summary would." in summ
         await _post(b, "/account", {"action": "summary_send"})
-        assert stack.ntfy.messages[-1]["title"] == "Summary · This week"
+        assert stack.ntfy.messages[-1]["title"].startswith("Summary · Weekly, ")
         # a refusal from the server is said plainly
         stack.gw.notifier._last_summary.clear()
         stack.ntfy.status = 403
@@ -221,5 +221,40 @@ async def test_view_choices_asks_in_a_box_and_delete_my_data_puts_the_tick_above
         # Approval mode and Connected apps are one Assistants row (per-assistant modes), still #apps
         assert "<section class='ygrp' data-g='1' id='apps'><h2>Assistant</h2>" in page
         assert "<a class='yrow' href='/account/assistants'>" in page
+    finally:
+        await b.aclose()
+
+
+async def test_a_missed_weekly_summary_is_sent_the_next_day_and_is_kept_once(stack: Stack) -> None:
+    """Weekly summaries went out on Mondays only, so a Monday the gateway was off lost the week's.
+    A summary is kept on the Alerts page before its push, so one that was not pushed (the member
+    chose Alerts only, or the notification server refused it) still counts as this week's: a
+    second try would keep it twice."""
+    b = await _browser(stack)
+    try:
+        await _opt_in(b)
+        await _post(b, "/account", {"action": "summary_save", "summary_every": "weekly"})
+        due = stack.gw.summaries.send_due
+
+        def kept() -> int:
+            return stack.gw.db._conn.execute(
+                "SELECT COUNT(*) FROM gateway_alerts WHERE event = 'summary'"
+            ).fetchone()[0]
+
+        assert await due("2026-10-14") == 0  # the first one waits for a Monday
+        assert await due("2026-10-19") == 1  # Monday
+        assert await due("2026-10-20") == 0 and await due("2026-10-25") == 0  # this week's has gone
+        assert await due("2026-10-27") == 1  # Monday the 26th was missed: Tuesday sends it
+        assert await due("2026-10-28") == 0 and kept() == 2
+        # Alerts only: nothing is pushed, and the week's summary is kept once, not once a day
+        await _post(b, "/account", {"action": "notify_save", "ntfy_on": "1", "deliver_summary": "list"})
+        for day in ("2026-11-02", "2026-11-03", "2026-11-04"):
+            assert await due(day) == 0
+        assert kept() == 3
+        # a push the notification server refuses: kept once as well
+        await _post(b, "/account", {"action": "notify_save", "ntfy_on": "1", "deliver_summary": "push"})
+        stack.ntfy.status = 403
+        assert await due("2026-11-09") == 0 and await due("2026-11-10") == 0
+        assert kept() == 4
     finally:
         await b.aclose()

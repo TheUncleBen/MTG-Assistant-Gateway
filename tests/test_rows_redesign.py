@@ -193,7 +193,8 @@ async def test_reports_rows_have_open_and_the_menu_together(stack: Stack) -> Non
                 f"<a class='kebab' href='/history/reports/{rid}'" in r
             ), r
             assert "md-hide" not in r
-            assert "<span class='sub'><span class='kv'>Won <b>" in r
+            # "Won" with a rate, "Forge" with any other state of the games (0.7.48)
+            assert re.search(r"<span class='sub'><span class='kv'>(Won|Forge) <b>", r), r
         head = body.split("<div class='list-head'>")[1].split("</div>")[0]
         assert (
             "<span>Newest first</span>"

@@ -36,6 +36,7 @@ import httpx
 
 from . import dbwait
 from .busy import outage
+from .digits import is_digits
 from .timing import add_time, archidekt_failures, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
@@ -413,7 +414,7 @@ def category_sort_key(name: str) -> tuple[Any, ...]:
     deck answer itself lists categories by record, which the site never shows; it keeps no order
     of its own (no field, no route), so this rule is the one order there is."""
     parts = _DIGITS_RE.split(name.casefold())
-    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in parts if p), name
+    return tuple((0, int(p)) if is_digits(p) else (1, p) for p in parts if p), name
 
 
 def backup_name(deck_name: str, when: float) -> str:
@@ -656,6 +657,17 @@ class Deck:
             for c in self.categories
             if isinstance(c.get("name"), str) and c.get("includedInDeck") is False
         }
+
+    def counts_in_price(self, card: DeckCard) -> bool:
+        """Whether a card counts toward the deck's price: not when its first category (the row's
+        primary one, as for the deck's size) is marked "Not in price". The gateway offers that
+        switch itself, so its own total has to follow it. That the primary category decides is
+        taken from the size rule; archidekt.com's price code was not read."""
+        if not card.categories:
+            return True
+        return not any(
+            c.get("name") == card.categories[0] and c.get("includedInPrice") is False for c in self.categories
+        )
 
     def premier_categories(self) -> set[str]:
         """Category names Archidekt marks premier (its commander zone), plus the literal
@@ -1771,14 +1783,19 @@ class ArchidektClient(AccountRequests):
         """Trade a refresh token for a new access token: POST /rest-auth/token/refresh/
         {"refresh"} -> {"access", "access_token_expiration"} (verified live 2026-10-05; the
         refresh token is not rotated). A rejected refresh token (400 or 401) is ``auth``: the
-        link is dead and the user has to sign in again."""
+        link is dead and the user has to sign in again. Any other refusal is ``unavailable``."""
         try:
             body = await self._request(
                 "POST", "/rest-auth/token/refresh/", json_body={"refresh": refresh_token}
             )
         except ArchidektError as exc:
-            if exc.kind in ("auth", "forbidden", "contract"):
+            # Only Archidekt's own "this token is no good" (401, or 400 for the refresh field)
+            # ends the link. A 403 block page, a 408 or a body that is not JSON says nothing
+            # about the token: the link is kept and the member is told to try again later.
+            if exc.kind == "auth" or (exc.kind == "contract" and getattr(exc, "status", None) == 400):
                 raise ArchidektError("auth", "Archidekt rejected the stored refresh token; relink.") from exc
+            if exc.kind in ("forbidden", "contract"):
+                raise ArchidektError("unavailable", outage("failing"), retryable=True) from exc
             raise
         if not isinstance(body, dict):
             raise ArchidektError("contract", "Unexpected token refresh response shape.")
@@ -2289,7 +2306,7 @@ class ArchidektClient(AccountRequests):
     ) -> dict[str, Any]:
         """One page of the member's own collection: {"results": [...], "count", "page",
         "totalPages", "next", "previous", "tags", "isPublic", "owner"}."""
-        if not str(user_id).isdigit():
+        if not is_digits(str(user_id)):
             raise ArchidektError("contract", "The linked account has no Archidekt user ID; relink.")
         params: dict[str, Any] = {"page": max(1, int(page)), "pageSize": max(1, min(int(page_size), 500))}
         if card_name:
@@ -2506,7 +2523,7 @@ class ArchidektClient(AccountRequests):
     async def following(self, token: str, user_id: str, page: int = 1) -> dict[str, Any]:
         """GET /users/{id}/following/: {"count", "next", "previous", "results": [{id, username,
         avatar, following}]} (checked live 2026-10-07)."""
-        if not str(user_id).isdigit():
+        if not is_digits(str(user_id)):
             raise ArchidektError("contract", "User ID is not a number.")
         body = await self._request(
             "GET", f"/users/{user_id}/following/", token=token, params={"page": max(1, int(page))}

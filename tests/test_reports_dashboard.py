@@ -81,7 +81,7 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     h = _seed(server)
     page = h.get("/reports").text
     # the head and the four widgets
-    assert "Every deck report you or your assistants ran, newest first." in page
+    assert "Every deck report you or your assistants ran. The newest 200 are kept" in page
     for title in ("Forge now", "Latest report", "Partial or failed", "Decks tested"):
         assert title in page
     assert "Nothing plays or waits now." in page

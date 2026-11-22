@@ -30,6 +30,7 @@ from . import actions, deck_extras, forum, ui
 from .busy import busy_body, busy_headers, busy_json_response, busy_plan, same_url
 from .companion import DECK_CSP, _json_for_html
 from .decks import DeckError, current_client
+from .digits import is_digits
 from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect_here
 from .theme import esc, icon
 
@@ -885,7 +886,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         # the old addresses of the thread's boxes (/forum/thread/<n>/enter and so on): the thread
         # page with that box drawn open, so the strip's buttons work without scripts
         head, _slash, tail = raw.rpartition("/")
-        if tail in BOX_NAMES and head.isdigit():
+        if tail in BOX_NAMES and is_digits(head):
             raw = head
             open_box = tail
         else:
@@ -930,7 +931,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         link = state.db.get_link(sub) or {}
         linked = bool(link)
         raw_me = str(link.get("archidekt_user_id") or "")
-        me = int(raw_me) if raw_me.isdigit() else None
+        me = int(raw_me) if is_digits(raw_me) else None
         me_name = str(link.get("archidekt_username") or "")
         entries = None
         if t.get("type") == "contest" and link:
@@ -1052,8 +1053,8 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 "report",
                 thread_id=str(tid),
                 report_kind="comment",
-                comment_id=int(raw_id) if raw_id.isdigit() else None,
-                page=int(raw_page) if raw_page.isdigit() else 1,
+                comment_id=int(raw_id) if is_digits(raw_id) else None,
+                page=int(raw_page) if is_digits(raw_page) else 1,
                 message=values["message"],
             )
         except DeckError as exc:

@@ -82,3 +82,27 @@ def test_hardware_sizes_come_from_measured_figures_and_say_what_is_not_measured(
         doc = " ".join(_read(name).split())
         assert "about 60 MB" not in doc and "idles around 60 MB" not in doc, name
         assert "about 82 MB" in doc, name
+
+
+def test_the_docs_count_the_docker_secrets_the_stack_declares() -> None:
+    """An admin who checks "the four secrets" misses the fifth, and the stack then fails to start."""
+    stack = _read("deploy/portainer-stack.yml")
+    block = stack.split("\nsecrets:\n", 1)[1].split("\n\n", 1)[0]
+    count = len(re.findall(r"^  [a-z_]+:$", block, flags=re.M))
+    words = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}
+    assert count in words
+    said = []
+    for path in DOCS:
+        text = path.read_text(encoding="utf-8")
+        said += [(path.name, m) for m in re.findall(r"\b(\d+|[a-z]+) (?:Docker )?secrets\b", text)]
+        said += [(path.name, m) for m in re.findall(r"Docker secrets<br/>(\d+) files", text)]
+    counted = [(name, m) for name, m in said if m.isdigit() or m in words.values()]
+    assert counted, "no doc states the number of secrets any more: drop this test's premise"
+    assert all(m in (str(count), words[count]) for _, m in counted), counted
+
+
+def test_the_note_for_a_hidden_tool_names_only_arguments_its_owner_takes() -> None:
+    from mtg_gateway import mf_proxy
+
+    assert "archidekt_text to export" not in mf_proxy.OWNER_NOTES["get_deck"]
+    assert "view 'export'" in mf_proxy.OWNER_NOTES["get_deck"]

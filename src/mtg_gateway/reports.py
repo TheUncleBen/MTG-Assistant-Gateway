@@ -39,6 +39,7 @@ from .decks import (
     current_client,
     deck_to_text,
 )
+from .digits import is_digits
 from .forge import (
     FINAL_STATES,
     GIVE_UP_SECONDS,
@@ -2986,7 +2987,7 @@ class ReportService:
             "deck_name": d["deck_name"],
             # a pasted list (or a new deck's proposal) is no Archidekt deck: no link
             "deck_url": f"https://archidekt.com/decks/{d['deck_id']}"
-            if str(d["deck_id"]).isdigit()
+            if is_digits(str(d["deck_id"]))
             else None,
             "source": source,
             "taken_at": d["taken_at"],

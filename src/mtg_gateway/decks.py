@@ -107,6 +107,7 @@ from .decklist import (
     parse_decklist,
     to_text,
 )
+from .digits import is_digits
 from .timing import add_time, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,8 @@ current_client: ContextVar[str | None] = ContextVar("current_client", default=No
 # The plan-first hint (DeckService.propose_linked): from the PLAN_FIRST_AFTER-th deck edit one app
 # sends for one deck within PLAN_WINDOW_SECONDS.
 PLAN_FIRST_AFTER = 3
+# An approval mode's row limit counts the rows assistants applied by themselves this long back.
+AUTO_WINDOW_SECONDS = 86400
 PLAN_WINDOW_SECONDS = 300
 PLAN_FIRST_TEXT = (
     "Your app has sent {n} changes to this deck in the last {minutes} minutes. Finish the review "
@@ -1211,7 +1214,7 @@ OVERLAP_STEP = (
 def _new_deck_fields(kind: str, result: Any) -> dict[str, Any]:
     """``new_deck_id`` and ``new_deck_url`` of a clone that made its copy."""
     new = result.get("deck_id") if kind == "clone" and isinstance(result, dict) else None
-    if new is None or not str(new).isdigit():
+    if new is None or not is_digits(str(new)):
         return {}
     return {"new_deck_id": str(new), "new_deck_url": f"https://archidekt.com/decks/{new}"}
 
@@ -1394,7 +1397,7 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
                 raise DeckError(
                     "invalid", f"Change {i}: relation_id goes with {', '.join(ROW_TARGET_ACTIONS)} only."
                 )
-            if isinstance(rel, str) and rel.isdigit():
+            if isinstance(rel, str) and is_digits(rel):
                 rel = int(rel)
             if isinstance(rel, bool) or not isinstance(rel, int) or rel <= 0:
                 raise DeckError(
@@ -3252,7 +3255,7 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
         if action not in CUSTOM_CARD_ACTIONS:
             raise DeckError("invalid", f"Change {i}: action must be one of {', '.join(CUSTOM_CARD_ACTIONS)}.")
         cid = item.get("custom_card_id")
-        if isinstance(cid, str) and cid.strip().isdigit():
+        if isinstance(cid, str) and is_digits(cid.strip()):
             cid = int(cid.strip())
         if not isinstance(cid, int) or isinstance(cid, bool) or cid < 1:
             raise DeckError("invalid", f"Change {i}: custom_card_id must be the custom card's ID (a number).")
@@ -4341,7 +4344,7 @@ class DeckService:
                     lambda token, *_, p=page: self.client.packages_list(token, owner=username, page=p),
                 )
                 found += [
-                    r for r in body["results"] if isinstance(r, dict) and str(r.get("id") or "").isdigit()
+                    r for r in body["results"] if isinstance(r, dict) and is_digits(str(r.get("id") or ""))
                 ]
                 if not body.get("next"):
                     break
@@ -4683,7 +4686,34 @@ class DeckService:
         )
         if mode == "auto" and wait and risk not in modes.MEMBER_ONLY:
             why = wait  # what the assistant is told: why auto mode still waits for the user
-        return risk, why, mode, modes.assistant_may_apply(mode, risk, auto_wait=wait)
+        allowed = modes.assistant_may_apply(mode, risk, auto_wait=wait)
+        if allowed and row.get("state") == "pending":
+            over = self._over_the_window(sub, row, mode)
+            if over:
+                return risk, over, mode, False
+        return risk, why, mode, allowed
+
+    def _over_the_window(self, sub: str, row: dict[str, Any], mode: str) -> str | None:
+        """Why this proposal waits although it is small enough by itself, or None: with the rows
+        the member's assistants already applied to the same deck by themselves in the last
+        ``AUTO_WINDOW_SECONDS``, it would pass the mode's row limit. A big edit split into small
+        proposals is still a big edit; a member's own press is not counted."""
+        rows = row.get("rows")
+        if not isinstance(rows, list):
+            return None
+        limit = int(self.live.get("auto_big_edit_rows" if mode == "auto" else "auto_apply_max_rows"))
+        own = len([r for r in rows if isinstance(r, dict) and r.get("kind") != "package"])
+        if own > limit:
+            return None  # too big by itself: the tiers have said so already
+        earlier = self.db.assistant_applied_rows(
+            sub, str(row.get("deck_id") or ""), int(time.time()) - AUTO_WINDOW_SECONDS
+        )
+        if not earlier or earlier + own <= limit:
+            return None
+        return (
+            f"would bring the rows assistants applied here without your press in 24 hours to "
+            f"{earlier + own}, more than {limit}"
+        )
 
     def press_reason(self, sub: str, row: dict[str, Any]) -> str | None:
         """Why this waiting note needs the member's own press in every mode, or None: a hold and a
@@ -5194,7 +5224,7 @@ class DeckService:
         # an optional folder of the member's own, checked as propose_clone checks it
         folder = None
         if folder_id is not None:
-            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+            if isinstance(folder_id, bool) or not is_digits(str(folder_id)):
                 raise DeckError("invalid", "That folder is not in your Archidekt account.")
             _info, folder = await self._folder_in(sub, int(folder_id))
             if folder.get("backup"):
@@ -5788,7 +5818,9 @@ class DeckService:
                 else {}
             ),
             "deck_id": row["deck_id"],
-            "deck_url": f"https://archidekt.com/decks/{row['deck_id']}" if row["deck_id"].isdigit() else None,
+            "deck_url": f"https://archidekt.com/decks/{row['deck_id']}"
+            if is_digits(row["deck_id"])
+            else None,
             "deck_name": row["deck_name"],
             "state": state,
             "diff": row["diff_text"],
@@ -6085,7 +6117,7 @@ class DeckService:
             deck_id = str(r.get("deck_id") or "")
             if r.get("kind") == "create_deck":
                 deck_id = "new"  # every new deck under one key: it has no deck id yet
-            elif not deck_id.isdigit():
+            elif not is_digits(deck_id):
                 continue
             row = self.db.get_proposal(r["id"], sub)
             if row is None or row["state"] != "pending":
@@ -7244,6 +7276,7 @@ class DeckService:
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
         mismatches = edit_mismatches(deck, changes, verified, specs)
         mismatches += label_mismatches(changes, deck, verified)
+        mismatches += commander_surprise(row, deck, verified)
         if unanswered is not None and mismatches:
             if not progress.get("sent_entries") and verified.rows_fingerprint() == progress["read_rows"]:
                 # the deck read again is as it was: the write did not land (the rule
@@ -7783,7 +7816,7 @@ class DeckService:
             if str((made.get("backup") or {}).get("backup_deck_id")) == str(backup_id):
                 made.pop("backup")  # the selection's next change on this deck makes its own
         if (
-            not str(backup_id).isdigit()
+            not is_digits(str(backup_id))
             or str(backup_id) == str(source_deck_id)
             or snap is None
             or str(snap.get("backup_deck_id") or "") != str(backup_id)
@@ -7893,7 +7926,7 @@ class DeckService:
             and _changed_anything(proposal.get("result") or {})
         )
         if (
-            not backup_id.isdigit()
+            not is_digits(backup_id)
             or backup_id == deck_id
             or snap is None
             or str(snap.get("backup_deck_id") or "") != backup_id
@@ -7999,7 +8032,7 @@ class DeckService:
         sid, sub, pid = job["snapshot_id"], job["sub"], job["proposal_id"]
         self.db.drop_backup_delete(sid)
         backup_id = str(job["backup_deck_id"])
-        if error != "copy_changed" and backup_id.isdigit():
+        if error != "copy_changed" and is_digits(backup_id):
             # The copy stays where it is and is no longer counted, so
             # no later trim queues it again (one more Archidekt read and give-up per new copy),
             # and its restore point is no longer held past the newest kept.
@@ -8134,7 +8167,7 @@ class DeckService:
         newest = copies[0]
         backup_id = str(newest["backup_deck_id"])
         made = self.db.backup_made(backup_id)
-        if not made or made.get("kept") or not backup_id.isdigit() or backup_id == str(deck.id):
+        if not made or made.get("kept") or not is_digits(backup_id) or backup_id == str(deck.id):
             return None
         if self.db.backup_copy_queued(sub, backup_id):
             return None  # an unused or over-limit copy waiting to be deleted is never shared
@@ -8183,7 +8216,7 @@ class DeckService:
             if not made or made.get("kept"):
                 continue
             counted += 1
-            if counted <= keep or not backup_id.isdigit() or backup_id == str(deck_id) or not sid:
+            if counted <= keep or not is_digits(backup_id) or backup_id == str(deck_id) or not sid:
                 continue
             if self.db.backup_delete_queued(sid):
                 continue
@@ -8354,7 +8387,10 @@ class DeckService:
                 "changes": {
                     **{k: v for k, v in (extra or {}).items() if v},
                     "add": adds,
-                    "remove": [{"id": r["id"], "quantity": r["quantity"]} for r in removes],
+                    "remove": [
+                        {"id": r["id"], "quantity": r["quantity"], "name": str(r.get("name") or "")}
+                        for r in removes
+                    ],
                     **(
                         {"tag": [{"id": t["id"], "name": t["name"], "tags": list(t["tags"])} for t in tags]}
                         if tags
@@ -8419,7 +8455,7 @@ class DeckService:
         changes: dict[str, Any] = {"name": new_name}
         folder_name = None
         if folder_id is not None:
-            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+            if isinstance(folder_id, bool) or not is_digits(str(folder_id)):
                 raise DeckError("invalid", "That folder is not in your Archidekt account.")
             _info, folder = await self._folder_in(sub, int(folder_id))
             changes["folder_id"] = int(folder["id"])
@@ -12914,6 +12950,24 @@ def _unanswered_note(
         "This change may have reached Archidekt before it stopped answering, so check the deck "
         "before trying it again."
     )
+
+
+def commander_surprise(row: dict[str, Any], before: Deck, now: Deck) -> list[str]:
+    """["which cards are the commanders"] when an edit the gateway judged to leave the commanders
+    alone (no commander row in its review rows) is read back with a commander it did not have before,
+    else []. The risk tiers are worked out from the deck's own categories; should Archidekt file a
+    card into the commander zone some other way (a category new to the deck that takes a Premier flag from the
+    member's category templates: not confirmed either way), the apply ends as a mismatch with its
+    snapshot named, instead of reading as done."""
+    rows = row.get("rows")
+    if not isinstance(rows, list) or any(isinstance(r, dict) and r.get("kind") == "commander" for r in rows):
+        return []  # a commander change the member was shown (modes.risk_of), or nothing to judge by
+
+    def names(deck: Deck) -> set[str]:
+        return {c.name for c in deck.cards if deck.in_deck(c) and deck.is_commander(c)}
+
+    # only a card that became a commander: one that left is a count or category change the rows show
+    return ["which cards are the commanders"] if names(now) - names(before) else []
 
 
 def edit_mismatches(

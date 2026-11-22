@@ -16,7 +16,7 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | What you see | Cause and fix |
 | --- | --- |
 | Log: `configuration error: ...` and the container exits | A setting is missing or out of range; the message names it. Common ones: `MTG_REQUIRED_GROUP is empty` (set your group, or `MTG_ALLOW_ANY_IDP_USER=true`; see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)); `MTG_PUBLIC_URL` must be `https://` with no path; `MTG_OIDC_ISSUER` must be `https://`; the session secret must be at least 32 characters; the Fernet key must be a valid key (regenerate it with the command in the deploy guide) |
-| Log mentions a `*_FILE` path that can't be read | The secret file isn't mounted or isn't readable by `PUID`. Compose: check `secrets/*.txt` exist and `chown` them to `PUID:PGID`. Swarm: check the four secrets exist with exactly the names in the stack (`docker secret ls`) |
+| Log mentions a `*_FILE` path that can't be read | The secret file isn't mounted or isn't readable by `PUID`. Compose: check `secrets/*.txt` exist and `chown` them to `PUID:PGID`. Swarm: check the five secrets exist with exactly the names in the stack (`docker secret ls`) |
 | `Permission denied` on `/data` or `/backups` | The host folders aren't owned by `PUID:PGID`. `sudo chown -R <PUID>:<PGID>` them |
 | Compose: `required variable ... is missing a value` | A REQUIRED line in `.env` is empty |
 | Swarm: `network "..." is declared as external, but could not be found` | Create the overlay network first, or set `MTG_NETWORK_NAME` to your existing network's exact name (it's case-sensitive) |

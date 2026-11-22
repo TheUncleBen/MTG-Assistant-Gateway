@@ -14,6 +14,7 @@ from typing import Any
 
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, Deck, format_label
 from .deck_stats import _SINGLETON_FORMATS, colour_letter
+from .digits import is_digits
 
 KEYWORDS_MAX = 200
 PAGE_ROWS = 50  # Archidekt's Packages listing: rows a page
@@ -80,7 +81,7 @@ def parse(raw: Any, *, partial: bool = False) -> dict[str, Any]:
 def block_of(deck: Deck) -> dict[str, Any] | None:
     """The deck's package block as Archidekt sent it, or None when the deck is not a package."""
     block = deck.raw.get("cardPackage")
-    return block if isinstance(block, dict) and str(block.get("id") or "").isdigit() else None
+    return block if isinstance(block, dict) and is_digits(str(block.get("id") or "")) else None
 
 
 def text(block: dict[str, Any]) -> str:
@@ -116,7 +117,7 @@ def _budget(v: Any) -> Any:
         return None
     if set(s) == {"$"}:
         return len(s)
-    return int(s) if s.isdigit() else s
+    return int(s) if is_digits(s) else s
 
 
 def _saved_format(f: Any) -> Any:
@@ -128,7 +129,7 @@ def _saved_format(f: Any) -> Any:
     if isinstance(f, bool) or f is None:
         return str(f)
     s = str(f).strip()
-    if s.isdigit():
+    if is_digits(s):
         return int(s)
     return FORMAT_IDS.get(s.casefold().replace(" ", ""), s)
 
@@ -342,7 +343,7 @@ async def listing(
             _keep(key, body)
     rows = []
     for r in body["results"]:
-        if not isinstance(r, dict) or not str(r.get("id") or "").isdigit():
+        if not isinstance(r, dict) or not is_digits(str(r.get("id") or "")):
             continue
         # Archidekt's name filter matches keywords too; name_contains means the name
         if name and name.casefold() not in " ".join(str(r.get("name") or "").split()).casefold():

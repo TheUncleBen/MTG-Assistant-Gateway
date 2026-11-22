@@ -585,11 +585,11 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
         # weekly: only the next Monday sends
         assert out["summaries"] == (1 if clock.day == "2026-10-19" else 0), clock.day
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "Summary · This week" and msg["click"].startswith(
+    assert msg["title"] == "Summary · Weekly, Oct 19" and msg["click"].startswith(
         "https://mtg.test/notifications/open/"
     )
     assert stack.h.db.gateway_alerts("user-1", kinds=("summary",))[0]["path"] == f"{N}#summary"
-    assert "2 watched cards, biggest move Sol Ring +25%" in msg["message"]
+    assert "2 watched cards. Biggest move: Sol Ring +25%" in msg["message"]
     token = await mcp_token(h)
     s = structured(await call(h, token, "get_summary", {"period": "week"}))
     assert s["ok"] and s["cards"][0]["from"] == 1.28 and s["cards"][0]["to"] == 1.6
@@ -783,7 +783,7 @@ async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
         clock.next_day()
         out = await prices.DailyJobs(None, st.gw.summaries, hour_utc=6).run_due()
         assert "prices" not in out and out["summaries"] == 1
-        assert st.ntfy.messages[-1]["title"] == "Summary · Today"
+        assert st.ntfy.messages[-1]["title"].startswith("Summary · Daily, ")
 
 
 async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:

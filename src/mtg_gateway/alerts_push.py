@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import dbwait, notify, profile, profile_page
 from .decks import DeckError
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .db import Database
@@ -285,7 +286,7 @@ class AlertWatch:
     async def _check(self, sub: str) -> dict[str, Any]:
         link = self.db.get_link(sub)
         uid_text = str((link or {}).get("archidekt_user_id") or "")
-        if not uid_text.isdigit():
+        if not is_digits(uid_text):
             return {"skipped": "not_linked"}
         uid = int(uid_text)
         client = self.decks.client

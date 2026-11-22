@@ -30,7 +30,7 @@ from urllib.parse import quote
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, card_models, update_check
+from . import __version__, card_models, localday, update_check
 from .mana import SPRITE
 from .menus import MENUS_CSS
 
@@ -932,9 +932,15 @@ details.raw{margin:.5rem 0 0}
     border:1px solid var(--card-border);border-radius:var(--radius-lg);box-shadow:var(--shadow)}
   body:not(.has-tabbar) .apply form.guarded .choice{bottom:calc(.5rem + env(safe-area-inset-bottom))}
   .apply form.guarded .choice .btn-plain{display:none}  /* Not now: the tab bar and Back lead out */
+  /* very large text: the bar would cover a third of the screen and the proposal with it, so it
+     sits in the page instead (static/clickguard.js marks the form) */
+  .apply form.guarded.tall .choice{position:static;margin:.9rem 0 0;padding:0;background:none;border:0;
+    box-shadow:none}
+  .apply form.guarded.tall .choice .btn-plain{display:inline-flex}
   /* the page's last lines scroll above the bar */
-  main.wrap:has(.apply form.guarded){padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
-  .has-tabbar main.wrap:has(.apply form.guarded){
+  main.wrap:has(.apply form.guarded:not(.tall)){
+    padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
+  .has-tabbar main.wrap:has(.apply form.guarded:not(.tall)){
     padding-bottom:calc(5.5rem + 9rem + env(safe-area-inset-bottom))} }
 /* Locked (until the click guard unlocks them), Apply and Reject keep their own look: the orange
    and the red, not faded, not outlined (a dashed outline read as disabled, re-audit N16); the lock
@@ -1007,7 +1013,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 /* Touch screens: every control at least 44 px tall (the release's rule), including the small
    ones a mouse never minds: the editor's add-to chips, the deck page's category
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
-  .addbox button.tchip,.popular a,.cardview .chip{min-height:44px}
+  .addbox button.tchip,.popular a{min-height:44px}
   .switch{min-height:44px;min-width:44px}
   .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:auto}
   /* kept a list item (a flex summary loses its native fold-out marker in Chromium); the padding
@@ -2362,13 +2368,22 @@ CSS += BOX_CSS
 
 # The Alerts page and the bell's box (alerts_page.py, static/bell.js): one row an alert, its type's
 # icon and colour, its type and time on a small line, the title in bold and its words; unread rows
-# carry a dot and a tint; each kept row ends with its ⋮ (Mark read or unread, Dismiss).
+# carry a dot before the type word, an orange edge and a light tint; each kept row ends with its ⋮
+# (Mark read or unread, Dismiss).
 BELL_CSS = """
+/* While a box is open, a menu opened from it sits over it: a row's ⋮ in the bell's box opened its
+   menu behind the box (0.7.48). Only then: the deck page layers its own toasts around the menu's
+   usual place (deckpage.py). The box says what was done, and its Undo, in its own note. */
+body:has(.mtgbox-scrim) .ctxmenu{z-index:97}
+body:has(.mtgbox-scrim) .cs-scrim{z-index:96}
 .al-list{list-style:none;margin:0;padding:0}
 .al-row{position:relative;display:flex;align-items:stretch;gap:.25rem;
   border-top:1px solid var(--border-soft);-webkit-touch-callout:none}
 .al-list > .al-row:first-child{border-top:0}
-.al-row.unread{background:var(--orange-tint)}
+/* unread: an orange edge and a light tint (the full --orange-tint made a page of unread rows one
+   heavy brown block, 0.7.48) */
+.al-row.unread{background:color-mix(in srgb,var(--orange) 4%,transparent);
+  box-shadow:inset 3px 0 0 var(--orange)}
 .al-main{flex:1 1 auto;min-width:0;display:flex;gap:.75rem;align-items:flex-start;
   padding:.7rem .5rem .7rem .75rem;color:var(--text);text-decoration:none;min-height:44px}
 .al-main:hover .al-title{text-decoration:underline}
@@ -2380,13 +2395,13 @@ BELL_CSS = """
 .al-ic.k-report{background:var(--blue-tint);color:var(--blue-text)}
 .al-ic.k-account{background:var(--red-tint);color:var(--red-text)}
 .al-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:.1rem;overflow-wrap:anywhere}
-.al-meta{display:flex;flex-wrap:wrap;column-gap:.6rem;font-size:.86rem;color:var(--text-muted)}
+.al-meta{display:flex;flex-wrap:wrap;align-items:center;column-gap:.6rem;font-size:.86rem;color:var(--text-muted)}
 .al-type{font-weight:700;color:var(--text)}
 .al-title{font-weight:700;line-height:1.3}
 .al-row:not(.unread) .al-title{font-weight:600}
 .al-text{color:var(--text-muted);line-height:1.4}
-.al-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--orange);margin-top:.45rem}
-.al-row details.al-menu{flex:none;position:relative;align-self:center;margin-right:.25rem}
+.al-dot{flex:none;width:max(8px,.5em);height:max(8px,.5em);border-radius:50%;background:var(--orange);margin-right:-.3rem}
+.al-row details.al-menu,.al-row .al-kebab{flex:none;position:relative;align-self:center;margin-right:.25rem}
 .al-row details.al-menu > summary{list-style:none}
 .al-row details.al-menu > summary::-webkit-details-marker{display:none}
 .al-row details.al-menu .menu{position:absolute;right:0;top:calc(100% + .25rem);width:max-content;
@@ -2403,9 +2418,10 @@ BELL_CSS = """
 .al-card > .notice{margin:.75rem}
 .al-head{flex-wrap:wrap;gap:.5rem 1rem}
 /* the three actions sit in one row or one above the other, never two and one alone (0.7.47
-   audit): the row needs --al-row (about 26em of their own text size, with room to spare), so
-   200% text stacks them sooner */
-.al-acts{--al-row:29em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
+   audit): the row needs --al-row (three equal shares, each wide enough for "Mark all read" with
+   its icon on one line: at 29em it wrapped inside its button on a desktop), so 200% text stacks
+   them sooner */
+.al-acts{--al-row:33em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
   flex-wrap:wrap;gap:.5rem}
 .al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
 .al-acts form{margin:0;display:flex}
@@ -2419,8 +2435,17 @@ BELL_CSS = """
 h1 .bell-badge{display:inline-block;font-size:.8rem;line-height:1.6;min-height:0;border-radius:999px;
   padding:0 8px}
 .bell-foot{margin:.75rem 0 0}
-.mtgbox .body .al-list{margin:0 -16px}
-.mtgbox .body .al-row.unread{background:var(--orange-tint)}
+/* the bell's box: Mark all read and Clear all over a framed list; each row's words two lines at
+   most (the page shows them whole). The box's own list indent (.mtgbox .body ul) and the old
+   negative margin pushed the rows out of the box's left side, where they were cut. */
+.al-boxacts{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .6rem}
+.al-boxacts button{flex:1 1 auto;margin:0;min-height:44px;display:inline-flex;align-items:center;
+  justify-content:center;gap:.4rem;text-align:center}
+.al-boxlist{border:1px solid var(--border-soft);border-radius:var(--radius-lg,12px);overflow:hidden}
+.al-boxlist > .notice{margin:.6rem}
+.mtgbox .body .al-list{margin:0;padding:0}
+.mtgbox .body .al-list > li{margin:0}
+.al-boxlist .al-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .mtgbox .body .bell-foot{margin-top:.75rem}
 /* the update strip's × (assistants.dismiss_form) */
 .notice.upd{position:relative;padding-right:calc(1rem + 44px)}
@@ -2923,7 +2948,7 @@ def time_html(ts: int | float | None, *, day: bool = True) -> str:
     return f"<time datetime='{iso}'{'' if day else ' data-fmt=time'}>{shown}</time>"
 
 
-_NUMBERS = re.compile(r"(\d+)")
+_NUMBERS = re.compile(r"([0-9]+)")  # plain digits only: "²" and "٣" sort as text
 
 
 @functools.lru_cache(maxsize=16384)
@@ -2932,7 +2957,9 @@ def natural_key(text: str | None) -> tuple[str | int, ...]:
     the rest without regard to case. Every key alternates text and numbers from the first
     character, so any two compare. Kept for the last names asked about: a Watchlist at the cap
     sorts 5,000 names on every view."""
-    return tuple(int(p) if p.isdigit() else p.casefold() for p in _NUMBERS.split(text or ""))
+    # split() with one group alternates text, number, text ...: the place decides, so two keys always
+    # hold the same kind at the same place. Python converts at most 4300 digits.
+    return tuple(int(p[:4000]) if i % 2 else p.casefold() for i, p in enumerate(_NUMBERS.split(text or "")))
 
 
 def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
@@ -3556,6 +3583,7 @@ class ThemeMiddleware:
             return
         value = None
         layout = None
+        tz = None
         app = False
         app_ver = ""
         for k, v in scope.get("headers", []):
@@ -3566,6 +3594,8 @@ class ThemeMiddleware:
                         value = val.strip()
                     elif name == LAYOUT_COOKIE:
                         layout = val.strip()
+                    elif name == localday.TZ_COOKIE:
+                        tz = val
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
                 m = _APP_VERSION_RE.search(v.decode("latin-1", "replace"))
@@ -3577,9 +3607,11 @@ class ThemeMiddleware:
         atoken = _app.set(app)
         vtoken = _app_version.set(app_ver)
         ctoken = _card_size.set((card_size_page(path), {}))
+        ztoken = localday.set_offset(localday.offset_from_cookie(tz))
         try:
             await self.app(scope, receive, send)
         finally:
+            localday.reset_offset(ztoken)
             _card_size.reset(ctoken)
             _theme.reset(token)
             _layout.reset(ltoken)

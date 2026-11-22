@@ -30,6 +30,7 @@ from .deckpage import (
     money,
 )
 from .decks import CATEGORIES_SAVED, DeckError, is_busy
+from .digits import is_digits
 from .pages import (
     _csrf,
     _err_code,
@@ -277,7 +278,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return RedirectResponse(f"/proposals/{pid}?ok=applying", status_code=303)
         made = result.get("result") if isinstance(result.get("result"), dict) else {}
         target = deck_id or str(made.get("deck_id") or result.get("deck_id") or "")
-        if not target.isdigit():
+        if not is_digits(target):
             return RedirectResponse(f"/proposals/{pid}?ok=applied", status_code=303)
         if made.get("package_saved_as") and not made.get("package_block"):
             return RedirectResponse(f"/proposals/{pid}?ok=applied", status_code=303)  # no block to edit

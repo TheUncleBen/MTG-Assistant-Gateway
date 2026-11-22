@@ -30,8 +30,9 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import alerts_push, notify, prefs, profile_page, ui
+from . import alerts_push, localday, notify, prefs, profile_page, ui
 from .decks import DeckError
+from .digits import is_digits
 from .pages import (
     browser_session,
     csrf_form_ok,
@@ -47,8 +48,7 @@ BOX_ROWS = 8  # rows the bell's box shows; the page shows them all
 SHOW_CHOICES = (("", "All"), ("unread", "Unread"))
 ACTIONS = ("read", "unread", "dismiss", "undo", "read_all", "clear_all")
 FOOT = (
-    "Alerts from Archidekt are read from Archidekt: marking them read or dismissing them here "
-    "doesn't change them on archidekt.com. Dismissed alerts are kept 30 days for Undo."
+    "What you read or dismiss here stays as it is on archidekt.com. Dismissed alerts stay 30 days for Undo."
 )
 # where the kinds of Archidekt's own alerts are chosen (the gateway's are under Settings)
 ARK_CHOICE = "<a class='btn btn-plain' href='/account/details/email'>Email and alerts on Archidekt</a>"
@@ -112,12 +112,22 @@ def waiting_rows(waiting: dict[str, tuple[str, int, str]]) -> list[dict[str, Any
     return out
 
 
+def _shown_title(a: dict[str, Any], kind: str) -> str:
+    """The title as the list shows it (and its search reads it): a summary's names its day."""
+    if kind != "summary":
+        return a["title"]
+    head, sep, rest = a["title"].partition(" \u00b7 ")
+    if not sep:
+        return a["title"]
+    return f"{head} \u00b7 {summary_title(rest, a.get('created_at'))}"
+
+
 def kept_rows(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             "id": a["id"],
-            "kind": a.get("kind") or notify.kind_of(a.get("event") or ""),
-            "title": a["title"],
+            "kind": (kind := a.get("kind") or notify.kind_of(a.get("event") or "")),
+            "title": _shown_title(a, kind),
             "message": a["message"],
             "href": f"/notifications/open/{a['id']}",
             "created_at": a["created_at"],
@@ -157,7 +167,7 @@ def narrow(
     return out
 
 
-def _menu(r: dict[str, Any], csrf_in: str) -> str:
+def _menu(r: dict[str, Any], csrf_in: str, label: str) -> str:
     """A kept row's ⋮: a menu that works without scripts (forms in a <details>); static/bell.js
     opens the shared row menu in its place (and on a right-click or a press and hold)."""
     rid = int(r["id"])
@@ -173,7 +183,7 @@ def _menu(r: dict[str, Any], csrf_in: str) -> str:
         )
 
     return (
-        f"<details class='al-menu'><summary class='kebab' aria-label='{esc('Actions for ' + r['title'])}' "
+        f"<details class='al-menu'><summary class='kebab' aria-label='{esc('Actions for ' + label)}' "
         f"title='Actions'>{icon('more')}</summary><div class='menu' role='menu'>"
         f"{form(read_act, read_word, 'check' if read_act == 'read' else 'bell')}"
         f"{form('dismiss', 'Dismiss', 'x')}</div></details>"
@@ -190,15 +200,40 @@ def split_title(title: str, k: notify.Kind) -> tuple[str, str]:
     return k.name, title
 
 
+# what summaries were titled before 0.7.48 ("Summary · Today" on every one, whatever its day)
+_OLD_SUMMARY = {"Today": "Daily", "This week": "Weekly"}
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def summary_title(title: str, created_at: float | None, now: float | None = None) -> str:
+    """A summary's day as the member's own ("Daily, Nov 20"): one kept before 0.7.48 named its
+    day "Today" or "This week" forever, and a new one is titled by the server's (UTC) day when it
+    was sent (summary.push_title), which is the next day for a member west of UTC in the evening."""
+    text = title.strip()
+    span = _OLD_SUMMARY.get(text) or next((w for w in ("Daily", "Weekly") if text.startswith(w + ", ")), None)
+    if span is None or not created_at:
+        return title
+    day = localday.day_of(created_at)
+    this_year = localday.day_of(time.time() if now is None else now)[:4]
+    y, m, d = (int(x) for x in day.split("-"))
+    shown = f"{_MONTHS[m - 1]} {d}"
+    return f"{span}, {shown if str(y) == this_year else f'{shown}, {y}'}"
+
+
 def row_html(r: dict[str, Any], *, now: float | None = None, csrf_in: str = "") -> str:
     k = notify.KINDS.get(r["kind"]) or notify.KINDS["waiting"]
     word, title = split_title(r["title"], k)
+    if k.key == "summary":
+        title = summary_title(title, r["created_at"], now)
     unread = not r["read"]
     when = ui.when_text(r["created_at"], now=now) if r["created_at"] else "Waiting now"
     state = "Unread" if unread else "Read"
     attrs = f" data-alert='{int(r['id'])}' data-read='{0 if unread else 1}'" if r["id"] is not None else ""
     cls = "al-row" + (" unread" if unread else "") + (" live" if r["id"] is None else "")
+    # the dot leads the type word: at the row's far end it sat a screen's width from the title on a
+    # Fold and read as part of the ⋮ (0.7.48)
     dot = "<span class='al-dot' aria-hidden='true'></span>" if unread else ""
+    label = f"{word} \u00b7 {title}"  # the ⋮'s name, as the push titles it
     # Archidekt's news and contests open on archidekt.com, in a new tab (as links to Archidekt do)
     away = " target='_blank' rel='noopener'" if r.get("away") else ""
     ext = "<span class='sr-only'> (opens Archidekt in a new tab)</span>" if r.get("away") else ""
@@ -207,11 +242,11 @@ def row_html(r: dict[str, Any], *, now: float | None = None, csrf_in: str = "") 
         f"<a class='al-main' href='{esc(r['href'])}'{away}>"
         f"<span class='al-ic k-{esc(k.key)}' aria-hidden='true'>{icon(k.icon)}</span>"
         "<span class='al-body'>"
-        f"<span class='al-meta'><span class='al-type'>{esc(word)}</span><span class='sr-only'>, </span>"
+        f"<span class='al-meta'>{dot}<span class='al-type'>{esc(word)}</span><span class='sr-only'>, </span>"
         f"<span class='al-when'>{esc(when)}</span><span class='sr-only'>, {state}</span></span>"
         f"<b class='al-title'>{esc(title)}</b>"
-        f"<span class='al-text'>{esc(r['message'])}</span>{ext}</span>{dot}</a>"
-        f"{_menu(r, csrf_in) if r['id'] is not None else ''}</li>"
+        f"<span class='al-text'>{esc(r['message'])}</span>{ext}</span></a>"
+        f"{_menu(r, csrf_in, label) if r['id'] is not None else ''}</li>"
     )
 
 
@@ -281,7 +316,7 @@ def _ids(raw: Any) -> list[int]:
     out = []
     for v in raw if isinstance(raw, list) else []:
         s = str(v).strip()
-        if s.isdigit() and len(s) <= 12:
+        if is_digits(s) and len(s) <= 12:
             out.append(int(s))
     return out[:500]
 
@@ -307,6 +342,13 @@ def act(state: Any, sub: str, action: str, ids: list[int]) -> list[int]:
     if action in ("read", "dismiss", "read_all", "clear_all") and changed and state.notifier is not None:
         state.notifier.withdraw_alerts(sub, changed)
     return changed
+
+
+def kept_counts(state: Any, sub: str) -> dict[str, int]:
+    """The member's kept alerts and how many are unread, every one of them (the bell's box shows
+    the newest 8: its "N unread", Mark all read and Clear all go by these)."""
+    kept = state.db.gateway_alerts(sub)
+    return {"kept": len(kept), "kept_unread": sum(1 for a in kept if a.get("read_at") is None)}
 
 
 def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
@@ -365,7 +407,14 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             shown = rows[:BOX_ROWS]
             body = err + list_html(shown, filtered=False, csrf_in=csrf_in)
             return JSONResponse(
-                {"ok": True, "unseen": unseen, "unread": unread, "total": len(rows), "html": body},
+                {
+                    "ok": True,
+                    "unseen": unseen,
+                    "unread": unread,
+                    "total": len(rows),
+                    "html": body,
+                    **kept_counts(state, sub),
+                },
                 headers=NO_STORE,
             )
         qp = request.query_params
@@ -411,8 +460,8 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             f"{tools_html(csrf_in, any_unread=any_unread, any_rows=kept_any) if not cross_site else ''}</div>"
             "<p class='ui-sub'>What needs you and what happened, from this gateway and from Archidekt.</p>"
             f"{note}{tools}{link_note}<div class='card al-card' data-al-page>{body_list}</div>"
-            f"<p class='muted small bell-foot'>{esc(FOOT)} Choose which alerts Archidekt sends you under "
-            f"Email and alerts on Archidekt.</p><p class='al-ark'>{ARK_CHOICE}</p></div>",
+            # the button under it says where Archidekt's own alerts are chosen: not said twice
+            f"<p class='muted small bell-foot'>{esc(FOOT)}</p><p class='al-ark'>{ARK_CHOICE}</p></div>",
             sub=sub,
             sid=sid,
             current="/notifications",
@@ -426,7 +475,7 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = request.path_params.get("alert_id", "")
         if not sub:
             return login_redirect_here(request, f"/notifications/open/{raw}")
-        if not str(raw).isdigit() or len(str(raw)) > 12:
+        if not is_digits(str(raw)) or len(str(raw)) > 12:
             return RedirectResponse("/notifications", 303)
         a = state.db.gateway_alert(sub, int(raw))
         if a is None:
@@ -487,6 +536,7 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     "changed": changed,
                     "message": DONE_WORDS[action],
                     "unseen": state.db.unseen_gateway_alerts(sub),
+                    **kept_counts(state, sub),
                 },
                 headers=NO_STORE,
             )

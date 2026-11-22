@@ -55,6 +55,7 @@ from .decks import (
     parse_category_changes,
     unused_category_changes,
 )
+from .digits import is_digits
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -1095,7 +1096,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         got = await asyncio.gather(
             decks.page_own_deck(sub, deck_id),
             folders_or_none(sub),
-            collaborators_or_none(sub, deck_id) if deck_id.isdigit() else asyncio.sleep(0, None),
+            collaborators_or_none(sub, deck_id) if is_digits(deck_id) else asyncio.sleep(0, None),
             following_or_none(sub),
             return_exceptions=True,
         )

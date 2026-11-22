@@ -149,27 +149,37 @@ class Summaries:
         return await self.notifier.send(
             sub,
             "summary",
-            notify.push_title("summary", "Today" if summary["period"] == "day" else "This week"),
+            push_title(summary),
             short_text(summary),
             "/account/details/notifications#summary",
         )
 
     async def send_due(self, day: str) -> int:
         """Send the summary to every member who chose one that is due on ``day`` (daily ones every
-        day, weekly ones on Mondays) and has ntfy notifications on. Returns how many were sent."""
+        day, weekly ones on Mondays) and has ntfy notifications on. Returns how many were sent.
+
+        A weekly one whose Monday was missed (the gateway was off, the run failed) is sent on the
+        first day after it. A summary is marked sent once it was handed over, pushed or not: it is
+        kept on the Alerts page before the push, so a second try would keep it twice (and a member
+        who chose Alerts only is never pushed one). Only a run that raised is tried again."""
         if self.notifier is None or not self.notifier.enabled:
             return 0
-        weekday = _dt.date.fromisoformat(day).weekday()
+        today = _dt.date.fromisoformat(day)
+        monday = (today - _dt.timedelta(days=today.weekday())).isoformat()
         with self.db._lock:
             rows = self.db._conn.execute(
-                "SELECT sub, summary_every FROM notify_prefs WHERE ntfy_on = 1 AND ntfy_topic IS NOT NULL "
+                "SELECT sub, summary_every, summary_sent_day FROM notify_prefs "
+                "WHERE ntfy_on = 1 AND ntfy_topic IS NOT NULL "
                 "AND summary_every != 'off' AND (summary_sent_day IS NULL OR summary_sent_day != ?)",
                 (day,),
             ).fetchall()
         sent = 0
         for r in rows:
-            if r["summary_every"] == "weekly" and weekday != 0:
-                continue
+            if r["summary_every"] == "weekly":
+                last = r["summary_sent_day"]
+                # the first one waits for a Monday; later ones are due once this week's has not gone
+                if (last is None and today.weekday() != 0) or (last is not None and last >= monday):
+                    continue
             period = "day" if r["summary_every"] == "daily" else "week"
             try:
                 ok = await self.send(r["sub"], period)
@@ -238,24 +248,43 @@ def _which(c: dict[str, Any]) -> str:
     return " cheapest printing"
 
 
+def push_title(s: dict[str, Any]) -> str:
+    """The notification's title: the kind and the day it was sent ("Summary · Daily, Nov 22"), so
+    a week of them never reads "Today" on every row of the Alerts list (0.7.48)."""
+    return notify.push_title(
+        "summary", f"{'Daily' if s['period'] == 'day' else 'Weekly'}, {_day(s['to_day'], s['to_day'])}"
+    )
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def short_text(s: dict[str, Any]) -> str:
-    """The notification's text: counts and totals only, no deck names or contents."""
+    """The notification's text: counts and totals only, no deck names or contents, in short
+    sentences that leave out what is zero (0.7.48: "0 reports finished; 0 proposals waiting, 0
+    applied" on every summary was noise)."""
     parts = []
     if s["cards"]:
         top = s["cards"][0]
-        parts.append(
-            f"{len(s['cards'])} watched cards"
-            + (f", biggest move {top['name']} {_signed(top['change_pct'])}" if top["change_pct"] else "")
-        )
+        parts.append(_count(len(s["cards"]), "watched card"))
+        if top["change_pct"]:
+            parts.append(f"Biggest move: {top['name']} {_signed(top['change_pct'])}")
     if s["decks"]:
         start = sum(d["from"] or 0 for d in s["decks"])
         end = sum(d["to"] or 0 for d in s["decks"])
-        parts.append(
-            f"{len(s['decks'])} watched decks worth {money(end)} ({_signed(pct_change(start, end))})"
-        )
-    parts.append(f"{len(s['reports_finished'])} reports finished")
-    parts.append(f"{s['proposals_waiting']} proposals waiting, {s['proposals_applied']} applied")
-    return "; ".join(parts) + "."
+        decks = _count(len(s["decks"]), "watched deck")
+        parts.append(f"{decks} worth {money(end)} ({_signed(pct_change(start, end))})")
+    if s["reports_finished"]:
+        parts.append(f"{_count(len(s['reports_finished']), 'report')} finished")
+    waiting, applied = s["proposals_waiting"], s["proposals_applied"]
+    if waiting and applied:
+        parts.append(f"{_count(waiting, 'proposal')} waiting, {applied} applied")
+    elif waiting:
+        parts.append(f"{_count(waiting, 'proposal')} waiting")
+    elif applied:
+        parts.append(f"{_count(applied, 'proposal')} applied")
+    return ". ".join(parts) + "." if parts else "Nothing new."
 
 
 def add_summary_tool(server: MCPServer, state: AppState) -> None:

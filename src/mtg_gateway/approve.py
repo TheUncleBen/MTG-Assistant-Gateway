@@ -40,6 +40,7 @@ from typing import Any
 from mcp.server.apps import Apps, ResourceCsp
 
 from .archidekt import drops_formatting, words_only_note
+from .digits import is_digits
 
 CARD_URI = "ui://mtg-assistant-gateway/proposal-card"
 CARD_PATH = Path(__file__).parent / "static" / "cards" / "proposal-card.html"
@@ -416,7 +417,7 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
     from .decks import current_client
 
     pid, deck_id = data.get("proposal_id"), data.get("deck_id")
-    if data.get("state") != "pending" or not pid or not str(deck_id or "").isdigit():
+    if data.get("state") != "pending" or not pid or not is_digits(str(deck_id or "")):
         return None, None
     client = current_client.get()
     rows = [r for r in decks.db.pending_board(sub, str(deck_id))]

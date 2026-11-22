@@ -15,6 +15,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from .archidekt import DECK_ID_RE, ArchidektError, rich_doc
+from .digits import is_digits
 
 if TYPE_CHECKING:
     from .archidekt import ArchidektClient
@@ -344,7 +345,7 @@ class AccountRequests:
         if fields.get("parent_folder") is not None:
             body["parent_folder"] = _id(fields["parent_folder"], "folder ID")
         resp = await self._request("POST", "/decks/packages/", token=token, json_body=body)
-        if not isinstance(resp, dict) or not str(resp.get("id") or "").isdigit():
+        if not isinstance(resp, dict) or not is_digits(str(resp.get("id") or "")):
             raise ArchidektError("contract", "Archidekt's answer had no ID for the new package.")
         return resp
 

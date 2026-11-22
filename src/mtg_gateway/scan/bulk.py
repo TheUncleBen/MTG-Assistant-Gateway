@@ -65,6 +65,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from ..busy import outage
+from ..digits import is_digits
 from .names import fold
 from .scryfall import PRINT_ORDERS, PRINT_PAGES, ScryfallError, browse_row
 
@@ -596,7 +597,7 @@ class PrintingsCopy:
                     await asyncio.to_thread(out.write, bytes(pending))
             finally:
                 await asyncio.to_thread(out.close)
-            if expected and expected.isdigit() and int(expected) != got:
+            if expected and is_digits(expected) and int(expected) != got:
                 # a transfer cut short is a transport failure, not a damaged file
                 raise ScryfallError("unavailable", f"The download was cut off ({got} of {expected} bytes).")
             if halt.is_set():

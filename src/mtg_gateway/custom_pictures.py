@@ -33,6 +33,7 @@ from starlette.responses import Response
 
 from .avatars import sniff
 from .decks import DeckError
+from .digits import is_digits
 from .pages import browser_session
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ def add_custom_picture_routes(server: Any, state: Any) -> None:
             return Response(status_code=401, headers={"Cache-Control": "no-store"})
         raw_id = str(request.path_params["custom_card_id"])
         face = request.query_params.get("face") or "front"
-        if not raw_id.isdigit() or face not in FACES:
+        if not is_digits(raw_id) or face not in FACES:
             return Response(status_code=404, headers={"Cache-Control": "no-store"})
         front, back = _LISTED.get(sub, {}).get(int(raw_id), ("", ""))
         return await _serve(back if face == "back" else front)
@@ -176,7 +177,7 @@ def add_custom_picture_routes(server: Any, state: Any) -> None:
             return Response(status_code=401, headers={"Cache-Control": "no-store"})
         raw_id = str(request.path_params["custom_card_id"])
         face = request.query_params.get("face") or "front"
-        if not raw_id.isdigit() or face not in FACES:
+        if not is_digits(raw_id) or face not in FACES:
             return Response(status_code=404, headers={"Cache-Control": "no-store"})
         try:
             deck = await state.decks.get_deck(sub, str(request.path_params["deck_id"]))

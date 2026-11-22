@@ -18,6 +18,7 @@ from typing import Any
 
 from . import card_models, card_models_view, ui
 from .busy import outage
+from .digits import is_digits
 from .report_view import (
     APPROX_HEADING,
     APPROX_LEAD,
@@ -948,7 +949,7 @@ def run_again_html(r: dict[str, Any], csrf: str) -> str:
     """Run again, for a report of one of the member's decks as it is (not a list, a proposal or a
     comparison, which an assistant runs): the same full test as the deck page's button."""
     deck_id = str(r.get("deck_id") or "")
-    if not csrf or not deck_id.isdigit() or r.get("source"):
+    if not csrf or not is_digits(deck_id) or r.get("source"):
         return ""
     return (
         f"<form method='post' action='/decks/{_esc(deck_id)}/report' class='rv-again'>"
@@ -1830,7 +1831,7 @@ def report_page_html(
     deck_id = _esc(r.get("deck_id"))
     name = _esc(r.get("deck_name") or r.get("deck_id") or "Unnamed deck")
     # a pasted list (or a new deck's proposal) has no deck to go back to
-    on_deck = str(r.get("deck_id") or "").isdigit()
+    on_deck = is_digits(str(r.get("deck_id") or ""))
     crumbs = (
         "<nav class='crumbs rv-crumbs' aria-label='Back'>"
         # capsules, as History's way back (ui.cap_link): never bare blue text

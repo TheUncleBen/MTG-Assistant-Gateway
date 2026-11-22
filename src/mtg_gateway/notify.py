@@ -48,6 +48,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from . import dbwait
 from .busy import outage
 from .db import Database
+from .digits import is_digits
 from .theme import esc as _esc
 from .theme import icon, in_app
 from .ui import label
@@ -779,7 +780,7 @@ class Notifier:
         reaches 0. A count the phone already shows sends nothing. A deck whose proposals just
         changed (``touched``) is withdrawn at 0 even when this process never sent its message (one
         sent before a restart), once until it sends one again."""
-        if not self.enabled or not str(deck_id).isdigit():
+        if not self.enabled or not is_digits(str(deck_id)):
             return
         group = f"deck-{int(deck_id)}"
         key = (sub, group)

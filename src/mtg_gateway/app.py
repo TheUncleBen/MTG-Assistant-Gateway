@@ -90,6 +90,7 @@ from .decks import (
     reload_read,
     scopes_allow_writes,
 )
+from .digits import is_digits
 from .forge import ForgeClient
 from .guide import add_guide_routes
 from .home import add_home_routes
@@ -462,6 +463,13 @@ def _tidy_numbers(data: dict[str, Any], structured: dict[str, Any]) -> dict[str,
     return {**data, "content": content, "structuredContent": tidied}
 
 
+_TOOL_CRASH_HEAD = "Error executing tool"
+TOOL_CRASH_MESSAGE = (
+    "Something went wrong on the gateway and this call did not finish. Try it once more. If it was "
+    "a change, call proposal_status first to see whether it went through."
+)
+
+
 def schema_error_middleware():
     """MCP middleware for tool errors. Arguments the input schema refused get the same answer as
     any other refusal: ok false, error invalid, and a message naming each field and what it takes.
@@ -511,11 +519,20 @@ def schema_error_middleware():
             busy = {"ok": False, "error": "busy", "message": str(text)[len(BUSY_PREFIX) :]}
             return {**data, "structuredContent": _with_error_code(busy)}
         problems = _schema_problems(str(text))
-        if problems is None:
+        if problems is None and not str(text).startswith(_TOOL_CRASH_HEAD):
             return result
-        out = _with_error_code(
-            {"ok": False, "error": "invalid", "message": f"The arguments do not fit the tool: {problems}."}
-        )
+        if problems is None:
+            # the last resort: a tool that raised. The framework's text names only the tool, so the
+            # assistant gets the house sentence, the error flag and what to do next instead.
+            out = _with_error_code({"ok": False, "error": "internal", "message": TOOL_CRASH_MESSAGE})
+        else:
+            out = _with_error_code(
+                {
+                    "ok": False,
+                    "error": "invalid",
+                    "message": f"The arguments do not fit the tool: {problems}.",
+                }
+            )
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=pydantic_core.to_json(out).decode())],
             structuredContent=out,
@@ -1005,7 +1022,7 @@ class BodyLimitMiddleware:
             return
         declared = next((v for k, v in scope.get("headers", []) if k == b"content-length"), b"0")
         too_big = JSONResponse({"error": "invalid_request", "error_description": "request too large"}, 413)
-        if not declared.isdigit() or int(declared) > limit:
+        if not is_digits(declared) or int(declared) > limit:
             await too_big(scope, receive, send)
             return
         seen = 0

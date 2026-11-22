@@ -25,6 +25,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 
 from . import prefs, prices
 from .decks import DeckError
+from .digits import is_digits
 from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect_here, read_limited
 from .theme import render
 from .watchlist_page import WATCH_PAGE_CSS, Query, alert_text, watchlist_fragment_html, watchlist_page_html
@@ -350,7 +351,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
         deck_id = (request.query_params.get("deck_id") or "").strip()[:20]
-        rows = state.prices.deck_series(sub, deck_id, 365) if deck_id.isdigit() else []
+        rows = state.prices.deck_series(sub, deck_id, 365) if is_digits(deck_id) else []
         history = [{"day": r["day"], "price": r["usd"]} for r in rows if r["usd"] is not None]
         return JSONResponse({"ok": True, "deck_id": deck_id, "history": history}, headers=NO_STORE)
 

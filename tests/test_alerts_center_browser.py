@@ -123,7 +123,7 @@ def test_the_alerts_page_reads_and_works_at_every_size(server: Server, width: in
             )
             assert over <= 0, over
             small = page.evaluate(
-                "[...document.querySelectorAll('.al-row summary, .al-acts button, .al-acts a')]"
+                "[...document.querySelectorAll('.al-row .al-kebab, .al-acts button, .al-acts a')]"
                 ".filter(e => e.offsetParent && Math.min(e.getBoundingClientRect().width,"
                 " e.getBoundingClientRect().height) < 43.5).map(e => e.textContent.trim())"
             )
@@ -131,12 +131,12 @@ def test_the_alerts_page_reads_and_works_at_every_size(server: Server, width: in
             # the newest alert's ⋮: Mark read, in place
             row = page.locator(f".al-row[data-alert='{a3}']")
             assert "unread" in (row.get_attribute("class") or "")
-            row.locator(".al-menu > summary").click()
+            row.locator(".al-kebab").click()
             page.get_by_role("menuitem", name="Mark read").click()
             page.wait_for_selector(f".al-row.unread[data-alert='{a3}']", state="detached")
             assert server.db.gateway_alert("user-1", a3)["read_at"] is not None
             # Dismiss, then Undo in the toast
-            page.locator(f".al-row[data-alert='{a2}'] .al-menu > summary").click()
+            page.locator(f".al-row[data-alert='{a2}'] .al-kebab").click()
             page.get_by_role("menuitem", name="Dismiss").click()
             page.wait_for_selector(f".al-row[data-alert='{a2}']", state="detached")
             assert server.db.gateway_alert("user-1", a2)["dismissed_at"] is not None

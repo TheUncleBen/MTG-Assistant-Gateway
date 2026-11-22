@@ -27,6 +27,7 @@ from . import activity_view, idp_sweep, settings_page, tool_labels, ui, update_c
 from .companion import member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, current_client
+from .digits import is_digits
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -307,7 +308,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if not back.startswith("/admin/models") or any(c in back for c in "\r\n"):
             back = "/admin/models"
         page_no = str(data.get("page") or "")
-        if page_no.isdigit() and "?" not in back:
+        if is_digits(page_no) and "?" not in back:
             back = _href("/admin/models", offset=max(0, int(page_no) - 1) * PER_PAGE)
         sep = "&" if "?" in back else "?"
         return RedirectResponse(

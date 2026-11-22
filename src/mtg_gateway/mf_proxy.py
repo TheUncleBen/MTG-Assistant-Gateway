@@ -26,6 +26,7 @@ from . import dbwait, deck_stats
 from .busy import AGAIN, outage
 from .decklist import _FACE_SPLIT, front_faces
 from .decks import DeckError
+from .digits import is_digits
 from .report_view import found_not_verified
 from .schemas import compact_schema, flatten_params
 from .tool_labels import tool_name
@@ -81,7 +82,7 @@ OWNER_NOTES: dict[str, str] = {
     "with the same options (annotations, combos, seed, until_turn, opponents, mulligan) and stores the "
     "report; compare_decks with simulate=true is the paired A/B of two decks",
     "get_deck": "the gateway's deck reader: any Archidekt deck by ID or link, include_text for rules text, "
-    "archidekt_text to export in Archidekt's import syntax",
+    "view 'export' for Archidekt's import syntax",
     "search_decks": "public decks by name, commander, format, colors or owner; owner plus order_by "
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
     "deck_stats": "legality, structural checks, bracket, curve, colors and price from one read",
@@ -387,8 +388,45 @@ def _rewrite_result(result: types.CallToolResult) -> types.CallToolResult:
     if result.structured_content is not None:
         update["structured_content"] = _rewrite_strings(result.structured_content)
     if upstream_failed(result):
-        update["is_error"] = True  # so the assistant sees a failure, not an answer
+        return upstream_refusal(result)
     return result.model_copy(update=update)
+
+
+_UPSTREAM_NAMES = {"edhrec": "EDHREC"}
+
+
+def upstream_refusal(result: types.CallToolResult) -> types.CallToolResult:
+    """A lookup whose source failed, in the gateway's own words: which source did not answer,
+    that nothing was changed, and what to do next. The source's own text (a status line, an
+    exception's name, sometimes a page of HTML) is not passed on: it is not written for a member
+    and is not the gateway's to vouch for."""
+    text = result.content[0].text.lstrip() if result.content else ""
+    m = UPSTREAM_FAILURE.match(text)
+    named = m.group(2) if m and m.group(2) else ""
+    if not named:
+        about = re.match(r"^(?:Request to ([A-Za-z ]+?) timed out\.|Rate limited by (\w+))", text)
+        named = (about.group(1) or about.group(2) or "") if about else ""
+    service = _UPSTREAM_NAMES.get(named.lower(), named) or "The research service"
+    # the one table of outage sentences (busy.OUTAGE). A source that limits the research service is
+    # "can't be reached right now": the gateway pauses nothing here, so the pause sentence is not true
+    if text.startswith("Rate limited"):
+        words = outage("unavailable", service)
+    elif "timed out" in text[:80]:
+        words = outage("timeout", service)
+    else:
+        words = outage("failing", service)
+    out = {
+        "ok": False,
+        "error": "unavailable",
+        "error_code": "UPSTREAM_ERROR",
+        "message": f"{words} This lookup returned nothing, and nothing was changed.",
+        "next_step": "Try again later. Do not answer from memory in its place.",
+    }
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=json.dumps(out, separators=(",", ":")))],
+        structured_content=out,
+        isError=True,
+    )
 
 
 def _validation_checks(result: types.CallToolResult, arguments: Any) -> types.CallToolResult:
@@ -599,7 +637,7 @@ def names_deck(value: Any) -> bool:
         return True
     if isinstance(value, str):
         value = value.strip()
-        return value.isdigit() or ("archidekt.com" in value.lower() and "\n" not in value)
+        return is_digits(value) or ("archidekt.com" in value.lower() and "\n" not in value)
     return False
 
 

@@ -131,7 +131,9 @@ def test_status_line_list_heads_and_the_watch_a_card_box() -> None:
     # the status line carries what the old widgets said, in one line of text
     # its facts are spans whose dots are drawn by CSS, so none dangles at a line end (polish C1)
     status = page.split("<p class='w-status ui-dots'>")[1].split("</p>")[0]
-    assert status.startswith("<span>Last check today at 06:00 UTC</span><span>") and " · " not in status
+    # the last check is the list date the page draws in the member's own time zone, never "UTC" text
+    assert status.startswith("<span>Last check <time class='ui-when' datetime='2026-10-19T06:00:00Z'")
+    assert " UTC</span>" not in status and " · " not in status
     assert (
         "Biggest move, 7 days: Smothering Tithe <span class='dl up'><span aria-hidden='true'>↑</span>9.3%"
         in status
