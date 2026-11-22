@@ -35,8 +35,15 @@ odd input gets a plain answer instead of an error page, and a connected app read
   still found by its name.
 - A weekly summary whose Monday was missed goes out the next day. The first one after you turn
   it on still waits for a Monday.
+- Alerts: the bell's list has Mark all read and Clear all, with Undo, as the Alerts page has.
+  Rows are lighter: an unread one has an orange edge and a dot by its type, not a heavy tint.
+- A summary's title names its day ("Daily, Nov 22") instead of "Today" on every one, older ones
+  too, and its text leaves out what is zero.
 
 ### Fixed
+- **An alert's ⋮ menu opens.** In the bell's list it opened hidden behind the list, and the
+  Undo after a dismissal was hidden too.
+- The Alerts page's buttons keep their words on one line.
 - **The row limit of an approval mode counts what assistants already applied by themselves in
   the last 24 hours**, so many small changes cannot add up past it.
 - An edit that was not a commander change can no longer end with a new commander: the read-back

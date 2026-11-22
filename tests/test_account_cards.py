@@ -100,7 +100,7 @@ async def test_send_it_now_sends_the_summary_the_card_shows(stack: Stack, monkey
         assert r.headers["location"] == f"{N}?ok=summary_sent#summary"
         assert len(stack.ntfy.messages) == sent + 1
         msg = stack.ntfy.messages[-1]
-        assert msg["title"] == "Summary · Today" and msg["click"].startswith(
+        assert msg["title"] == "Summary · Daily, Oct 12" and msg["click"].startswith(
             "https://mtg.test/notifications/open/"
         )
         # it is kept under Alerts too, and opens the summary through it (marked read there)
@@ -123,7 +123,7 @@ async def test_send_it_now_sends_the_summary_the_card_shows(stack: Stack, monkey
         summ = _card((await b.http.get(N)).text, "summary")
         assert "<h3>The last 7 days</h3>" in summ and "as your weekly summary would." in summ
         await _post(b, "/account", {"action": "summary_send"})
-        assert stack.ntfy.messages[-1]["title"] == "Summary · This week"
+        assert stack.ntfy.messages[-1]["title"].startswith("Summary · Weekly, ")
         # a refusal from the server is said plainly
         stack.gw.notifier._last_summary.clear()
         stack.ntfy.status = 403

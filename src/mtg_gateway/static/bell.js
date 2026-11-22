@@ -113,7 +113,13 @@
     row.setAttribute("data-read", read ? "1" : "0");
     var dot = row.querySelector(".al-dot");
     if (read && dot) dot.remove();
-    if (!read && !dot) row.querySelector(".al-main").appendChild(el("span", "al-dot"));
+    if (!read && !dot) {
+      // before the type word (alerts_page.row_html)
+      var meta = row.querySelector(".al-meta");
+      dot = el("span", "al-dot");
+      dot.setAttribute("aria-hidden", "true");
+      if (meta) meta.insertBefore(dot, meta.firstChild);
+    }
     var sr = row.querySelector(".al-meta .sr-only");
     if (sr) sr.textContent = read ? " · Read" : " · Unread";
     // the no-script menu's first form says what it does now
@@ -145,7 +151,10 @@
       if (Menu.dismissToast) Menu.dismissToast();
       post({ action: action, ids: ids }).then(function (d) {
         if (!d || !d.ok) { failed(d); return; }
-        location.reload();  // the rows come back where they were
+        // the rows come back where they were: in the bell's box, read again there (the box stays
+        // open); on the page, the page again
+        if (shown && shown.box.panel.isConnected) { fill(shown.box); return; }
+        location.reload();
       });
     });
     return b;
@@ -162,6 +171,9 @@
         emptyIfNone();
       }
       settle(d);
+      // the box's "N unread" goes once nothing in it is unread
+      var badge = shown && shown.box.panel.isConnected ? shown.box.panel.querySelector(".bh .bell-badge") : null;
+      if (badge && !shown.box.panel.querySelector(".al-row.unread")) badge.parentNode.removeChild(badge);
       var undo = { dismiss: "undo", clear_all: "undo", read_all: "unread" }[action];
       if (Menu && Menu.toast) {
         var extra = undo && changed.length ? [undoButton(changed, undo)] : [];
@@ -182,13 +194,26 @@
     ];
     Menu.open({ items: items, head: title, label: "Menu: " + (title || "Alert") }, x, y);
   }
+  // Each row's no-script ⋮ (forms in a <details>) gives way to the ⋮ button every other list
+  // has (MtgMenu.kebab), which opens the shared row menu (0.7.48: the owner could not open the
+  // <summary> one on a Fold).
+  function kebabs(root) {
+    $$("details.al-menu", root).forEach(function (d) {
+      var sum = d.querySelector("summary");
+      var b = Menu.kebab((sum && sum.getAttribute("aria-label")) || "Actions");
+      b.classList.add("al-kebab");
+      d.parentNode.replaceChild(b, d);
+    });
+  }
   function bindRows(root) {
-    if (!Menu || !Menu.bind || !root || root.getAttribute("data-al-bound")) return;
+    if (!Menu || !Menu.bind || !Menu.kebab || !root) return;
+    kebabs(root);
+    if (root.getAttribute("data-al-bound")) return;
     root.setAttribute("data-al-bound", "1");
     Menu.bind(root, {
       itemOf: function (t) { return t && t.closest ? t.closest(".al-row[data-alert]") : null; },
-      button: ".al-menu > summary",
-      skip: ".al-menu",
+      button: ".al-kebab",
+      skip: ".al-kebab",
       open: function (row, x, y) { rowMenu(row, x, y); }
     });
   }
@@ -217,6 +242,59 @@
   });
 
   // -- the bell's box ----------------------------------------------------------------------------
+  // the box open now: Undo reads its list again into it
+  var shown = null;
+  // Mark all read and Clear all at the head of the box, as on the page (the click handler above
+  // acts on them; settle() turns them off when there is nothing left for them to do)
+  function boxTools() {
+    var bar = el("div", "al-boxacts");
+    [["read_all", "Mark all read", "check"], ["clear_all", "Clear all", "x"]].forEach(function (a) {
+      var b = el("button", "btn-plain");
+      b.type = "button";
+      b.setAttribute("data-al-all", a[0]);
+      var ic = Menu && Menu.icon ? Menu.icon(a[2]) : null;
+      if (ic) b.appendChild(ic);
+      b.appendChild(document.createTextNode(a[1]));
+      bar.appendChild(b);
+    });
+    return bar;
+  }
+  function failNote(text) {
+    var e = el("p", "notice error", text);
+    e.setAttribute("role", "alert");
+    return e;
+  }
+  function fill(box) {
+    return getJSON("/notifications").then(function (d) {
+      var wrap = el("div");
+      if (!d || !d.ok) {
+        wrap.appendChild(failNote((d && d.message) || "No connection; the list could not be read. Try again."));
+      } else {
+        wrap.setAttribute("data-al-page", "");
+        wrap.appendChild(boxTools());
+        var list = el("div", "al-boxlist");
+        list.innerHTML = d.html;
+        wrap.appendChild(list);
+        var h = box.panel.querySelector(".bh h2");
+        var badge = h && h.querySelector(".bell-badge");
+        if (badge) h.removeChild(badge);
+        if (h && d.unread > 0) h.appendChild(el("span", "bell-badge", d.unread + " unread"));
+        if (d.total > 8) {
+          wrap.appendChild(el("p", "muted small bell-foot", "The newest 8 of " + d.total + ". Open all alerts for the rest, or to filter them."));
+        }
+        setCount(0);
+        keep(0);
+      }
+      box.setBody(wrap);
+      bindRows(wrap);
+      settle(null);
+      box.focusFirst();
+    }, function (err) {
+      if (err && err.signedOut && window.MtgFetch) box.setBody(window.MtgFetch.signedOut("the list"));
+      else box.setBody(failNote("No connection; the list could not be read. Try again."));
+      box.focusFirst();
+    });
+  }
   function open(back) {
     var Box = window.MtgBox;
     if (!Box) { location.href = "/notifications"; return; }
@@ -237,39 +315,9 @@
       actions: [all, settings, Box.button("Close", "btn", null, { cancel: true })],
       returnFocus: back
     });
-    getJSON("/notifications").then(function (d) {
-      var wrap = el("div");
-      if (!d || !d.ok) {
-        var err = el("p", "notice error", (d && d.message) || "No connection; the list could not be read. Try again.");
-        err.setAttribute("role", "alert");
-        wrap.appendChild(err);
-      } else {
-        wrap.innerHTML = d.html;
-        wrap.setAttribute("data-al-page", "");
-        if (d.unread > 0) {
-          var h = box.panel.querySelector(".bh h2");
-          if (h) { h.appendChild(document.createTextNode(" ")); h.appendChild(el("span", "bell-badge", d.unread + " unread")); }
-        }
-        if (d.total > 0) {
-          var more = el("p", "muted small bell-foot", d.total > 8 ? "The newest 8 of " + d.total + ". Open all alerts for the rest, to filter them, or to clear them." : "Open all alerts to filter them or clear them.");
-          wrap.appendChild(more);
-        }
-        setCount(0);
-        keep(0);
-      }
-      box.setBody(wrap);
-      bindRows(wrap);
-      box.focusFirst();
-    }, function (err) {
-      var e;
-      if (err && err.signedOut && window.MtgFetch) e = window.MtgFetch.signedOut("the list");
-      else {
-        e = el("p", "notice error", "No connection; the list could not be read. Try again.");
-        e.setAttribute("role", "alert");
-      }
-      box.setBody(e);
-      box.focusFirst();
-    });
+    box.panel.classList.add("al-box");
+    shown = { box: box };
+    fill(box);
   }
   document.addEventListener("click", function (e) {
     var a = e.target && e.target.closest ? e.target.closest("[data-bell], [data-bell-open]") : null;

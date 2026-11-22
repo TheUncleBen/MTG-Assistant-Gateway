@@ -36,11 +36,11 @@ async def test_the_alerts_page_filters_by_type_and_by_words(stack: Stack) -> Non
         # one type
         page = (await b.http.get("/notifications?type=price", headers=NAV)).text
         assert "Price drop · Sol Ring" in page
-        assert "Report ready · Atraxa" not in page and "Summary · This week" not in page
+        assert "Report ready · Atraxa" not in page and "Summary · Weekly," not in page
         assert "<option value='price' selected>Price alerts</option>" in page
         # words: a title or a line that holds them, any type
         page = (await b.http.get("/notifications?q=week", headers=NAV)).text
-        assert "Summary · This week" in page and "Price drop · Sol Ring" not in page
+        assert "Summary · Weekly," in page and "Price drop · Sol Ring" not in page
         # the hint, and the shorter one for a box too narrow for it (ui.hint_attrs)
         hint = "placeholder='Search alerts' data-ph='Search'"
         assert f"<input type='search' name='q' value='week' {hint}>" in page

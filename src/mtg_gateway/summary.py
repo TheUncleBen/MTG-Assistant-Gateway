@@ -149,7 +149,7 @@ class Summaries:
         return await self.notifier.send(
             sub,
             "summary",
-            notify.push_title("summary", "Today" if summary["period"] == "day" else "This week"),
+            push_title(summary),
             short_text(summary),
             "/account/details/notifications#summary",
         )
@@ -248,24 +248,43 @@ def _which(c: dict[str, Any]) -> str:
     return " cheapest printing"
 
 
+def push_title(s: dict[str, Any]) -> str:
+    """The notification's title: the kind and the day it was sent ("Summary · Daily, Nov 22"), so
+    a week of them never reads "Today" on every row of the Alerts list (0.7.48)."""
+    return notify.push_title(
+        "summary", f"{'Daily' if s['period'] == 'day' else 'Weekly'}, {_day(s['to_day'], s['to_day'])}"
+    )
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def short_text(s: dict[str, Any]) -> str:
-    """The notification's text: counts and totals only, no deck names or contents."""
+    """The notification's text: counts and totals only, no deck names or contents, in short
+    sentences that leave out what is zero (0.7.48: "0 reports finished; 0 proposals waiting, 0
+    applied" on every summary was noise)."""
     parts = []
     if s["cards"]:
         top = s["cards"][0]
-        parts.append(
-            f"{len(s['cards'])} watched cards"
-            + (f", biggest move {top['name']} {_signed(top['change_pct'])}" if top["change_pct"] else "")
-        )
+        parts.append(_count(len(s["cards"]), "watched card"))
+        if top["change_pct"]:
+            parts.append(f"Biggest move: {top['name']} {_signed(top['change_pct'])}")
     if s["decks"]:
         start = sum(d["from"] or 0 for d in s["decks"])
         end = sum(d["to"] or 0 for d in s["decks"])
-        parts.append(
-            f"{len(s['decks'])} watched decks worth {money(end)} ({_signed(pct_change(start, end))})"
-        )
-    parts.append(f"{len(s['reports_finished'])} reports finished")
-    parts.append(f"{s['proposals_waiting']} proposals waiting, {s['proposals_applied']} applied")
-    return "; ".join(parts) + "."
+        decks = _count(len(s["decks"]), "watched deck")
+        parts.append(f"{decks} worth {money(end)} ({_signed(pct_change(start, end))})")
+    if s["reports_finished"]:
+        parts.append(f"{_count(len(s['reports_finished']), 'report')} finished")
+    waiting, applied = s["proposals_waiting"], s["proposals_applied"]
+    if waiting and applied:
+        parts.append(f"{_count(waiting, 'proposal')} waiting, {applied} applied")
+    elif waiting:
+        parts.append(f"{_count(waiting, 'proposal')} waiting")
+    elif applied:
+        parts.append(f"{_count(applied, 'proposal')} applied")
+    return ". ".join(parts) + "." if parts else "Nothing new."
 
 
 def add_summary_tool(server: MCPServer, state: AppState) -> None:

@@ -30,7 +30,7 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import alerts_push, notify, prefs, profile_page, ui
+from . import alerts_push, localday, notify, prefs, profile_page, ui
 from .decks import DeckError
 from .digits import is_digits
 from .pages import (
@@ -157,7 +157,7 @@ def narrow(
     return out
 
 
-def _menu(r: dict[str, Any], csrf_in: str) -> str:
+def _menu(r: dict[str, Any], csrf_in: str, label: str) -> str:
     """A kept row's ⋮: a menu that works without scripts (forms in a <details>); static/bell.js
     opens the shared row menu in its place (and on a right-click or a press and hold)."""
     rid = int(r["id"])
@@ -173,7 +173,7 @@ def _menu(r: dict[str, Any], csrf_in: str) -> str:
         )
 
     return (
-        f"<details class='al-menu'><summary class='kebab' aria-label='{esc('Actions for ' + r['title'])}' "
+        f"<details class='al-menu'><summary class='kebab' aria-label='{esc('Actions for ' + label)}' "
         f"title='Actions'>{icon('more')}</summary><div class='menu' role='menu'>"
         f"{form(read_act, read_word, 'check' if read_act == 'read' else 'bell')}"
         f"{form('dismiss', 'Dismiss', 'x')}</div></details>"
@@ -190,15 +190,39 @@ def split_title(title: str, k: notify.Kind) -> tuple[str, str]:
     return k.name, title
 
 
+# what summaries were titled before 0.7.48 ("Summary · Today" on every one, whatever its day)
+_OLD_SUMMARY = {"Today": "Daily", "This week": "Weekly"}
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def summary_title(title: str, created_at: float | None, now: float | None = None) -> str:
+    """A summary kept before 0.7.48 named its day "Today" or "This week" forever; it shows the
+    member's own day it came instead ("Daily, Nov 20"), as new ones are titled
+    (summary.push_title)."""
+    span = _OLD_SUMMARY.get(title.strip())
+    if span is None or not created_at:
+        return title
+    day = localday.day_of(created_at)
+    this_year = localday.day_of(time.time() if now is None else now)[:4]
+    y, m, d = (int(x) for x in day.split("-"))
+    shown = f"{_MONTHS[m - 1]} {d}"
+    return f"{span}, {shown if str(y) == this_year else f'{shown}, {y}'}"
+
+
 def row_html(r: dict[str, Any], *, now: float | None = None, csrf_in: str = "") -> str:
     k = notify.KINDS.get(r["kind"]) or notify.KINDS["waiting"]
     word, title = split_title(r["title"], k)
+    if k.key == "summary":
+        title = summary_title(title, r["created_at"], now)
     unread = not r["read"]
     when = ui.when_text(r["created_at"], now=now) if r["created_at"] else "Waiting now"
     state = "Unread" if unread else "Read"
     attrs = f" data-alert='{int(r['id'])}' data-read='{0 if unread else 1}'" if r["id"] is not None else ""
     cls = "al-row" + (" unread" if unread else "") + (" live" if r["id"] is None else "")
+    # the dot leads the type word: at the row's far end it sat a screen's width from the title on a
+    # Fold and read as part of the ⋮ (0.7.48)
     dot = "<span class='al-dot' aria-hidden='true'></span>" if unread else ""
+    label = f"{word} \u00b7 {title}"  # the ⋮'s name, as the push titles it
     # Archidekt's news and contests open on archidekt.com, in a new tab (as links to Archidekt do)
     away = " target='_blank' rel='noopener'" if r.get("away") else ""
     ext = "<span class='sr-only'> (opens Archidekt in a new tab)</span>" if r.get("away") else ""
@@ -207,11 +231,11 @@ def row_html(r: dict[str, Any], *, now: float | None = None, csrf_in: str = "") 
         f"<a class='al-main' href='{esc(r['href'])}'{away}>"
         f"<span class='al-ic k-{esc(k.key)}' aria-hidden='true'>{icon(k.icon)}</span>"
         "<span class='al-body'>"
-        f"<span class='al-meta'><span class='al-type'>{esc(word)}</span><span class='sr-only'>, </span>"
+        f"<span class='al-meta'>{dot}<span class='al-type'>{esc(word)}</span><span class='sr-only'>, </span>"
         f"<span class='al-when'>{esc(when)}</span><span class='sr-only'>, {state}</span></span>"
         f"<b class='al-title'>{esc(title)}</b>"
-        f"<span class='al-text'>{esc(r['message'])}</span>{ext}</span>{dot}</a>"
-        f"{_menu(r, csrf_in) if r['id'] is not None else ''}</li>"
+        f"<span class='al-text'>{esc(r['message'])}</span>{ext}</span></a>"
+        f"{_menu(r, csrf_in, label) if r['id'] is not None else ''}</li>"
     )
 
 
