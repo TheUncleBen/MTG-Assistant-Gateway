@@ -3841,7 +3841,10 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .row.dragging{outline:2px dashed var(--orange);outline-offset:-2px;background:var(--surface-2)}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
-   darkened page; the image column grows with the window, the text column scrolls on its own. */
+   darkened page; the image column grows with the window, the text column scrolls on its own as
+   one piece (0.7.48, the owner's Fold: a column that did not scroll squeezed its parts to fit, the
+   rules text cut to a line and the last rows of each group clipped). Nothing in it scrolls inside
+   it and nothing in it shrinks. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
   background:var(--scrim-strong,rgba(0,0,0,.78));padding:1.5rem;
   -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
@@ -3861,14 +3864,15 @@ html.cardview-open{overflow:hidden}
   color:var(--text);padding:1rem;text-align:center;font-weight:700;font-size:1rem;overflow-wrap:anywhere}
 .cardview .ph .ty{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .cardview .ph .custom-badge{margin-top:.25rem}
-.cardview .info{grid-area:info;min-width:0;display:flex;flex-direction:column;gap:.75rem;min-height:0}
+.cardview .info{grid-area:info;min-width:0;display:flex;flex-direction:column;gap:.75rem;min-height:0;
+  overflow:auto;overscroll-behavior:contain}
+.cardview .info > *{flex:none}
 .cardview .head{grid-area:head;display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;
   min-width:0}
 .cardview h3{margin:0;font-size:1.35rem;line-height:1.25;display:flex;align-items:center;gap:.6rem;
   flex-wrap:wrap;overflow-wrap:anywhere;min-width:0}
 .cardview .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
-.cardview .cardtext{overflow:auto;min-height:0;padding-right:.25rem;overscroll-behavior:contain}
 /* "In this test" (a report's card: report_page.py _ctx, cardview.js ctxBlock) */
 .cardview .cv-ctx{border:1px solid var(--border-soft);border-left:3px solid var(--orange);
   border-radius:var(--radius);background:var(--surface-2);padding:.6rem .8rem;margin:0 0 .75rem}
@@ -3888,21 +3892,25 @@ html.cardview-open{overflow:hidden}
 .cardview .rules{white-space:pre-line;font-size:1rem;line-height:1.5;margin:0 0 .6rem;overflow-wrap:anywhere}
 .cardview .flavor{font-style:italic;color:var(--text-muted);font-size:.93rem;white-space:pre-line;
   margin:0 0 .6rem;overflow-wrap:anywhere}
-.cardview .facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem .9rem;margin:0;
-  font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
+.cardview .facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.45rem 1rem;margin:0;
+  font-size:.9rem;line-height:1.4;border-top:1px solid var(--border-soft);padding-top:.75rem;
+  align-items:baseline}
+/* Legal in: the label level with the first line of chips, the chips evenly spaced both ways */
+.cardview .facts dd.legal{padding-top:0}
 .cardview .facts dt{color:var(--text-muted);font-weight:700}
 .cardview .facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .cardview .facts dd.notes{white-space:pre-wrap}
 .cardview .facts .gc{color:var(--orange-text);font-weight:700}
 .cardview .chips{display:flex;flex-wrap:wrap;gap:.3rem}
-.cardview .chip{display:inline-block;padding:.05rem .5rem;border-radius:1rem;background:var(--surface-2);
-  font-size:.82rem;line-height:1.5;white-space:nowrap}
+/* a format the card is legal in: words, not a control, so as tall as its line on every screen */
+.cardview .chip{display:inline-flex;align-items:center;padding:.1rem .6rem;border-radius:1rem;
+  background:var(--surface-2);border:1px solid var(--border-soft);font-size:.82rem;line-height:1.4;
+  white-space:nowrap}
 .cardview .pane .flip{display:flex;margin:.5rem auto 0;min-height:40px}
 .cardview .pane .flip[hidden]{display:none}
 .cardview .more{display:flex;flex-wrap:wrap;gap:.4rem}
 .cardview .more .btn{margin:0;min-height:40px}
-.cardview .rulings{font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.5rem;flex:0 1 auto;
-  min-height:4rem;overflow:auto;overscroll-behavior:contain}
+.cardview .rulings{font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.5rem}
 .cardview .rulings ul{list-style:none;margin:0;padding:0;display:grid;gap:.6rem}
 .cardview .rulings time{font-weight:700;color:var(--text-muted);font-size:.82rem;display:block}
 .cardview .rulings p{margin:.1rem 0;line-height:1.45;overflow-wrap:anywhere}
@@ -3916,6 +3924,7 @@ html.cardview-open{overflow:hidden}
   border-radius:var(--radius);background:var(--surface-2);cursor:pointer}
 .cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--orange)}
 .cardview .printrow .pic{display:inline-flex;flex:none;color:var(--orange-text)}
+.cardview .printrow .pic svg{width:max(18px,1.15em);height:max(18px,1.15em)}
 .cardview .printrow .lbl{flex:none;color:var(--text-muted);font-weight:700}
 .cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:break-word}
 .cardview .printrow .chev{flex:none;color:var(--text-muted);font-size:1.4rem;line-height:1}
@@ -3932,11 +3941,18 @@ html.cardview-open{overflow:hidden}
   @keyframes cardup{from{transform:translateY(12px)}to{transform:none}}
   .cardview .head{flex-direction:column-reverse;align-items:flex-end;justify-content:flex-end;gap:.5rem}
   .cardview .head h3{align-self:stretch;font-size:1.2rem}
-  .cardview .cardtext,.cardview .rulings{overflow:visible}
+  .cardview .info{overflow:visible}
   .cardview .acts .btn,.cardview .acts button{min-height:44px}
   .cardview .more .btn{min-height:44px} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
+/* beside the text, the picture is never taller than the window leaves it (a laptop at 200% text cut
+   its foot off): narrower instead, in the middle of its column */
+@media (min-width:701px){
+  .cardview .pane > img,.cardview .pane > .ph{width:min(100%,calc((100vh - 6rem) * 5 / 7));
+    width:min(100%,calc((100dvh - 6rem) * 5 / 7));margin-inline:auto}
+  .cardview .pane:has(.flip:not([hidden])) > :is(img,.ph){
+    width:min(100%,calc((100dvh - 9.5rem) * 5 / 7))} }
 /* the card menu (deck.js): its base is theme.CARD_MENU_CSS */
 /* the menu's head: the card's name, and on your own deck its count with − and + at the end */
 /* the head row (mockup screen 3): the card's name with its count and − and + beside it */
@@ -4718,7 +4734,9 @@ ul.erows{container-type:inline-size}
    is 48 px, its words at the left; no pile of bordered buttons. */
 .cardview .printrow,.cardview .more,.cardview .acts{border:1px solid var(--border-soft);border-radius:14px;
   background:var(--surface-2)}
-.cardview .printrow{min-height:48px;padding:.35rem 1rem;flex-wrap:wrap;row-gap:.15rem}
+.cardview .printrow{min-height:48px;padding:.35rem 1rem}
+.cardview .printrow .txt{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;
+  gap:.15rem .6rem}
 /* large text: the printing's set and rarity go under the label rather than one letter a line */
 .cardview .printrow .val{flex:1 1 7em}
 .cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--border-soft);
@@ -4726,7 +4744,7 @@ ul.erows{container-type:inline-size}
 .cardview .more,.cardview .acts{display:flex;flex-direction:column;flex-wrap:nowrap;gap:0;padding:0;
   overflow:hidden}
 .cardview .more > *,.cardview .acts > *{display:flex;align-items:center;justify-content:flex-start;gap:.6rem;
-  width:100%;min-height:48px;margin:0;padding:0 1rem;border:0;border-radius:0;background:transparent;
+  width:100%;min-height:48px;margin:0;padding:.4rem 1rem;border:0;border-radius:0;background:transparent;
   color:var(--text);font:inherit;font-weight:400;text-align:left;text-decoration:none;box-shadow:none;
   flex:none}
 .cardview .more > * + *,.cardview .acts > * + *{border-top:1px solid var(--border-soft)}
@@ -4739,12 +4757,20 @@ ul.erows{container-type:inline-size}
 /* each row 48 px (44 px at least on a touch screen): the viewer's own .btn.small rules (40 px) must
    not win over the row's height */
 .cardview .more > :is(a,button,.btn),.cardview .acts > :is(a,button,.btn){min-height:48px;height:auto}
-/* large text (the window under 22 of its own ems: 200% on a phone, a narrow window at 150%): the
-   picture, the name and the rows one under another, each the full width, so no word breaks in two
-   beside the picture (0.7.47 UI sweep: "Tyrant", "Creature", "Mythic") */
+/* large text (the window under 22 of its own ems: 200% on a phone, a narrow window at 150%; or
+   a viewer 600 px or wider but under 36 rem, where the picture's 14 and the text's 16 rem columns
+   do not fit beside each other: an open Fold at 200% ran the text column off the viewer's right
+   edge, 0.7.48. The viewer is the window less its 3 rem of padding above 700 px, so the bound is
+   600 px, not 701; at 100% text 36 rem is 576 px and this never fires): the picture, the
+   name and the rows one under another, each the full width, so no word breaks in two beside the
+   picture (0.7.47 UI sweep: "Tyrant", "Creature", "Mythic") */
 .cardview{container-type:inline-size}
-@container (max-width:22em){
-  .cardview .box{grid-template-columns:minmax(0,1fr);grid-template-areas:'head' 'pic' 'info'}
+@container (max-width:22em) or ((min-width:600px) and (max-width:36rem)){
+  .cardview .box{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;
+    grid-template-areas:'head' 'pic' 'info';overflow:auto;overscroll-behavior:contain}
+  .cardview .info{overflow:visible}
+  /* Legal in under its label, the full width, rather than one format a line beside it */
+  .cardview .facts dd.legal{grid-column:1 / -1}
   .cardview .pane{width:min(100%,16rem);justify-self:center}
   .cardview .head{flex-direction:row;align-items:flex-start} }
 /* the grid's cards one a row when two would leave each under 10 of its own ems (200% text on a
@@ -4767,6 +4793,18 @@ ul.erows{container-type:inline-size}
   background:var(--surface);font-size:1.2rem;font-weight:700}
 @media (pointer:coarse){ .cardview .acts .qtyctl button{height:44px;min-height:44px} }
 .cardview .rulings{border-top:0}
+/* Rulings and Price history open under their own row, inside the group (0.7.48: the answer showed
+   at the bottom of the viewer, away from the row the owner tapped), with a chevron that turns */
+.cardview .more > .rulings{display:block;min-height:0;padding:.6rem 1rem .75rem;background:var(--surface);
+  color:var(--text);font-size:.92rem}
+.cardview .more > .rulings[hidden]{display:none}
+.cardview .more > .rulings p{margin:.15rem 0}
+.cardview .more > .rulings .btn{min-height:44px;margin:.4rem 0 0}
+.cardview .more > .cv-disc::after{content:"";flex:none;margin-left:auto;width:.5rem;height:.5rem;
+  border:solid var(--text-muted);border-width:0 2px 2px 0;transform:rotate(-45deg);
+  transition:transform .15s ease}
+.cardview .more > .cv-disc[aria-expanded=true]::after{transform:rotate(45deg)}
+@media (prefers-reduced-motion:reduce){ .cardview .more > .cv-disc::after{transition:none} }
 """
     + DECK_CSS_A
     + DECK_CSS_C

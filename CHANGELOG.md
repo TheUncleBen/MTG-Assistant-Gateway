@@ -37,6 +37,15 @@ odd input gets a plain answer instead of an error page, and a connected app read
   it on still waits for a Monday.
 
 ### Fixed
+- **The card viewer shows the whole card on an open Fold and a laptop.** A card with long rules
+  text and many formats squeezed the viewer's text: the rules were cut to a line and the last
+  actions (Add to binder, EDHREC) were clipped. The text column now scrolls as one piece, and at
+  200% text the picture, the name and the rows sit one under another.
+- The Legal in formats in the card viewer are small, even labels again instead of tall, mostly
+  empty pills on a touch screen.
+- Rulings and Price history open right under their own row in the card viewer, with an arrow
+  that turns, and a card without rulings says "No official rulings have been published for this
+  card."
 - **The row limit of an approval mode counts what assistants already applied by themselves in
   the last 24 hours**, so many small changes cannot add up past it.
 - An edit that was not a commander change can no longer end with a new commander: the read-back
