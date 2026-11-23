@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import copy
 import json
-import re
 
 from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.mf_proxy import ALLOWED_TOOLS, BLOCKED_TOOLS, OWNED_ELSEWHERE
@@ -374,68 +373,6 @@ async def test_collection_row_details_save_condition_language_and_price(stack: S
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"language": "1"})
         assert r.status_code == 400
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"purchase_price": "lots"})
-        assert r.status_code == 400
-    finally:
-        await b.aclose()
-
-
-async def test_editor_edits_maybeboard_rows_and_adds_to_the_maybeboard(stack: Stack) -> None:
-    stack.ark.add_side_row(42, "Opt", 2)
-    b = await linked(stack)
-    try:
-        r = await b.http.get("/decks/42/edit", headers=NAV)
-        cfg = json.loads(
-            re.search(
-                r"<script id='editor-config' type='application/json'>(.*?)</script>", r.text, re.S
-            ).group(1)
-        )
-        assert cfg["sideCategory"] == "Maybeboard"
-        opt = next(c for c in cfg["cards"] if c["name"] == "Opt")
-        assert opt["zone"] == "side" and opt["in_deck"] is False
-        assert "id='addzone'" in r.text and "Paste a list" in r.text
-        main_before = sum(
-            c["quantity"] for c in stack.ark.decks[42]["cards"] if "Maybeboard" not in (c["categories"] or [])
-        )
-        r = await api(
-            b,
-            "POST",
-            "/api/v1/proposals",
-            {
-                "kind": "edit",
-                "deck_id": "42",
-                "changes": [
-                    {"action": "set_quantity", "card_name": "Opt", "quantity": 3, "zone": "side"},
-                    {"action": "add", "card_name": "Swamp", "quantity": 1, "zone": "side"},
-                ],
-                "apply": True,
-            },
-            csrf=await b.csrf("/decks"),
-        )
-        assert r.status_code == 201 and r.json()["applied"] is True, r.text
-        rows = {
-            c["card"]["oracleCard"]["name"]: c
-            for c in stack.ark.decks[42]["cards"]
-            if "Maybeboard" in (c["categories"] or [])
-        }
-        assert rows["Opt"]["quantity"] == 3 and rows["Swamp"]["quantity"] == 1
-        main_after = sum(
-            c["quantity"] for c in stack.ark.decks[42]["cards"] if "Maybeboard" not in (c["categories"] or [])
-        )
-        assert main_after == main_before  # the deck proper is untouched
-        rows_out = r.json()["result"]["rows"]
-        assert any(x.get("zone") == "side" for x in rows_out), rows_out
-        # a commander cannot go to the maybeboard
-        r = await api(
-            b,
-            "POST",
-            "/api/v1/proposals",
-            {
-                "kind": "edit",
-                "deck_id": "42",
-                "changes": [{"action": "set_commander", "card_name": "Opt", "zone": "side"}],
-            },
-            csrf=await b.csrf("/decks"),
-        )
         assert r.status_code == 400
     finally:
         await b.aclose()

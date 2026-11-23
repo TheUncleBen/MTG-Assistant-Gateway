@@ -1455,6 +1455,11 @@ class ScanService:
             except ScryfallError as exc:
                 if exc.kind in ("unavailable", "rate_limited"):
                     raise ScanError(exc.kind, str(exc)) from exc
+                if exc.kind == "contract":
+                    # an answer that is no card list (an error page on the way): Scryfall could
+                    # not be read, which is not "no such card" (the deck page's Add a card says
+                    # that for an empty answer)
+                    raise ScanError("unavailable", str(exc)) from exc
                 found = []
             # Scryfall matches a name with its punctuation ignored ("Goblin" finds "_____ Goblin"):
             # a card counts only for the name it really has (same_name).

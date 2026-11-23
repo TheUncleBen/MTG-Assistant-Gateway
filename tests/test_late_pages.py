@@ -180,7 +180,6 @@ DECK_PAGES = (
     ("/decks/42/settings", "Deck settings"),
     ("/decks/42/goldfish", "Goldfish"),
     ("/decks/42/compare", "Compare"),
-    ("/decks/42/edit", "Edit deck"),
     ("/decks/42/export", "Deck"),
     ("/history/reports/rep_x", "Report"),
 )
@@ -188,14 +187,14 @@ DECK_PAGES = (
 
 async def test_a_decks_other_pages_and_reports_send_the_frame_at_once_too(stack: Stack) -> None:
     """0.7.46 review: the frame came for seven kinds of address only, so Deck settings, Goldfish,
-    Compare, the editor and a report waited on a slow Archidekt with nothing on screen."""
+    Compare and a report waited on a slow Archidekt with nothing on screen."""
     for path, title in DECK_PAGES:
         assert latepage.late_page_of(path) is not None, path
         assert latepage.late_page_of(path)[0] == title
     b = await _linked(stack)
     try:
         _slow(stack, 2.0)
-        for path in ("/decks/42/settings", "/decks/42/goldfish", "/decks/42/compare", "/decks/42/edit"):
+        for path in ("/decks/42/settings", "/decks/42/goldfish", "/decks/42/compare"):
             stack.h.app.state.gateway.decks._forget_page_decks()  # nothing kept: Archidekt is asked
             t0 = time.monotonic()
             r = await b.http.get(path, headers=PAGE)

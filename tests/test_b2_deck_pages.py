@@ -14,15 +14,16 @@ DECK = "/decks/42"
 
 
 async def test_the_deck_page_holds_its_boxes_and_one_orange_button(stack: Stack) -> None:
-    """Edit deck is the one orange button; Clone opens the Clone box (a plain clone without
-    scripts); the old More items sit in the no-script drop-down the menu replaces; the Export,
-    Compare, Clone and Delete boxes are on the page, hidden, with real links as openers."""
+    """No orange button in the banner (0.7.48: the deck is edited on its own page, so there is no
+    Edit deck button; Add a card and More ways to add sit in the toolbar); Clone opens the Clone
+    box (a plain clone without scripts); the old More items sit in the no-script drop-down the
+    menu replaces; the Export, Compare, Clone and Delete boxes are on the page, hidden, with real
+    links as openers."""
     b = await linked_browser(stack)
     try:
         page = (await b.http.get(DECK, headers=NAV)).text
-        # the button says Edit deck, and Edit on a phone (the redesigned phone top, mockup screen 5)
-        edit = "<span class='lg'>Edit deck</span><span class='sm'>Edit</span></a>"
-        assert page.count("btn-primary") == 1 and edit in page
+        assert page.count("btn-primary") == 0 and "Edit deck" not in page and "/decks/42/edit" not in page
+        assert "<input id='quick'" in page and "class='btn addways'" in page
         assert "class='btn' data-box-open='clone'" in page and "form='clonef'" in page
         assert "data-deck-name='Sample Commander Deck'" in page and "data-own='1'" in page
         assert "details class='dd deckmore'" in page
@@ -290,7 +291,7 @@ async def test_goldfish_intro_and_forge_solo_line(stack: Stack) -> None:
         page = (await b.http.get(f"{DECK}/goldfish", headers=NAV)).text
         # the facts line's dots are drawn by CSS, so none dangles at a wrapped line's end (polish C1)
         assert (
-            "<p class='muted small gf-intro ui-dots'><span>100 cards</span>"
+            "<p class='ui-sub gf-intro ui-dots'><span>100 cards</span>"
             "<span>Commander: first mulligan free</span><span>on the play</span>"
             "<span>Nothing is saved or sent to Archidekt" in page
         )
@@ -331,15 +332,5 @@ async def test_compare_page_has_a_heading_one_orange_button_and_no_size_control(
         assert "cardsize" not in page and "Statistics: this deck minus “Sample Commander Deck”</h2>" in page
         assert "Taken out of “Sample Commander Deck” <span class='n'>0</span>" in page
         assert "Mystic Forge" not in page and "card_size" not in page
-    finally:
-        await b.aclose()
-
-
-async def test_the_editor_toolbar_has_the_card_size_and_a_plain_add(stack: Stack) -> None:
-    b = await linked_browser(stack)
-    try:
-        page = (await b.http.get(f"{DECK}/edit", headers=NAV)).text
-        assert "class='field cardsize'" in page and "data-card-size-set='l'" in page
-        assert "btn-primary'>" not in page.split("class='editbar'", 1)[1].split("</form>", 1)[0]
     finally:
         await b.aclose()

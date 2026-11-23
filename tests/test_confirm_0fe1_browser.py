@@ -779,7 +779,7 @@ def test_a_wrapped_icon_buttons_content_is_centred(server: Server, site) -> None
         ):
             ctx = _ctx(browser, server, sid, width, root=root)
             page = ctx.new_page()
-            for path in ("/decks/42", "/forum", "/watchlist", "/decks/42/edit", "/collection", "/decks"):
+            for path in ("/decks/42", "/forum", "/watchlist", "/collection", "/decks"):
                 _goto(page, server, path, zoom)
                 problems += [f"{path} @{tag}: {f}" for f in page.evaluate(ICON_BUTTONS)]
             ctx.close()

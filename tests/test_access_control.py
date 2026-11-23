@@ -153,7 +153,7 @@ async def test_cross_user_objects(stack) -> None:
     assert r.status_code == 404
     r = await bb.http.post("/history/restore", data={"csrf": csrf_b, "snapshot_id": snap_id})
     assert r.status_code == 400, r.text
-    r = await bb.http.get(f"/decks/42/edit?scan_session={scan_id}", headers=NAV)
+    r = await bb.http.get(f"/decks/42?scan_session={scan_id}", headers=NAV)
     assert "alices box" not in r.text
     # Scan API
     r = await bb.http.get(f"/scan/api/sessions/{scan_id}")
@@ -211,11 +211,14 @@ async def test_private_deck_of_another_member_is_unreachable(stack) -> None:
         "/decks/43/export.txt",
         "/decks/43/export.csv",
         "/decks/43/settings",
-        "/decks/43/edit",
     ]:
         r = await ba.http.get(url, headers=NAV)
         assert r.status_code in (400, 403, 404), (url, r.status_code)
         assert "Amy's deck" not in r.text
+    # the old editor's address only sends on to the deck page, which refuses as above
+    r = await ba.http.get("/decks/43/edit", headers=NAV)
+    assert r.status_code == 303 and r.headers["location"] == "/decks/43", r.headers
+    assert "Amy's deck" not in r.text
     await ba.aclose()
 
 

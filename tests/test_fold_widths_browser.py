@@ -22,7 +22,7 @@ from .test_suggest_browser import Server
 
 pytest.importorskip("playwright")
 
-PAGES = ["/decks/42", "/decks/42?view=grid", "/decks/42/edit", "/decks/42/settings", "/history/reports/r1"]
+PAGES = ["/decks/42", "/decks/42?view=grid", "/decks/42/settings", "/history/reports/r1"]
 
 
 @pytest.mark.parametrize("screen", ["fold-600", "fold-884"])

@@ -151,49 +151,13 @@ def test_the_deck_page_banner_list_and_tools_line_up(server: Server, width: int)
         browser.close()
 
 
-def test_the_editor_chips_pending_badge_and_goldfish_facts(server: Server) -> None:  # noqa: F811
+def test_the_goldfish_facts_never_dangle_a_dot(server: Server) -> None:  # noqa: F811
     from playwright.sync_api import sync_playwright
 
     sid, _pending = _seed(server)
     exe = _exe()
     with sync_playwright() as p:
         browser, page, errors = _open(p, exe, server, sid, 412)
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-        assert page.evaluate(MEASURE) == []
-        # D05 and B10: the category chips are blocks that end in an ellipsis, and the Maybeboard
-        # chip flows after the others at a row's left edge, never alone at the right
-        chips = page.locator(".addbox .tchip")
-        assert chips.count() >= 4
-        info = page.evaluate(
-            "() => [...document.querySelectorAll('.addbox .tchip')].map(c => {"
-            " const r = c.getBoundingClientRect(), s = getComputedStyle(c);"
-            " return [c.textContent.trim(), Math.round(r.left), Math.round(r.top),"
-            " s.display, s.textOverflow, s.overflow, c.scrollWidth <= c.clientWidth]; })"
-        )
-        assert all(
-            i[3] in ("block", "inline-block") and i[4] == "ellipsis" and i[5] == "hidden" and i[6]
-            for i in info
-        ), info
-        side = [i for i in info if i[0] == "Maybeboard"]
-        first_left = min(i[1] for i in info)
-        assert side and (
-            side[0][1] == first_left or any(i[2] == side[0][2] and i[1] < side[0][1] for i in info)
-        ), info
-        # a chip that starts a new row starts where the first does
-        rows = sorted({i[2] for i in info})
-        for top in rows:
-            assert min(i[1] for i in info if i[2] == top) == first_left, info
-        # C3: nothing pending is a grey badge, not the orange attention one
-        badge = page.locator(".pendingbox summary .n")
-        assert badge.inner_text() == "0" and "zero" in (badge.get_attribute("class") or "")
-        grey = badge.evaluate("e => getComputedStyle(e).backgroundColor")
-        orange = page.evaluate(
-            "() => getComputedStyle(document.documentElement).getPropertyValue('--orange').trim()"
-        )
-        assert grey != orange and grey == page.evaluate(
-            "() => { const s = document.createElement('span'); s.style.background = 'var(--surface-3)';"
-            " document.body.append(s); const c = getComputedStyle(s).backgroundColor; s.remove(); return c; }"
-        )
         # C1: the goldfish intro's dots never dangle at a line end
         page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
         _no_dangling_dot(page, ".gf-intro.ui-dots")

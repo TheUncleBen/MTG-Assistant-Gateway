@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from .deck_add import add_card
 from .test_cardsearch_browser import _chromium, _page
 from .test_deck_toasts_browser import _commander
 from .test_overflow_sweep_browser import _seed, server  # noqa: F401
@@ -114,8 +115,7 @@ def test_every_toast_keeps_its_icon_its_first_line_and_its_x_on_one_row(
         # the deck page's own, after a quick add
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         _zoom(page, zoom)
-        page.locator("#quick").fill("Cultivate")
-        page.locator("#quick").press("Enter")
+        add_card(page, "Cultivate")
         page.locator(".deck-toast .msg", has_text="Added Cultivate").wait_for(timeout=8000)
         _check(f"deck @{width} {zoom}", page.evaluate(ROW, ".toast.deck-toast"), icon=False)
         assert errors == []

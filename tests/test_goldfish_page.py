@@ -52,3 +52,18 @@ def test_card_text_cannot_close_the_script_block() -> None:
     assert "Evil \\u003c/script> Card" in blob
     assert json.loads(blob)["library"]
     assert "<script>alert" not in page
+
+
+def test_goldfish_and_compare_use_the_sites_page_head_and_plain_section_headings() -> None:
+    """One look for the deck's pages (docs/UI-STANDARD.md): the page title in ui.page_head's
+    .ui-head, the purpose line as .ui-sub, the way back as the grey capsule, and section h2s with
+    no size of their own (Goldfish had a 1.6rem title and 1.1rem zone headings)."""
+    from mtg_gateway import deckpage
+
+    page = goldfish_page_html(parse_deck(_deck()))
+    assert "<div class='ui-head'><h1>Goldfish <span class='gf-deck'>" in page
+    assert "class='ui-sub gf-intro" in page and "class='ui-cap'" in page
+    for rule in (".gf-zone h2{", ".gf-guide h2{"):
+        assert "font-size" not in deckpage.GOLDFISH_CSS.split(rule)[1].split("}")[0], rule
+    assert "font-size" not in deckpage.COMPARE_CSS.split(".cmp-h{")[1].split("}")[0]
+    assert ".gf-head h1{" not in deckpage.GOLDFISH_CSS

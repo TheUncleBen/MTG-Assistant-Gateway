@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 
 import pytest
 
@@ -225,7 +226,10 @@ async def test_csv_export_round_trips(stack: Stack) -> None:
         await b.aclose()
 
 
-async def test_editor_page_carries_printing_data_and_quick_add(stack: Stack) -> None:
+async def test_the_deck_page_carries_printing_data_and_the_old_editor_link_adds(stack: Stack) -> None:
+    """The deck page's rows carry each card's printing and finish (the card menu's Printings… and
+    Finish start from them); the old editor's address with a card (``?add=``) opens the deck page,
+    whose Add a card then shows that card's preview (static/deck.js)."""
     h = stack.h
     h.app.state.gateway.scan.scryfall = ScryfallClient(
         "https://scryfall.test", min_interval=0.0, http=FakeScryfall().client()
@@ -233,21 +237,18 @@ async def test_editor_page_carries_printing_data_and_quick_add(stack: Stack) -> 
     b = await _linked_browser(stack)
     try:
         edit = await b.http.get("/decks/42/edit?add=Arcane+Signet", headers=NAV)
-        assert edit.status_code == 200, edit.text
-        cfg = __import__("json").loads(
-            edit.text.split("id='editor-config' type='application/json'>")[1].split("</script>")[0]
+        assert edit.status_code == 303 and edit.headers["location"] == "/decks/42?add=Arcane+Signet"
+        page = (await b.http.get("/decks/42?add=Arcane+Signet", headers=NAV)).text
+        row = re.search(
+            r"<div class=\"c\"[^>]*data-card=\"Sol Ring\"[^>]*>|<[^>]*data-card='Sol Ring'[^>]*>", page
         )
-        assert cfg["prefill"] == [{"action": "add", "card_name": "Arcane Signet", "quantity": 1}]
-        card = next(c for c in cfg["cards"] if c["name"] == "Sol Ring")
-        assert (
-            card["modifier"] == "Normal" and card["set_code"] == "cmr" and card["collector_number"] == "472"
-        )
-        assert cfg["writesEnabled"] is True and cfg["maxChanges"] == 40
-        assert "<template id='icon-swap'>" in edit.text and "class='editbar'" in edit.text
-        assert "Save changes" in edit.text and "Undo" in edit.text
+        assert row, page[:2000]
+        tag = row.group(0)
+        assert "CMR 472" in tag and "Normal" in tag, tag
+        # the add form the page's script opens the preview from
+        assert "<input id='quick'" in page and "data-suggest-rich" in page
         # uncategorised cards sit under their auto category, never a bare "Other"
-        assert [g["name"] for g in cfg["groups"]][0] == "Commander"
-        assert "Other" not in [g["name"] for g in cfg["groups"]]
+        assert "data-group='Commander'" in page and "data-group='Other'" not in page
     finally:
         await b.aclose()
 

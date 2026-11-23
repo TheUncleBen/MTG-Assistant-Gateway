@@ -143,25 +143,31 @@ async def test_the_save_bar_tick_box_decides_the_extra_copy_on_archidekt(stack: 
         await b.aclose()
 
 
-async def test_the_editor_backup_tick_box_follows_the_settings(stack: Stack) -> None:  # noqa: F811
-    """The extra Archidekt copy is the member's choice per save: unticked until they tick it, ticked
-    at first when the admin Settings page says so, and gone with backups off."""
+async def test_the_batch_add_backup_box_follows_the_settings(stack: Stack) -> None:  # noqa: F811
+    """The extra Archidekt copy is the member's choice per batch add (the deck page's Paste a list
+    and Add from a scan, static/deck.js): unticked until they tick it, ticked at first when the
+    admin Settings page says so, and not offered with backups off. The add form carries both."""
     import re
 
     b = await linked(stack)
     live = stack.h.app.state.gateway.live
 
-    async def box() -> str | None:
-        page = (await b.http.get("/decks/42/edit")).text
-        m = re.search(r"<input type='checkbox' name='archidekt_backup'[^>]*>", page)
-        return m.group(0) if m else None
+    async def form() -> tuple[str, str]:
+        page = (await b.http.get("/decks/42")).text
+        m = re.search(r"<form [^>]*class='field add quick'[^>]*>", page)
+        assert m, page
+        tag = m.group(0)
+        return (
+            re.search(r"data-backups='(\d)'", tag).group(1),
+            re.search(r"data-backup-default='(\d)'", tag).group(1),
+        )
 
     try:
-        assert (found := await box()) is not None and "checked" not in found
+        assert await form() == ("1", "0")
         live.set("archidekt_backup_box_default", True, by="admin-1")
-        assert (found := await box()) is not None and " checked" in found
+        assert await form() == ("1", "1")
         live.set("archidekt_backups", False, by="admin-1")
-        assert await box() is None
+        assert (await form())[0] == "0"
     finally:
         await b.aclose()
 

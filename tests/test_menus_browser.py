@@ -7,7 +7,7 @@ first), Delete (the typed name, in any capitals), Export, Compare with, + New fo
 Rename folder, Move folder (itself and its own folders left out), Delete folder (the counts, the
 progress line, then My decks with its notice) and the refusal over the backup folder; the Settings
 page's collaborator forms ask in a box first. The rows of Proposals, History, Reports and the
-Watchlist, Card search's tiles, the Collection's rows and the editor's rows have their menus.
+Watchlist, Card search's tiles, and the Collection's rows have their menus.
 Skipped without a Chromium build."""
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ pytest.importorskip("playwright")
 OWN = [
     "Open",
     "Open in a new tab",
-    "Edit deck",
     "Goldfish",
     "Run test",
     "Clone",
@@ -660,7 +659,7 @@ def test_the_collaborator_form_asks_in_a_box_before_it_is_sent(tmp_path: Path) -
         server.stop()
 
 
-# -- rows: Proposals, History, Reports, the Watchlist; cards on Card search, the Collection, the editor
+# -- rows: Proposals, History, Reports, the Watchlist; cards on Card search and the Collection
 
 
 def _seed_rows(server: Server) -> str:
@@ -789,7 +788,7 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
         server.stop()
 
 
-def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path: Path) -> None:
+def test_cards_have_their_menus_on_search_and_the_collection(tmp_path: Path) -> None:
     from playwright.sync_api import sync_playwright
 
     exe = _exe()
@@ -840,15 +839,6 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             page.keyboard.press("Escape")
             expect(page.locator(".ctxmenu")).to_have_count(0)
             assert page.locator(".ctxmenu").count() == 0
-            # the editor's rows
-            page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-            erow = page.locator("li.erow").first
-            erow.locator(".name").click(button="right")
-            _menu(page)
-            items = _items(page)
-            assert items[:3] == ["Open card", "Add to binder", "Watch this card"]
-            assert "Printings…" in items and "Remove from deck" in items
-            assert "Copy name" in items and items[-1] == "Open on Scryfall"
             assert errors == [], errors
             browser.close()
     finally:

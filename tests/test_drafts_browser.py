@@ -203,11 +203,6 @@ FIELDS: list[tuple[str, str, dict[str, str]]] = [
     # page, what opens the form ("" when it is on the page), the fields with what is typed
     ("/decks/42/settings", "", {"#name": "Kept name", "#description": "Kept description"}),
     (
-        "/decks/42/edit",
-        "fold:details.pastebox summary",
-        {"#addname": "Sol Ri", "#pastetext": "2 Lightning Bolt"},
-    ),
-    (
         "/decks/42/compare",
         "fold:.cmp-form summary",
         {"#cmp-with": "9999", ".cmp-form textarea[name=paste]": "1 Sol Ring"},

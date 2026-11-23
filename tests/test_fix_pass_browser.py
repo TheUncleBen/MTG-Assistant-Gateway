@@ -276,11 +276,11 @@ def test_an_unnamed_deck_reads_unnamed_deck_everywhere_and_can_be_deleted(server
         browser.close()
 
 
-OWNER_ONLY = ["Edit deck", "Rename…", "Move to folder…", "Deck settings", "Delete deck…"]
+OWNER_ONLY = ["Rename…", "Move to folder…", "Deck settings", "Delete deck…"]
 
 
 def test_the_deck_menu_on_another_members_deck_has_no_owner_items(server: Server) -> None:
-    """A deck search result (someone else's deck) opens a menu without Edit deck, Rename, Move to
+    """A deck search result (someone else's deck) opens a menu without Rename, Move to
     folder, Deck settings and Delete deck; the member's own deck on My decks has them all."""
     from playwright.sync_api import sync_playwright
 

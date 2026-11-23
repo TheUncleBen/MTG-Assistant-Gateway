@@ -181,3 +181,27 @@ async def test_back_faces_find_their_card_never_the_art_series_card() -> None:
     await sf.named("Goblin", set_code="TDMU")
     assert searched == ['!"Goblin" set:tdmu']
     await sf.aclose()
+
+
+async def test_peek_says_scryfall_could_not_be_read_rather_than_no_such_card() -> None:
+    """0.7.48: the deck page's Add a card tells "No card is named …" from an empty peek. An answer
+    that is no card list (an HTML error page on the way) is Scryfall unreadable, so peek says so
+    (ScanError "unavailable"), and the page opens the preview on the typed name instead."""
+    import pytest
+
+    from mtg_gateway.scan.service import ScanError, ScanService
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>proxy error</html>", headers={"Content-Type": "text/html"})
+
+    service = ScanService.__new__(ScanService)
+    service.scryfall = ScryfallClient(
+        "https://scryfall.test",
+        min_interval=0.0,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    service._lookup_slot = lambda owner: _Null()  # type: ignore[method-assign]
+    with pytest.raises(ScanError) as err:
+        await service.peek(["Arcane Signet"])
+    assert err.value.kind == "unavailable"
+    await service.scryfall.aclose()

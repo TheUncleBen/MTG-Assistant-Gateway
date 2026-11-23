@@ -10,8 +10,8 @@
   Delete deck…; one Contests… item whose box offers entering and withdrawing; the Registration
   PDF as a row of the Export box's Files pane;
 - the phone's deck page (screen 5; F16, F18): the cards start near the top, there is no "No deck
-  tags" line, the toolbar is one row (Quick add, View, ⋮) whose View sheet drives the hidden
-  controls and whose ⋮ holds Add a package…, Undo and Redo, the select bar shows only when
+  tags" line, the toolbar is one row (Add a card, View, ⋮) whose View sheet drives the hidden
+  controls and whose ⋮ holds the ways to add, Undo and Redo, the select bar shows only when
   selecting, and nothing scrolls sideways at 200% text;
 - the editor's steppers and the shell's brand are 44 px on a touch screen (F18).
 
@@ -139,7 +139,6 @@ def test_the_card_menu_has_one_standard_shape(server: Server, width: int, theme:
             "Companion",
             "Finish",
             "Lock categories",
-            "Edit in deck editor",
             "Copy name",
             "Open on Scryfall",
             "Report card…",
@@ -250,9 +249,11 @@ def test_a_tap_opens_the_viewer_whose_printing_row_opens_the_printings_sheet(
         row = view.locator(".printrow")
         assert row.locator(".lbl").inner_text() == "Printings"
         assert "CMR" in row.locator(".val").inner_text()
-        # the actions: the count, Move to…, Remove in outline red, then the binder and the editor
+        # the actions: the count, Move to…, Remove in outline red, then the binder (no way into a
+        # separate editor since 0.7.48: the deck is edited on this page)
         acts = [t.strip() for t in view.locator(".acts .btn").all_inner_texts()]
-        assert "Move to…" in acts and "Add to binder" in acts and "Edit in deck editor" in acts, acts
+        assert "Move to…" in acts and "Add to binder" in acts, acts
+        assert not any("editor" in a for a in acts), acts
         remove = view.locator(".acts .btn", has_text="Remove from deck")
         assert "btn-outline-danger" in remove.get_attribute("class")
         assert view.locator(".more a[data-scry]").inner_text().strip().startswith("Scryfall")
@@ -408,18 +409,19 @@ def test_the_phone_deck_page_starts_with_the_cards_near_the_top(server: Server) 
             ".map(e => ({ t: e.innerText.trim(), h: e.getBoundingClientRect().height }))"
         )
         words = {b["t"] for b in shown}
-        assert {"Edit", "Clone"} <= words, shown
+        assert {"Clone", "Test", "More"} <= words and "Edit" not in words, shown
         assert all(b["h"] >= 44 for b in shown), shown
         assert page.locator(".banner .btn .lg").first.is_hidden()
-        # the toolbar: one row with Quick add, View and ⋮; the select bar waits for Select cards
+        # the toolbar: one row with Add a card, View and ⋮ (which holds More ways to add); the
+        # select bar waits for Select cards
         toolbar = page.locator(".toolbar.compact")
         assert toolbar.count() == 1
         assert (
-            page.locator(".toolbar form.views").is_hidden() and page.locator(".toolbar .addpkg").is_hidden()
+            page.locator(".toolbar form.views").is_hidden() and page.locator(".toolbar .addways").is_hidden()
         )
         assert page.locator(".bulkbar").is_hidden()
         assert page.locator(".movehint").inner_text() == "Hold a card to move it to another category."
-        for sel in (".toolbar .viewbtn", ".toolbar .toolmore", ".toolbar .quickrow button:not(.addpkg)"):
+        for sel in (".toolbar .viewbtn", ".toolbar .toolmore", "#quick"):
             b = page.locator(sel).first
             assert b.is_visible() and b.bounding_box()["height"] >= 44, sel
         assert page.evaluate(MEASURE) == []
@@ -443,11 +445,13 @@ def test_the_phone_deck_page_starts_with_the_cards_near_the_top(server: Server) 
         sheet.locator(".viewsheet .switch").click()
         page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert page.locator(".bulkbar.on").is_visible()
-        # the ⋮: Add a package…, Undo and Redo (nothing to undo yet)
+        # the ⋮: the ways to add (Paste a list…, Add from a scan…, Add a package…), Undo and Redo
+        # (nothing to undo yet)
         page.locator(".toolbar .toolmore").click()
         menu = page.locator(".ctxmenu[role=menu]")
         menu.wait_for(timeout=3000)
-        assert _items(page) == ["Add a package…", "Undo", "Redo"], _items(page)
+        want = ["Paste a list…", "Add from a scan…", "Add a package…", "Undo", "Redo"]
+        assert _items(page) == want, _items(page)
         assert menu.locator("[role=menuitem]", has_text="Undo").get_attribute("disabled") is not None
         menu.locator("[role=menuitem]", has_text="Add a package…").click()
         page.locator("#package").wait_for(state="visible", timeout=3000)
@@ -456,28 +460,6 @@ def test_the_phone_deck_page_starts_with_the_cards_near_the_top(server: Server) 
         # 200% text: nothing scrolls sideways, the toolbar wraps
         page.evaluate("() => { document.documentElement.style.fontSize = '200%'; }")
         redrawn(page)
-        assert page.evaluate(MEASURE) == []
-        assert errors == []
-        browser.close()
-
-
-def test_the_editor_steppers_and_the_brand_are_finger_sized(server: Server) -> None:
-    from playwright.sync_api import sync_playwright
-
-    sid = server.sign_in_and_link()
-    _chromium()
-    with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, 375, theme="light", height=812, touch=True)
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-        small = page.evaluate(
-            "() => [...document.querySelectorAll('.erow .qty button.mini, .erow .qty input, .topbar .brand, "
-            ".editbar .backup, .bulkbar .histtools button')]"
-            ".filter(e => e.getClientRects().length)"
-            ".map(e => ({ t: (e.getAttribute('aria-label') || e.textContent).trim().slice(0, 16),"
-            " h: e.getBoundingClientRect().height, w: e.getBoundingClientRect().width }))"
-            ".filter(r => r.h < 44 || r.w < 44)"
-        )
-        assert small == [], small
         assert page.evaluate(MEASURE) == []
         assert errors == []
         browser.close()

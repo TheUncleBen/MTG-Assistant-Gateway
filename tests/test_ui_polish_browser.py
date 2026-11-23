@@ -53,61 +53,6 @@ def _open(p, exe, server: Server, sid: str, width: int = 1366, theme: str | None
     return browser, page, dialogs, errors
 
 
-def test_editor_new_category_is_inline_and_controls_name_the_card(server: Server) -> None:
-    from playwright.sync_api import sync_playwright
-
-    sid = _link(server)
-    exe = _exe()
-    with sync_playwright() as p:
-        browser, page, dialogs, errors = _open(p, exe, server, sid, theme="light")
-        page.goto(f"{server.base}/decks/42/edit#card-Sol%20Ring", wait_until="networkidle")
-        # the deep link from the deck page lands on the card's row, opened and marked
-        row = page.locator("#card-Sol\\ Ring")
-        assert row.count() == 1 and row.evaluate("e => e.classList.contains('target')")
-        assert page.locator("#cat-Commander").count() == 1
-        assert row.locator("input[type=number]").get_attribute("aria-label") == "Quantity of Sol Ring"
-        assert row.locator("button[aria-label='One fewer Sol Ring']").count() == 1
-        assert row.locator("select[aria-label='Category of Sol Ring']").count() == 1
-        # "New category…" becomes a text field in the row; Escape puts the select back
-        sel = row.locator("select[aria-label='Category of Sol Ring']")
-        sel.evaluate(
-            "s => { s.value = '\\u0000new'; s.dispatchEvent(new Event('change', { bubbles: true })); }"
-        )
-        field = row.locator(".newcat input")
-        field.wait_for(timeout=2000)
-        assert page.evaluate("() => document.activeElement.placeholder") == "New category name"
-        field.fill("Ramp spells")
-        field.press("Enter")
-        expect(row.locator(".newcat")).to_have_count(0)
-        assert row.locator(".newcat").count() == 0
-        assert sel.evaluate("s => s.value") == "Ramp spells"
-        assert "Category" in (page.locator(".pending .changes .act").first.text_content() or "")
-        assert dialogs == [] and errors == []
-        # the backup tick box is themed (no browser blue): appearance none, our own check mark
-        box = page.locator(".editbar input[type=checkbox]")
-        if box.count():
-            assert box.evaluate("e => getComputedStyle(e).appearance") == "none"
-            assert not box.is_checked()  # unticked until the member ticks it (0.7.27)
-            box.check()
-            assert "check.svg" in box.evaluate("e => getComputedStyle(e).backgroundImage")
-        foil = page.locator("input[name=foil]")
-        assert foil.evaluate("e => getComputedStyle(e).appearance") == "none"
-        # the focus ring on the page is the dark orange (3:1 on the light page), the bar keeps orange
-        assert (
-            page.evaluate(
-                "() => getComputedStyle(document.documentElement).getPropertyValue('--focus').trim()"
-            )
-            == "#944b00"
-        )
-        assert (
-            page.evaluate(
-                "() => getComputedStyle(document.querySelector('.topbar')).getPropertyValue('--focus').trim()"
-            )
-            == "#fa890d"
-        )
-        browser.close()
-
-
 def test_skip_link_times_images_and_copy_button(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 

@@ -1015,9 +1015,9 @@ def toolbar_html(
         "<form method='get' action='/cards' class='field add quick' role='search' "
         f"data-scan='{1 if scan else 0}' data-backups='{1 if backups else 0}' "
         f"data-backup-default='{1 if backup_default else 0}'>"
-        "<label for='quick'>Add a card</label><div class='quickrow'>"
+        "<label for='quick'>Add to the deck</label><div class='quickrow'>"
         # "3 sol ring" sets the count; the full name of the control is its label
-        "<input id='quick' type='text' name='q' placeholder='Type a card name' data-suggest='cards' "
+        "<input id='quick' type='text' name='q' placeholder='Name' data-suggest='cards' "
         "data-suggest-rich data-suggest-qty data-suggest-submit enterkeyhint='search' "
         "autocomplete='off' aria-describedby='quick-help'>"
         "<span id='quick-help' class='sr-only'>Type a card name, or a count and a name such as 3 Sol "
@@ -1610,7 +1610,8 @@ def _odds_html(cards: list[DeckCard]) -> str:
     options = "".join(f"<option value='{esc(k)}'>{esc(k)}</option>" for k in groups)
     return (
         "<div class='odds' id='odds'><h3>Probability of draw</h3>"
-        "<form class='oddsform' onsubmit='return false'>"
+        # no inline handler (the CSP blocks it): static/deck.js keeps Enter from sending the form
+        "<form class='oddsform' action='#odds'>"
         "<select name='mode' aria-label='At least or exactly'><option value='atleast'>At least</option>"
         "<option value='exact'>Exactly</option></select>"
         "<input type='number' name='k' value='1' min='0' max='99' aria-label='How many'> "
@@ -2334,7 +2335,8 @@ def compare_page_html(
     )
     compare_kind = "" if forge_html or ab_html else "primary"
     form = (
-        f"<a class='cmp-back ui-cap' href='/decks/{did}'>← {name}</a>"
+        "<nav class='crumbs cmp-back' aria-label='Back'>"
+        f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
         + ui.page_head("Compare decks", f"What “{name}” took out of another deck, put in and changed.")
         + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form' "
         f"data-draft='compare:{did}'>"
@@ -2594,7 +2596,7 @@ COMPARE_CSS = """
   font-size:.9rem}
 .cmp-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1rem;
   align-items:start;margin:0 0 1rem}
-.cmp-h{display:flex;align-items:baseline;gap:.35rem;font-size:1.1rem;margin:0 0 .5rem;overflow-wrap:anywhere}
+.cmp-h{display:flex;align-items:baseline;gap:.35rem;margin:0 0 .5rem;overflow-wrap:anywhere}
 .cmp-h .n{color:var(--text-muted);font-weight:400}
 .cmp-sub{font-size:1rem;margin:1rem 0 .5rem}
 .cmp-t{--cols:4rem minmax(0,1fr) 44px;--cols-md:4rem minmax(0,1fr) 44px;--cols-sm:3.6rem minmax(0,1fr) 44px}
@@ -2803,8 +2805,9 @@ def goldfish_page_html(
         # the way back is the report and review pages' grey capsule (ui.cap_link), never blue text
         "<nav class='crumbs gf-crumbs' aria-label='Back'>"
         f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
-        f"<h1>Goldfish <span class='gf-deck'>{name}</span></h1>"
-        "<p class='muted small gf-intro ui-dots'>"
+        # the site's page title (ui.page_head's look), the deck's name beside it, muted
+        f"<div class='ui-head'><h1>Goldfish <span class='gf-deck'>{name}</span></h1></div>"
+        "<p class='ui-sub gf-intro ui-dots'>"
         + "".join(f"<span>{esc(x)}</span>" for x in goldfish_intro(size, commander=commander).split(" · "))
         + "</p>"
         + solo
@@ -2842,9 +2845,8 @@ def goldfish_page_html(
 
 
 GOLDFISH_CSS = """
-.gf-head h1{margin:.1rem 0 .3rem;font-size:1.6rem}
 .gf-crumbs{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .25rem}
-.gf-head h1 .gf-deck{font-size:1rem;font-weight:400;color:var(--text-muted);margin-left:.4rem;
+.gf-head h1 .gf-deck{font-size:.5em;font-weight:400;color:var(--text-muted);margin-left:.4rem;
   overflow-wrap:anywhere}
 .gf-intro{margin:0}
 .gf-solo{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:.6rem 0 0}
@@ -2867,7 +2869,7 @@ GOLDFISH_CSS = """
 .gf-size .sizeseg button{min-width:44px}
 .gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
   padding:.75rem;margin:0 0 1rem;min-width:0}
-.gf-zone h2{font-size:1.1rem;margin:0 0 .5rem}
+.gf-zone h2{margin:0 0 .5rem}
 .gf-zone .gf-n{color:var(--text-muted);font-weight:400}
 /* the cards wrap at every size: a grid of columns the card's width (--gw), never a sideways scroll */
 .gf-row{--gw:130px;display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--gw),1fr));gap:.5rem;
@@ -2912,7 +2914,7 @@ html[data-card-size=s] .gf-c .kebab{display:none}
 /* the guide: a numbered list without boxes; the step the game is at has an orange number and bold text */
 .gf-guide[hidden],.gf-guide-show[hidden]{display:none}
 .gf-guide-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem}
-.gf-guide h2{font-size:1.1rem;margin:0}
+.gf-guide h2{margin:0}
 .gf-steps{list-style:none;margin:.5rem 0 0;padding:0;display:grid;gap:.1rem 1.5rem;
   grid-template-columns:repeat(auto-fill,minmax(min(100%,22rem),1fr))}
 .gf-steps li{display:flex;gap:.6rem;align-items:flex-start;padding:.35rem 0;line-height:1.4}
@@ -2971,7 +2973,7 @@ def deck_card_html(
 ) -> str:
     """One deck tile: a link to the deck, and after it the tile's ⋮ (static/menus.js opens the
     deck's menu from it, a right-click, a press and hold or Shift+F10). ``own``: the member's own
-    deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest. ``plain``:
+    deck, whose menu has Rename, Move to folder, Delete deck and the rest. ``plain``:
     a precon tile, without the owner's picture and the deck tags (as deck search's tiles).
     ``tick``: My decks' Select tick box before the link (deck_bulk.py)."""
     did = esc(d["id"])

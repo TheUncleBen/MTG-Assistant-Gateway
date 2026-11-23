@@ -786,7 +786,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert "target='_blank'" not in lst.text.split("<main")[1].split("Open on Archidekt")[0]
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "Mana curve" in deck.text and "Run test" in deck.text and "Edit deck" in deck.text
+        assert "Mana curve" in deck.text and "Run test" in deck.text and "Add to the deck" in deck.text
         assert "Open on Archidekt" in deck.text  # the one external link may open a new tab
         missing = await b.http.get("/decks/999999", headers=NAV)
         assert missing.status_code == 404
@@ -847,56 +847,6 @@ async def test_app_shell_routes(stack: Stack) -> None:
 
 def editor_config(page: str) -> dict:
     return json.loads(page.split("id='editor-config' type='application/json'>")[1].split("</script>")[0])
-
-
-async def test_deck_editor_page(stack: Stack) -> None:
-    from mtg_gateway.scan.scryfall import ScryfallClient
-
-    from .fake_scryfall import FakeScryfall
-
-    h = stack.h
-    h.app.state.gateway.scan.scryfall = ScryfallClient(
-        "https://scryfall.test", min_interval=0.0, http=FakeScryfall().client()
-    )
-    b = Browser(h)
-    try:
-        await b.login("/decks")
-        r = await b.link("alice", "pw-alice")
-        assert r.status_code == 303
-        edit = await b.http.get("/decks/42/edit", headers=NAV)
-        assert edit.status_code == 200, edit.text
-        assert "id='editor-config'" in edit.text and "/static/companion.js" in edit.text
-        assert "script-src 'self'" in edit.headers["content-security-policy"]
-        assert "connect-src 'self'" in edit.headers["content-security-policy"]
-        cfg = json.loads(
-            edit.text.split("id='editor-config' type='application/json'>")[1].split("</script>")[0]
-        )
-        assert cfg["deckId"] == "42" and cfg["cards"] and cfg["groups"] and cfg["csrf"]
-        assert cfg["prefill"] == []
-        # someone else's deck cannot be edited, a missing one is not found
-        other = await b.http.get("/decks/43/edit", headers=NAV)
-        assert other.status_code in (403, 404), other.text
-        assert (await b.http.get("/decks/999999/edit", headers=NAV)).status_code == 404
-        # a scan session prefills additions
-        token = await mcp_token(h)
-        saved = (await call(h, token, "save_scan_session", {"name": "Binder", "text": "2 Sol Ring"}))[
-            "structuredContent"
-        ]
-        sid = saved["id"]
-        pre = await b.http.get(f"/decks/42/edit?scan_session={sid}", headers=NAV)
-        assert pre.status_code == 200
-        cfg = json.loads(
-            pre.text.split("id='editor-config' type='application/json'>")[1].split("</script>")[0]
-        )
-        assert cfg["prefill"] and cfg["prefill"][0]["action"] == "add"
-        assert cfg["prefill"][0]["card_name"] == "Sol Ring" and cfg["prefill"][0]["quantity"] == 2
-        assert "<option value='" + sid + "' selected>" in pre.text
-        js = await b.http.get("/static/companion.js")
-        assert js.status_code == 200 and "editor-config" in js.text
-        anon = await h.http.get("/decks/42/edit", headers=NAV)
-        assert anon.status_code == 302
-    finally:
-        await b.aclose()
 
 
 async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
@@ -1191,7 +1141,6 @@ BUSY_PAGES = (
     "/decks/42/export",
     "/decks/42/compare",
     "/decks/42/compare?with=43",
-    "/decks/42/edit",
     "/decks/42/settings",
     "/decks/42/delete",
     "/collection",
@@ -1370,7 +1319,6 @@ async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
             ("/decks/999999", "This deck could not be found."),
             ("/decks/999999/export", "This deck could not be found."),
             ("/decks/999999/compare", "This deck could not be found."),
-            ("/decks/999999/edit", "Cannot edit this deck"),
             ("/decks/999999/settings", "Cannot edit this deck"),
         ):
             r = await b.http.get(path, headers=NAV)
@@ -1390,7 +1338,6 @@ async def test_every_page_that_links_the_manifest_lets_the_browser_load_it(stack
             "/",
             "/decks",
             "/decks/42",
-            "/decks/42/edit",
             "/account",
             "/proposals",
             "/history",

@@ -88,7 +88,7 @@ async def test_a_decks_other_pages_use_the_read_the_deck_page_keeps(stack: Stack
         w = Watch(stack)
         await _view(b, "/decks/42")
         n = len(w.asked)
-        for path in ("/decks/42/goldfish", "/decks/42/compare", "/decks/42/edit", "/decks/42/settings"):
+        for path in ("/decks/42/goldfish", "/decks/42/compare", "/decks/42/settings"):
             await _view(b, path)
         deck_reads = [p for _m, p in w.since(n) if re.fullmatch(r"/api/decks/42/?", p)]
         assert deck_reads == [], w.since(n)
@@ -100,7 +100,6 @@ SECOND_VIEWS = (
     "/decks/42/settings",
     "/decks/42/goldfish",
     "/decks/42/compare",
-    "/decks/42/edit",
     "/decks/api/folders",
     "/notifications",
     "/collection/wants",
@@ -250,7 +249,6 @@ CLICKS = (
     "/decks/42/settings",
     "/decks/42/goldfish",
     "/decks/42/compare",
-    "/decks/42/edit",
     "/collection/wants",
     "/notifications",
     "/forum",

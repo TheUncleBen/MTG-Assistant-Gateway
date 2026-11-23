@@ -71,7 +71,6 @@ MAIN_PAGES = (
     "/decks",
     "/decks/42",
     "/decks/42?view=grid",
-    "/decks/42/edit",
     "/collection",
     "/search",
     "/cards?q=sol",
@@ -91,7 +90,6 @@ MAIN_PAGES = (
 HEAVY_PAGES = (
     "/decks/42",
     "/decks/42?view=grid",
-    "/decks/42/edit",
     "/collection",
     "/cards?q=sol",
     "/admin",
@@ -546,29 +544,6 @@ ROW_BATCHES = r"""
   }).observe(document, { childList: true, subtree: true });
 })();
 """
-
-
-def test_the_editor_builds_its_rows_in_small_slices_after_the_first_frame(server: Server) -> None:
-    """The deck editor's first load was the longest task left (up to about 350 ms at 4x on a busy
-    runner, 25 Oct 2026): its first frame laid out the page for the top bar's measure, built a
-    second slice of 12 rows and then styled the page with 24 rows of selects and menus at once.
-    Now a slice is at most 6 rows, and the second one waits until the first frame is on screen."""
-    from playwright.sync_api import sync_playwright
-
-    sid, _pending = _seed(server)
-    exe = _exe()
-    with sync_playwright() as p:
-        for d in _drivers(p, server, sid, exe):
-            d.ctx.add_init_script(ROW_BATCHES)
-            d.page.goto(d.server.base + "/decks/42/edit", wait_until="load")
-            d.page.wait_for_selector("#editor[data-rows-ready]", state="attached", timeout=15000)
-            batches = d.page.evaluate("() => window.__rows")
-            total = d.page.locator(".existing li.erow").count()
-            assert total > 60, total  # the 100-card deck, every row built
-            assert sum(n for _f, n in batches) == total, batches
-            assert max(n for _f, n in batches) <= 6, f"a slice of more than 6 rows: {batches}"
-            assert batches[1][0] - batches[0][0] >= 2, f"the second slice came in the first frame: {batches}"
-            assert d.errors == [], d.errors
 
 
 def test_the_server_answers_main_pages_fast_and_static_files_are_kept(server: Server) -> None:

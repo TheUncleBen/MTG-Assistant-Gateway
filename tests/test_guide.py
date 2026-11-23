@@ -224,15 +224,12 @@ def test_the_backup_texts_follow_the_backup_settings() -> None:
         "Archidekt account"
     )
     ticked = _page(live=_Live(archidekt_backup_box_default=True))
-    assert "ticked by default on this gateway: untick it to skip that extra copy for that one save." in ticked
+    assert "ticked by default on this gateway: untick it to skip that extra copy." in ticked
     assert "unticked by default" not in ticked and copy_step in ticked
     # a delete keeps the snapshot only, backups on or off (assistant tool review, 2026-10-28)
     assert "keeps a snapshot (no backup copy on Archidekt) first." in ticked
     unticked = _page(live=_Live(archidekt_backup_box_default=False))
-    assert (
-        "unticked by default on this gateway: tick it to also keep that extra copy for that one save."
-        in unticked
-    )
+    assert "unticked by default on this gateway: tick it to also keep that extra copy." in unticked
     assert copy_step in unticked and "keeps a snapshot (no backup copy on Archidekt) first." in unticked
     off = _page(
         archidekt_backups=False, live=_Live(archidekt_backups=False, archidekt_backup_box_default=True)
@@ -289,7 +286,7 @@ def test_the_app_guide_says_press_and_hold_not_right_click() -> None:
     """In the app a card is pressed and held: no "right-click" and no "click adds" where the
     browser guide names the mouse first (final audit D33)."""
     web, in_app = _page(), _page(app=True)
-    assert "right-click" in web and "a click adds that printing" in web
+    assert "right-click" in web
     assert "right-click" not in in_app and "click adds" not in in_app
-    assert "a press and hold on a card" in in_app and "a tap adds that printing" in in_app
+    assert "a press and hold on a card" in in_app
     assert "<kbd>Shift</kbd>+<kbd>F10</kbd>" in in_app  # the keyboard way stays

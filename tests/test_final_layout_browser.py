@@ -209,9 +209,10 @@ def test_the_quick_add_field_shows_its_whole_placeholder(
         _shot(page, f"quick-add-{width}-{theme}")
         assert fit["need"] <= fit["room"], fit
         assert page.evaluate(MEASURE) == []
-        # the field is a finger-sized target on touch screens, and the + beside it too
+        # the field is a finger-sized target on touch screens, and the More ways to add beside it
+        # (the toolbar's own button, or the ⋮ that holds it on a phone) too
         if touch:
-            for sel in ("#quick", ".toolbar .quickrow button:not(.addpkg)"):
+            for sel in ("#quick", ".toolbar .addways:visible, .toolbar .toolmore:visible"):
                 assert page.locator(sel).first.bounding_box()["height"] >= 44, sel
         assert errors == [], errors
         browser.close()

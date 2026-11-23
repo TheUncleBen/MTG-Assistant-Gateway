@@ -156,40 +156,6 @@ def test_a_price_nobody_knows_reads_the_same_way_everywhere(
         browser.close()
 
 
-@pytest.mark.parametrize("width,theme", [(360, "light"), (720, "dark"), (1280, "light")])
-def test_the_editors_empty_add_says_type_a_card_name(
-    server: Server,  # noqa: F811
-    width: int,
-    theme: str,
-) -> None:
-    """N4: the editor's Add with nothing typed showed the browser's "Please fill out this
-    field."; the deck page's quick add says "Type a card name." (A5). One shared note."""
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium()
-    sid, _pending = _seed(server)
-    with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, width, theme, exe)
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-        box = page.locator("#addname")
-        box.wait_for()
-        page.locator("form.addcard .go button").click()
-        assert box.evaluate("e => e.validationMessage") == "Type a card name."
-        assert box.get_attribute("aria-invalid") == "true"
-        assert box.evaluate("e => document.activeElement === e")
-        assert page.url.endswith("/decks/42/edit")  # the form never left the page
-        box.fill("Sol")
-        assert box.evaluate("e => e.validationMessage") == "" and box.get_attribute("aria-invalid") is None
-        # the deck page's own quick add says the same, from the same code
-        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-        quick = page.locator("#quick")
-        quick.focus()
-        quick.press("Enter")
-        assert quick.evaluate("e => e.validationMessage") == "Type a card name."
-        assert errors == []
-        browser.close()
-
-
 def _edit_proposal(srv: Server) -> str:
     decks = srv.app.state.gateway.decks
 
@@ -216,7 +182,7 @@ def test_a_changes_label_is_sentence_case_at_every_width(
 ) -> None:
     """N5: the review page's row labels read "Change / Add / Remove" on a phone but "CHANGE /
     ADD / REMOVE" from 600 px (an uppercase transform the phone's rule undid). Sentence case,
-    everywhere, on the review page and in the editor's box of changes."""
+    everywhere, on the review page."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -224,12 +190,8 @@ def test_a_changes_label_is_sentence_case_at_every_width(
     pid = _edit_proposal(server)
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        for path in (f"/proposals/{pid}", "/decks/42/edit"):
+        for path in (f"/proposals/{pid}",):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
-            if path.endswith("/edit"):
-                page.locator("button[aria-label='One fewer Sol Ring']").first.click()
-                page.locator("details.pendingbox summary").click()  # the box of changes is folded
-                page.locator(".pending .changes .act").first.wait_for()
             labels = page.locator("ul.changes .act, .pending .changes .act")
             assert labels.count() >= 1, path
             got = labels.evaluate_all(

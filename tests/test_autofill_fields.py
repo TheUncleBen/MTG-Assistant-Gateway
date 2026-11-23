@@ -105,7 +105,6 @@ async def test_no_page_field_reads_as_a_payment_cards(stack: Stack) -> None:
             "/cards?q=Sol%20Ring",
             "/collection",
             "/watchlist",
-            "/decks/42/edit",
             "/decks/42/settings",
             "/decks/42/registration",
             "/lists/custom",

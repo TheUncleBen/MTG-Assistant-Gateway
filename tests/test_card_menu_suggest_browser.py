@@ -6,13 +6,12 @@ off neither has anything of the watch. Skipped without Chromium."""
 
 from __future__ import annotations
 
-import asyncio
 import re
 from pathlib import Path
 
 import pytest
 
-from .test_editor_browser import PNG, _link
+from .test_editor_browser import PNG
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .waits import expect
@@ -65,117 +64,6 @@ def _open_menu(page, row, width: int) -> None:
         page.locator(".ctxmenu.cs-menu").wait_for(timeout=3000)  # the list closed as the menu took the focus
     else:
         row.click(button="right")
-
-
-@pytest.mark.parametrize("width", [390, 1280])
-def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, width: int) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _exe()
-    server = _server(tmp_path, watchlists_enabled=True)
-    try:
-        sid = _link(server)
-        prices = server.app.state.gateway.prices
-        asyncio.run(prices.watch_card("user-1", "Sol Ring"))
-        with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-            ctx = _context(browser, server, sid, width)
-            page = ctx.new_page()
-            errors: list[str] = []
-            page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-            box = page.locator("#addname")
-            box.click()
-            box.press_sequentially("sol", delay=30)
-            page.locator("[role=option] .rich .ty").first.wait_for(timeout=3000)
-            sol = page.locator("[role=option][data-name='Sol Ring']")
-            talisman = page.locator("[role=option][data-name='Sol Talisman']")
-            # the card already watched says so; the others say Watch (icon only, named for readers)
-            sol_btn = sol.locator(".wbtn")
-            assert sol_btn.get_attribute("aria-label") == "Sol Ring is on your watchlist"
-            assert "on" in (sol_btn.get_attribute("class") or "")
-            btn = talisman.locator(".wbtn.icon")
-            assert btn.get_attribute("aria-label") == "Watch Sol Talisman"
-            assert btn.get_attribute("title") == "Watch Sol Talisman"
-            b = btn.bounding_box()
-            r = talisman.bounding_box()
-            assert b and r and b["x"] + b["width"] <= r["x"] + r["width"] + 0.5
-            if width < 900:
-                assert b["height"] >= 44 - 0.5 and b["width"] >= 44 - 0.5
-            assert page.evaluate("document.documentElement.scrollWidth") <= width
-            # Watch: the toast, the button turns to On your watchlist, and nothing is added to the deck
-            btn.click()
-            toast = page.locator(".toast.cards-toast")
-            toast.wait_for(timeout=5000)
-            assert re.fullmatch(  # with the default price alert it came with (independent review 2, L5)
-                r"Sol Talisman added to your watchlist, with a price alert: "
-                r"under \$\d+\.\d\d · over \$\d+\.\d\d\.",
-                toast.locator(".msg").inner_text(),
-            ), toast.locator(".msg").inner_text()
-            assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Talisman"
-            label = talisman.locator(".wbtn").get_attribute("aria-label")
-            assert label == "Sol Talisman is on your watchlist"
-            assert talisman.locator(".wbtn").text_content().strip() == "On your watchlist"
-            assert page.locator(".pendingbox .n").inner_text() == "0" and box.input_value() == "sol"
-            assert sorted(w["name"] for w in prices.watched_cards("user-1")) == ["Sol Ring", "Sol Talisman"]
-            toast.locator("button", has_text="Undo").click()
-            page.locator(".toast.cards-toast", has_text="no longer").wait_for(timeout=5000)
-            assert [w["name"] for w in prices.watched_cards("user-1")] == ["Sol Ring"]
-            # the card menu: as Card search's, without Add to deck… (these rows add to this deck)
-            page.locator(".toast.cards-toast .close").click()
-            box.click()
-            page.locator("[role=option][data-name='Sol Talisman']").wait_for(timeout=3000)
-            _open_menu(page, page.locator("[role=option][data-name='Sol Talisman']"), width)
-            assert _menu_items(page) == ["Open card", "Watch this card", "Printings…", "Open on Scryfall"]
-            mb = page.locator(".ctxmenu.cs-menu").bounding_box()
-            assert mb and mb["x"] >= 0 and mb["x"] + mb["width"] <= width + 1
-            page.keyboard.press("Escape")
-            assert page.locator(".ctxmenu").count() == 0
-            assert page.locator(".pendingbox .n").inner_text() == "0"
-            # from the keyboard: the highlighted row, Shift+F10 in the box
-            box.click()
-            page.locator("[role=option][data-name='Sol Ring']").wait_for(timeout=3000)
-            box.press("ArrowDown")
-            box.press("Shift+F10")
-            items = _menu_items(page)
-            assert items == ["Open card", "On your watchlist", "Printings…", "Open on Scryfall"]
-            # Printings…: the picker's browse mode, with this deck's own pick
-            page.locator(".ctxmenu.cs-menu button", has_text="Printings…").click()
-            page.locator(".printpick.open").wait_for(timeout=3000)
-            page.locator(".printpick .pptile").first.click()
-            page.locator(".printpick .ppwatch:visible").wait_for(timeout=3000)
-            use = page.locator(".printpick .ppuse:visible")
-            assert use.inner_text() == "Add this printing"
-            use.click()
-            page.locator(".addstatus", has_text="Added 1 × Sol Ring").wait_for(timeout=3000)
-            assert errors == []
-            browser.close()
-    finally:
-        server.stop()
-
-
-def test_the_editor_has_no_watch_with_watchlists_off(tmp_path: Path) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _exe()
-    server = _server(tmp_path, watchlists_enabled=False)
-    try:
-        sid = _link(server)
-        with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-            page = _context(browser, server, sid, 1280).new_page()
-            page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-            assert page.locator("#addname[data-suggest-watch]").count() == 0
-            box = page.locator("#addname")
-            box.click()
-            box.press_sequentially("sol", delay=30)
-            page.locator("[role=option] .rich .ty").first.wait_for(timeout=3000)
-            assert page.locator(".suggest-list .wbtn").count() == 0
-            page.locator("[role=option][data-name='Sol Ring']").click(button="right")
-            assert _menu_items(page) == ["Open card", "Open on Scryfall"]
-            browser.close()
-    finally:
-        server.stop()
 
 
 @pytest.mark.parametrize("width", [390, 1280])

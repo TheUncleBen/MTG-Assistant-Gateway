@@ -19,11 +19,13 @@ from .test_suggest_browser import Server
 pytest.importorskip("playwright")
 
 
-def _open(p, server: Server, sid: str, width: int, scheme: str = "light"):  # noqa: ANN001
+def _open(p, server: Server, sid: str, width: int, scheme: str = "light"):  # noqa: ANN001, F811
     exe = EXE[0]
     browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
     ctx = browser.new_context(
-        viewport={"width": width, "height": 900 if width > 500 else 800}, color_scheme=scheme, has_touch=width < 500
+        viewport={"width": width, "height": 900 if width > 500 else 800},
+        color_scheme=scheme,
+        has_touch=width < 500,
     )
     ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
     ctx.route(
@@ -36,9 +38,11 @@ def _open(p, server: Server, sid: str, width: int, scheme: str = "light"):  # no
     edits: list[dict] = []
     page.on(
         "request",
-        lambda r: edits.append(json.loads(r.post_data or "{}"))
-        if r.method == "POST" and r.url.endswith("/api/v1/decks/42/edit")
-        else None,
+        lambda r: (
+            edits.append(json.loads(r.post_data or "{}"))
+            if r.method == "POST" and r.url.endswith("/api/v1/decks/42/edit")
+            else None
+        ),
     )
     return browser, page, errors, edits
 
@@ -90,7 +94,8 @@ def test_a_typed_card_opens_a_preview_and_adds_to_the_chosen_category(server: Se
         # every control in the preview is at least 44 px tall (a finger's size)
         small = preview.evaluate(
             """b => [...b.querySelectorAll('button, select, .msel-btn')].filter(x => x.offsetParent)
-                   .map(x => [x.textContent.trim() || x.getAttribute('aria-label'), x.getBoundingClientRect().height])
+                   .map(x => [x.textContent.trim() || x.getAttribute('aria-label'),
+                              x.getBoundingClientRect().height])
                    .filter(x => x[1] > 2 && x[1] < 43.5)"""
         )
         assert small == [], small
@@ -151,7 +156,16 @@ def test_paste_a_list_is_checked_then_added_with_a_category_each(server: Server,
         box = page.locator(".mtgbox.batchbox")
         box.wait_for(timeout=3000)
         box.locator("textarea").fill("2 Sol Ring\n1 Zzyzx Notacard\nSideboard\n")
-        box.locator("button", has_text="Check the list").click()
+        if width > 600:
+            # what was typed survives a reload: Paste a list opens with it again
+            page.reload(wait_until="networkidle")
+            page.locator(".toolbar .addways").click()
+            page.locator("[role=menu]:visible [role=menuitem]", has_text="Paste a list").click()
+            box.wait_for(timeout=3000)
+            assert box.locator("textarea").input_value().startswith("2 Sol Ring"), "paste lost on reload"
+            # a list put back is checked at once (no second press)
+        else:
+            box.locator("button", has_text="Check the list").click()
         box.locator(".batchlist li").first.wait_for(timeout=8000)
         rows = box.locator(".batchlist li:not(.miss)")
         assert rows.count() == 1 and "Sol Ring" in rows.first.inner_text()

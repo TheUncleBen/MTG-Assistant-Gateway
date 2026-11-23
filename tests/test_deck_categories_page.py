@@ -91,7 +91,9 @@ async def test_the_panel_is_editable_with_the_approved_controls(stack: Stack) ->
             "<button class='btn' name='action' value='save'>" in page and "Save categories</button>" in page
         )
         assert "<button type='reset' class='btn'>Undo changes</button>" in page
-        assert "Moving single cards between categories is in the deck editor and on the deck page." in page
+        assert (
+            "Move single cards between categories on the deck page: from a card's menu, or by dragging it."
+        ) in page
         # each category with a record has a Delete button and its card count (create and delete,
         # The owner 22 Oct: one pane of glass)
         assert f"form='catdel' name='delete' value='{ids['Ramp']}' data-name='Ramp' data-cards='2'" in page

@@ -35,8 +35,6 @@ PAGES = [
     "/decks/42?view=grid",
     "/decks/42?view=table",
     "/decks/50",
-    "/decks/50/edit",
-    "/decks/42/edit",
     "/decks/42/settings",
     "/decks/new",
     "/decks/new-package",

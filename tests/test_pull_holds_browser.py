@@ -36,20 +36,6 @@ def _app_page(p, server: Server):
     return browser, page, errors
 
 
-def test_the_editor_holds_the_pull_while_changes_are_staged(server: Server) -> None:
-    from playwright.sync_api import sync_playwright
-
-    _chromium()
-    with sync_playwright() as p:
-        browser, page, errors = _app_page(p, server)
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-        assert page.evaluate(MAY) is True
-        page.locator("li.erow button.mini[title='One more']").first.click()  # staged, not saved
-        assert page.evaluate(MAY) is False
-        assert errors == []
-        browser.close()
-
-
 def test_the_deck_page_holds_the_pull_while_a_save_is_on_its_way(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 

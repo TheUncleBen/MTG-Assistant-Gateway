@@ -125,6 +125,7 @@
           tbody.appendChild(tr);
         });
       };
+      oddsForm.addEventListener("submit", function (e) { e.preventDefault(); renderOdds(); });
       oddsForm.addEventListener("input", renderOdds);
       oddsForm.addEventListener("change", renderOdds);
       renderOdds();
@@ -898,9 +899,10 @@
   function summaryOf(name) {
     var have = summaries[fold(name)];
     if (have) return Promise.resolve(have);
-    return fetch("/scan/api/peek?names=" + enc(name), { credentials: "same-origin", headers: { Accept: "application/json" } })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    // through MtgFetch: signed out or offline rejects with its one wording (never "no such card")
+    return Fetch.json("/scan/api/peek?names=" + enc(name), {})
       .then(function (d) {
+        if (d && d.ok === false) { var bad = new Error(d.message || "The card could not be looked up."); bad.code = d.error; throw bad; }
         var want = frontFace(name);
         var c = ((d && d.cards) || []).filter(function (x) { return x && (fold(x.name) === fold(name) || frontFace(x.name) === want); })[0] || null;
         if (c) summaries[fold(name)] = c;
@@ -995,7 +997,7 @@
   function openPreview(name, qty, card) {
     var Box = window.MtgBox;
     if (!Box) return;
-    var typeCat = typeCategory(card.type_line);
+    var typeCat = card.type_line ? typeCategory(card.type_line) : "";  // unknown: Auto (by card type)
     var form = el("form", "addpreview");
     form.noValidate = true;
     var pic = el("div", "appic");
@@ -1197,9 +1199,24 @@
         return;
       }
       openPreview(card.name || parts.name, parts.qty, card);
-    }, function () {
+    }, function (err) {
       quickForm.classList.remove("looking");
-      toast("The card could not be looked up: no connection. Try again in a moment.", { error: true });
+      // the card lookup (Scryfall) is down or busy, or answered something unreadable: the preview
+      // opens on the typed name without its picture, and Archidekt itself checks the name on Add
+      if (err && !err.signedOut && !err.noConnection && (err.server || err.code === "unavailable" || err.code === "rate_limited" || err.code === "busy")) {
+        openPreview(parts.name, parts.qty, { name: parts.name });
+        return;
+      }
+      // signed out: Sign in (back to this page); otherwise Try again looks the name up once more
+      var acts = [];
+      if (err && err.signedOut) acts.push(signInAction());
+      else {
+        var again = el("button", "btn", "Try again");
+        again.type = "button";
+        again.addEventListener("click", function () { dismissToast(); startAdd(raw); });
+        acts.push(again);
+      }
+      toast((err && err.message) || "No connection; nothing was changed.", { error: true, actions: acts });
     });
   }
   if (quickForm && quickInput) {
@@ -1241,6 +1258,12 @@
 
   // -- More ways to add: Paste a list, Add from a scan, Add a package ------------------------
   var addWays = quickForm ? $(".addways", quickForm) : null;
+  // where the focus goes back to when a box from these closes: the button that opened the menu
+  // (More ways to add, or the phone's ⋮, which stands in for it there)
+  function addWaysBack() {
+    if (addWays && addWays.offsetParent) return addWays;
+    return $(".toolbar .toolmore") || quickInput;
+  }
   function addWayItems() {
     var Menu = window.MtgMenu, items = [];
     if (!Menu) return items;
@@ -1249,7 +1272,11 @@
       items.push(Menu.item("Add from a scan…", "scan", function () { Menu.whenClosed(function () { openBatch("scan"); }); }));
     }
     items.push(Menu.item("Add a package…", "package", function () {
-      Menu.whenClosed(function () { if (window.MtgBox && window.MtgBox.openElement) window.MtgBox.openElement("package", { returnFocus: addWays }); });
+      // through deckextras.js, which fills the box (the member's packages) as it opens
+      Menu.whenClosed(function () {
+        if (window.MtgDeckExtras) window.MtgDeckExtras.open("package", { returnFocus: addWaysBack() });
+        else if (window.MtgBox) window.MtgBox.openElement("package", { returnFocus: addWaysBack() });
+      });
     }));
     return items;
   }
@@ -1317,7 +1344,7 @@
     var add = Box.button("Add", "primary", null, { icon: "plus" });
     add.hidden = true;
     var box = Box.open({
-      title: kind === "paste" ? "Paste a list" : "Add from a scan", wide: true, body: body, returnFocus: addWays || quickInput,
+      title: kind === "paste" ? "Paste a list" : "Add from a scan", wide: true, body: body, returnFocus: addWaysBack(),
       actions: [Box.button("Cancel", "btn", null, { cancel: true }), check, add]
     });
     box.panel.classList.add("batchbox");

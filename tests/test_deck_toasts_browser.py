@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from .deck_add import add_card
 from .test_deck_menu_browser import Server, _chromium
 from .test_deck_views_browser import _error, _menu_page, _open_menu
 from .waits import sideways
@@ -101,10 +102,8 @@ def test_deck_page_notes_after_instant_saves(
             "e => { const p = document.createElement('span'); p.className = 'muted'; document.body.append(p);"
             " const c = getComputedStyle(p).color; p.remove(); return c; }"
         )
-        box = page.locator("#quick")
         # a second copy in a singleton format: saved, and the note says which rule it breaks
-        box.fill("Cultivate")
-        box.press("Enter")
+        add_card(page, "Cultivate")
         note = page.locator(".deck-toast .msg", has_text="Added Cultivate")
         note.wait_for(timeout=8000)
         text = note.inner_text()
@@ -116,6 +115,7 @@ def test_deck_page_notes_after_instant_saves(
         assert "–" not in cost.inner_text() and cost.locator(".unpriced").count() == 1
         assert "$0.00" not in page.locator(".stats .tiles").inner_text()
         # no such card: refused, no Try again (it would fail the same way), a search instead
+        box = page.locator("#quick")
         box.fill("Zzyzx")
         box.press("Enter")
         assert "Zzyzx" in _error(page)

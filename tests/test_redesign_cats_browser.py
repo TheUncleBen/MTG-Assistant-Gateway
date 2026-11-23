@@ -2,8 +2,8 @@
 in headless Chromium, on the phone in the Android app (375 px, a touch screen, the app's user
 agent), the open Fold (840 px, touch) and the desktop (1280 px, a mouse), light and dark:
 
-- each stack's ⋮ opens the category's menu (Rename…, Add category…, Add from template… | Premier,
-  In deck, In price as tick rows | Edit cards in editor | Delete… in red), as does a right-click,
+- each stack's ⋮ opens the category's menu (Add a card here | Rename…, Add category…, Add from
+  template… | Premier, In deck, In price as tick rows | Delete… in red), as does a right-click,
   a press and hold or Shift+F10 on its head; the no-script drop-down is gone; every row is
   finger-sized on touch and reads at 4.5:1;
 - a rename saves at once and redraws the stacks, with Undo in its toast;
@@ -38,13 +38,13 @@ APP_UA = "Mozilla/5.0 (Linux; Android 16; wv) Chrome/140 Mobile Safari/537.36 MT
 MENU_TEXT = ".ctxmenu [role=menuitem], .ctxmenu [role=menuitemcheckbox], .ctxmenu .head, .stackhead .title"
 BOX = ".mtgbox-scrim .mtgbox"
 ITEMS = [
+    "Add a card here",
     "Rename…",
     "Add category…",
     "Add from template…",
     "Premier",
     "In deck",
     "In price",
-    "Edit cards in editor",
     "Delete…",
 ]
 SURFACES = [(375, "dark", True, True), (840, "light", True, False), (1280, "dark", False, False)]
