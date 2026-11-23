@@ -155,7 +155,7 @@ html[data-card-size=l] .scan .tiles{--tile:10rem}
 .scan .tile .setname{display:block;margin:.3rem 0;font-size:.8rem;line-height:1.25;color:var(--text-muted);overflow-wrap:anywhere}
 .scan .tile .fin{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center}
 .scan .tile .year{font-size:.75rem;color:var(--text-muted);margin-right:.1rem}
-.scan .tile .chip{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .4rem;
+.scan .tile .chip{display:inline-block;background:var(--surface-2);line-height:1.3;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .4rem;
   border-radius:22px;border:1px solid var(--border);color:var(--text-muted)}
 .scan .tile .chip.foil,.scan .tile .chip.etched{color:var(--text);border-color:var(--orange);
   background:linear-gradient(110deg,var(--orange-tint),var(--green-tint) 35%,var(--blue-tint) 70%,var(--orange-tint)) var(--surface)}
@@ -462,14 +462,17 @@ body.picker-open{overflow:hidden}
 /* a 44 px target around the round grip */
 .scan .camera.editing .guide .grip::after{content:"";position:absolute;inset:-8px}
 .scan .camera.looking .guide{border-color:var(--orange)}
-.scan .area-btn{position:absolute;left:.5rem;bottom:.5rem;z-index:2;width:var(--ctl);height:var(--ctl);min-width:var(--ctl);padding:0;
-  border-radius:50%;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
-  display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
-.scan .area-btn .lbl{display:none}
+/* Scan area: its icon and its words in the viewfinder's bottom-left corner, outside the card's
+   guide (nothing covers the card); a viewfinder too narrow for the words keeps the icon alone */
+.scan .area-btn{position:absolute;left:.5rem;bottom:.5rem;z-index:2;min-height:var(--ctl);min-width:var(--ctl);padding:.4rem .7rem;
+  border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
+  display:inline-flex;align-items:center;justify-content:center;gap:.35rem;backdrop-filter:blur(2px)}
 .scan .area-btn[hidden]{display:none}
 .scan .area-btn:hover{background:var(--navbar-bg);color:var(--navbar-text)}
 .scan .camera{container-type:inline-size}
-@container (max-width:20em){.scan .torch .lbl{display:none}}
+@container (max-width:20em){.scan .area-btn .lbl,.scan .torch .lbl{display:none}
+  /* the icon alone is a round 44 px button, so it stays clear of the guide at large text */
+  .scan .area-btn{padding:0;width:var(--ctl);border-radius:50%}}
 .scan .area-bar{position:absolute;left:.5rem;right:.5rem;bottom:.5rem;z-index:4;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
   padding:.5rem;border-radius:var(--radius);background:var(--surface-2);border:1px solid var(--border);box-shadow:var(--shadow);color:var(--text)}
 .scan .area-bar[hidden]{display:none}

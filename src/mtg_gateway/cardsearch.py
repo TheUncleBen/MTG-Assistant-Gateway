@@ -55,6 +55,10 @@ TEXT_MAX = 500  # cards kept at most (each a few hundred bytes)
 ABSENT_TTL = 1800  # seconds a name Scryfall does not know is remembered as unknown
 
 
+# the purpose line under the title, as Search decks has one (two lines at most on a phone)
+CARDS_PURPOSE = "Every Magic card. Open one for its text, rulings and printings, or add it to a deck."
+
+
 def _face(f: dict[str, Any]) -> dict[str, str]:
     pt = f"{f.get('power')}/{f.get('toughness')}" if f.get("power") or f.get("toughness") else ""
     return {
@@ -365,7 +369,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
         resp = render(
             title,
-            ui.page_head(title) + body,
+            ui.page_head(title, CARDS_PURPOSE if title == "Cards" else "") + body,
             site=s.server_name,
             status=status,
             signed_in=True,

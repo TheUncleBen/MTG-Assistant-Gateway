@@ -51,7 +51,7 @@ def test_open_deck_sits_in_its_row_and_the_bar_waits_for_a_tick(server: Server, 
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/proposals", wait_until="networkidle")
         group = page.locator(".pr-table .tr.group").first
-        cap = group.locator(".act > .ui-cap", has_text="Open deck")
+        cap = group.locator(".act > .btn", has_text="Open deck")
         g, c = group.bounding_box(), cap.bounding_box()
         assert g and c, (g, c)
         assert c["height"] >= 44, c

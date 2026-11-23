@@ -368,6 +368,19 @@ def _with(href: str, **q: Any) -> str:
     )
 
 
+def list_menu_html(view: View) -> str:
+    """A list's own menu (Rename, Delete), at the end of its page's title."""
+    if not view.list:
+        return ""
+    return (
+        "<details class='dd bn-listmenu'><summary class='btn' aria-haspopup='menu'>"
+        f"{icon('more')}<span>List</span></summary><div class='menu'>"
+        f"<a href='{PATH}?box=rename' {ui.box_open_attr('bn-rename')}>{icon('edit')} Rename list…</a>"
+        f"<a href='{PATH}?box=delete' class='danger' {ui.box_open_attr('bn-delete')}>{icon('trash')} "
+        "Delete list…</a></div></details>"
+    )
+
+
 def main_html(
     view: View,
     rows: list[dict[str, Any]],
@@ -400,15 +413,6 @@ def main_html(
     tag_opts = "".join(
         f"<option value='{esc(t)}'{' selected' if t == view.tag else ''}>{esc(t)}</option>" for t in tags
     )
-    list_menu = ""
-    if view.list:
-        list_menu = (
-            "<details class='dd bn-listmenu'><summary class='btn' aria-haspopup='menu'>"
-            f"{icon('more')}<span>List</span></summary><div class='menu'>"
-            f"<a href='{PATH}?box=rename' {ui.box_open_attr('bn-rename')}>{icon('edit')} Rename list…</a>"
-            f"<a href='{PATH}?box=delete' class='danger' {ui.box_open_attr('bn-delete')}>{icon('trash')} "
-            "Delete list…</a></div></details>"
-        )
     empty = ""
     if not rows:
         empty = (
@@ -427,8 +431,9 @@ def main_html(
     )
     return (
         "<section class='bn-main' aria-labelledby='bn-title'>"
-        f"<a class='bn-back' href='{PATH}'>{icon('back')}Binder</a>"
-        f"<div class='bn-head'><h2 id='bn-title'>{esc(view.title())}</h2>{list_menu}</div>"
+        # a picked view's name is the page's title (binder_get); the Binder page itself shows
+        # this list beside the library on a wide screen, under its section heading
+        + ("" if view.picked else f"<div class='bn-head'><h2 id='bn-title'>{esc(view.title())}</h2></div>")
         + notice
         + f"<nav class='hubseg bn-seg' aria-label='Show'>{segs}</nav>"
         f"<form class='bn-tools' method='get' action='{PATH}'>{hidden}"
@@ -660,7 +665,7 @@ def settings_html(d: dict[str, float], split: tuple[int, int], csrf: str, notice
         ex.append(f"A card added at <b>{money(added)}</b>: " + (f"alert {said}." if said else "no alert."))
     return (
         "<div class='yhub bn-set'>"
-        f"<p class='bn-up'><a class='bn-back' href='{PATH}'>{icon('back')}Binder</a></p>"
+        + ui.back_link("Binder", PATH)
         + ui.page_head("Watch settings")
         + notice
         + f"<form method='post' action='{SETTINGS}'><input type='hidden' name='csrf' value='{esc(csrf)}'>"
@@ -703,6 +708,7 @@ def settings_html(d: dict[str, float], split: tuple[int, int], csrf: str, notice
 CSS = """
 .bn{display:grid;gap:1.25rem;align-items:start}
 .bn .bn-lib{max-width:none;margin:0}
+.bn-top{margin-bottom:-.5rem;min-width:0}
 /* the search box is the shared field, its magnifier drawn inside its left padding */
 .bn-find{position:relative;display:block;margin:0 0 1rem;color:var(--text-muted)}
 .bn-find svg.i{position:absolute;left:.8rem;top:50%;width:18px;height:18px;transform:translateY(-50%);
@@ -717,7 +723,8 @@ CSS = """
 .bn-lib .yrow.wlrow{padding-right:.25rem;gap:.5rem}
 .bn-lib .yrow.wlrow a.lbl{display:flex;align-items:center;gap:.8rem;flex:1 1 auto;min-width:0;min-height:44px;
   color:inherit;text-decoration:none;padding:.5rem 0}
-.bn-lib .yrow.wlrow a.lbl svg.i{width:20px;height:20px;flex:none;color:var(--orange-text)}
+.bn-lib .yrow.wlrow a.lbl svg.i{width:max(20px,1.4em);height:max(20px,1.4em);flex:none;
+  color:var(--orange-text)}
 .bn-lib .yrow.wlrow a.lbl span{min-width:0;overflow-wrap:break-word}
 .bn-lib .yrow.wlrow a.lbl small{display:block;color:var(--text-muted);font-size:.82rem;margin-top:.1rem}
 .bn-lib .yrow.wlrow a.lbl:hover span{text-decoration:underline}
@@ -730,7 +737,8 @@ CSS = """
 .bn-head{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
 .bn-head h2{margin:0;margin-right:auto;overflow-wrap:break-word;min-width:0}
 .bn-main{display:flex;flex-direction:column;gap:.75rem;min-width:0}
-.bn-seg{display:flex;width:100%;max-width:28rem}
+/* the switch is centred over its list, the list's whole width on a phone (docs/UI-STANDARD.md) */
+.bn-seg{display:flex;width:100%;max-width:28rem;align-self:center}
 .bn-seg a{flex:1 1 0;justify-content:center}
 .bn-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0}
 .bn-tools select,.bn-tools .msel-btn{flex:1 1 9rem;width:auto;min-width:0;max-width:16rem}
@@ -816,11 +824,18 @@ main form.bn-tools > button.bn-select:not(.mini):not(.inline){margin:0 0 0 auto;
 @container bn (max-width:55.99em){
   .bn.picked .bn-lib{display:none}
   .bn:not(.picked) .bn-main{display:none}
+  /* one column: the standard's narrow centred column, as the Account page (an open Fold too) */
+  .bn-wrap > .bn{max-width:44rem;margin-inline:auto}
 }
 /* a wide screen: the library beside the list (split view), the list centred in the space left */
 @container bn (min-width:56em){
   .bn{grid-template-columns:minmax(0,min(22rem,40%)) minmax(0,1fr);gap:clamp(1rem,3vw,2rem)}
-  .bn .bn-back{display:none}
+  .bn-top .bn-up{display:none}
+  /* "Binder" over both; a picked view's title over its list, the library beside them */
+  .bn > .bn-top{grid-column:1 / -1}
+  .bn.picked > .bn-top{grid-column:2;grid-row:1;max-width:60rem}
+  .bn.picked > .bn-lib{grid-column:1;grid-row:1 / span 2}
+  .bn.picked > .bn-main{grid-column:2;grid-row:2}
   .bn-main{max-width:60rem}
   .bn-row{grid-template-columns:minmax(0,1fr)}
   .bn-row .meta{padding-left:3.35rem}
@@ -940,10 +955,21 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
             notice=notice_of(sub, qp, csrf, back),
             csrf=csrf,
         )
+        # the page's title, the standard head: "Binder" over the library, or the picked view's
+        # name over its list with the way back to the library (a wide screen shows the library
+        # beside the list, so the way back is not drawn there)
+        head = (
+            ui.back_link("Binder", PATH, cls="bn-up")
+            + ui.page_head(view.title(), actions_html=list_menu_html(view)).replace(
+                "<h1>", "<h1 id='bn-title'>", 1
+            )
+            if view.picked
+            else ui.page_head(TITLE)
+        )
         body = (
-            f"<h1 class='sr-only'>{TITLE}</h1>"
-            f"<div class='bn-wrap'><div class='bn{' picked' if view.picked else ''}' data-csrf='{esc(csrf)}' "
-            f"data-floor='{defaults.get('floor') or 0:g}'>"
+            f"<div class='bn-wrap'>"
+            f"<div class='bn{' picked' if view.picked else ''}' data-csrf='{esc(csrf)}' "
+            f"data-floor='{defaults.get('floor') or 0:g}'><div class='bn-top'>{head}</div>"
             + library_html(
                 view,
                 binder_library.counts(rows),

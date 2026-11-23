@@ -142,7 +142,7 @@ def test_account_pages_share_the_narrow_column_title_and_way_back(server: Server
         assert box and abs(box["width"] - NARROW) <= 1 and box["height"] == 44 and mid <= 1, (box, mid)
         # the way back a level goes back
         page.goto(f"{server.base}/account/details", wait_until="networkidle")
-        page.locator("a.bn-back").click()
+        page.locator("a.ui-back").click()
         page.wait_for_url("**/account")
         browser.close()
         assert not errors, errors

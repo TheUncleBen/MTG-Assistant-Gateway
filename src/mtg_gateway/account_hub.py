@@ -144,12 +144,9 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
 
 def back_head(back_href: str, back_text: str, title: str) -> str:
     """The head of a page one level in (Account details, Assistants, a section's page): the way
-    back a level, as Binder's pages draw it (theme's .bn-back), then the page title in the shared
+    back a level (ui.back_link, the one look every page uses), then the page title in the shared
     page head (ui.page_head's .ui-head). ``title`` is plain text. Render with heading=False."""
-    return (
-        f"<p class='bn-up'><a class='bn-back yback' href='{html.escape(back_href)}'>{icon('back')}"
-        f"{html.escape(back_text)}</a></p><div class='ui-head'><h1>{html.escape(title)}</h1></div>"
-    )
+    return ui.back_link(back_text, back_href) + ui.page_head(title)
 
 
 def _group_html(g: tuple[int, str, list[Row]]) -> str:
@@ -217,12 +214,14 @@ HUB_CSS = """
   border:0;border-radius:0;background:transparent;color:var(--text);text-decoration:none;font:inherit;
   font-weight:400;text-align:left;cursor:pointer;justify-content:flex-start}
 .ygrp .rows > * + *{border-top:1px solid var(--border-soft)}
-.ygrp .yrow > svg.i,.ygrp summary > svg.i{width:20px;height:20px;color:var(--orange-text)}
+/* a row's icon and chevron grow with its words (200% text) */
+.ygrp .yrow > svg.i,.ygrp summary > svg.i{width:max(20px,1.4em);height:max(20px,1.4em);flex:none;
+  color:var(--orange-text)}
 /* the label and the value (“Fit the screen”) each wrap by word at large text, neither squeezed
    under its longest word, so one never runs over the other */
 .ygrp .yrow .lbl{flex:1 1 auto}
 .ygrp .yrow .val{flex:0 1 auto;text-align:right;color:var(--text-muted);font-size:.92rem}
-.ygrp .ch svg.i{width:16px;height:16px;color:var(--text-muted)}
+.ygrp .ch svg.i{width:max(16px,1.1em);height:max(16px,1.1em);color:var(--text-muted)}
 .ygrp div.yrow{cursor:default}
 .ygrp .yrow[hidden]{display:none}
 .ygrp details.yrow{display:block;padding:0;min-height:0}
@@ -252,6 +251,11 @@ HUB_CSS = """
     text-align:left;margin:0;max-width:none}
   .ygrp .rows .yrow .ch,.ygrp .rows .yrow > details.dd{grid-column:3;grid-row:1 / span 2}
   .ygrp .rows .yrow .ch{margin-right:-.2rem}
+  /* here the words need the room: the icon grows with them only as far as their own size, and
+     the chevron keeps its size, so no word of a label is broken */
+  .ygrp .rows > .yrow > svg.i,.ygrp .rows > details.yrow > summary > svg.i{
+    width:max(20px,1em);height:max(20px,1em)}
+  .ygrp .rows .ch svg.i{width:16px;height:16px}
 }
 @media (hover:hover) and (pointer:fine){
   .ygrp .yrow{min-height:44px} .ygrp details.yrow > summary{min-height:44px}

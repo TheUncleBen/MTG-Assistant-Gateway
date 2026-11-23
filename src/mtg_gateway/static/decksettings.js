@@ -149,8 +149,8 @@
   // the page's own labels of the deck's name (companion_settings: the back chip, the quoted line
   // under the heading, which may go on " · package"), as the save's answer names it
   function drawTitle(name) {
-    var back = $(".ds > a.back"), line = $(".ds > .ui-sub");
-    if (back) back.textContent = "← " + name;
+    var back = $(".ds > .ui-back-line .ui-back span"), line = $(".ds > .ui-sub");
+    if (back) back.textContent = name;
     if (line) {
       var t = line.textContent, end = t.lastIndexOf("”");
       line.textContent = "“" + name + (end >= 0 ? t.slice(end) : "”");

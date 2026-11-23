@@ -702,20 +702,6 @@ ADMIN_CSS = """
 .adm .miss-grid button{width:100%;min-height:var(--ctl);display:inline-flex;align-items:center;
   justify-content:center;gap:.4rem}
 .adm .adm-nav{margin:0 0 1rem;display:flex;width:100%}
-/* seven tabs on a phone: the switch's script (static/topbar.js) lays equal parts in even rows,
-   and seven of them as wide as "Card scanner" fit a phone only one a row (seven rows, half the
-   screen). Where it settles on that and the page has 22em of room (a 360 px phone at 100% text),
-   the bar is two rows instead, four tabs over three, the three in the middle of their row: every
-   tab the same width (the switch's rule), no tab alone, none cut off, nothing scrolling. Narrower
-   than that (a 320 px phone, or large text) the rows stay one tab each. */
-@container (min-width:22em){
-  .adm .adm-nav.seg-grid:is([style*="--seg-cols: 1"],[style*="--seg-cols:1"]){
-    grid-template-columns:repeat(8,minmax(0,1fr))}
-  .adm .adm-nav.seg-grid:is([style*="--seg-cols: 1"],[style*="--seg-cols:1"]) > a{
-    grid-column:span 2;padding-left:.15rem;padding-right:.15rem}
-  .adm .adm-nav.seg-grid:is([style*="--seg-cols: 1"],[style*="--seg-cols:1"]) > a:nth-child(5){
-    grid-column:2 / span 2}
-}
 /* a card's heading is the site's section heading (docs/UI-STANDARD.md), not the smaller one
    theme's .ui-card > h2 still sets */
 .adm .ui-card > h2{margin-bottom:.5rem}

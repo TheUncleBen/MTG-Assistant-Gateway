@@ -26,10 +26,6 @@ KEEP_PX = {
     # the tab bar's count: it grows with the text up to 12 px, so it stays on its icon's corner and
     # inside its tab (confirmation NA5)
     ("theme.py", "font-size:min(.72rem, 12px)"),
-    # the mana symbols: a glyph drawn inside a 16 px circle, part of the icon
-    ("theme.py", ".pip b{font-size:10px"),
-    ("theme.py", ".pip.big b{font-size:8px"),
-    ("theme.py", ".pip.sm b{font-size:9px"),
     # the tick on a picked card: a mark drawn inside its 44 px circle, part of the icon
     ("deckpage.py", "font-size:26px"),
     # the scanner's viewfinder overlays: capped so they stay inside a 280 px camera view at any text

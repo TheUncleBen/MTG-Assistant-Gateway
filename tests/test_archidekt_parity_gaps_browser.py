@@ -26,7 +26,7 @@ pytest.importorskip("playwright")
 SHOTS = os.environ.get("MTG_PARITY_SHOTS")
 PAGES = ("/history/archidekt?deck_id=42", "/users/bo", "/account/details/backups")
 TEXT = "main h1, main h2, main p, main li, main label, main button, main .btn, main a, .notice"
-TARGETS = "main button, main .btn, main input[type=text], .yback"
+TARGETS = "main button, main .btn, main input[type=text], .ui-back"
 
 
 @pytest.fixture

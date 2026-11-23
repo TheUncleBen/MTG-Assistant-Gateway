@@ -93,6 +93,17 @@ CENSUS = r"""
     const kind = el.matches('.primary,.btn-primary') ? 'primary' : el.matches('.danger,.btn-danger') ? 'danger' : el.matches('.btn-outline-danger') ? 'danger-outline' : el.matches('.secondary,.btn-ghost') ? 'quiet' : (role === 'chip' && el.matches('[aria-pressed=true],[aria-current]')) ? 'chosen' : 'plain';
     add(role + ':' + kind, el, {h: px(r.height), radius: rad, size: px(cs.fontSize), weight: cs.fontWeight, padx: px(cs.paddingLeft), bg, border: px(cs.borderTopWidth) + ' ' + col(cs.borderTopColor), color: col(cs.color)});
   }
+  // the grey capsule: a small action inside a row, a list line or a sentence, and the way back;
+  // the disclosure capsule (a fold's summary) is its sibling with a chevron
+  for (const el of main.querySelectorAll('.ui-cap, details > summary.fold-btn, summary .disc')) {
+    if (!vis(el) || skip(el) || seen.has(el)) continue;
+    const cs = getComputedStyle(el);
+    if (!painted(cs)) continue;  // a phone row's main action is its chevron, not a capsule
+    seen.add(el);
+    const r = el.getBoundingClientRect();
+    const role = el.matches('.ui-cap') ? 'capsule' : 'disclosure';
+    add(role, el, {h: px(r.height), radius: radius(cs, r.height), size: px(cs.fontSize), weight: cs.fontWeight, padx: px(cs.paddingLeft), bg: col(cs.backgroundColor), border: px(cs.borderTopWidth) + ' ' + col(cs.borderTopColor), color: col(cs.color)});
+  }
   for (const el of main.querySelectorAll('.ui-chip,[class*=pill],[class*=badge],[class*=tag]:not(textarea):not(input),.ui-lbl,.chip,.set-badge')) {
     if (!vis(el) || skip(el) || seen.has(el) || el.matches('button,a.btn')) continue;
     const cs = getComputedStyle(el);
@@ -147,6 +158,8 @@ ROLES = (
     "button:quiet",
     "icon-button:plain",
     "icon-button:quiet",
+    "capsule",
+    "disclosure",
     "chip:plain",
     "chip:chosen",
     "label",

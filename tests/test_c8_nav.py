@@ -104,7 +104,7 @@ def test_watchlist_and_every_list_light_binder_and_account_lights_the_picture(se
 async def test_binder_pages_lead_back_to_the_binder(member: Browser) -> None:
     """One Binder (0.7.47): with watchlists on, the Binder page is the place, and the pages it opens
     have "‹ Binder" back and their own name instead of the old switch."""
-    back = "<a class='bn-back' href='/binder'>"
+    back = "<a class='ui-cap ui-back' href='/binder'>"
     cards = (await member.http.get("/collection")).text
     assert back in cards and "<h1>Archidekt collection" in cards
     assert "<nav class='hubseg' aria-label='Binder'>" not in cards

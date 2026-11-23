@@ -249,7 +249,10 @@ async def test_deck_settings_use_the_shared_form_rows(stack: Stack) -> None:
         page = (await b.http.get(f"{DECK}/settings", headers=NAV)).text
         assert "<title>Deck settings" in page and "<h1>Deck settings</h1>" in page
         assert "<p class='ui-sub'>“Sample Commander Deck”</p>" in page
-        assert "class='back ui-cap' href='/decks/42'>← Sample Commander Deck</a>" in page
+        assert (
+            "<a class='ui-cap ui-back' href='/decks/42'>" in page
+            and "<span>Sample Commander Deck</span></a>" in page
+        )
         assert page.count("btn-primary") == 1 and "Save changes</button>" in page
         assert "Commander only. Changing the format clears it." in page
         assert "<label for='private'>Private</label>" in page and "The deck is only visible to you." in page

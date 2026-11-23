@@ -568,7 +568,7 @@ def paste_test_html(csrf: str) -> str:
     if not csrf:
         return ""
     return (
-        "<details class='fold rp-paste'><summary class='fold-btn'>Test a pasted list</summary>"
+        "<details class='fold rp-paste'><summary class='btn'>Test a pasted list</summary>"
         "<form method='post' action='/reports/test' class='rp-paste-f' data-draft='test-list'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<p class='ui-sub'>{PASTE_TEST_LINE}</p>"

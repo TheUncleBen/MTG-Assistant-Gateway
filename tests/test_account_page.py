@@ -95,7 +95,7 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         link = (await b.http.get("/account/details/archidekt")).text
         assert (
             "<h1>Archidekt account</h1>" in link
-            and "<a class='bn-back yback' href='/account/details'>" in link
+            and "<a class='ui-cap ui-back' href='/account/details'>" in link
         )
         assert "<button class='primary'>Link account</button>" in link
         assert orange(link) == 1, re.findall(r"class='primary'[^>]*>[^<]*", link)
@@ -385,11 +385,14 @@ async def test_assistants_way_back_names_where_the_member_came_from(gw: Harness)
         assert "href='/account/assistants?from=account'" in hub
         page = (await b.http.get("/account/assistants?from=account")).text
         assert (
-            "<a class='bn-back yback' href='/account'>" in page
-            and "Account</a></p><div class='ui-head'><h1>Assistants</h1>" in page
+            "<a class='ui-cap ui-back' href='/account'>" in page
+            and "Account</span></a></p><div class='ui-head'><h1>Assistants</h1>" in page
         )
-        assert "Account details</a>" not in page
+        assert "Account details</span></a>" not in page
         page = (await b.http.get("/account/assistants")).text
-        assert "<a class='bn-back yback' href='/account/details'>" in page and "Account details</a>" in page
+        assert (
+            "<a class='ui-cap ui-back' href='/account/details'>" in page
+            and "Account details</span></a>" in page
+        )
     finally:
         await b.aclose()

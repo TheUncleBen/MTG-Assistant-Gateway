@@ -268,7 +268,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert (
             tests
             and ">Test</span>" in tests[0]
-            and "<a class='ui-cap' href='/history/reports/rep_a' aria-label='Open report'>" in tests[0]
+            and "<a class='btn' href='/history/reports/rep_a' aria-label='Open report'>" in tests[0]
         )
         assert (
             "<span class='ui-when'><span class='sr-only'>Snapshots do not record who made them</span></span>"
@@ -285,7 +285,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
             "<optgroup label='No longer on Archidekt'><option value='43'>Reap the Tides</option></optgroup>"
             in body
         )
-        assert "<select name='when' aria-label='When (UTC days)'>" in body
+        assert "<select name='when' aria-label='When'>" in body
         assert "<option value='day' selected>Group by day</option>" in body
         # older page
         older = (await b.http.get("/history?deck_id=42&offset=25", headers=NAV)).text.split("<main")[1]

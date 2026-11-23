@@ -46,7 +46,7 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         page = r.text
         # the head: the purpose line, Export CSV plain, + Add cards the one orange button (opens the box)
         # One Binder (0.7.47): "‹ Binder" back, then the page's name with its count of cards
-        assert "<a class='bn-back' href='/binder'>" in page
+        assert "<a class='ui-cap ui-back' href='/binder'>" in page
         assert "<h1>Archidekt collection <span class='cn'>3</span></h1>" in page
         assert "<p class='ui-sub'>The cards you own (your Archidekt collection).</p>" in page
         # two orange buttons: + Add cards in the head, and Show cards at the foot of the phone's

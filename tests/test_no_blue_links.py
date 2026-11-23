@@ -21,7 +21,7 @@ from .test_social_browser import Server
 
 def test_the_capsule_link_and_the_rows_open() -> None:
     assert ui.cap_link("Why", "/proposals/p1") == "<a class='ui-cap' href='/proposals/p1'>Why</a>"
-    assert ui.open_link("/history/reports/r1", "Open").startswith("<a class='act ui-cap' href=")
+    assert ui.open_link("/history/reports/r1", "Open").startswith("<a class='act btn' href=")
 
 
 pytest.importorskip("playwright")

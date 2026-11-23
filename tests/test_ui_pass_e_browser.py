@@ -524,9 +524,19 @@ def test_the_tag_preview_words_and_the_custom_card_box_layout(server: Server) ->
         box = page.locator("#cc-box")
         box.wait_for(state="visible")
         settled(page)
-        # the three type fields line up at their inputs
+        # the three type fields are one column on a phone, each the box's whole width, so each
+        # holds its hint (the cohesion round: a third of 390 px cut "Creature"); the three number
+        # fields under them share a row and line up at their inputs
+        types = page.evaluate(
+            "() => [...document.querySelector('#cc-face-f .lp-types').querySelectorAll('input')]"
+            ".map(i => { const r = i.getBoundingClientRect();"
+            " return [Math.round(r.left), Math.round(r.width), Math.round(r.bottom)]; })"
+        )
+        assert len(types) == 3 and len({(x, w) for x, w, _b in types}) == 1, types
+        assert types[0][2] < types[1][2] < types[2][2], types
         bottoms = page.evaluate(
-            "() => [...document.querySelector('#cc-face-f .lp-three').querySelectorAll('input')]"
+            "() => [...document.querySelector('#cc-face-f .lp-three:not(.lp-types)')"
+            ".querySelectorAll('input')]"
             ".map(i => Math.round(i.getBoundingClientRect().bottom))"
         )
         assert len(bottoms) == 3 and max(bottoms) - min(bottoms) <= 1, bottoms

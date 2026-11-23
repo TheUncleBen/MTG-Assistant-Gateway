@@ -713,15 +713,16 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (sprite from mana.py) */
 .mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap;vertical-align:middle}
 .mana .sep{color:var(--text-muted);font-size:.8em;margin:0 .15em}
-.pip{display:inline-flex;align-items:center;justify-content:center;width:max(16px,1.15em);
-  height:max(16px,1.15em);border-radius:50%;
+.pip{--pip:max(16px,1.15em);display:inline-flex;align-items:center;justify-content:center;
+  width:var(--pip);height:var(--pip);border-radius:50%;
   color:#111;background:#cbc2bf;box-shadow:-1px 1px 0 rgba(0,0,0,.55);flex:none;vertical-align:-.2em;
   font-style:normal;line-height:1}
 .pip svg{width:70%;height:70%;fill:currentColor;display:block}
-.pip b{font-size:max(10px,.72em);font-weight:900;line-height:1}
-.pip.big b{font-size:max(8px,.58em)}
-.pip.sm{width:max(14px,1em);height:max(14px,1em);margin:0 1px}
-.pip.sm b{font-size:max(9px,.65em)}
+/* the glyph is a share of its circle, so it grows with the text as the circle does */
+.pip b{font-size:calc(var(--pip) * .625);font-weight:900;line-height:1.25}
+.pip.big b{font-size:calc(var(--pip) * .5)}
+.pip.sm{--pip:max(14px,1em);margin:0 1px}
+.pip.sm b{font-size:calc(var(--pip) * .643)}
 .pip-W{background:#f8f6d8} .pip-U{background:#c1d7e9} .pip-B{background:#bab1ab} .pip-R{background:#e49977}
 .pip-G{background:#a3c095} .pip-C{background:#cbc2bf} .pip-g{background:#cbc2bf}
 .pip-T,.pip-Q,.pip-E,.pip-P{background:#cbc2bf} .pip-S{background:#dfe8ee}
@@ -768,8 +769,10 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .badge.danger{background:var(--danger-fill)}
 .badge.info{background:#2a66c9}
 /* A tag (a deck's or a card's tag, a list's word on a row): one look on every page
-   (docs/UI-STANDARD.md). .pill and a plain .chip are older names for it. */
-.ui-tag,.pill,span.chip,.pill.tag{display:inline-flex;align-items:center;gap:.25rem;min-height:24px;
+   (docs/UI-STANDARD.md). .pill is an older name for it. A component's own .chip (the card
+   viewer's Legal in formats, the scan printing picker's finishes) is not a tag: it has its own
+   look in its own sheet, and this rule does not reach it. */
+.ui-tag,.pill{display:inline-flex;align-items:center;gap:.25rem;min-height:24px;
   max-width:100%;padding:.15rem .55rem;border-radius:999px;border:0;background:var(--surface-2);
   color:var(--text);font-size:.82rem;font-weight:600;line-height:1.25;vertical-align:middle;
   overflow-wrap:anywhere;white-space:normal}
@@ -1521,12 +1524,10 @@ UI_CSS = """
 main.wrap.ui-wide{max-width:1200px}
 /* forms, settings, grouped lists and reading pages: one narrow centred column (docs/UI-STANDARD.md) */
 main.wrap.ui-narrow{max-width:calc(44rem + 2 * var(--gutter))}
-/* One Binder (0.7.47): "‹ Binder" back on the pages that open from the Binder page */
-.bn-up{margin:0}
-.bn-back{display:inline-flex;align-items:center;gap:.2rem;min-height:44px;color:var(--orange-text);font-weight:700;
-  text-decoration:none}
-.bn-back svg.i{width:18px;height:18px}
-.bn-up + .ui-head h1 .cn{font-size:.55em;font-weight:600;color:var(--text-muted);vertical-align:middle}
+/* The way back a level (ui.back_link): one look on every page, the grey capsule with the back
+   arrow in a line of its own at the page's top left, above the title (docs/UI-STANDARD.md) */
+.ui-back-line{margin:0 0 .25rem}
+.ui-back-line + .ui-head h1 .cn{font-size:.55em;font-weight:600;color:var(--text-muted);vertical-align:middle}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
 /* its parts never shrink under their words: when they are wider than the screen (large text on a
@@ -1573,7 +1574,14 @@ main.wrap.ui-narrow{max-width:calc(44rem + 2 * var(--gutter))}
 /* static/topbar.js: the parts in equal columns, as many a row as fit whole, the rows evenly filled
    (confirmation NA4: parts of their own widths, and "Card models" alone on a second row). Without
    scripts the parts wrap as above. seg-measure is the one-row layout the script measures in */
-.hubseg.seg-grid{display:inline-grid;grid-template-columns:repeat(var(--seg-cols),minmax(0,1fr))}
+.hubseg.seg-grid{display:inline-grid;grid-template-columns:repeat(calc(2 * var(--seg-cols)),minmax(0,1fr))}
+/* two tracks a part: a row shorter than the others starts half a part in and sits in the middle
+   (seven parts as four over three), every part the same width */
+.hubseg.seg-grid > *{grid-column-end:span 2}
+/* parts that would go one a row at their one-line widths (seven tabs on a phone) are laid out by
+   their longest word: tight sides, a part's words on two lines where needed, no word broken */
+.hubseg.seg-tight > *{padding-left:.3rem;padding-right:.3rem;text-align:center;white-space:normal!important}
+.hubseg.seg-measure.seg-words > *{white-space:normal!important;width:min-content!important}
 /* one row of parts as wide as their words, the row's room shared out (NC1) */
 .hubseg.seg-row{flex-wrap:nowrap}
 .hubseg.seg-row > *{flex:1 1 auto!important;white-space:nowrap}
@@ -1785,7 +1793,7 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
-  .ui-table .act.ui-cap{padding:0;background:none}
+  .ui-table .act:is(.ui-cap,.btn){padding:0;border:0;background:none}
 }
 /* the same two folds by the table's own width in em (large text): a table narrower than 46em of
    its text folds its low-priority columns, one narrower than 38em takes the two-line rows. At 100%
@@ -1807,7 +1815,9 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
-  .ui-table .act.ui-cap{padding:0;background:none}
+  .ui-table .act:is(.ui-cap,.btn){padding:0;border:0;background:none}
+  /* a row list's main action is its chevron here too, as on a phone */
+  .ui-table.ui-rows .tr:not(.group) .act > .btn{padding:0;border:0;background:none}
 }
 /* A row list (Proposals, History, Reports; the 0.7.46 redesign, screen 6): one line per entry at
    every width. A tick box where the list has one, the title with its facts line (.sub) under it,
@@ -1830,18 +1840,20 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 /* the actions sit on the title's line, whatever the lines under it (a History entry has three):
    their 44 px boxes centre on the first line, at any text size */
 .ui-table.ui-rows .tr:not(.group) .act{align-self:start;margin-top:calc(.675em - 22px)}
-.ui-table.ui-rows .act .ui-cap{margin:0;white-space:nowrap}
+/* from 600 px the main action is a standard button (docs/UI-STANDARD.md: an action that opens a page
+   or a panel), 44 px tall with an edge: it and the ⋮ start level with the title's line, inside the
+   row's padding */
+@media (min-width:600px){ .ui-table.ui-rows .tr:not(.group) .act{margin-top:0} }
+.ui-table.ui-rows .act :is(.ui-cap,.btn){margin:0;white-space:nowrap}
 .ui-table.ui-rows .act .kebab{flex:none}
 /* large text on a narrow phone (the list under about 20 em of its own text: 200% at 375 px): the
    main action's chevron goes, as the title opens the same and the ⋮ has it, so the title keeps
    room for whole words (independent review 2, M5 sweep) */
 .ui-table.ui-rows{container-type:inline-size}
-@container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > .ui-cap{display:none}
-  /* a group row's Open deck drops under the name, so the name keeps whole words */
-  .ui-table.ui-rows .tr.group{display:flex;flex-wrap:wrap;gap:.25rem 8px}
-  .ui-table.ui-rows .tr.group > :first-child{flex:none}
-  .ui-table.ui-rows .tr.group .m{flex:1 1 min(8em,calc(100% - 52px))}
-  .ui-table.ui-rows .tr.group .act{margin-left:auto} }
+@container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > :is(.ui-cap,.btn){display:none}
+  /* a group row's Open deck goes the same way: the deck's name beside it opens the deck, and keeps
+     the row's room for whole words */
+  .ui-table.ui-rows .tr.group .act{display:none} }
 .ui-table.ui-rows .act .acts[hidden]{display:none}
 /* a deck's group row: the name with its count under it, Open deck at the end */
 .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto;min-height:52px}
@@ -1855,20 +1867,21 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 /* the group's Open deck has no ⋮ beside it: its drawn edge (inside the capsule's transparent
    border) sits at --row-edge, where the ⋮ icon and the tick box do, not pulled into the padding
    as the actions cell is for the ⋮ (polish R4) */
-.ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad) - 4px)}
+.ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad))}
 @media (max-width:599.98px){
   .ui-table.ui-rows .tr{--row-pad:8px}
   .ui-table.ui-rows .tr .act{margin-right:-6px}
   /* the main action is its chevron: the title keeps its line at any text size */
-  .ui-table.ui-rows .act > .ui-cap{padding:0;margin:0;border:0;background:none}
-  .ui-table.ui-rows .act > .ui-cap:hover{background:var(--surface-2)}
+  .ui-table.ui-rows .act > :is(.ui-cap,.btn){padding:0;margin:0;border:0;background:none}
+  .ui-table.ui-rows .act > :is(.ui-cap,.btn):hover{background:var(--surface-2)}
   .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto}
   .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
   /* the group's Open deck keeps its capsule inside the row (audit D10), its edge at --row-edge
      (the capsule has no transparent border here) */
   .ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad))}
-  .ui-table.ui-rows .tr.group .act > .ui-cap{display:inline-flex;align-items:center;padding:0 .6rem;
+  .ui-table.ui-rows .tr.group .act > :is(.ui-cap,.btn){display:inline-flex;align-items:center;padding:0 .6rem;
     min-height:44px;margin:0}
+  .ui-table.ui-rows .tr.group .act > .btn{border:1px solid var(--control-border);background:var(--surface)}
   /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
      grows above and below the words without moving the lines around it (F14) */
   .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
@@ -1878,7 +1891,7 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
    facts line, the Install page's address): on a touch screen its tap area grows above and below
    the words to 44 px without moving the lines around it (the padding makes the box, the negative
    margins keep the line box as it is) */
-  .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap),.ui-meta dd a,
+  .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap,.btn),.ui-meta dd a,
   .wdg .det a,
   .rv-meta a,.inst a.mdaddr,a.tap{display:inline-block;padding:14px 0;margin:-14px 0;min-width:44px}
 
@@ -1905,12 +1918,13 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   font-size:.86rem;line-height:1.2;text-decoration:none;vertical-align:middle;cursor:pointer}
 .ui-cap:hover{background:var(--surface-3) padding-box;color:var(--text)}
 .ui-cap:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-.ui-cap svg.i{width:16px;height:16px;flex:none}
+/* the icon grows with the words (200% text) */
+.ui-cap svg.i{width:max(16px,1.3em);height:max(16px,1.3em);flex:none}
 /* a row of capsules (Your Archidekt lists on Account details): they wrap, with room between */
 .ui-caps{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-left:4px}
 /* a title that opens its row or group, or a deck named in a panel or a widget: the text colour,
    bold, underlined on hover and focus, so the page carries no blue text */
-.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap),.ui-meta dd a,
+.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap,.btn),.ui-meta dd a,
 .wdg .det a,
 .trend .tdata th a{color:var(--text);font-weight:700;text-decoration:none}
 .ui-table .title .t a:hover,.ui-table .title a.t:hover,.ui-table .tr.group > span a:hover,
@@ -2020,6 +2034,7 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 @container (max-width:20em){ .ui-drawer .ui-meta{grid-template-columns:minmax(0,1fr)} }
 .ui-drawer .dh{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .5rem}
 .ui-drawer .dh h2{margin:0;flex:1;overflow-wrap:anywhere}
+/* the item as its own page: its page title (side_panel's page_title) under the way back */
 .ui-drawer h1.page-only{margin:0}
 .ui-drawer h1 + .dh{margin-top:.5rem}
 .ui-drawer .close{min-width:44px;min-height:44px;display:inline-grid;place-items:center;
@@ -2077,7 +2092,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .ui-row:has(> .ctl > .switch) .ctl{grid-column:2;grid-row:1 / span 2}}
 /* a card too narrow for the label's words beside the switch (320 px at 200% text): the switch
    goes under the label, at the row's end */
-.mtgbox .body,.ds .ui-card{container-type:inline-size}
+.mtgbox .body{container-type:inline-size}
 @container (max-width:13em){
   .ui-row:has(> .ctl > .switch){grid-template-columns:1fr}
   .ui-row:has(> .ctl > .switch) .ctl{grid-column:1;grid-row:auto;justify-self:end}}
@@ -2701,6 +2716,16 @@ SEARCH_PANEL_CSS = """
   .spanel .rbar:not(.cards) > .g.sort .msel-btn,.spanel .rbar:not(.cards) > .g.sort select{width:100%}
   .spanel .rbar:not(.cards) > .segc label,.spanel .rbar:not(.cards) .sizeseg button{flex:1 1 auto}
   .spanel .rbar:not(.cards) .sizeseg{display:flex;flex:1 1 auto} } }
+/* a bar with Select beside its count (My decks) has one piece more: on a wider open Fold the
+   card size would wrap alone under the row's end, so that bar breaks after Sort up to the width
+   where all of it fits one row, the second row filled the same way */
+@media (min-width:600px){ @container sp (min-width:660px) and (max-width:829.98px){
+  .spanel .rbar:has(> .cnt + .btn) .brk{display:block}
+  .spanel .rbar:has(> .cnt + .btn) > .segc{flex:1 1 auto}
+  .spanel .rbar:has(> .cnt + .btn) > .g.size{flex:1 1 auto}
+  .spanel .rbar:has(> .cnt + .btn) > .segc label,
+  .spanel .rbar:has(> .cnt + .btn) .sizeseg button{flex:1 1 auto}
+  .spanel .rbar:has(> .cnt + .btn) .sizeseg{display:flex;flex:1 1 auto} } }
 @container sp (max-width:879.98px){ .spanel .rbar.cards .brk{display:block} }
 @container sp (max-width:499.98px){ .spanel .rbar.cards .brk{display:none} .spanel .rbar.cards
   .brka{display:block} }

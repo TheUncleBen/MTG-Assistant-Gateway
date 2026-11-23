@@ -444,7 +444,7 @@ def binder_head(
         n = counts.get(current)
         cn = f" <span class='cn'>{n:,}</span>" if n else ""
         return (
-            f"<p class='bn-up'><a class='bn-back' href='/binder'>{icon('back')}Binder</a></p>"
+            f"{back_link('Binder', '/binder')}"
             f"<div class='ui-head phead bnhead'><h1>{esc(name)}{cn}</h1>{acts}</div>{line}"
         )
     switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
@@ -658,7 +658,7 @@ def check_cell(name: str, value: str, label: str, *, checked: bool = False, form
 def group_row(title_html: str, meta_html: str = "", *, check_html: str = "", action_html: str = "") -> str:
     """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta
     line. With ``action_html`` (a row list, ``.ui-rows``): the meta line sits under the title and
-    the action (Open deck, as a capsule) ends the row."""
+    the action (Open deck, a standard button: ui.button_link) ends the row."""
     chk = check_html or "<span></span>"
     if action_html:
         small = f"<small>{meta_html}</small>" if meta_html else ""
@@ -681,18 +681,18 @@ def row_menu(href: str, name: str) -> str:
 
 
 def row_open(href: str, word: str) -> str:
-    """A row list's main action (Review, Details, Open): the word in a capsule from 600 px; on a
+    """A row list's main action (Review, Details, Open): the word in a standard button from 600 px; on a
     phone a 44 px chevron, so the title keeps its line at any text size (the word stays for
     screen readers)."""
     return (
-        f"<a class='ui-cap' href='{esc(href)}' aria-label='{esc(word)}'>"
+        f"<a class='btn' href='{esc(href)}' aria-label='{esc(word)}'>"
         f"<span class='sm-hide'>{esc(word)}</span>"
         "<span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )
 
 
 def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str:
-    """A row list's action cell: the one main action as a capsule (cap_link), then the ⋮
+    """A row list's action cell: the one main action (row_open), then the ⋮
     (row_menu). ``hidden_html``: forms the menu submits (a snapshot's Restore) that the row no
     longer shows; the row's page has them in view."""
     hid = f"<span class='acts' hidden>{hidden_html}</span>" if hidden_html else ""
@@ -718,9 +718,9 @@ def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> s
 
 
 def open_link(href: str, text: str) -> str:
-    """The row's open action: the word in a capsule from 600 px, a 44 px chevron on phones."""
+    """The row's open action: the word in a standard button from 600 px, a 44 px chevron on phones."""
     return (
-        f"<a class='act ui-cap' href='{esc(href)}' aria-label='{esc(text)}'>"
+        f"<a class='act btn' href='{esc(href)}' aria-label='{esc(text)}'>"
         f"<span class='sm-hide'>{esc(text)}</span><span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )
 
@@ -878,6 +878,19 @@ def menu_opener(text: str, href: str, box_id: str, *, icon_name: str = "") -> st
     return f"<a href='{esc(href)}' {box_open_attr(box_id)}>{ic}{esc(text)}</a>"
 
 
+def back_link(text: str, href: str, *, cls: str = "", attrs: str = "", line: bool = True) -> str:
+    """The way back a level, one look on every page (docs/UI-STANDARD.md): the grey capsule with
+    the back arrow, in a line of its own at the page's top left, above the title. ``text`` names
+    where it goes ("Binder", "Back to Proposals"). ``cls``: more classes for the line.
+    ``line=False``: the capsule alone, for a row that has other ways to go beside it (a report's
+    Back to the deck, Deck history, All reports)."""
+    extra = f" {attrs}" if attrs else ""
+    link = f"<a class='ui-cap ui-back' href='{esc(href)}'{extra}>{icon('back')}<span>{esc(text)}</span></a>"
+    if not line:
+        return link
+    return f"<p class='{f'ui-back-line {cls}' if cls else 'ui-back-line'}'>{link}</p>"
+
+
 def side_panel(
     heading_html: str,
     body_html: str,
@@ -885,14 +898,21 @@ def side_panel(
     label: str,
     close_href: str,
     back_text: str,
+    page_title: str = "",
+    merge_title: bool = False,
 ) -> str:
     """One item opened from a list: from 1100 px a panel beside the list with a × that
     closes it (Esc too); narrower, the same markup is the item's own page with a back link. The
-    × and the back link both go to ``close_href`` (the list); put the result in ``split``."""
+    × and the back link both go to ``close_href`` (the list); put the result in ``split``.
+    ``page_title`` (plain text): the page title the item has as its own page; beside the list the
+    list's page has the title, so it is not shown there. ``merge_title``: the page title says what
+    the panel's heading says, so as its own page the heading is not drawn a second time."""
+    title = f"<h1 class='page-only'>{esc(page_title)}</h1>" if page_title else ""
+    dh = "dh panel-only" if page_title and merge_title else "dh"
     return (
         f"<aside class='ui-drawer' aria-label='{esc(label)}'>"
-        f"<p class='page-only'><a class='ui-cap' href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
-        f"<div class='dh'><h2>{heading_html}</h2><a class='close btn panel-only' href='{esc(close_href)}'"
+        f"{back_link(back_text, close_href, cls='page-only')}{title}"
+        f"<div class='{dh}'><h2>{heading_html}</h2><a class='close btn panel-only' href='{esc(close_href)}'"
         f" aria-label='Close' title='Close'>{icon('x')}</a></div>{body_html}</aside>"
     )
 

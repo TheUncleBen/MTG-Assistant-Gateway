@@ -734,7 +734,7 @@ def build(
         "<strong>Group by</strong>). The chips pick Everything, Changes, Snapshots or Tests; the search "
         "finds a deck by name, and the filters "
         "narrow by deck and when "
-        "(today, the last 7, 30 or 90 days or this year, counted in UTC days), and "
+        "(today, the last 7, 30 or 90 days or this year, counted in your own local days), and "
         "<strong>Load more</strong> adds the next 25 under the list. Changes waiting for you, and every "
         "change your assistants proposed, are on <a href='/proposals?show=all'>Proposals</a>.</span></li>"
         "<li><span>A snapshot row links to the change it was taken before and has <strong>Restore (review "

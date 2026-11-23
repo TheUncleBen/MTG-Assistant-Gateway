@@ -37,12 +37,13 @@ PAGES = [
 ]
 TEXT = (
     ".ygrp h2, .ygrp .lbl, .ygrp .val, .ygrp .sb, .ygrp .yfoot, .ygrp .lbl small, .yme b, .yme .sub, "
-    ".ydisc .btn, .justin .t, .justin .btn, .mtgbox h2, .mtgbox p, .mtgbox .acts button, .yback, h1"
+    ".ydisc .btn, .justin .t, .justin .btn, .mtgbox h2, .mtgbox p, .mtgbox .acts button, .ui-back, h1"
 )
 # rows and buttons on these pages under 44 px tall (a box's buttons on a touch screen: with a mouse
 # they are the site's 39 px box buttons, as every other box)
 TAPS = """
-(touch) => [...document.querySelectorAll('.ygrp a.yrow, .ygrp button.yrow, .ydisc .btn, .justin .btn, .yback'
+(touch) => [...document.querySelectorAll(
+    '.ygrp a.yrow, .ygrp button.yrow, .ydisc .btn, .justin .btn, .ui-back'
     + (touch ? ', .mtgbox .acts button' : ''))]
   .filter(e => e.getBoundingClientRect().width && getComputedStyle(e).visibility !== 'hidden')
   .filter(e => e.getBoundingClientRect().height < 43.5)

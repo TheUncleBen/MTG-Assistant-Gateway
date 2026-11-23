@@ -170,7 +170,7 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
     )
     details = h.get("/account/details").text
     assert "<title>Account details · " in details
-    assert "<a class='bn-back yback' href='/account'>" in details and "<h1>Account details</h1>" in details
+    assert "<a class='ui-cap ui-back' href='/account'>" in details and "<h1>Account details</h1>" in details
     assert "Sign out on all my devices" in details and ">Sign out</button>" not in details
 
 
