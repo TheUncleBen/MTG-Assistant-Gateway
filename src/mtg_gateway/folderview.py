@@ -321,7 +321,7 @@ def level_html(
         tiles = "".join(folder_tile_html(t, order=order) for t in level.folders)
         out += (
             "<section class='fv-area' aria-labelledby='fv-folders'>"
-            f"<h2 id='fv-folders'>Folders <span class='n'>{len(level.folders)}</span></h2>"
+            f"<h2 id='fv-folders'>Folders <span class='ui-sub'>{len(level.folders)}</span></h2>"
             f"<ul class='plain folderlist {esc(view)}'>{tiles}</ul></section>"
         )
     if level.decks:
@@ -352,6 +352,34 @@ def level_html(
 
 
 FOLDER_CSS = """
+/* My decks' head: the switch names the page and sits in the middle (full width on a phone, the
+   shared .hubseg rule), New deck, New folder and New package at the row's end; where the row
+   has no room for both, the three buttons share a row of their own under the switch. Whole
+   buttons at the standard size at every width: three on one row while their words fit, one a row
+   when they don't (large text), never two and one */
+.dkhead{container:dkhead/inline-size;margin:0 0 12px}
+.dkhead .dkrow{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;align-items:center;
+  gap:12px;margin:0}
+.dkhead .acts{display:flex;gap:8px;align-items:center;min-width:0;max-width:100%}
+.dkhead .acts > *{margin:0;flex:1 1 auto;white-space:nowrap}
+@container dkhead (min-width:76em){
+  .dkhead .dkrow{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+  .dkhead .hubseg{grid-column:2}
+  .dkhead .acts{grid-column:3;justify-self:end} }
+@container dkhead (max-width:29em){
+  .dkhead .acts{flex-direction:column;align-items:stretch}
+  .dkhead .acts > *{white-space:normal} }
+/* a phone: the plus and the thing ("+ Deck", "+ Folder", "+ Package"), so the three whole
+   buttons fit a 360 px row at the standard size; "New" stays in each button's name */
+.dkhead .acts .nn{display:inline-block}
+@media (max-width:599.98px){
+  .dkhead .dkrow{justify-items:stretch}
+  .dkhead .acts .nw{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);
+    white-space:nowrap}
+  .dkhead .acts .nn::first-letter{text-transform:uppercase}
+  @container dkhead (min-width:22.2em){
+    .dkhead .acts{flex-direction:row;align-items:center}
+    .dkhead .acts > *{white-space:nowrap} } }
 /* My decks' Show filter (Decks and packages, Decks only, Packages only), the package tiles
    static/decks.js marks (the package icon in place of the initial, a Package label in the
    detail line) and the tiles it hides */
@@ -375,10 +403,9 @@ ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
 .crumbs a.ui-cap{overflow-wrap:normal;white-space:nowrap;flex:none}
 .crumbs li[aria-current] span{font-weight:700}
 .fv-area{margin:0 0 14px}
-.fv-area > h2{display:flex;align-items:center;gap:.45rem;margin:0 0 8px;font-size:1.05rem;
-  overflow-wrap:anywhere}
-.fv-area > h2 .n{font-size:.8rem;font-weight:700;color:var(--text-muted);
-  border:1px solid var(--border);border-radius:10px;padding:0 .45rem;line-height:1.6}
+/* the areas' headings are the standard h2; the folders' count beside its word, as a list's
+   heading has it (ui.list_head) */
+.fv-area > h2 .ui-sub{font-size:1rem;font-weight:400;margin:0}
 .fv-area .empty{margin:0;color:var(--text-muted)}
 .fv-area ul.decklist{margin-bottom:0}
 ul.folderlist{display:grid;gap:10px;margin:0}

@@ -457,7 +457,7 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
             browser, page, errors = _page(p, server, sid, 1280, "light", exe)
             page.goto(f"{server.base}/decks", wait_until="networkidle")
             # the heading: + New folder beside New deck, the one orange button
-            head = page.locator(".ui-head.phead")
+            head = page.locator(".dkhead")
             assert head.locator("h1").inner_text() == "My Decks"
             assert head.locator(".acts .btn-primary").inner_text().strip() == "New deck"
             assert page.locator(".listbar a[href='/folders']").count() == 0

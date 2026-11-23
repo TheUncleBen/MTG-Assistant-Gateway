@@ -18,7 +18,7 @@ INTROS = [
     ("/history", "p.ui-sub"),
     ("/proposals", "p.ui-sub, p.ui-note"),
     ("/reports", "p.ui-sub, p.ui-note"),
-    ("/search", "#s-results .panel > p.muted"),
+    ("/search", "main p.ui-sub"),
     ("/cards", ".panel > p.muted"),
     ("/notifications", "p.ui-sub, p.bell-foot"),
     ("/lists/custom", "p.ui-sub"),

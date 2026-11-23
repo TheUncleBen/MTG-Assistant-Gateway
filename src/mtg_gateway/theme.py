@@ -435,7 +435,9 @@ label{display:block;margin:.9rem 0 .3rem;font-weight:700}
 input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],
 /* height:auto from 44 px: the box grows with its text (at 200% a fixed 44 px box left the words
    touching its edges, confirmation AD3) */
-input[type=url],select{width:100%;height:auto;min-height:var(--ctl);padding:.3em 1rem;font:inherit;
+/* the sides give way on a very narrow box (320 px with the browser's text doubled), so a hint
+   fits: 1rem at every usual size */
+input[type=url],select{width:100%;height:auto;min-height:var(--ctl);padding:.3em min(1rem,4vw);font:inherit;
   border-radius:var(--radius);
   border:1px solid var(--control-border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
@@ -1117,8 +1119,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
 .home .hero > div{flex:1 1 14rem;min-width:0}
-.home .hero h1{margin:0;font-size:min(1.6rem,8vw)}
-.home .hero .sub{color:var(--text-muted);margin:.2rem 0 0}
+.home .hero h1{margin:0}
+.home .hero .ui-sub{margin:.1rem 0 0}
 .home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:1rem;
   margin:0 0 1rem}
 .home .tile{display:flex;flex-direction:column;gap:.35rem;padding:1rem;background:var(--surface);
@@ -2567,7 +2569,8 @@ SEARCH_PANEL_CSS = """
 .spanel .sp-name{flex:1 1 16rem;min-width:0}
 .spanel .sp-name > label{display:block;font-weight:700;margin:0 0 .35rem}
 .spanel .sp-name .search{margin:0}
-.spanel .sp-name .search > input{flex:1 1 auto;min-width:0}
+/* 320 px at the browser's largest text: the box's side room gives way to its hint; 1rem otherwise */
+.spanel .sp-name .search > input{flex:1 1 auto;min-width:0;padding-inline:min(1rem,4vw)}
 /* the search button is as tall as its box at every text size (polish AG2: 44 px beside 64 px) */
 .spanel .sp-name .search button{height:auto;align-self:stretch;min-height:var(--ctl);width:var(--ctl);
   padding:0;flex:none;display:inline-flex;align-items:center;justify-content:center}
@@ -2665,7 +2668,8 @@ SEARCH_PANEL_CSS = """
    group one piece; the bar breaks after Sort when it is narrow, so no group is ever alone on a row */
 .spanel .rbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px 12px;
   border-top:1px solid var(--border-soft);padding-top:12px}
-.spanel .rbar .cnt{font-size:1.15rem;font-weight:900;margin:0 auto 0 0;min-width:0}
+/* the count is the list's heading: the standard h2, level with the bar's controls */
+.spanel .rbar .cnt{margin:0 auto 0 0;min-width:0}
 .spanel .rbar .g{display:inline-flex;align-items:center;gap:8px;flex:none;margin:0}
 .spanel .rbar .cnt + .btn{margin:0}  /* Select beside the count, level with it (not a form's button) */
 .spanel .rbar .lbl{font-weight:400;color:var(--text-muted);margin:0;white-space:nowrap}
@@ -2688,6 +2692,15 @@ SEARCH_PANEL_CSS = """
   .spanel .rbar .sort > .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);
     white-space:nowrap} }
 @container sp (max-width:659.98px){ .spanel .rbar .brk{display:block} }
+/* a bar in two rows (an open Fold beside the rail): the row under the count is filled from edge
+   to edge, its controls sharing the width, so no corner of the panel is left empty (the owner's
+   filter panel rule). The count's row keeps its controls at the right, the count at the left */
+@media (min-width:600px){ @container sp (max-width:659.98px){
+  .spanel .rbar:not(.cards) > .g,.spanel .rbar:not(.cards) > .segc{flex:1 1 auto}
+  .spanel .rbar:not(.cards) > .g.sort > span{flex:1 1 auto}
+  .spanel .rbar:not(.cards) > .g.sort .msel-btn,.spanel .rbar:not(.cards) > .g.sort select{width:100%}
+  .spanel .rbar:not(.cards) > .segc label,.spanel .rbar:not(.cards) .sizeseg button{flex:1 1 auto}
+  .spanel .rbar:not(.cards) .sizeseg{display:flex;flex:1 1 auto} } }
 @container sp (max-width:879.98px){ .spanel .rbar.cards .brk{display:block} }
 @container sp (max-width:499.98px){ .spanel .rbar.cards .brk{display:none} .spanel .rbar.cards
   .brka{display:block} }
@@ -2769,7 +2782,7 @@ SEARCH_PANEL_CSS = """
     position:sticky;
     top:0;z-index:2;background:var(--bg);padding:.75rem 0;border-bottom:1px solid var(--border);margin:0
       0 .75rem}
-  .spanel .sp-sheet-head h2{margin:0;font-size:1.2rem}
+  .spanel .sp-sheet-head h2{margin:0}
   .spanel .sp-sheet-head .close{margin:0;width:44px;min-height:44px;height:44px;padding:0;
     border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
   .spanel .sheet-size{display:block;margin:14px 0 0}
@@ -2816,7 +2829,7 @@ html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,
    letter (last, after the headings' own sizes above; the same bounds as the headings' own, so a
    412 px phone at 200% keeps "Preconstructed" whole too, batch 10 AB5) */
 @media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.2rem,6vw)}
-  .home .hero h1{font-size:min(1.6rem,8vw)} .mtgbox .bh{--th:min(1.25rem,9vw)}}
+  .mtgbox .bh{--th:min(1.25rem,9vw)}}
 """
 
 

@@ -328,7 +328,7 @@
   // press draws the other side at once, without a page load: the form's show value, the heading,
   // the filter box's words, the page's orange button and the address follow it (the browser's
   // Back comes back the same way), and mark() shows the packages or the decks.
-  var seg = $(".hubhead .hubseg");
+  var seg = $(".dkhead .hubseg");
   function isPackages(href) { return /[?&]show=packages(?:&|$)/.test(href || ""); }
   function applyShow(packages, href) {
     var s = form.querySelector("input[name=show]");
@@ -344,10 +344,10 @@
       else a.removeAttribute("aria-current");
     });
     var word = packages ? "Packages" : "My Decks";
-    var h1 = $(".hubhead h1");
+    var h1 = $(".dkhead h1");
     if (h1) h1.textContent = word;
     document.title = document.title.replace(/^(My Decks|Packages)/, word);
-    var newDeck = $(".hubhead .acts a[href='/decks/new']"), newPkg = $(".hubhead .acts a[href='/decks/new-package']");
+    var newDeck = $(".dkhead .acts a[href='/decks/new']"), newPkg = $(".dkhead .acts a[href='/decks/new-package']");
     if (newDeck) newDeck.classList.toggle("btn-primary", !packages);
     if (newPkg) newPkg.classList.toggle("btn-primary", packages);
     var q = $("#q", form), lab = form.querySelector("label[for=q]"), show = form.querySelector(".sp-show");
