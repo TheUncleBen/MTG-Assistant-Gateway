@@ -702,6 +702,23 @@ ADMIN_CSS = """
 .adm .miss-grid button{width:100%;min-height:var(--ctl);display:inline-flex;align-items:center;
   justify-content:center;gap:.4rem}
 .adm .adm-nav{margin:0 0 1rem;display:flex;width:100%}
+/* seven tabs on a phone: the switch's script (static/topbar.js) lays equal parts in even rows,
+   and seven of them as wide as "Card scanner" fit a phone only one a row (seven rows, half the
+   screen). Where it settles on that and the page has 22em of room (a 360 px phone at 100% text),
+   the bar is two rows instead, four tabs over three, the three in the middle of their row: every
+   tab the same width (the switch's rule), no tab alone, none cut off, nothing scrolling. Narrower
+   than that (a 320 px phone, or large text) the rows stay one tab each. */
+@container (min-width:22em){
+  .adm .adm-nav.seg-grid:is([style*="--seg-cols: 1"],[style*="--seg-cols:1"]){
+    grid-template-columns:repeat(8,minmax(0,1fr))}
+  .adm .adm-nav.seg-grid:is([style*="--seg-cols: 1"],[style*="--seg-cols:1"]) > a{
+    grid-column:span 2;padding-left:.15rem;padding-right:.15rem}
+  .adm .adm-nav.seg-grid:is([style*="--seg-cols: 1"],[style*="--seg-cols:1"]) > a:nth-child(5){
+    grid-column:2 / span 2}
+}
+/* a card's heading is the site's section heading (docs/UI-STANDARD.md), not the smaller one
+   theme's .ui-card > h2 still sets */
+.adm .ui-card > h2{font-size:min(1.2rem,7vw);margin-bottom:.5rem}
 .adm .notice{margin:0 0 1rem}
 .adm .ui-widgets .wdg .det{overflow-wrap:anywhere;min-width:0}
 /* the number and its unit ("0.7.37 running") may part at 200% text: two flex items, not one word */
@@ -719,7 +736,6 @@ ADMIN_CSS = """
 .adm .wdg .go .btn,.adm .wdg .go a.btn-plain{white-space:normal;overflow-wrap:anywhere;height:auto;
   text-align:center}
 .adm .ui-table .title .labs{display:inline-flex;flex-wrap:wrap;gap:.3rem;align-items:center}
-.adm .ui-table .title .sub .ui-lbl,.adm .ui-table .title .sm-only .ui-lbl{min-height:22px;font-size:.78rem}
 .adm .ui-table .sm-only{display:none}
 .adm .ui-table .sub{font-weight:400;color:var(--text-muted);font-size:.86rem}
 .adm .ui-table .tr > span{min-width:0;overflow-wrap:anywhere}
@@ -738,7 +754,7 @@ ADMIN_CSS = """
 .ao .ao-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;align-items:start}
 .ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
 .ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}
-.ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;min-height:22px;padding-top:2px;padding-bottom:2px}
+.ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;padding-top:2px;padding-bottom:2px}
 /* break-word: a word breaks inside only when wider than the whole control, never because the
    label took its share ("Not configur/ed", "AUTHENTIK.md."; batch 10, AB7) */
 .ao .ui-row .ctl{overflow-wrap:break-word;font-size:.95rem}
@@ -821,11 +837,8 @@ ADMIN_CSS = """
   border-top:1px solid var(--border-soft)}
 .am .more-body[hidden]{display:none}
 .am .more-body .ui-meta{margin:0;font-size:.9rem}
-.am .ui-tools .f{flex:0 0 auto;width:10rem}
-@media (max-width:599.98px){.am .ui-tools .f{width:8.8rem}}
-/* Card models */
-.amo .ui-tools .f{flex:0 0 auto;width:13rem}
-@media (max-width:599.98px){.amo .ui-tools .f{width:9.5rem}}
+/* Card models (its filter row, as Metrics', is the shared flexible .ui-tools row: the search
+   and the pickers share the line, or each takes a whole line, with no fixed widths) */
 .amo .ui-table .tr.model .title .t{font-weight:700;overflow-wrap:break-word}
 /* a narrow table (a phone, or large text): the card's name takes the whole first line, the ⋮
    beside the line under it, so a long name never breaks inside a word */
