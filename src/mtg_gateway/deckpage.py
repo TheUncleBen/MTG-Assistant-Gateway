@@ -4188,6 +4188,7 @@ html.cardview-open{overflow:hidden}
    apart (polish B5). Wrapped to a line of its own (large text on a phone), Lands only starts at
    the line's edge (0.7.47) */
 .statctl .seg2{display:inline-flex;flex-wrap:wrap;gap:.35rem;margin-right:.5rem}
+.statctl .ui-chip{min-width:var(--ctl);justify-content:center}  /* "Pie": a 44 px target too */
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
 .k5{background:#e87ba4} .k6{background:#9085e9} .k7{background:#e34948} .k0{background:#8a8a8a}
