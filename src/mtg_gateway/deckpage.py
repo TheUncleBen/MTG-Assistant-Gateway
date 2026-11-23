@@ -3644,9 +3644,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .newcat .btn{flex:none;width:var(--ctl);min-width:var(--ctl);min-height:var(--ctl);padding:0;
   justify-content:center;margin:0}
 @container (max-width:34em){ .addpreview{grid-template-columns:1fr}
-  .addpreview .appic{width:min(100%,11rem);margin:0 auto} }
+  .addpreview .appic{width:min(100%,11rem,50vw);margin:0 auto} }
 @media (max-width:599.98px){ .addpreview{grid-template-columns:1fr}
-  .addpreview .appic{width:min(100%,11rem);margin:0 auto} }
+  .addpreview .appic{width:min(100%,11rem,50vw);margin:0 auto} }
 @media (max-width:420px){ .addpreview .afrow{grid-template-columns:1fr} }
 /* Paste a list / Add from a scan (deck.js openBatch): the list, the review of what was found,
    each card with its category, and the lines left out */
