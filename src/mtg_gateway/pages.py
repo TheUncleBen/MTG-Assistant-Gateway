@@ -1326,6 +1326,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             label=f"Proposal {no}for {where}",
             close_href=close,
             back_text="Back to Proposals",
+        ).replace(
+            "<div class='dh'>",
+            # its own page (a phone, a Fold, "Open as a full page") has the page's title
+            f"<h1 class='page-only'>{html.escape(f'Proposal {no}for {where}')}</h1><div class='dh'>",
+            1,
         )
         if full:
             body = f"<div class='pr-full'>{ui.split('', panel)}</div>"
@@ -4071,7 +4076,7 @@ def _confirm_body(
     out.append(
         guarded_form(
             hidden=hidden,
-            buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-primary btn-lg")],
+            buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-primary")],
             action="/proposals/apply",
             extra=f"<a class='btn btn-plain' href='{html.escape(back)}'>Not now</a>",
             tab_reachable=True,
@@ -4184,12 +4189,12 @@ def _result_body(run: dict[str, Any], csrf: str | None) -> str:
         return "<ul class='results'>" + "".join(lis) + "</ul>"
 
     if run["applied"]:
-        out.append(f"<h2 class='ui-section'>{ui.status_label('applied')}</h2>" + items(run["applied"], False))
+        out.append(f"<h2>{ui.status_label('applied')}</h2>" + items(run["applied"], False))
     if run["failed"]:
-        out.append(f"<h2 class='ui-section'>{ui.status_label('failed')}</h2>" + items(run["failed"], True))
+        out.append(f"<h2>{ui.status_label('failed')}</h2>" + items(run["failed"], True))
     if run["not_sent"]:
         out.append(
-            f"<h2 class='ui-section'>{ui.label('Not sent', 'grey', 'x')}</h2>"
+            f"<h2>{ui.label('Not sent', 'grey', 'x')}</h2>"
             "<p class='muted'>These are still waiting; open one to fix or reject it.</p>"
             + items(run["not_sent"], True)
         )

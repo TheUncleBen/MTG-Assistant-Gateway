@@ -174,16 +174,13 @@ def deck_box_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str
 # Shared by the Proposals page, the strip and the confirm and result pages. Colours are the theme's
 # tokens (theme.py), each pair at least 4.5:1 in light and dark; rows are at least 44 px high.
 LIST_CSS = """
-/* the confirm's and Undo's locked buttons stay in the Tab order (click guard data-tab): outlined in
-   their colour, not faded, as the review page's locked ones are */
-form.guarded button[data-guard][aria-disabled=true]{opacity:1;background:transparent;
-  border:1px dashed currentColor;cursor:default}
-form.guarded button.primary[aria-disabled=true]{color:var(--orange-text)}
-form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
-/* the same for the Apply box's button, which sits in the box's action row (form='apply-f') */
-.ui-box button[data-guard][aria-disabled=true]{opacity:1;background:transparent;
-  border:1px dashed currentColor;cursor:default}
-.ui-box button.primary[data-guard][aria-disabled=true]{color:var(--orange-text)}
+/* the confirm's and Undo's locked buttons stay in the Tab order (click guard data-tab) and keep
+   their own look, the orange and the red at full strength, as the review page's locked Apply and
+   Reject do (theme.py): the note beside them says they are locked, a dashed outline read as a
+   button that cannot be pressed at all. The same for the Apply box's button, which sits in the
+   box's action row (form='apply-f') */
+form.guarded button[data-guard][aria-disabled=true],
+.ui-box button[data-guard][aria-disabled=true]{opacity:1;cursor:wait}
 /* Reject's short confirm in the bar; focus moves to its Reject by script */
 .wbar .rejectask{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;flex:1 1 100%}
 .wbar .rejectask span{flex:1 1 10rem;font-weight:700}
@@ -204,9 +201,9 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .pick.all{border-bottom:1px solid var(--border-soft);font-weight:700}
 .wrow .review{display:flex;align-items:center;padding:0 .6rem;min-width:44px;min-height:44px;
   justify-content:center;white-space:nowrap}
-.st{display:inline-block;padding:.05rem .45rem;border-radius:3px;font-size:.8rem;font-weight:700;
-  border:1px solid var(--border-soft);background:var(--surface-2);color:var(--text)}
-.st.exp,.st.ver{font-weight:400}
+/* a row's small facts (Expires in, Version) are tags: the standard's one tag look */
+.st{display:inline-flex;align-items:center;min-height:24px;padding:.15rem .55rem;border-radius:999px;
+  font-size:.82rem;font-weight:600;line-height:1.25;background:var(--surface-2);color:var(--text)}
 .wbar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.6rem .75rem;margin:.75rem 0 0;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel)}
 .wbar:not(.inline){position:sticky;bottom:.5rem;z-index:6;box-shadow:var(--shadow)}
@@ -217,7 +214,7 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .wbar .clear{background:none;border:0;color:var(--link);text-decoration:underline;padding:0 .4rem}
 .wbar .clear[hidden]{display:none}
 .dgroup{margin:0 0 1rem}
-.dgroup h2{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;font-size:1.1rem;margin:0 0 .25rem}
+.dgroup h2{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:0 0 .25rem}
 .dgroup h2 .pick{flex:0 1 auto;padding:.3rem 0;min-height:44px;align-items:center}
 .dgroup h2 .meta2{color:var(--text-muted);font-size:.86rem;font-weight:400}
 /* links a thumb taps on their own are 44 px tall */

@@ -347,8 +347,10 @@ def latest_widget(latest: dict[str, Any] | None, *, now: float) -> str:
     href = f"/history/reports/{esc(latest['report_id'])}"
     det = (
         status_label(latest.get("status"), research=latest.get("research"))
-        + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Unnamed deck')}</a>, "
-        f"{ui.when(latest.get('taken_at'), now=now)}</span>"
+        # the name and the time are two items of the line: after a name that fills the tile's width
+        # the time starts the next line by itself, never as ", 14 min ago"
+        + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Unnamed deck')}</a></span>"
+        f"<span>{ui.when(latest.get('taken_at'), now=now)}</span>"
     )
     trend = "/history?" + urlencode({"deck_id": str(latest.get("deck_id") or ""), "type": "tests"})
     return ui.widget(
@@ -582,6 +584,31 @@ def paste_test_html(csrf: str) -> str:
 # one a row when the text is so large that half the width cannot hold a word (the minimum is in
 # the widgets' own text size, so it grows with a phone's font scale or a text-only zoom). Shared
 # by the dashboard pages.
+# The UI standard's looks (docs/UI-STANDARD.md) where the shared sheet still has an older one: a
+# widget's button is the one button (1rem words, 1rem sides, on a phone too), a status label is
+# 24 px with .82rem words wherever it sits, a panel's heading is the section heading, a sub-heading
+# has the one bottom margin. The Assistant place's pages (Proposals, History, Reports, a report,
+# My activity) add this after the shared sheet.
+ONE_LOOK_CSS = """
+.wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{padding:0 1rem;font-size:1rem}
+.ui-table.ui-rows .sub .ui-lbl,.wdg .det .ui-lbl,.act-table .evt .ui-lbl{min-height:24px;font-size:.82rem}
+.ui-drawer .dh h2,.ui-card > h2{font-size:min(1.2rem,7vw)}
+.ui-section{margin-bottom:.4rem}
+/* one item opened from a list (a proposal, a History row's Details). Beside the list it keeps the
+   lists' column (1200 px), the panel a third of it; as its own page (a phone, a Fold, "Open as a
+   full page") it is the narrow reading column, centred, under the page's title (the standard's
+   h1), with the panel's heading as its first section heading */
+@media (min-width:1100px){main.wrap.ui-wide:has(.ui-split.with-panel){max-width:1200px}
+  .ui-split.with-panel{grid-template-columns:minmax(0,1fr) min(440px,36%)}}
+@media (max-width:1099.98px){.ui-split.with-panel .ui-drawer{max-width:44rem;margin:0 auto}}
+.ui-drawer h1.page-only{margin:0}
+.ui-drawer h1 + .dh{margin-top:.5rem}
+/* the panel's buttons fill their rows: when they wrap, no button is left alone at one side (a
+   button's form is the row's item, the button fills it) */
+.ui-drawer .ui-actions form{display:flex;flex:1 1 auto;margin:0}
+.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{flex:1 1 auto;margin:0}
+"""
+
 PHONE_WIDGETS_CSS = """
 @media (max-width:599.98px){
   .gb-dash .ui-widgets{--wdg-min:max(8.5em,calc(50% - .25rem))}
@@ -595,6 +622,7 @@ PHONE_WIDGETS_CSS = """
 
 REPORTS_PAGE_CSS = (
     PHONE_WIDGETS_CSS
+    + ONE_LOOK_CSS
     + """
 /* the Reports page */
 .reports-page .rp-paste{margin:1rem 0}

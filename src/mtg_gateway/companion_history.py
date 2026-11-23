@@ -1038,6 +1038,7 @@ def add_history_routes(
             heading=False,
             current=card_models_view.PAGE,
             viewer_only=True,
+            main_class="ui-narrow",
             extra_scripts=("export.js", "cardmodels.js"),
             extra_css=card_models_view.CSS,
         )

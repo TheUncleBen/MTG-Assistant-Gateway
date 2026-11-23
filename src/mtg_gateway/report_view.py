@@ -2741,7 +2741,7 @@ REPORT_CSS = """
 .report .forge-results .meter{display:inline-block;width:3.5rem;height:6px;margin-right:.4rem;
   border-radius:3px;background:var(--surface-3);overflow:hidden;vertical-align:middle}
 .report .forge-results .meter span{display:block;height:100%;background:var(--orange)}
-.report .forge-results h3{margin:1rem 0 .35rem}
+.report .forge-results h3{margin:1rem 0 .4rem}
 .report .forge-results .ended{list-style:none;margin:0;padding:0;border:1px solid var(--border-soft);
   border-radius:3px;max-width:32rem}
 .report .forge-results .ended li{display:flex;justify-content:space-between;gap:.75rem;padding:.35rem .6rem;

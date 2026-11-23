@@ -1004,9 +1004,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 @media (width >= 1024px){ @container topbar (58em <= width < 100em){
   body:not(.app) .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
   body:not(.app) .topbar .brand{margin-right:.25rem} } }
-/* The proposal review's three choices sit at one height, and the deck banner's
-   Comments link matches its Like and Bookmark buttons. */
-.choice button,.choice .btn{min-height:48px}
+/* The deck banner's Comments link matches its Like and Bookmark buttons. */
 .banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
 /* A control that carries text a member typed (a username in Follow, a folder's name) shrinks and
    ellipsises inside its row, with the whole text in its title, instead of widening the page (a
@@ -1879,7 +1877,8 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
    facts line, the Install page's address): on a touch screen its tap area grows above and below
    the words to 44 px without moving the lines around it (the padding makes the box, the negative
    margins keep the line box as it is) */
-  .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
+  .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap),.ui-meta dd a,
+  .wdg .det a,
   .rv-meta a,.inst a.mdaddr,a.tap{display:inline-block;padding:14px 0;margin:-14px 0;min-width:44px}
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
@@ -1910,7 +1909,8 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-caps{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-left:4px}
 /* a title that opens its row or group, or a deck named in a panel or a widget: the text colour,
    bold, underlined on hover and focus, so the page carries no blue text */
-.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
+.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap),.ui-meta dd a,
+.wdg .det a,
 .trend .tdata th a{color:var(--text);font-weight:700;text-decoration:none}
 .ui-table .title .t a:hover,.ui-table .title a.t:hover,.ui-table .tr.group > span a:hover,
 .ui-meta dd a:hover,.wdg .det a:hover,.trend .tdata th a:hover,

@@ -256,7 +256,6 @@ def confirm_box_html(card: str, *, csrf: str, back: str) -> str:
 
 
 CSS = """
-.mm-page{max-width:46rem;margin:0 auto}
 .mm-explain{margin:1rem 0 1.5rem;border:1px solid var(--border-soft);border-radius:14px;overflow:hidden;
   background:var(--surface)}
 .mm-q+.mm-q{border-top:1px solid var(--border-soft)}
@@ -269,7 +268,7 @@ CSS = """
 .mm-q p{margin:0;padding:0 1rem 1rem;color:var(--text-muted);line-height:1.5}
 .mm-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;
   margin:0 0 .5rem}
-.mm-top h2{margin:0;font-size:1.15rem}
+.mm-top h2{margin:0}
 .mm-n{color:var(--text-muted);font-weight:600}
 .mm-search{margin:0;flex:1 1 14rem;max-width:20rem}
 @media (max-width:600px){.mm-search{max-width:none}}
@@ -287,8 +286,9 @@ CSS = """
 .mm-sum .nm{overflow-wrap:break-word}
 .mm-when{color:var(--text-muted);font-weight:400;font-size:.85rem;overflow-wrap:break-word}
 .mm-item>.kebab{margin:2px 4px 0 0}
-.mm-body{padding:0 12px 12px}
-.mm-body h3{font-size:.95rem;margin:.25rem 0 .5rem;color:var(--text-muted);font-weight:600}
+/* what is saved and its buttons use the row's whole width, under the ⋮ too (48 px: the ⋮ and its margin) */
+.mm-body{padding:0 12px 12px;margin-right:-48px}
+.mm-body h3{margin-top:.25rem}
 .mm-does{margin:0 0 .75rem;padding-left:1.1em;line-height:1.5;overflow-wrap:break-word}
 .mm-does li+li{margin-top:.25rem}
 .mm-older{margin:0 0 .75rem}
@@ -297,7 +297,7 @@ CSS = """
   color:var(--text-muted);font-weight:600}
 .mm-raw summary::-webkit-details-marker{display:none}
 .mm-raw summary .chev{margin-left:0}
-.mm-raw pre{margin:0;padding:.75rem;border-radius:10px;background:var(--surface-2,var(--bg));
+.mm-raw pre{margin:0;padding:.75rem;border-radius:var(--radius-panel);background:var(--surface-2,var(--bg));
   border:1px solid var(--border-soft);font-size:.85rem;line-height:1.4;white-space:pre-wrap;
   overflow-wrap:anywhere;max-height:20rem;overflow:auto}
 .mm-acts{display:flex;flex-wrap:wrap;gap:.5rem}

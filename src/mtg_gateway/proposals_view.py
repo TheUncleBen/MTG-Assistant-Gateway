@@ -26,6 +26,7 @@ from .decks import ADMIN_CLIENT, BROWSER_CLIENT, UNDO_KINDS
 from .digits import is_digits
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
+from .reports_page import ONE_LOOK_CSS
 from .theme import esc
 from .waiting_strip import line_for
 
@@ -1027,7 +1028,9 @@ __all__ = [
 
 # The Proposals page's own styles (pages.py puts them in the page's head; the shared pieces are
 # theme.UI_CSS). Theme tokens only.
-PROPOSALS_CSS = """
+PROPOSALS_CSS = (
+    ONE_LOOK_CSS
+    + """
 /* a waiting row's cells are labels of its tick box: the whole row is the tap target */
 .pr-table label{margin:0;font-weight:inherit;cursor:pointer}
 /* a list narrow in its own text (under 12em: 200% text on a phone) puts Review and the ⋮ under the
@@ -1037,7 +1040,7 @@ PROPOSALS_CSS = """
   .pr-table .tr{grid-template-columns:32px minmax(0,1fr)}
   .pr-table .tr > .act{grid-column:2;justify-self:end} }
 .pr-table label.title{display:block}
-.pr-table .flag .ui-lbl{min-height:20px;font-size:.76rem;margin-right:.25rem}
+.pr-table .flag .ui-lbl{margin-right:.25rem}
 /* the waiting list's one header row: the check-every box and the word */
 .pr-table .tr.th{min-height:40px}
 .ui-drawer .apply{background:none;border:0;padding:0;margin-top:1rem}
@@ -1057,7 +1060,10 @@ PROPOSALS_CSS = """
      the words wrap inside the buttons rather than out of them */
   .ui-bar{padding:8px;gap:8px}
   .ui-bar .count{flex:1 1 40%;min-width:0}
-  .ui-bar button{height:auto;white-space:normal;line-height:1.2;padding:6px 8px}
+  /* the sides give way to the words at large text (14 px up to 100% text, 8 px from about 200%),
+     so Reject and Apply stay side by side on a 360 px phone at 200% */
+  .ui-bar button{height:auto;white-space:normal;line-height:1.2;
+    padding:6px min(14px, max(8px, calc(22px - .5em)))}
   .ui-bar button[name=action]{flex:1 1 40%;min-width:min-content}
 }
 /* one proposal: the panel (from 1100 px) or its own page */
@@ -1080,7 +1086,7 @@ PROPOSALS_CSS = """
 /* "Open as a full page": the panel alone, in the page's own column */
 .pr-full .ui-split.with-panel{display:block}
 .pr-full .ui-split.with-panel .ui-drawer{display:block;position:static;max-height:none;overflow:visible;
-  box-shadow:none;border:0;padding:0;max-width:52rem;margin:0 auto}
+  box-shadow:none;border:0;padding:0;max-width:44rem;margin:0 auto}
 .pr-full .ui-split.with-panel .page-only{display:block}
 .pr-full .panel-only{display:none}
 .pr-empty p{margin:0}
@@ -1096,3 +1102,4 @@ PROPOSALS_CSS = """
 .wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
 .wdg .big small{margin-left:0}
 """
+)

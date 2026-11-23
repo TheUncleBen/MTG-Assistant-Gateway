@@ -27,6 +27,7 @@ from .busy import outage
 from .companion import EVENT_LABELS, card_model_line, event_label, member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT, DECK_LIST_LAST
+from .reports_page import ONE_LOOK_CSS
 from .settings_page import FOLDED, change_line
 from .settings_page import label as setting_label
 from .theme import esc, icon
@@ -1002,7 +1003,6 @@ def _spark(values: list[int]) -> str:
 
 ACT_CSS = """
 .act-page .ui-chip svg.i{width:15px;height:15px;margin-right:.3rem;vertical-align:-2px}
-.act-page .wdg .det .ui-lbl{min-height:22px;font-size:.78rem}
 .act-page .spark{flex:1 1 100%;display:flex;align-items:flex-end;gap:3px;height:36px;margin:.1rem 0 0}
 .act-page .spark i{flex:1;display:block;min-height:2px;background:var(--text-muted);border-radius:2px 2px 0 0}
 .act-page .spark i:last-child{background:var(--text)}
@@ -1078,6 +1078,7 @@ ADMIN_CSS = (
 
 MEMBER_CSS = (
     ACT_CSS
+    + ONE_LOOK_CSS
     + """
 .act-member .act-table .tr{grid-template-columns:17rem minmax(0,1fr) 8rem 6.5rem}
 .act-member .act-table .c-det{display:block;font-size:.92rem}

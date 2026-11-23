@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 
 from . import localday, ui
 from .decks import actor_label, without_tabs_note
-from .reports_page import source_label_html
+from .reports_page import ONE_LOOK_CSS, source_label_html
 from .theme import esc as _esc
 from .theme import icon, time_html
 
@@ -660,6 +660,11 @@ def details_panel(
         label=f"{word} details",
         close_href="/history" + query_string(query, open=""),
         back_text="Back to History",
+    ).replace(
+        # its own page (a phone, a Fold) has the page's title; beside the list the list's page has it
+        "<div class='dh'>",
+        f"<h1 class='page-only hy-title'>{_esc(word)}: {_esc(e['deck_name'])}</h1><div class='dh'>",
+        1,
     )
 
 
@@ -965,7 +970,8 @@ HISTORY_CSS_C = ""
 
 
 HISTORY_CSS = (
-    """
+    ONE_LOOK_CSS
+    + """
 /* History (UI standard): the shared table, widgets and side panel are theme.UI_CSS */
 .hy-table .title .deck a{font-weight:400}
 .hy-table .ui-lbl + .ui-lbl{margin-left:.25rem}
@@ -976,12 +982,13 @@ HISTORY_CSS = (
    (final polish: no text cut short) */
 .hy-table .title .deck{overflow-wrap:break-word;min-width:0}
 .hy-table .title .sub{min-width:0}
-/* the Details' buttons: one row, each form inline */
-.ui-drawer .ui-actions form{display:contents}
-.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{margin:0}
+/* three filters share a phone's row: a choice two words long ("Group by day") takes two lines
+   inside the 44 px field instead of making its field taller than the two beside it */
+.ui-tools.n3 .msel-btn .msel-txt{line-height:1.15}
+/* the search box keeps its hint ("Deck name") whole on a 360 px phone at 200% text */
+.ui-tools .search input{padding-right:.4rem}
 .hy-copies .act .btn{display:inline-flex;align-items:center;gap:.35rem;margin:0}
 .hy-copies .act .chev svg.i{width:20px;height:20px}
-h2.hy-backups{font-size:1.2rem}
 /* a group row's meta wraps rather than push the page sideways at large text sizes */
 .ui-table .group > *{min-width:0}
 .ui-table .group .meta{white-space:normal}
@@ -994,10 +1001,13 @@ h2.hy-backups{font-size:1.2rem}
 .ui-drawer .page-only a{display:inline-flex;align-items:center;min-height:44px}
 .hy-empty p{margin:0}
 .hy-back{margin:0 0 .5rem}
-.trend h2{font-size:1.2rem} .trend > p.muted{margin:.2rem 0 .75rem}
+/* a row's Details as its own page: the page's title says what the panel's heading says beside the
+   list, so the heading is not drawn twice */
+@media (max-width:1099.98px){.ui-drawer h1.hy-title + .dh{display:none}}
+.trend > p.muted{margin:.2rem 0 .75rem}
 .tmetrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;margin:0}
-.tmetric{border:1px solid var(--border);border-radius:3px;padding:.6rem .75rem;min-width:0}
-.tmetric h3{margin:0 0 .3rem;font-size:.95rem;overflow-wrap:anywhere}
+.tmetric{border:1px solid var(--border);border-radius:var(--radius-panel);padding:.6rem .75rem;min-width:0}
+.tmetric h3{margin-top:0}
 .tspark{display:block;width:100%;height:36px;color:var(--orange-text)}
 .tspark polyline{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .tmetric p{margin:.3rem 0 0;font-size:.88rem;overflow-wrap:anywhere}
