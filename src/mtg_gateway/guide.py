@@ -984,17 +984,13 @@ def build(
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
             "Redo, "
-            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run test, statistics with Probability "
+            "Add to the deck (a preview with copies, category, printing and finish), More ways to add "
+            "(Paste a list, Add from a scan, Add a package), "
+            "Playtest, Goldfish, Play on EDHPlay, Run test, statistics with Probability "
             "of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
             "Open on Archidekt, Delete deck",
-        ),
-        (
-            "Editor",
-            "<code>/decks/&lt;id&gt;/edit</code>",
-            "quantities, categories, finish, printing, add cards, maybeboard and sideboard rows, paste a "
-            "list, remove, undo, Save changes with the backup tick box",
         ),
         (
             "Deck settings",

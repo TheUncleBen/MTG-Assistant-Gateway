@@ -167,6 +167,7 @@
   var deckId = cards.getAttribute("data-deck");
   var own = cards.hasAttribute("data-own");
   var canDrag = cards.hasAttribute("data-drop");
+  var serverFiltered = cards.hasAttribute("data-filtered");  // drawn with ?q=: some rows left out
   var grouping = cards.getAttribute("data-grouping");
   var byCategory = grouping === "category";
   var touch = window.matchMedia("(hover: none)").matches;
@@ -1166,7 +1167,9 @@
         if (!had.length) inv = { action: "remove", card_name: spec.name };
         else if (had.length === 1) inv = { action: "set_quantity", card_name: had[0].getAttribute("data-card"), quantity: qtyOf(had[0]) };
         if (inv && spec.zone === "side") inv.zone = "side";
-        // several rows of it in that zone: an Undo would count them all, so none is offered
+        // several rows of it in that zone: an Undo would count them all, so none is offered;
+        // nor on a page drawn with a filter (?q=), whose rows the page does not all hold
+        if (serverFiltered) inv = null;
         var ch = { action: "add", card_name: spec.name, quantity: spec.qty };
         if (spec.category) ch.category = spec.category;
         if (spec.zone === "side") ch.zone = "side";
@@ -1592,18 +1595,35 @@
         background({
           card: null, what: "Add",
           start: function () {
-            var inverse = [];
+            // One Undo step per card and zone: a scan can send one name as several changes
+            // (foil and normal, etched, more than 99 copies), and the save refuses a card
+            // removed twice. A card new to the zone is removed once; a card already there with one
+            // row is set back to its count, unless its changes asked for more than one finish
+            // (those may have made rows of their own, which a count on the name cannot undo).
+            var inverse = [], seen = {}, keys = 0, sure = true;
             part.forEach(function (ch) {
               var zone = ch.zone === "side" ? "side" : "main";
+              var key = zone + "\u0000" + frontFace(ch.card_name);
+              var kind = ch.finish === "etched" ? "etched" : ch.foil === true ? "foil" : "normal";
+              if (seen[key]) { seen[key].kinds[kind] = 1; return; }
+              keys++;
               var had = rowsOf(ch.card_name, zone);
               var inv = null;
               if (!had.length) inv = { action: "remove", card_name: ch.card_name };
               else if (had.length === 1) inv = { action: "set_quantity", card_name: had[0].getAttribute("data-card"), quantity: qtyOf(had[0]) };
               if (inv && zone === "side") inv.zone = "side";
+              seen[key] = { kinds: {}, inv: inv };
+              seen[key].kinds[kind] = 1;
               if (inv) inverse.push(inv);
+              else sure = false;
             });
+            Object.keys(seen).forEach(function (k) {
+              var mixed = Object.keys(seen[k].kinds).length > 1;
+              if (mixed && seen[k].inv && seen[k].inv.action !== "remove") sure = false;
+            });
+            if (serverFiltered) sure = false;  // a page drawn with ?q= does not hold every row
             // a card with several rows in its zone: the batch's Undo could not put it back alone
-            if (inverse.length !== part.length) inverse = [];
+            if (!sure || inverse.length !== keys) inverse = [];
             var copies = part.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
             return {
               changes: part, inverse: inverse, backup: withBackup && first,  // one copy, before the first part
