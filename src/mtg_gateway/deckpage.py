@@ -3617,6 +3617,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* the card's shape while the picture loads (or when it can't): the frame never collapses */
 .addpreview .appic img{display:block;width:100%;height:auto;aspect-ratio:63 / 88;object-fit:cover;
   border-radius:4.75% / 3.5%;background:var(--surface-2)}
+/* a picture that fails (feedback.js swaps in its name tile): the tile keeps the card's shape */
+.addpreview .appic .img-fallback{width:100%;height:auto;aspect-ratio:63 / 88;border-radius:4.75% / 3.5%}
 .addpreview .apph{aspect-ratio:63 / 88;display:flex;align-items:center;justify-content:center;padding:1rem;
   text-align:center;border:1px dashed var(--border);border-radius:.75rem;color:var(--text-muted)}
 .addpreview .aphead{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .6rem;margin:0 0 .5rem;

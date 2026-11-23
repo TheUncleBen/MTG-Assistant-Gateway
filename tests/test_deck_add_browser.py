@@ -81,6 +81,9 @@ def test_a_typed_card_opens_a_preview_and_adds_to_the_chosen_category(server: Se
             preview.inner_text()
         )
         assert preview.locator(".appic img").count() == 1
+        # the picture, or its name tile when it fails, keeps the card's shape (never a thin strip)
+        pic = preview.locator(".appic").bounding_box()
+        assert pic["height"] >= pic["width"] * 1.3, pic
         assert preview.locator(".aphead .ty").inner_text().startswith("Basic Land")
         # Category: Auto by type first, the deck's categories, and New category…
         cat = page.locator("#ap-cat")
