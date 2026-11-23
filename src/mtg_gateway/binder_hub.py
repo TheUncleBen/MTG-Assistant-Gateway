@@ -375,8 +375,11 @@ def list_menu_html(view: View) -> str:
     return (
         "<details class='dd bn-listmenu'><summary class='btn' aria-haspopup='menu'>"
         f"{icon('more')}<span>List</span></summary><div class='menu'>"
-        f"<a href='{PATH}?box=rename' {ui.box_open_attr('bn-rename')}>{icon('edit')} Rename list…</a>"
-        f"<a href='{PATH}?box=delete' class='danger' {ui.box_open_attr('bn-delete')}>{icon('trash')} "
+        # without scripts the link opens the box for this list, so it carries the list
+        f"<a href='{esc(view.href(box='rename'))}' {ui.box_open_attr('bn-rename')}>"
+        f"{icon('edit')} Rename list…</a>"
+        f"<a href='{esc(view.href(box='delete'))}' class='danger' {ui.box_open_attr('bn-delete')}>"
+        f"{icon('trash')} "
         "Delete list…</a></div></details>"
     )
 

@@ -73,7 +73,7 @@ _path: ContextVar[str] = ContextVar("mtg_path", default="/")
 _app: ContextVar[bool] = ContextVar("mtg_app", default=False)
 APP_UA_MARK = "MTGAssistant/"
 
-# A computer's top bar lists the rail's pages (theme.rail_extra: Scan, Precons, Card models, Forum)
+# A computer's top bar lists the rail's pages (theme.rail_extra: Scan, Precons, Forum)
 # as links and drops More ▾ once the bar is this wide (0.7.46 redesign, screen 1; a container
 # query in the bar's own em, so a narrower window or 200% text brings More ▾ back, with every page
 # still in it). None: More ▾ at every width, as before. Open for the owner.
@@ -1852,8 +1852,13 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-table.ui-rows{container-type:inline-size}
 @container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > :is(.ui-cap,.btn){display:none}
   /* a group row's Open deck goes the same way: the deck's name beside it opens the deck, and keeps
-     the row's room for whole words */
-  .ui-table.ui-rows .tr.group .act{display:none} }
+     the row's room for whole words. History's group row keeps its action (Only this deck, which
+     the name does not do): it wraps under the name instead */
+  .ui-table.ui-rows .tr.group:not(.hy-group) .act{display:none}
+  .ui-table.ui-rows .tr.hy-group{display:flex;flex-wrap:wrap;gap:.25rem 8px}
+  .ui-table.ui-rows .tr.hy-group > :first-child{flex:none}
+  .ui-table.ui-rows .tr.hy-group .m{flex:1 1 min(8em,calc(100% - 52px))}
+  .ui-table.ui-rows .tr.hy-group .act{margin-left:auto} }
 .ui-table.ui-rows .act .acts[hidden]{display:none}
 /* a deck's group row: the name with its count under it, Open deck at the end */
 .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto;min-height:52px}
