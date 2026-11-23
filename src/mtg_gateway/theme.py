@@ -2494,7 +2494,8 @@ _TOPSEARCH_CSS = """
 /* the wrapper static/suggest.js puts around the input spans the box too: in the first column only,
    the input (and under 600 px its suggestion list) stopped 20rem in, short of the box's end */
 .topbar .topsearch .box > .suggest{grid-column:1 / -1}
-.topbar .topsearch .box > svg.i{position:absolute;left:min(.75rem,11px);top:50%;transform:translateY(-50%);z-index:1;
+.topbar .topsearch .box > svg.i{position:absolute;left:min(.75rem,11px);top:50%;transform:translateY(-50%);
+  z-index:1;
   color:var(--navbar-muted);pointer-events:none}
 /* the sides stop at their 100% size: at large text they ate the room the hint needs ("Search" cut
    at 717 px with the root at 200%) */
