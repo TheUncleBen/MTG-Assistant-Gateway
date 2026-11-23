@@ -67,7 +67,10 @@ def test_goldfish_and_compare_use_the_sites_page_head_and_plain_section_headings
     )
     # the head sits outside the panel
     assert page.index("gf-intro") < page.index("class='panel gf-head'")
-    assert "class='ui-sub gf-intro" in page and "class='ui-cap'" in page
+    # the way back is the site's one helper (grey capsule with the back icon, own line, above h1)
+    back = "<p class='ui-back-line gf-crumbs'><a class='ui-cap ui-back' href='/decks/"
+    assert back in page and page.index(back) < page.index("<h1>Goldfish</h1>")
+    assert "← Back" not in page
     for rule in (".gf-zone h2{", ".gf-guide h2{"):
         assert "font-size" not in deckpage.GOLDFISH_CSS.split(rule)[1].split("}")[0], rule
     assert "font-size" not in deckpage.COMPARE_CSS.split(".cmp-h{")[1].split("}")[0]
@@ -85,3 +88,5 @@ def test_compare_names_the_deck_once_escaped() -> None:
     )
     assert "“Tom &amp; &lt;Jerry&gt;” and another deck" in page
     assert "&amp;amp;" not in page
+    back = "<p class='ui-back-line cmp-back'><a class='ui-cap ui-back' href='/decks/"
+    assert back in page and page.index(back) < page.index("<h1>Compare decks</h1>")

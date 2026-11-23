@@ -2337,8 +2337,7 @@ def compare_page_html(
     )
     compare_kind = "" if forge_html or ab_html else "primary"
     form = (
-        "<nav class='crumbs cmp-back' aria-label='Back'>"
-        f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
+        ui.back_link("Back to the deck", f"/decks/{did}", cls="cmp-back")
         + ui.page_head(
             # page_head escapes its words: the raw title (name is escaped already)
             "Compare decks",
@@ -2589,7 +2588,6 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
 
 
 COMPARE_CSS = """
-.cmp-back{margin-bottom:.25rem}
 .cmp-ab .cmp-ab-forge{display:flex;width:100%;min-height:44px;margin:.25rem 0 .75rem}
 .cmp-form{margin:0 0 1rem}
 .cmp-form .row{display:flex;gap:.5rem;align-items:flex-end}
@@ -2809,9 +2807,8 @@ def goldfish_page_html(
     return (
         # the page's head as on Compare (no panel around it): the way back, the title, and the facts
         # line led by the deck's name; the game's panel follows
-        "<nav class='crumbs gf-crumbs' aria-label='Back'>"
-        f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
-        "<div class='ui-head'><h1>Goldfish</h1></div>"
+        ui.back_link("Back to the deck", f"/decks/{did}", cls="gf-crumbs")
+        + "<div class='ui-head'><h1>Goldfish</h1></div>"
         f"<p class='ui-sub gf-intro ui-dots'><span class='gf-deck'>{name}</span>"
         + "".join(f"<span>{esc(x)}</span>" for x in goldfish_intro(size, commander=commander).split(" · "))
         + "</p>"
@@ -2851,7 +2848,6 @@ def goldfish_page_html(
 
 
 GOLDFISH_CSS = """
-.gf-crumbs{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .25rem}
 .gf-intro .gf-deck{font-weight:700;color:var(--text);overflow-wrap:anywhere}
 .gf-solo{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:0}
 .gf-solo form.inline{display:contents} .gf-solo button{margin:0}
