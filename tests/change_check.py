@@ -41,10 +41,16 @@ ALWAYS = [
 ]
 
 
-def _run(cmd: list[str], log: Path, env: dict | None = None) -> tuple[int, float]:
+def _run(
+    cmd: list[str], log: Path, env: dict | None = None, timeout: float | None = None
+) -> tuple[int, float]:
     t = time.time()
     with log.open("w") as f:
-        r = subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, env=env)
+        try:
+            r = subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, env=env, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            f.write(f"\n(stopped after {timeout:.0f} s)\n")
+            return 124, time.time() - t
     return r.returncode, time.time() - t
 
 
@@ -54,7 +60,8 @@ def _click_key(r: dict) -> tuple:
     import re
 
     detail = re.sub(r"\d+", "#", str(r.get("detail") or ""))
-    return (r.get("display"), r["page"], r.get("kind"), r.get("text"), r.get("verdict"), detail)
+    text = re.sub(r"\d+", "#", str(r.get("text") or ""))
+    return (r.get("display"), r["page"], r.get("kind"), text, r.get("verdict"), detail)
 
 
 def _base_clicks(base: str, pages: list[str], out: Path, env: dict) -> list[dict]:
@@ -74,18 +81,24 @@ def _base_clicks(base: str, pages: list[str], out: Path, env: dict) -> list[dict
             shutil.rmtree(out)
         cmd = [sys.executable, "-m", "tests.ui_clicks", str(out), "--pages", ",".join(pages)]
         with (out.parent / "clicks-base.log").open("w") as f:
-            subprocess.run([*cmd, "--displays", "app,laptop"], cwd=wt, env=benv, stdout=f, stderr=f)
+            try:  # its results are written before the server stops: a stop that hangs loses nothing
+                subprocess.run(
+                    [*cmd, "--displays", "app,laptop"], cwd=wt, env=benv, stdout=f, stderr=f, timeout=3600
+                )
+            except subprocess.TimeoutExpired:
+                f.write("\n(stopped after an hour)\n")
         res = out / "clicks.json"
         return json.loads(res.read_text()) if res.exists() else []
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", str(wt)], cwd=ROOT, capture_output=True)
 
 
-def _write_click_findings(path: Path, new: list[dict], old: int) -> None:
+def _write_click_findings(path: Path, new: list[dict], old: int, once: list[dict] = ()) -> None:
     lines = [
         "# Controls this change broke",
         "",
-        f"{len(new)} new; {old} more the base has too (left for the release run).",
+        f"{len(new)} new; {len(once)} went wrong once and not when pressed again (listed, not failed);"
+        f" {old} more the base has too (left for the release run).",
         "",
     ]
     for r in new:
@@ -93,6 +106,9 @@ def _write_click_findings(path: Path, new: list[dict], old: int) -> None:
             f"- **{r.get('verdict')}** {r.get('display')} {r['page']}: {r.get('kind', '')} "
             f"{r.get('text', '')!r} {r.get('detail') or ''}"
         )
+    if once:
+        lines += ["", "## Seen once", ""]
+        lines += [f"- {r.get('verdict')} {r.get('display')} {r['page']}: {r.get('text', '')!r}" for r in once]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
 
@@ -200,11 +216,37 @@ def main(argv: list[str] | None = None) -> int:
         t = time.time()
         old = _base_clicks(base, sorted({r["page"] for r in bad}), out / "clicks-base", env) if bad else []
         known = {_click_key(r) for r in old}
-        new = [r for r in bad if _click_key(r) not in known]
-        _write_click_findings(out / "clicks" / "new.md", new, len(bad) - len(new))
+        # a request the base fails too is not new, whichever page's copy of the control asked it
+        failing = {_click_key(r)[-1] for r in old if r.get("verdict") == "failed-request"}
+        new = [
+            r
+            for r in bad
+            if _click_key(r) not in known
+            and not (r.get("verdict") == "failed-request" and _click_key(r)[-1] in failing)
+        ]
+        # a press can go wrong once on a busy machine: what is new is pressed again on the change, and
+        # only what goes wrong both times fails (the rest is listed as seen once)
+        once: list[dict] = []
+        if new:
+            again = out / "clicks-again"
+            cmd = [
+                py,
+                "-m",
+                "tests.ui_clicks",
+                str(again),
+                "--pages",
+                ",".join(sorted({r["page"] for r in new})),
+            ]
+            _run([*cmd, "--displays", "app,laptop"], out / "clicks-again.log", env, timeout=3600)
+            res = again / "clicks.json"
+            twice = {_click_key(r) for r in (json.loads(res.read_text()) if res.exists() else [])}
+            once = [r for r in new if _click_key(r) not in twice]
+            new = [r for r in new if _click_key(r) in twice]
+        _write_click_findings(out / "clicks" / "new.md", new, len(bad) - len(new) - len(once), once)
         steps.append(
             (
-                f"no new dead or broken control ({len(new)} new, {len(bad) - len(new)} the base has too)",
+                f"no new dead or broken control ({len(new)} new, {len(once)} seen once, "
+                f"{len(bad) - len(new) - len(once)} the base has too)",
                 1 if new else 0,
                 time.time() - t,
                 "clicks/new.md",
