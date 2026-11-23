@@ -494,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("out", type=Path)
     ap.add_argument("--pages", default="")
     ap.add_argument("--displays", default="app,laptop")
+    ap.add_argument("--slice", default="", help="I/N: only every Nth page from the Ith (parallel jobs)")
     a = ap.parse_args(argv)
 
     from . import conftest  # noqa: F401
@@ -508,6 +509,9 @@ def main(argv: list[str] | None = None) -> int:
         sid, pending = OS._seed(s)
         s.app.state.gateway.decks.archidekt_budget.per_window = 100_000
         paths = a.pages.split(",") if a.pages else [p for p in pages(pending) if "#" not in p]
+        if a.slice:
+            i, n = (int(x) for x in a.slice.split("/"))
+            paths = paths[i::n]
         disp = [d for d in DISPLAYS if d.key in a.displays.split(",")]
         rows = sweep(s, sid, paths, disp, a.out)
         (a.out / "clicks.json").write_text(json.dumps(rows, indent=1))
