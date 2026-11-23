@@ -339,6 +339,7 @@
     body.view = vf && vf.elements.view ? vf.elements.view.value : "";
     body.group = grouping || "category";
     body.sort = vf && vf.elements.sort ? vf.elements.sort.value : "name";
+    if (opts.backup) body.archidekt_backup = true;  // the member ticked "Back up on Archidekt first"
     return api(editUrl, body).then(function (d) {
       if (d.ok && d.applied) {
         saving = false;
@@ -349,7 +350,7 @@
         saving = false;
         return askConfirm(d.why, d.proposal_id).then(function (yes) {
           if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
-          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id, version: d.version, replay: opts.replay, note: opts.note });
+          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id, version: d.version, replay: opts.replay, note: opts.note, backup: opts.backup });
         });
       }
       saving = false;
@@ -753,7 +754,7 @@
       // nothing left to send (+ then − before the save went): its Saving note goes too
       if (!plan) { dropSavingNote(job.card, job.what); return null; }
       savingNote(plan.saying, true, job.card, job.what);
-      return saveEdit(plan.changes, plan.inverse, { note: plan.note }).then(function () { if (job.saved) job.saved(); }, function (err) {
+      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(function () { if (job.saved) job.saved(); }, function (err) {
         notSaved(plan, job, err, false);
       });
     }).then(done, done);
@@ -847,52 +848,684 @@
         .map(function (c) { return [zoneOf(c)].concat(attrs.map(function (a) { return c.getAttribute(a); })).join("\u0001"); }).join("\n");
     }).join("\n\n");
   }
-  // -- Quick add: one copy of the typed card, saved at once and drawn in place (owner decision
-  // C4); its Undo takes the copy back out. An unknown name is refused in the red note; the page
-  // never leaves. Without scripts the form opens the editor with the name filled in.
-  // With no name, the box keeps the focus and says so, as a required field does (the browser's
-  // own note at the field, static/suggest.js's needName, shared with the editor's Add), until
-  // something is typed; the form itself is never held back by it.
+  // -- Add a card (the deck editor's add box, folded into the deck page in 0.7.48) -------------
+  // The toolbar's box suggests cards with their picture, mana cost and type (static/suggest.js's
+  // rich rows). Picking one, or Enter on a typed name ("3 sol ring" for three), opens the card's
+  // preview in the shared box (static/box.js): the whole card, then its count, its category (the
+  // card's own by its type, or "Add a card here"'s), its printing (the set used last on this deck
+  // when the card was printed in it; the shared printing picker for another) and its finish.
+  // Add to deck saves it at once and draws it in place, with Undo, as every other edit on this
+  // page (one proposal applied with its snapshot; a commander-zone category asks first). More
+  // ways to add: Paste a list and Add from a scan go through one review list and one save per 40
+  // cards; Add a package opens the package box.
   var quickForm = own ? $("form.quick") : null;
+  var quickInput = quickForm ? $("#quick", quickForm) : null;
+  var PRIMARY_TYPES = ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land"];
+  var NEW_CAT = "\u0000new";
+  var summaries = Object.create(null);  // folded name -> the suggestion list's card summary
+  var addTo = "";  // "Add a card here": the category every add starts in until its chip is closed
   function needName(input, need) { window.MtgSuggest.needName(input, need); }
-  if (quickForm && $("#quick")) {
-    quickForm.noValidate = true;
-    $("#quick").addEventListener("input", function (e) { if (e.target.value.trim()) needName(e.target, false); });
-    quickForm.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var input = $("#quick"), name = (input.value || "").trim();
-      needName(input, !name);
-      if (!name) {
-        input.focus();
-        if (input.reportValidity) input.reportValidity();
-        return;
+  function fold(name) { return String(name || "").trim().toLowerCase(); }
+  // the category Archidekt files a card under when the add names none (deck_stats.primary_type)
+  function typeCategory(typeLine) {
+    var words = String(typeLine || "").split(" // ")[0].split(/\s+[—-]\s+/)[0].toLowerCase().split(/\s+/);
+    for (var i = 0; i < PRIMARY_TYPES.length; i++) if (words.indexOf(PRIMARY_TYPES[i].toLowerCase()) >= 0) return PRIMARY_TYPES[i];
+    return "Other";
+  }
+  function splitQty(raw) {
+    var m = /^\s*(\d{1,2})\s*[xX×]?\s+(.+)$/.exec(raw || "");
+    return m ? { qty: Math.max(1, Math.min(99, parseInt(m[1], 10))), name: m[2].trim() } : { qty: 1, name: String(raw || "").trim() };
+  }
+  var lastSetKey = "mtg-lastset-" + deckId;  // the deck editor's key: the set kept from before
+  function lastSet() { try { return localStorage.getItem(lastSetKey) || ""; } catch (e) { return ""; } }
+  function rememberSet(code) { try { if (code) localStorage.setItem(lastSetKey, code); } catch (e) { /* private window */ } }
+  // every category a card can be added under: the deck's own, the stacks on the page, the
+  // maybeboard or sideboard; those left out of the deck are marked so
+  function addCategories() {
+    var names = deckCats.slice();
+    $$(".stack", cards).forEach(function (st) { var n = st.getAttribute("data-group"); if (byCategory && n && names.indexOf(n) < 0) names.push(n); });
+    if (names.indexOf(sideCat) < 0) names.push(sideCat);
+    return names;
+  }
+  function isSide(cat) { return !!cat && (cat === sideCat || excluded.indexOf(cat) >= 0); }
+  // the rows of a card already on the page in a zone (the deck proper, or outside it)
+  function rowsOf(name, zone) {
+    var face = frontFace(name);
+    return $$(".c, .row", cards).filter(function (c) { return zoneOf(c) === zone && frontFace(c.getAttribute("data-card")) === face; });
+  }
+  // a card's summary (picture, mana cost, type line, default printing, oracle id): the
+  // suggestion list's when it brought one, else one lookup (/scan/api/peek)
+  function summaryOf(name) {
+    var have = summaries[fold(name)];
+    if (have) return Promise.resolve(have);
+    return fetch("/scan/api/peek?names=" + enc(name), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var want = frontFace(name);
+        var c = ((d && d.cards) || []).filter(function (x) { return x && (fold(x.name) === fold(name) || frontFace(x.name) === want); })[0] || null;
+        if (c) summaries[fold(name)] = c;
+        return c;
+      });
+  }
+  function bigPicture(small) { return small ? String(small).replace("/small/", "/normal/") : ""; }
+  // a themed select (static/select.js enhances it) of the add categories; "" is the card's own
+  function categorySelect(id, typeCat, current) {
+    var sel = el("select");
+    sel.id = id;
+    var auto = el("option", null, typeCat ? "Auto: " + typeCat : "Auto (by card type)");
+    auto.value = "";
+    sel.appendChild(auto);
+    addCategories().forEach(function (n) {
+      var o = el("option", null, isSide(n) ? n + " (not in the deck)" : n);
+      o.value = n;
+      sel.appendChild(o);
+    });
+    var nw = el("option", null, "New category…");
+    nw.value = NEW_CAT;
+    sel.appendChild(nw);
+    sel.value = current && addCategories().indexOf(current) >= 0 ? current : "";
+    return sel;
+  }
+  // "New category…": a field in the select's place (never the browser's prompt box); Enter or
+  // the check takes the name, Escape or the × goes back to the list
+  function newCategoryField(sel, onDone) {
+    var wrap = sel.closest(".sel") || sel;
+    var was = sel.getAttribute("data-was") || "";
+    var field = el("input");
+    field.type = "text";
+    field.maxLength = 60;
+    field.placeholder = "New category name";
+    field.setAttribute("aria-label", "New category name");
+    field.autocomplete = "off";
+    var ok = el("button", "btn icon-only", "");
+    ok.type = "button";
+    ok.setAttribute("aria-label", "Use this category");
+    ok.appendChild(icon("check"));
+    var no = el("button", "btn icon-only", "");
+    no.type = "button";
+    no.setAttribute("aria-label", "Cancel");
+    no.appendChild(icon("x"));
+    var box = el("span", "newcat");
+    box.appendChild(field); box.appendChild(ok); box.appendChild(no);
+    var back = function (value) {
+      box.replaceWith(wrap);
+      if (value) {
+        var o = el("option", null, value);
+        o.value = value;
+        sel.insertBefore(o, sel.lastElementChild);
       }
-      quickAdd(name, input);
+      sel.value = value || was;
+      sel.setAttribute("data-was", sel.value);
+      if (window.MtgSelect) window.MtgSelect.refresh(sel);
+      if (onDone) onDone(sel.value);
+      var btn = wrap.querySelector("button") || sel;
+      btn.focus();
+    };
+    ok.addEventListener("click", function () { var v = field.value.trim().slice(0, 60); if (!v) { field.focus(); return; } back(v); });
+    no.addEventListener("click", function () { back(""); });
+    field.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); ok.click(); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); back(""); }
+    });
+    wrap.replaceWith(box);
+    field.focus();
+  }
+  function watchNewCategory(sel, onDone) {
+    sel.setAttribute("data-was", sel.value);
+    sel.addEventListener("change", function () {
+      if (sel.value === NEW_CAT) newCategoryField(sel, onDone);
+      else { sel.setAttribute("data-was", sel.value); if (onDone) onDone(sel.value); }
     });
   }
-  function quickAdd(name, input) {
-    var face = frontFace(name);
+  function row(labelText, forId, control) {
+    var r = el("div", "afrow");
+    var l = el("label", null, labelText);
+    if (forId) l.htmlFor = forId;
+    r.appendChild(l);
+    var c = el("div", "afctl");
+    c.appendChild(control);
+    r.appendChild(c);
+    return r;
+  }
+  function printLabelOf(p) {
+    return p && p.set_code ? String(p.set_code).toUpperCase() + " #" + p.collector_number : "Default printing";
+  }
+
+  // The preview. name: the card's exact name; qty: the typed count; card: its summary
+  function openPreview(name, qty, card) {
+    var Box = window.MtgBox;
+    if (!Box) return;
+    var typeCat = typeCategory(card.type_line);
+    var form = el("form", "addpreview");
+    form.noValidate = true;
+    var pic = el("div", "appic");
+    var big = bigPicture(card.image_small);
+    if (big) {
+      var img = el("img");
+      img.src = big;
+      img.alt = name;
+      img.width = 244; img.height = 340;
+      pic.appendChild(img);
+    } else pic.appendChild(el("div", "apph", name));
+    form.appendChild(pic);
+    var info = el("div", "apinfo");
+    var head = el("p", "aphead");
+    if (card.mana_cost && window.MtgMana) head.appendChild(window.MtgMana.mana(card.mana_cost));
+    head.appendChild(el("span", "ty", card.type_line || ""));
+    info.appendChild(head);
+    var text = el("p", "aptext muted");
+    info.appendChild(text);
+    if (CardView && CardView.text) {
+      CardView.text(name).then(function (t) {
+        if (!t) return;
+        var words = t.text || (t.faces || []).map(function (f) { return f.text || ""; }).filter(Boolean).join("\n\n");
+        if (words && window.MtgMana && window.MtgMana.symbolize) { text.textContent = ""; window.MtgMana.symbolize(words, text); }
+        else text.textContent = words || "";
+        if (t.price) { price = t.price; showPrint(); }
+      });
+    }
+    // copies already in the deck (or outside it): the add raises that count
+    var main = rowsOf(name, "main"), side = rowsOf(name, "side");
+    if (main.length || side.length) {
+      var where = main.concat(side).map(function (c) { return qtyOf(c) + " in " + (stackOf(c) || catOf(c) || "the deck"); });
+      info.appendChild(el("p", "notice aphave", "Already here: " + where.join(", ") + ". Adding raises the count."));
+    }
+    // Quantity: − n +
+    var count = Math.max(1, Math.min(99, qty || 1));
+    var step = el("span", "apstep");
+    step.setAttribute("role", "group");
+    step.setAttribute("aria-label", "Copies to add");
+    var minus = el("button", "btn icon-only", "−");
+    minus.type = "button";
+    var n = el("output", "n", String(count));
+    n.id = "ap-qty";
+    n.setAttribute("aria-live", "polite");
+    var plus = el("button", "btn icon-only", "+");
+    plus.type = "button";
+    var relabel = function () {
+      n.textContent = String(count);
+      minus.disabled = count <= 1;
+      plus.disabled = count >= 99;
+      minus.setAttribute("aria-label", "One fewer: " + Math.max(1, count - 1));
+      plus.setAttribute("aria-label", "One more: " + Math.min(99, count + 1));
+    };
+    minus.addEventListener("click", function () { count = Math.max(1, count - 1); relabel(); });
+    plus.addEventListener("click", function () { count = Math.min(99, count + 1); relabel(); });
+    relabel();
+    step.appendChild(minus); step.appendChild(n); step.appendChild(plus);
+    var fields = el("div", "apfields");
+    fields.appendChild(row("Copies", null, step));
+    // Category
+    var cat = categorySelect("ap-cat", typeCat, addTo);
+    var catWrap = el("span", "sel");
+    catWrap.appendChild(cat);
+    watchNewCategory(cat);
+    fields.appendChild(row("Category", "ap-cat", catWrap));
+    // Printing: the default one, or the set used last on this deck when the card was printed in it
+    // shown as the card's usual printing; sent only once the member picked one, or the set used
+    // last on this deck was found (Archidekt files a plain add under its own default printing)
+    var printing = card.set && card.collector_number ? { set_code: card.set, collector_number: String(card.collector_number) } : null;
+    var picked = false, chosen = false, price = "";
+    var printBtn = el("button", "btn apprint", "");
+    printBtn.type = "button";
+    printBtn.id = "ap-print";
+    function showPrint() {
+      printBtn.textContent = "";
+      printBtn.appendChild(el("span", "pl", printLabelOf(printing) + (price ? " · $" + price : "")));
+      printBtn.appendChild(el("span", "chg", "Change"));
+      printBtn.setAttribute("aria-label", "Printing: " + printLabelOf(printing) + ". Change the printing");
+    }
+    showPrint();
+    var remembered = lastSet().toLowerCase();
+    var Pick = window.MtgPrintPick;
+    if (remembered && card.oracle_id && Pick && Pick.pageFor && !(printing && String(printing.set_code).toLowerCase() === remembered)) {
+      Pick.pageFor(card.oracle_id, {}, 1).then(function (res) {
+        if (picked) return;
+        var p = ((res && res.cards) || []).filter(function (x) { return String(x.set || "").toLowerCase() === remembered; })[0];
+        if (p) { printing = { set_code: p.set, collector_number: String(p.collector_number) }; chosen = true; price = ""; showPrint(); }
+      }).catch(function () { /* the default printing stays */ });
+    }
+    var finish = el("select");
+    finish.id = "ap-finish";
+    [["", "Normal"], ["foil", "Foil"], ["etched", "Etched"]].forEach(function (f) { var o = el("option", null, f[1]); o.value = f[0]; finish.appendChild(o); });
+    printBtn.addEventListener("click", function () {
+      if (!Pick || !card.oracle_id) return;
+      Pick.open({
+        name: name, oracleId: card.oracle_id, pickLabel: "Use this printing", returnFocus: printBtn,
+        finish: finish.value || "normal",
+        onPick: function (p, how) {
+          picked = true; chosen = true;
+          printing = { set_code: p.set, collector_number: String(p.collector_number) };
+          price = "";
+          rememberSet(p.set || "");
+          var f = how && how.finish ? String(how.finish).toLowerCase() : "";
+          if (f === "foil" || f === "etched") finish.value = f; else if (f) finish.value = "";
+          if (window.MtgSelect) window.MtgSelect.refresh(finish);
+          showPrint();
+        }
+      });
+    });
+    if (!card.oracle_id || !Pick) printBtn.disabled = true;
+    fields.appendChild(row("Printing", "ap-print", printBtn));
+    var finWrap = el("span", "sel");
+    finWrap.appendChild(finish);
+    fields.appendChild(row("Finish", "ap-finish", finWrap));
+    info.appendChild(fields);
+    form.appendChild(info);
+    var box = null;
+    var addBtn = Box.button("Add to deck", "primary", null, { icon: "plus" });
+    addBtn.type = "submit";
+    addBtn.setAttribute("form", "ap-form");
+    form.id = "ap-form";
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (cat.value === NEW_CAT) return;
+      var category = cat.value || "";
+      var spec = { name: name, qty: count, category: category, zone: isSide(category) ? "side" : "main", printing: chosen ? printing : null, finish: finish.value };
+      box.close();
+      addOne(spec);
+    });
+    box = Box.open({
+      title: name, label: "Add " + name, wide: true, body: form, returnFocus: quickInput,
+      actions: [Box.button("Cancel", "btn", null, { cancel: true }), addBtn]
+    });
+    box.panel.classList.add("addbox-preview");
+    // Enter adds: the Add button has the focus first, so a typed name goes in with Enter twice
+    setTimeout(function () { addBtn.focus(); }, 0);
+  }
+
+  // One add, saved in the background like the page's other edits; Undo takes the copies back out
+  function addOne(spec) {
     background({
       card: null, what: "Add",
       start: function () {
-        var had = $$(".c, .row", cards).filter(function (c) { return zoneOf(c) === "main" && frontFace(c.getAttribute("data-card")) === face; });
+        var had = rowsOf(spec.name, spec.zone);
         var inv;
-        if (!had.length) inv = { action: "remove", card_name: name };
+        if (!had.length) inv = { action: "remove", card_name: spec.name };
         else if (had.length === 1) inv = { action: "set_quantity", card_name: had[0].getAttribute("data-card"), quantity: qtyOf(had[0]) };
-        // several rows of it in the deck: an Undo would count them all, so none is offered
+        if (inv && spec.zone === "side") inv.zone = "side";
+        // several rows of it in that zone: an Undo would count them all, so none is offered
+        var ch = { action: "add", card_name: spec.name, quantity: spec.qty };
+        if (spec.category) ch.category = spec.category;
+        if (spec.zone === "side") ch.zone = "side";
+        if (spec.printing && spec.printing.set_code) { ch.set_code = spec.printing.set_code; ch.collector_number = spec.printing.collector_number; }
+        if (spec.finish) ch.finish = spec.finish;
+        var what = (spec.qty > 1 ? spec.qty + " × " : "") + spec.name;
         return {
-          changes: [{ action: "add", card_name: name, quantity: 1 }], inverse: inv ? [inv] : [],
-          saying: "Adding " + name + "…", note: "Added " + name + ". Snapshot kept under History."
+          changes: [ch], inverse: inv ? [inv] : [],
+          saying: "Adding " + what + "…",
+          note: "Added " + what + (spec.category ? " to " + spec.category : "") + ". Snapshot kept under History."
         };
       },
       saved: function () {
-        if ((input.value || "").trim() !== name) return;
-        input.value = "";
-        input.dispatchEvent(new Event("input", { bubbles: true }));  // the suggestion list closes
+        if (spec.printing && spec.printing.set_code) rememberSet(spec.printing.set_code);
+        showAdded(spec.name, spec.zone);
       },
       undo: function () { return ""; }
     });
+    if (quickInput) {
+      quickInput.value = "";
+      quickInput.dispatchEvent(new Event("input", { bubbles: true }));  // the suggestion list closes
+      quickInput.focus({ preventScroll: true });
+    }
   }
+  // the card that just went in: in view, marked for a moment
+  function showAdded(name, zone) {
+    var c = rowsOf(name, zone)[0];
+    if (!c) return;
+    c.classList.add("justadded");
+    if (c.scrollIntoView) c.scrollIntoView({ block: "nearest" });
+    setTimeout(function () { c.classList.remove("justadded"); }, 2400);
+  }
+
+  // The box: a pick or Enter opens the preview of the card the box names
+  function startAdd(raw) {
+    var parts = splitQty(raw);
+    needName(quickInput, !parts.name);
+    if (!parts.name) {
+      quickInput.focus();
+      if (quickInput.reportValidity) quickInput.reportValidity();
+      return;
+    }
+    quickForm.classList.add("looking");
+    summaryOf(parts.name).then(function (card) {
+      quickForm.classList.remove("looking");
+      if (!card) {
+        var find = el("a", "btn", "Search cards");
+        find.href = "/cards?q=" + enc(parts.name);
+        toast("No card is named “" + parts.name + "”. Pick one from the list, or search for it.", { error: true, actions: [find] });
+        return;
+      }
+      openPreview(card.name || parts.name, parts.qty, card);
+    }, function () {
+      quickForm.classList.remove("looking");
+      toast("The card could not be looked up: no connection. Try again in a moment.", { error: true });
+    });
+  }
+  if (quickForm && quickInput) {
+    quickForm.noValidate = true;
+    quickInput.addEventListener("input", function (e) { if (e.target.value.trim()) needName(e.target, false); });
+    quickInput.addEventListener("suggest:pick", function (ev) {
+      var d = ev.detail || {};
+      if (d.name && d.card) summaries[fold(d.name)] = d.card;
+    });
+    quickForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      startAdd(quickInput.value);
+    });
+  }
+
+  // "Add a card here" (a category's menu): a chip beside the box names the category the next
+  // adds start in, until its × is pressed
+  function drawAddTo() {
+    var old = quickForm && $(".addto", quickForm);
+    if (old) old.remove();
+    if (!quickForm || !addTo) return;
+    var chip = el("button", "ui-chip on addto", "");
+    chip.type = "button";
+    chip.appendChild(el("span", "t", addTo));
+    chip.appendChild(icon("x"));
+    chip.setAttribute("aria-label", "Adding to " + addTo + ". Stop adding to " + addTo);
+    chip.title = "Cards you add go to " + addTo + ". Press to stop.";
+    chip.addEventListener("click", function () { addTo = ""; drawAddTo(); quickInput.focus(); });
+    var rowEl = $(".quickrow", quickForm);
+    rowEl.insertBefore(chip, rowEl.firstChild);
+  }
+  function addHere(name) {
+    if (!quickForm) return;
+    addTo = name;
+    drawAddTo();
+    quickForm.scrollIntoView({ block: "center" });
+    quickInput.focus({ preventScroll: true });
+  }
+
+  // -- More ways to add: Paste a list, Add from a scan, Add a package ------------------------
+  var addWays = quickForm ? $(".addways", quickForm) : null;
+  function addWayItems() {
+    var Menu = window.MtgMenu, items = [];
+    if (!Menu) return items;
+    items.push(Menu.item("Paste a list…", "copy", function () { Menu.whenClosed(function () { openBatch("paste"); }); }));
+    if (quickForm && quickForm.getAttribute("data-scan") === "1") {
+      items.push(Menu.item("Add from a scan…", "scan", function () { Menu.whenClosed(function () { openBatch("scan"); }); }));
+    }
+    items.push(Menu.item("Add a package…", "package", function () {
+      Menu.whenClosed(function () { if (window.MtgBox && window.MtgBox.openElement) window.MtgBox.openElement("package", { returnFocus: addWays }); });
+    }));
+    return items;
+  }
+  if (addWays && !addWays.hasAttribute("aria-disabled")) {
+    addWays.addEventListener("click", function (e) {
+      var Menu = window.MtgMenu;
+      if (!Menu) return;  // without the menu layer the link opens the package box's address
+      e.preventDefault();
+      e.stopPropagation();
+      var r = addWays.getBoundingClientRect();
+      Menu.open({ head: "Add cards", label: "More ways to add", items: addWayItems(), focusBack: addWays, anchor: addWays }, r.left, r.bottom + 4);
+    });
+  }
+
+  // The review a pasted list or a scan goes through: every card found, each with its category
+  // (its own by type, or one picked for all), the lines that matched no card, the backup tick
+  // where the admin turned Archidekt backup copies on, and one Add for them all.
+  var PASTE_KEY = "mtg-paste-" + deckId;
+  function openBatch(kind, scanId) {
+    var Box = window.MtgBox;
+    if (!Box) return;
+    var body = el("div", "batch");
+    var picker = null, area = null;
+    if (kind === "paste") {
+      var lab = el("label", null, "One card per line, with a count in front (“2 Lightning Bolt”)");
+      lab.htmlFor = "batch-text";
+      area = el("textarea");
+      area.id = "batch-text";
+      area.rows = 6;
+      area.maxLength = 20000;
+      area.placeholder = "4 Lightning Bolt\n1 Sol Ring";
+      try { area.value = sessionStorage.getItem(PASTE_KEY) || ""; } catch (e) { /* private window */ }
+      area.addEventListener("input", function () { try { sessionStorage.setItem(PASTE_KEY, area.value); } catch (e) { /* private */ } });
+      body.appendChild(lab);
+      body.appendChild(area);
+    } else {
+      var slab = el("label", null, "Scan");
+      slab.htmlFor = "batch-scan";
+      picker = el("select");
+      picker.id = "batch-scan";
+      var wait = el("option", null, "Loading your scans…");
+      wait.value = "";
+      picker.appendChild(wait);
+      var sw = el("span", "sel");
+      sw.appendChild(picker);
+      var srow = el("div", "field");
+      srow.appendChild(slab);
+      srow.appendChild(sw);
+      body.appendChild(srow);
+    }
+    var review = el("div", "batchreview");
+    body.appendChild(review);
+    var backup = null;
+    if (quickForm && quickForm.getAttribute("data-backups") === "1") {
+      var bl = el("label", "check batchbackup");
+      backup = el("input");
+      backup.type = "checkbox";
+      backup.checked = quickForm.getAttribute("data-backup-default") === "1";
+      bl.appendChild(backup);
+      bl.appendChild(document.createTextNode(" Also keep a backup copy on Archidekt"));
+      body.appendChild(bl);
+    }
+    var found = [];  // [{change, typeCat, select}]
+    var check = Box.button(kind === "paste" ? "Check the list" : "Show the cards", "primary", null, {});
+    var add = Box.button("Add", "primary", null, { icon: "plus" });
+    add.hidden = true;
+    var box = Box.open({
+      title: kind === "paste" ? "Paste a list" : "Add from a scan", wide: true, body: body, returnFocus: addWays || quickInput,
+      actions: [Box.button("Cancel", "btn", null, { cancel: true }), check, add]
+    });
+    box.panel.classList.add("batchbox");
+    function showReview(d) {
+      review.textContent = "";
+      found = [];
+      var changes = (d && d.changes) || [];
+      var items = (d && (d.cards || d.items)) || [];
+      var types = Object.create(null);
+      items.forEach(function (it) { if (it && it.card && it.card.name) types[fold(it.card.name)] = it.card.type_line || ""; });
+      // left out: a line no card has, a card the list and its set disagree on (conflict), and one
+      // the look-up ran out of time for (deferred); only the ready cards are in d.changes
+      var missed = items.filter(function (it) { return it && (!it.card || it.status === "conflict" || it.status === "deferred"); });
+      if (!changes.length && !missed.length) {
+        review.appendChild(el("p", "muted", kind === "paste" ? "Nothing to add: paste one card per line." : "This scan has no cards."));
+        add.hidden = true; check.hidden = kind !== "paste";
+        return;
+      }
+      var all = categorySelect("batch-all", "", "");
+      all.options[0].text = "Each card's own category";
+      var aw = el("span", "sel");
+      aw.appendChild(all);
+      var allRow = el("div", "field batchall");
+      var al = el("label", null, "Put them in");
+      al.htmlFor = "batch-all";
+      allRow.appendChild(al);
+      allRow.appendChild(aw);
+      if (changes.length) review.appendChild(allRow);
+      var ul = el("ul", "batchlist");
+      changes.forEach(function (ch, i) {
+        var tc = typeCategory(types[fold(ch.card_name)]);
+        var li = el("li");
+        li.appendChild(el("span", "q", String(ch.quantity || 1)));
+        var nm = el("span", "nm", ch.card_name);
+        if (ch.set_code) nm.appendChild(el("small", "muted", " " + String(ch.set_code).toUpperCase() + " #" + ch.collector_number));
+        li.appendChild(nm);
+        var sel = categorySelect("batch-cat-" + i, tc, addTo);
+        sel.setAttribute("aria-label", "Category of " + ch.card_name);
+        watchNewCategory(sel);
+        var w = el("span", "sel");
+        w.appendChild(sel);
+        li.appendChild(w);
+        ul.appendChild(li);
+        found.push({ change: ch, select: sel });
+      });
+      missed.forEach(function (it) {
+        var li = el("li", "miss");
+        var nameIn = (it.input && it.input.name) || "";
+        li.appendChild(el("span", "q", String(it.quantity || 1)));
+        var why = !it.card ? ": no card has this name" : it.status === "deferred" ? ": not looked up in time, check the list again" : ": its set and name disagree, so it is left out";
+        li.appendChild(el("span", "nm", (nameIn || (it.card && it.card.name) || "A line") + why));
+        var sug = !it.card ? (it.suggestions || [])[0] : "";
+        if (sug && area) {
+          var fix = el("button", "btn", "Use " + sug);
+          fix.type = "button";
+          fix.addEventListener("click", function () {
+            area.value = area.value.split(/\r?\n/).map(function (line) { return line.indexOf(nameIn) >= 0 ? line.replace(nameIn, sug) : line; }).join("\n");
+            area.dispatchEvent(new Event("input", { bubbles: true }));
+            check.click();
+          });
+          li.appendChild(fix);
+        }
+        ul.appendChild(li);
+      });
+      review.appendChild(ul);
+      all.addEventListener("change", function () {
+        if (all.value === NEW_CAT) return;
+        found.forEach(function (f) { f.select.value = all.value; if (window.MtgSelect) window.MtgSelect.refresh(f.select); });
+      });
+      watchNewCategory(all, function (v) {
+        found.forEach(function (f) {
+          if (v && !Array.prototype.some.call(f.select.options, function (o) { return o.value === v; })) {
+            var o = el("option", null, v); o.value = v; f.select.insertBefore(o, f.select.lastElementChild);
+          }
+          f.select.value = v;
+          if (window.MtgSelect) window.MtgSelect.refresh(f.select);
+        });
+      });
+      var copies = changes.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
+      review.appendChild(el("p", "muted small batchsum", copies + (copies === 1 ? " card" : " cards") + " ready" + (missed.length ? " · " + missed.length + (missed.length === 1 ? " line matches" : " lines match") + " no card and will be left out" : "") + "."));
+      add.textContent = "";
+      add.appendChild(icon("plus"));
+      add.appendChild(document.createTextNode(" Add " + copies + (copies === 1 ? " card" : " cards")));
+      add.hidden = !changes.length;
+      check.hidden = kind !== "paste" || !!changes.length;
+    }
+    function lookUp() {
+      box.note("");
+      if (kind === "paste") {
+        var lines = [];
+        area.value.split(/\r?\n/).forEach(function (line) {
+          line = line.trim();
+          if (!line || /^(deck|sideboard|maybeboard|commander|companion)\s*:?$/i.test(line) || line.charAt(0) === "#") return;
+          if (lines.length < 200 && line.length <= 300) lines.push(line);
+        });
+        if (!lines.length) { box.note("Paste one card per line first.", true); area.focus(); return; }
+        box.busy(true);
+        window.MtgFetch.json("/scan/api/resolve", {
+          method: "POST", csrf: CSRF, body: JSON.stringify({ cards: lines }), what: "nothing was added"
+        }).then(function (d) { box.busy(false); if (d && d.ok === false) { box.note(d.message || "The list could not be checked. Nothing was added.", true); return; } showReview(d); }, function (err) {
+          box.busy(false);
+          box.note(err && err.message ? err.message : "The list could not be checked: no connection. Nothing was added.", true);
+        });
+      } else {
+        if (!picker.value) return;
+        box.busy(true);
+        window.MtgFetch.json("/scan/api/sessions/" + enc(picker.value), { method: "GET", what: "the scan could not be read" })
+          .then(function (d) { box.busy(false); if (d && d.ok === false) { box.note(d.message || "The scan could not be read.", true); return; } showReview(d); }, function (err) {
+            box.busy(false);
+            box.note(err && err.message ? err.message : "The scan could not be read: no connection.", true);
+          });
+      }
+    }
+    check.addEventListener("click", lookUp);
+    if (area) area.addEventListener("input", function () { if (found.length) { review.textContent = ""; found = []; add.hidden = true; check.hidden = false; } });
+    add.addEventListener("click", function () {
+      if (!found.length) return;
+      var changes = found.map(function (f) {
+        var ch = {};
+        Object.keys(f.change).forEach(function (k) { ch[k] = f.change[k]; });
+        var c = f.select.value === NEW_CAT ? "" : f.select.value;
+        if (c) ch.category = c; else delete ch.category;
+        if (isSide(c)) ch.zone = "side"; else delete ch.zone;
+        return ch;
+      });
+      var withBackup = !!(backup && backup.checked);
+      box.close();
+      addMany(changes, withBackup);
+      if (kind === "paste") { try { sessionStorage.removeItem(PASTE_KEY); } catch (e) { /* private */ } }
+    });
+    if (kind === "scan") {
+      window.MtgFetch.json("/scan/api/sessions", { method: "GET", what: "your scans could not be listed" }).then(function (d) {
+        picker.textContent = "";
+        var list = (d && d.sessions) || [];
+        if (!list.length) {
+          var none = el("option", null, "No saved scans yet");
+          none.value = "";
+          picker.appendChild(none);
+          review.textContent = "";
+          var go = el("a", "btn", "Open Scan");
+          go.href = "/scan";
+          var p = el("p", "muted", "Scan a pile of cards on the Scan page, then add them here. ");
+          p.appendChild(go);
+          review.appendChild(p);
+          check.hidden = true;
+        } else {
+          list.forEach(function (sess) {
+            var o = el("option", null, sess.name + (sess.card_count ? " (" + sess.card_count + ")" : ""));
+            o.value = sess.id;
+            picker.appendChild(o);
+          });
+          if (scanId && list.some(function (sess) { return sess.id === scanId; })) picker.value = scanId;
+          check.hidden = true;
+          lookUp();
+        }
+        if (window.MtgSelect) window.MtgSelect.refresh(picker);
+      }, function (err) { box.note(err && err.message ? err.message : "Your scans could not be listed: no connection.", true); });
+      picker.addEventListener("change", lookUp);
+    } else if (area.value.trim()) {
+      lookUp();
+    }
+  }
+  // A batch: one save per 40 changes (the endpoint's limit), each with its own Undo
+  function addMany(changes, withBackup) {
+    for (var i = 0; i < changes.length; i += 40) {
+      (function (part, first) {
+        background({
+          card: null, what: "Add",
+          start: function () {
+            var inverse = [];
+            part.forEach(function (ch) {
+              var zone = ch.zone === "side" ? "side" : "main";
+              var had = rowsOf(ch.card_name, zone);
+              var inv = null;
+              if (!had.length) inv = { action: "remove", card_name: ch.card_name };
+              else if (had.length === 1) inv = { action: "set_quantity", card_name: had[0].getAttribute("data-card"), quantity: qtyOf(had[0]) };
+              if (inv && zone === "side") inv.zone = "side";
+              if (inv) inverse.push(inv);
+            });
+            // a card with several rows in its zone: the batch's Undo could not put it back alone
+            if (inverse.length !== part.length) inverse = [];
+            var copies = part.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
+            return {
+              changes: part, inverse: inverse, backup: withBackup && first,  // one copy, before the first part
+              saying: "Adding " + copies + (copies === 1 ? " card…" : " cards…"),
+              note: "Added " + copies + (copies === 1 ? " card" : " cards") + ". Snapshot kept under History."
+            };
+          },
+          undo: function () { return ""; }
+        });
+      })(changes.slice(i, i + 40), i === 0);
+    }
+  }
+  // The deck editor's old address with a name or a scan (companion_tools.edit_page) and the Scan
+  // page's "Add to deck": the preview or the review opens as the page loads
+  (function () {
+    if (!quickForm || !window.URLSearchParams) return;
+    var q = new URLSearchParams(location.search);
+    var name = (q.get("add") || "").trim(), scan = (q.get("scan_session") || "").trim();
+    if (!name && !scan) return;
+    q.delete("add"); q.delete("scan_session");
+    try { history.replaceState(history.state, "", location.pathname + (q.toString() ? "?" + q.toString() : "") + location.hash); } catch (e) { /* the address stays */ }
+    var go = function () {
+      if (name) { quickInput.value = name.slice(0, 200); startAdd(quickInput.value); }
+      else if (quickForm.getAttribute("data-scan") === "1") openBatch("scan", scan);
+    };
+    if (document.readyState === "complete") setTimeout(go, 0); else window.addEventListener("load", go);
+  })();
 
   // Try again: the same change, sent once more in its turn; the answer draws the rows as any
   // save's does (Saved with Undo), and its failure says why, with Try again once more.
@@ -904,7 +1537,7 @@
     bgQueue = bgQueue.then(idle).then(function () {
       bgCards.splice(bgCards.indexOf(job.card), 1);
       savingNote(plan.saying, true, job.card, job.what);
-      return saveEdit(plan.changes, plan.inverse, { note: plan.note }).then(null, function (err) { notSaved(plan, job, err, true); });
+      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(null, function (err) { notSaved(plan, job, err, true); });
     }).then(done, done);
   }
   // Where a card sits and how it is filed, to put it back there when its save does not go through
@@ -1932,7 +2565,7 @@
   var CardView = window.MtgCardView;
   function closeViewer() { if (CardView) CardView.close(); }
   // The viewer's action rows (mockup screen 3): [− n +] [Move to…] [Remove], then [Add to
-  // binder] [Edit in deck editor]; its Printing row opens the Printings sheet (openPrintings),
+  // binder]; its Printing row opens the Printings sheet (openPrintings),
   // and EDHREC, TCGplayer and Scryfall are the viewer's own pills. Remove is the red outline: a
   // solid red button is for a final confirm only (U10a).
   function openViewer(card) {
@@ -1981,9 +2614,6 @@
         ownBtn.type = "button";
         ownBtn.addEventListener("click", function () { addToBinder(ownBtn, name); });
         acts.push(ownBtn);
-        var editLink = el("a", "btn", "Edit in deck editor");
-        editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
-        acts.push(editLink);
       }
       CardView.open(data, acts);
       return;
@@ -2156,6 +2786,14 @@
       if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
       sub.appendChild(b);
     });
+    // a category the deck does not have yet: its name in a box, then the card moves into it
+    // (Archidekt makes the category with the card's move)
+    if (window.MtgBox) {
+      sub.appendChild(menuItem("New category…", "plus", function () {
+        closeMenu();
+        newCategoryBox(card, mover);
+      }));
+    }
     var toggleSub = function (open) {
       sub.hidden = !open;
       moveBtn.setAttribute("aria-expanded", open ? "true" : "false");
@@ -2173,6 +2811,31 @@
     sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
     m.appendChild(moveBtn);
     m.appendChild(sub);
+  }
+  function newCategoryBox(card, mover) {
+    var Box = window.MtgBox;
+    var form = el("form", "catform");
+    var lab = el("label", null, "Category name");
+    lab.htmlFor = "movecat-name";
+    var input = el("input");
+    input.type = "text"; input.id = "movecat-name"; input.maxLength = 60; input.autocomplete = "off";
+    input.required = true;
+    form.appendChild(lab);
+    form.appendChild(input);
+    var ok = Box.button("Move here", "primary", null, { icon: "swap" });
+    ok.type = "submit";
+    ok.setAttribute("form", "movecat-form");
+    form.id = "movecat-form";
+    var cancel = Box.button("Cancel", "btn", null, { cancel: true });
+    var name = card.getAttribute("data-card") || "the card";
+    var box = Box.open({ title: "Move " + name + " to a new category", body: form, actions: [cancel, ok], returnFocus: card });
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var v = (input.value || "").trim().slice(0, 60);
+      if (!v) { box.note("Type a name for the category.", true); input.focus(); return; }
+      box.close();
+      mover(card, v);
+    });
   }
   // Finish ›: Normal, Foil or Etched, the card's own marked; the gateway refinishes cards in the
   // deck itself, so a maybeboard or sideboard row has no Finish list
@@ -2218,7 +2881,7 @@
     if (own && deckId) return function () { changePrinting(card); };
     return null;
   }
-  // A menu link (Add to deck…, Edit in deck editor, Open on Scryfall)
+  // A menu link (Add to deck…, Open on Scryfall)
   function menuLink(text, ic, href) {
     var a = el("a", "", "");
     a.setAttribute("role", "menuitem");
@@ -2235,7 +2898,7 @@
   }
   // The menu, in one standard shape (mockup screen 3): the card's name with its count in the
   // head; Open card, Printings…, Move to › and Color tag…; "Elsewhere" (the watchlist, the
-  // binder, a pin, another deck); "More" (the card's switches, the editor, Copy name, Scryfall,
+  // binder, a pin, another deck); "More" (the card's switches, Copy name, Scryfall,
   // Report card…); then Remove from deck alone after a line, in red. On someone else's deck the
   // editing items are not offered.
   function openMenu(card, x, y, opts) {
@@ -2304,7 +2967,6 @@
             window.MtgDeckExtras.open("lock", { card: name, cats: cats });
           }));
         }
-        more.push(menuLink("Edit in deck editor", "edit", "/decks/" + enc(deckId) + "/edit#card-" + enc(name)));
       }
       if (Shared) more.push(menuItem("Copy name", "copy", function () { closeMenu(); Shared.copyAndSay(name, "Name copied."); }));
       var scry = scryfallLink(name, "");
@@ -2748,7 +3410,7 @@
   // One row: Quick add with its +, View and ⋮. View opens a sheet with Layout, Card size (the
   // picture views), Group by, Sort by, Filter and a Select cards switch; each drives the server's
   // own control, hidden there (a layout, grouping or sort change reloads the page as it always
-  // did, the filter applies as you type). ⋮ holds Add a package, Undo and Redo, which the phone
+  // did, the filter applies as you type). ⋮ holds the ways to add, Undo and Redo, which the phone
   // had lost. Wider screens keep the toolbar as it is (the CSS shows one or the other).
   (function () {
     var toolbar = $(".toolbar.panel"), controls = toolbar && $(".controls", toolbar), vf = $("#viewform");
@@ -2762,19 +3424,17 @@
     viewBtn.appendChild(el("span", "chev", "\u2304"));
     viewBtn.addEventListener("click", openViewSheet);
     controls.appendChild(viewBtn);
-    var addpkg = $(".quickrow .addpkg", toolbar);
     if (own && deckId) {
       var moreBtn = el("button", "btn toolmore", "");
       moreBtn.type = "button";
       moreBtn.setAttribute("aria-haspopup", "menu");
-      moreBtn.setAttribute("aria-label", "More: Add a package, Undo and Redo");
+      moreBtn.setAttribute("aria-label", "More: ways to add cards, Undo and Redo");
       moreBtn.appendChild(Menu ? Menu.icon("more") : icon("more"));  // the shared layer's ⋮
       moreBtn.addEventListener("click", function () {
         if (!Menu) return;
-        var items = [];
-        if (addpkg && !addpkg.hasAttribute("aria-disabled")) {
-          items.push(Menu.item("Add a package…", "package", function () { Menu.whenClosed(function () { addpkg.click(); }); }));
-        }
+        // the toolbar's More ways to add, which the phone hides to keep the name box wide
+        var items = addWays && !addWays.hasAttribute("aria-disabled") ? addWayItems() : [];
+        if (items.length) items.push(Menu.sep());
         items.push(Menu.item("Undo", "history", undoLast, { disabled: !undoBtnEl || undoBtnEl.disabled, title: "Nothing to undo" }));
         items.push(Menu.item("Redo", "history", redoLast, { disabled: !redoBtnEl || redoBtnEl.disabled, title: "Nothing to redo" }));
         var r = moreBtn.getBoundingClientRect();
@@ -3081,7 +3741,7 @@
   // -- categories on the deck page (mockup screen 4, review F8; the owner's T-191 note) ---------------
   // Each stack's ⋮ (and a right-click, a press and hold or Shift+F10 on its head) opens the
   // category's menu: Rename…, Add category…, Add from template… | Premier, In deck, In price as
-  // tick rows | Edit cards in editor | Delete…, and "+ Add category" after the last stack opens
+  // tick rows | Add a card here | Delete…, and "+ Add category" after the last stack opens
   // the same box as Add category…. Every change goes to Deck settings' own route
   // (/decks/{id}/categories with json=1&page=deck) with the category's baseline, as the settings
   // page's form sends it: the same check that the deck is still what the page showed, the same
@@ -3485,6 +4145,11 @@
       var stack = head.closest(".stack"), name = stack ? stack.getAttribute("data-group") : "";
       var c = catNamed(name), back = $(".kebab", head) || head;
       var items = [];
+      // the deck's own adds go here until the box's chip is closed (Add a card, further up)
+      if (quickForm) {
+        items.push(Menu.item("Add a card here", "plus", function () { Menu.whenClosed(function () { addHere(name); }); }));
+        items.push(Menu.sep());
+      }
       if (c) items.push(Menu.item("Rename…", "edit", function () { renameBox(c, back); }));
       items.push(Menu.item("Add category…", "plus", function () { addBox(back); }));
       items.push(Menu.item("Add from template…", "decks", function () { templateBox(back); }));
@@ -3494,8 +4159,7 @@
         items.push(tick("In deck", !c.not_in_deck, function () { flip(c, "not_in_deck"); }));
         items.push(tick("In price", !c.not_in_price, function () { flip(c, "not_in_price"); }));
       }
-      items.push(Menu.sep());
-      items.push(Menu.link("Edit cards in editor", "edit", "/decks/" + enc(deckId) + "/edit#cat-" + enc(name)));
+      if (c) items.push(Menu.sep());
       if (c) items.push(Menu.item("Delete…", "trash", function () { deleteBox(c, back); }, { danger: true, disabled: !c.record, title: NO_RECORD }));
       Menu.open({ head: name, label: "Category: " + name, items: items, focusBack: back }, x, y);
     }

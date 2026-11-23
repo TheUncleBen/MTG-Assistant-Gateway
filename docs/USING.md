@@ -109,7 +109,7 @@ One deck:
   power and toughness or loyalty, flavour text, the printing, rarity,
   artist, price, salt score and the formats it is legal in; from there open
   it on Scryfall, mark it as owned, or move it to another category. The same
-  viewer opens from a thumbnail in the editor and in the binder.
+  viewer opens from a card in the binder.
 - On your own deck, **drag a card** onto another category: with a mouse, or
   press and hold on a touch screen and slide. The move goes to Archidekt
   when you let go, with a snapshot taken first, as a change from the card
@@ -118,16 +118,31 @@ One deck:
   anyway?".
 - **Undo** and **Redo** (beside **Select cards**, and **Undo** on the
   message after each save) take back or redo any of those changes, each a
-  save of its own; the editor's keys work too: Ctrl+Z, and Ctrl+Shift+Z or
+  save of its own; the keys work too: Ctrl+Z, and Ctrl+Shift+Z or
   Ctrl+Y (Cmd on a Mac), except while you type in a field. A card's notes
   cannot come back: Archidekt gives the gateway no way to write them, so
   removing a card that has a note asks first.
 - Stacks come in the order Archidekt's own deck page shows them: the
   commander's category first, then the categories in the deck by name, then
   Sideboard, then Maybeboard and any other category not in the deck.
-- On your own deck, **Quick add** adds one copy of the card you type straight
-  to the deck, with **Undo** on the message; a name Archidekt doesn't know is
-  refused in red and nothing changes.
+- On your own deck, **Add a card** above the cards suggests names as you
+  type (picture, mana cost, type line). A pick, or **Enter**, opens the
+  card's preview: its picture and rules text, the copies already in the
+  deck, and what to add: **Copies**, **Category** (**Auto** files it by its
+  type as Archidekt does, any of the deck's categories, the maybeboard, or
+  **New category…**), **Printing** (the set used last on this deck first)
+  and **Finish**. **Add to deck** saves it to Archidekt at once, with
+  **Undo** on the message. "3 sol ring" starts at three copies. A
+  category's own menu has **Add a card here**, which files the next cards
+  there until you clear its chip.
+- **More ways to add** beside the box (in the ⋮ menu on a phone): **Paste a
+  list** (one card per line with a count in front; printings and `*F*` /
+  `*E*` finishes are read), **Add from a scan** (one of your saved scans) and
+  **Add a package**. A list or a scan is checked first: each card found with
+  its category (its own by type, or one picked for them all) and the lines
+  that match no card, with the closest name to use instead. One press then
+  adds them all, with **Undo**. With backup copies on, their box **Also keep
+  a backup copy on Archidekt** asks for that extra copy.
 - **Playtest** opens the deck in Archidekt's own playtester (draw an
   opening hand, mulligan, play turns by hand) in a new tab, or in your
   phone's browser from the app. A private deck shows there only when that
@@ -288,17 +303,14 @@ One deck:
   Archidekt), and Arena .txt, MTGO .dek and PDF (one-way). See
   [EXPORT-IMPORT.md](EXPORT-IMPORT.md) for what survives in each direction.
 
-The **editor** changes quantities, categories (type a new one to create it),
-foil or printing, adds cards with autocompletion, removes cards, and undoes.
-Maybeboard and sideboard rows are edited the same way (count and category;
-they never count toward the deck), and **Add to** sends a new card to the
-deck or to the maybeboard. **Paste a list** adds many cards at once, one per
-line with a count in front (Archidekt's own export syntax is understood:
-printing, `*F*` and `*E*` finishes, `[Category]`, `# Sideboard` headers);
-names the gateway cannot match stay in the box.
-Press **Save changes** and they go to Archidekt (a snapshot is taken
-first, so History can undo); only a large removal or a change to the
-commander zone asks you to confirm.
+There is no separate editor: everything is done on the deck page itself.
+The card menu changes a card's copies, category (a new one too), printing,
+finish, colour tag and mana value, or removes it; **Select cards** does the
+same to several at once; **Add a card** and **More ways to add** add cards.
+Each change goes to Archidekt as you make it (a snapshot is taken first, so
+History can undo), with **Undo** and **Redo**; only a large removal or a
+change to the commander zone asks you to confirm. The old editor's address,
+`/decks/{id}/edit`, opens the deck page.
 
 On **My Decks**, **Select** ticks every deck on screen (each of your own
 decks has a tick box of its own); the bar that appears then offers **Move to
@@ -474,7 +486,7 @@ comment that has formatting: on its review page only).
 
 ## Proposals and history
 
-What you save in the app (the editor, a drag between categories, a new
+What you save in the app (a change on the deck page, a drag between categories, a new
 deck, clone or settings) goes to Archidekt at once: pressing Save is your
 approval, and a snapshot is taken first so History can undo it. Only a big
 removal or a change to the commander zone asks you to confirm, and a restore
@@ -500,8 +512,8 @@ Claude on the web, desktop and phone counts as one assistant, and so does ChatGP
   deck as it is now, saves a **snapshot** and, with backups on (the operator's
   setting), puts a backup copy of the deck in your backup folder on
   Archidekt ("MTG Gateway Backups" unless the operator renamed it), then reads the deck back to confirm. The deck
-  page's own saves, Card search's Add to deck, and the deck editor's save with
-  its backup box unticked make no backup copy.
+  page's own saves, Card search's Add to deck, and a pasted list or scan added
+  on the deck page with its backup box unticked make no backup copy.
 - **Updated** and **Needs a look**: Archidekt is the master copy of your
   decks. When you open the app, and every 30 minutes while changes are
   waiting, the gateway checks your decks on Archidekt (it only reads). If a

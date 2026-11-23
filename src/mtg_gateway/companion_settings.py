@@ -807,8 +807,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<span class='ds-sw' role='group' aria-label='Switches of the new category'>"
             f"{new_switches}</span>"
             f"<button class='btn'>{icon('plus')} Create category</button></div></form>"
-            + "<p class='muted small foot'>Moving single cards between categories is in the deck editor "
-            "and on the deck page.</p></section>"
+            + "<p class='muted small foot'>Move single cards between categories on the deck page: from a "
+            "card's menu, or by dragging it.</p></section>"
         )
 
     def cover_section(deck: Deck, csrf: str | None, note: str = "") -> str:

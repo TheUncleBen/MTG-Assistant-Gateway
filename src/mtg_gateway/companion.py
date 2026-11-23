@@ -1,8 +1,8 @@
 """The companion pages: my decks, one deck, history and activity, plus the app shell.
 
 These are the pages the Android app wraps and the browser shows on a phone. They render on
-the server from the same services the MCP tools and the JSON API use; the small amount of
-JavaScript (the deck editor) lives in ``static/companion.js`` and talks to ``/api/v1``.
+the server from the same services the MCP tools and the JSON API use; their scripts live in
+``static/`` and talk to ``/api/v1``.
 Internal links never open a new tab; external sites (Archidekt, Scryfall) may.
 """
 
@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 ICON_HEADERS = {"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"}
-# Pages with the editor load one script from /static; everything else keeps the default CSP.
+# Pages that load their scripts from /static; everything else keeps the default CSP.
 DECK_CSP = (
     "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
@@ -68,11 +68,6 @@ DECK_CSP = (
 DECKS_JSON_TIMEOUT = 25.0  # /api/decks/mine waits this long for a cold list at most
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
-EDITOR_CSP = (
-    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
-    "manifest-src 'self'; connect-src 'self'; "
-    "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
-)
 
 
 def _json_for_html(data: Any) -> str:

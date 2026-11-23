@@ -2525,7 +2525,7 @@
     const deckSel = h('select', { id: 'deck-pick', 'aria-label': 'Deck to add the cards to' }, h('option', { value: '', text: 'Loading your decks…' }));
     const toDeck = h('button', { class: 'secondary', disabled: true, onclick: async () => {
       if (!deckSel.value) { note('error', 'Pick a deck first.'); return; }
-      try { const id = await ensureSaved(); location.href = '/decks/' + encodeURIComponent(deckSel.value) + '/edit?scan_session=' + encodeURIComponent(id); }
+      try { const id = await ensureSaved(); location.href = '/decks/' + encodeURIComponent(deckSel.value) + '?scan_session=' + encodeURIComponent(id); }
       catch (err) { note('error', 'Could not save the scan: ' + why(err)); }
     } }, 'Add to deck');
     api('/api/v1/decks').then((out) => {
@@ -2543,7 +2543,7 @@
     return h('section', { class: 'card next', 'aria-label': 'What next' },
       h('h2', { text: 'What next?' }),
       h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Keep them as owned cards' }), h('small', { class: 'muted', text: 'Adds the matched cards to your binder; the scan is then done with.' })), toCollection),
-      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Add them to one of your decks' }), h('small', { class: 'muted', text: 'Opens the deck editor with these cards filled in; you review the change before it is applied.' }), deckSel), toDeck),
+      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Add them to one of your decks' }), h('small', { class: 'muted', text: 'Opens the deck with these cards ready to review: pick their categories, then add them.' }), deckSel), toDeck),
       h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Start a new deck' }), h('small', { class: 'muted', text: 'Opens the new-deck form with this list as the decklist.' })), newDeck));
   }
 

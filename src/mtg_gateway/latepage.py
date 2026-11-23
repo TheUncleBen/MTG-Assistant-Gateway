@@ -60,7 +60,6 @@ _PAGES = (
     (re.compile(r"^/decks/\d{1,12}/settings$"), "Deck settings", "/decks"),
     (re.compile(r"^/decks/\d{1,12}/goldfish$"), "Goldfish", "/decks"),
     (re.compile(r"^/decks/\d{1,12}/compare$"), "Compare", "/decks"),
-    (re.compile(r"^/decks/\d{1,12}/edit$"), "Edit deck", "/decks"),
     (re.compile(r"^/decks/\d{1,12}/(export|delete)$"), "Deck", "/decks"),
     (re.compile(r"^/history/reports/[A-Za-z0-9_-]{1,80}$"), "Report", "/reports"),
     (re.compile(r"^/notifications$"), "Alerts", ""),

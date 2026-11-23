@@ -126,7 +126,6 @@ def pages(pending: str) -> list[str]:
         "/decks/42?view=grid",
         "/decks/42?view=table",
         "/decks/50",
-        "/decks/42/edit",
         "/decks/42/settings",
         "/decks/new",
         "/decks/new-package",

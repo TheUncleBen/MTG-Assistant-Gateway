@@ -267,7 +267,7 @@ Separately, with backup copies on (**Keep a backup copy on Archidekt** on the
 Settings page, on by default), every
 applied edit also leaves a private backup copy of the deck in the user's own
 Archidekt account, except the deck page's own saves, Card search's Add to deck,
-and the deck editor's save with its backup box unticked (see
+and a pasted list or scan added on the deck page with its backup box unticked (see
 [Archidekt writes](#archidekt-writes-and-the-kill-switch)). Those live on Archidekt,
 not in your backups.
 
@@ -740,10 +740,10 @@ page. Restoring a snapshot does not put back a deck's folder, tags, cover or cus
 Deleting a deck keeps a snapshot too. With backup copies on
 (**Keep a backup copy on Archidekt**), an assistant's change, or one applied from its
 card or review page, also gets a backup copy on Archidekt. The member's own
-saves in the deck editor make one only when its "Also keep a backup copy on
-Archidekt" box is ticked (unticked unless the Settings page's
-**Backup box ticked by default** is on), and the deck page's own edits and Card
-search's Add to deck, which have no such box, never make one. A binder change, a clone, a new deck
+saves on the deck page make one only from Paste a list or Add from a scan with
+its "Also keep a backup copy on Archidekt" box ticked (unticked unless the
+Settings page's **Backup box ticked by default** is on); the deck page's other
+edits and Card search's Add to deck, which have no such box, never make one. A binder change, a clone, a new deck
 and the other actions on the member's Archidekt account (likes, votes,
 bookmarks, follows, comments, new folders and collaborator changes) keep no
 snapshot.

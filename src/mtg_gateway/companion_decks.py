@@ -931,6 +931,11 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
             making=bool(being_made),
+            add_opts={
+                "scan": state.scan is not None,
+                "backups": bool(state.live.get("archidekt_backups")),
+                "backup_default": bool(state.live.get("archidekt_backup_box_default")),
+            },
             waiting=waiting_changes(
                 state.db, sub, deck.id, own=own, risk_of=decks.proposal_risk
             ),  # waiting_strip.py

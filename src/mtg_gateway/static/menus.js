@@ -374,7 +374,6 @@
     items.push(link("Open", "eye", d.href));
     // the app has no tabs (the owner, 2026-10-25): a website-only item
     if (!inApp()) items.push(link("Open in a new tab", "external", d.href, { ext: true }));
-    if (d.own) items.push(link("Edit deck", "edit", "/decks/" + id + "/edit"));
     items.push(sep());
     if (!d.own) items.push(item("Clone into my decks", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
     items.push(link("Goldfish", "play", "/decks/" + id + "/goldfish"));
