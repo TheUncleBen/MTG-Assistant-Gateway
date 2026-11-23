@@ -136,7 +136,7 @@ def test_the_account_hub_is_one_centred_column_on_every_screen() -> None:
     checklist: "that spacing"): the groups are one centred column, in their own order, as iOS
     Settings draws them."""
     css = account_hub.HUB_CSS
-    assert ".yhub{max-width:42rem;margin:0 auto}" in css
+    assert ".yhub{max-width:44rem;margin:0 auto}" in css
     assert ".ycols{display:grid;grid-template-columns:minmax(0,1fr);" in css
     assert "minmax(0,1fr) minmax(0,1fr)" not in css and "ylone" not in css
     assert not hasattr(account_hub, "balance")
@@ -147,7 +147,7 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
     hub = h.get("/account").text
     assert "<title>Account · " in hub and "<div class='yhub'>" in hub
     for name in ("Your account", "Look", "Assistants and apps"):
-        assert f"<h2>{name}</h2>" in hub, name
+        assert f"<h2 class='ui-group'>{name}</h2>" in hub, name
     for href in (
         "/account/details",
         "/collection/lists",  # the lists live in Binder (mockup screen 8); Account keeps a row
@@ -157,7 +157,7 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
         "/install?for=android",
     ):
         assert f"<a class='yrow' href='{href}'>" in hub, href
-    assert "href='/admin'" not in hub and "<h2>This app</h2>" not in hub
+    assert "href='/admin'" not in hub and "<h2 class='ui-group'>This app</h2>" not in hub
     # Forum is in More and on the rail now (decision C8), not on the Account page
     assert "<a class='yrow' href='/forum'>" not in hub
     assert "<form method='post' action='/theme'>" in hub and "<form method='post' action='/layout'>" in hub
@@ -170,7 +170,7 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
     )
     details = h.get("/account/details").text
     assert "<title>Account details · " in details
-    assert "<a class='yback' href='/account'>" in details and "<h1>Account details</h1>" in details
+    assert "<a class='bn-back yback' href='/account'>" in details and "<h1>Account details</h1>" in details
     assert "Sign out on all my devices" in details and ">Sign out</button>" not in details
 
 
@@ -186,7 +186,10 @@ def test_admins_and_the_app_get_their_own_rows(server: Server) -> None:
     hub = _client(server, admin=True).get("/account").text
     assert "<a class='yrow' href='/admin'>" in hub
     app = _client(server).get("/account", headers=APP_UA).text
-    assert "<h2>This app</h2>" in app and "href='/install?for=android'" not in app.split("<main")[1]
+    assert (
+        "<h2 class='ui-group'>This app</h2>" in app
+        and "href='/install?for=android'" not in app.split("<main")[1]
+    )
     for action in ("openCamera", "reload", "openCopiedLink", "changeGateway", "checkForUpdates"):
         assert f"data-native='{action}'" in app, action
     assert "openInBrowser" not in app
@@ -375,7 +378,7 @@ def test_the_account_page_has_an_assistants_row_so_a_mode_change_is_three_taps(s
     Guide and the skill."""
     h = _client(server)
     hub = h.get("/account").text
-    group = hub.split("<h2>Assistants and apps</h2>", 1)[1].split("</section>", 1)[0]
+    group = hub.split("<h2 class='ui-group'>Assistants and apps</h2>", 1)[1].split("</section>", 1)[0]
     assert "<a class='yrow' href='/account/assistants?from=account'>" in group
     assert group.index("href='/account/assistants?from=account'") < group.index("href='/guide'")
     assert "<span class='lbl'>Assistants</span>" in group

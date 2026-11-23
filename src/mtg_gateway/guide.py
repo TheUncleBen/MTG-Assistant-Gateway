@@ -43,7 +43,7 @@ LEAD = "What you can do here, with or without an assistant."
 
 GUIDE_CSS = """
 .guide{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}
-.guide h2,.guide h3,.guide h4{overflow-wrap:anywhere}
+.guide h2{overflow-wrap:anywhere}
 .guide .gside{min-width:0}
 .gsearch{margin:0 0 .75rem}
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
@@ -122,17 +122,16 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .gmain a:not([class]):hover{color:var(--orange-text)}
 .gpart{margin:0 0 1.5rem}
 .gpart > header{margin:0 0 .75rem}
-.gpart > header h2{display:block;font-size:1.6rem;margin:0 0 .15rem}
-.gpart > header h2 svg{color:var(--orange);width:28px;height:28px;vertical-align:-.2em;margin-right:.4rem}
+.gpart > header h2{display:block}
+.gpart > header h2 svg{color:var(--orange);width:1.1em;height:1.1em;vertical-align:-.15em;margin-right:.4rem}
 .gpart > header p{margin:0;color:var(--text-muted)}
 .gsec{margin:0 0 1rem;scroll-margin-top:4.5rem}
-.gpart,.guide h4{scroll-margin-top:4.5rem}
-.gsec h3{display:flex;align-items:center;gap:.5rem;font-size:1.3rem;margin:0 0 .5rem}
-.gsec h3 svg{color:var(--orange)}
-.gsec h4{font-size:1.05rem;margin:1rem 0 .25rem;display:flex;align-items:center;gap:.4rem}
+.gpart,.gsec h2{scroll-margin-top:4.5rem}
+/* a topic's sections are the site's section heading (h2), each with its link beside it */
+.gsec h2{display:flex;align-items:center;gap:.4rem}
 .guide .anchor{color:var(--text-muted);text-decoration:none;font-weight:400;opacity:0;margin-left:auto;
   padding:0 .35rem;border-radius:var(--radius);font-size:.9em}
-.guide h2:hover .anchor,.guide h3:hover .anchor,.guide h4:hover .anchor,
+.guide h2:hover .anchor,
 .guide .anchor:focus-visible{opacity:1}
 .guide .anchor:hover{color:var(--orange-text);background:var(--surface-2)}
 .guide ul,.guide ol{padding-left:1.2rem}
@@ -172,11 +171,12 @@ details.gnav > summary::-webkit-details-marker{display:none}
   box-shadow:var(--shadow)}
 .gtop.hide{display:none}
 .gtop svg{transform:rotate(180deg)}
-@media (max-width:599px){.gtop{bottom:calc(4.5rem + env(safe-area-inset-bottom))}
-  .gpart > header h2{font-size:min(1.6rem,9vw)}}  /* 200% text: a word stays whole */
+@media (max-width:599px){.gtop{bottom:calc(4.5rem + env(safe-area-inset-bottom))}}
 @media (min-width:900px){
   /* the contents column: 16rem, or 30% at large text, so the topic keeps room for its heading */
-  .guide{grid-template-columns:min(16rem,30%) minmax(0,1fr);gap:1.5rem}
+  /* the topic is the standard's reading column (44rem) beside the contents, the two centred in
+     the page's 1200 px together, so a wide window has the same margin on both sides */
+  .guide{grid-template-columns:min(16rem,30%) minmax(0,44rem);gap:1.5rem;justify-content:center}
   .guide .gside{position:sticky;top:4rem;max-height:calc(100vh - 5rem);overflow:auto;padding-right:.25rem}
   .gside .gsrow{flex-wrap:wrap}
   .gside .gsrow input[type=search],.gside .gsrow .btn{flex:1 1 100%}
@@ -318,8 +318,9 @@ def _anchor(target: str, label: str) -> str:
     return f"<a class='anchor' href='#{target}' aria-label='Link to “{_esc(label)}”'>#</a>"
 
 
-def _h4(hid: str, label: str) -> str:
-    return f"<h4 id='{hid}'>{_esc(label)}{_anchor(hid, label)}</h4>"
+def _sec(hid: str, label: str) -> str:
+    """A section inside a topic: the site's section heading, with its own address."""
+    return f"<h2 id='{hid}'>{_esc(label)}{_anchor(hid, label)}</h2>"
 
 
 def _stackable(page: str) -> str:
@@ -617,7 +618,7 @@ def build(
         "<li>Ask your assistant: “build a new deck from this list” comes back as a proposal.</li></ul>"
     )
     how_add_cards = (
-        f"{_h4('how-add-editor', 'In the editor')}"
+        f"{_sec('how-add-editor', 'In the editor')}"
         "<p>Change quantities, categories (type a new one to create it), foil or printing, add cards with "
         "autocompletion (to the deck or the maybeboard), edit maybeboard and sideboard rows, paste a whole "
         "list, remove cards, and undo. The <strong>Add a card</strong> bar is one search box: chips pick "
@@ -628,7 +629,7 @@ def build(
         "arrives. <strong>Save changes</strong> sends the whole session to Archidekt in one go, after a "
         f"snapshot of the deck as it was; only a big removal (many cards at once) asks you to confirm "
         f"first. {backup_box}</p>"
-        f"{_h4('how-add-page', 'Straight from the deck page')}"
+        f"{_sec('how-add-page', 'Straight from the deck page')}"
         "<ul>"
         f"<li>On your own deck {card_menu_way} opens the site's own card menu: open the card, "
         "one more or one fewer copy, move it to a category or the maybeboard, remove it, or jump to the "
@@ -756,7 +757,7 @@ def build(
         "doesn't?”), and can also compare two versions of a deck in a solo test.</p>"
     )
     how_export = (
-        f"{_h4('how-export-deck', 'A deck')}"
+        f"{_sec('how-export-deck', 'A deck')}"
         "<p><strong>Export</strong> (More menu) gives the deck as Archidekt import text with every row's "
         "printing, finish, categories and labels (paste it into Archidekt's Import dialog or the New deck "
         "page), as a plain decklist and as the sideboard list, each with a Copy button, plus downloads as "
@@ -764,12 +765,12 @@ def build(
         ".txt, MTGO .dek and PDF (one-way); the app saves downloads to your Downloads folder. "
         "<strong>New deck</strong> on the Decks page imports a pasted list, a CSV export, the gateway's "
         ".json or a chosen file.</p>"
-        f"{_h4('how-export-collection', 'The binder')}"
+        f"{_sec('how-export-collection', 'The binder')}"
         "<p><strong>Export CSV</strong> downloads the whole binder in the column layout Archidekt's "
         "own import reads. <strong>Import a list</strong> adds cards from that CSV, from a CSV with "
         "Archidekt's column names or from a plain card list, pasted or chosen as a file, up to 100 rows "
         "at a time.</p>"
-        f"{_h4('how-export-report', 'A report')}"
+        f"{_sec('how-export-report', 'A report')}"
         "<p>A deck report downloads as Markdown or as a self-contained HTML page, and <strong>Copy as "
         "Markdown</strong> puts it on the clipboard. <a href='#ref-formats'>Export formats</a> lists "
         "every format in one place.</p>"
@@ -1116,7 +1117,7 @@ def build(
         "A change to one of your decks keeps a snapshot first, and deck and binder changes are read "
         "back to check them.</p>"
         f"<p class='tip'>{_esc(modes.AUTO_WARNING)}</p>"
-        f"{_h4('ref-approval-hand', 'Your own saves')}"
+        f"{_sec('ref-approval-hand', 'Your own saves')}"
         "<p>A hand save needs no approval: pressing Save is it. It still keeps a snapshot, and asks "
         "“are you sure” only for a restore, a commander change, or a removal of "
         f"{modes.HAND_EDIT_CONFIRM_ROWS} or more different cards or more than "
@@ -1171,7 +1172,7 @@ def build(
         )
     )
     ref_syntax = (
-        f"{_h4('ref-syntax-bar', 'The search bar')}"
+        f"{_sec('ref-syntax-bar', 'The search bar')}"
         "<ul>"
         "<li><code>sol ring</code>: suggestions as you type; <kbd>Enter</kbd> adds the highlighted one.</li>"
         "<li><code>3 sol ring</code> or <code>3x sol ring</code>: adds three copies (up to 99).</li>"
@@ -1181,7 +1182,7 @@ def build(
         "<li>On a wide screen the <strong>printings</strong> of the highlighted card show as pictures "
         f"beside the list, the set used last on this deck pre-selected; {tap} adds that printing.</li>"
         "</ul>"
-        f"{_h4('ref-syntax-list', 'A pasted list')}"
+        f"{_sec('ref-syntax-list', 'A pasted list')}"
         "<p>The editor's paste box, New deck and the assistant read the shapes people paste from "
         "Archidekt, Moxfield, MTGO and Arena: one card per line as <code>1 Sol Ring</code> or "
         "<code>1x Sol Ring</code>; a printing as the set code in parentheses and the collector number, as "
@@ -1215,7 +1216,7 @@ def build(
         "row. That is why every change, yours or the assistant's, has a record under Proposals and "
         "History, and why such a change to one of your decks can be undone by restoring its snapshot. "
         "Restoring a snapshot does not put back a deck's folder, tags, cover or custom cards.</p>"
-        f"{_h4('exp-approvals-proposal', 'Proposals')}"
+        f"{_sec('exp-approvals-proposal', 'Proposals')}"
         "<p>An assistant never writes to Archidekt directly. It proposes: the exact list of rows that "
         "would change, stored on the gateway with a review page and, in a chat that shows cards, a card "
         "with Apply and Reject. Whether the assistant may then apply the proposal itself depends only on "
@@ -1226,7 +1227,7 @@ def build(
         "the press. Before anything is applied the "
         "gateway checks the change still fits the deck as it is now, and after the write it reads the deck "
         "back to confirm what landed.</p>"
-        f"{_h4('exp-approvals-snapshot', 'Snapshots and the backup copy')}"
+        f"{_sec('exp-approvals-snapshot', 'Snapshots and the backup copy')}"
         "<p>Every apply to one of your decks takes a <strong>snapshot</strong> first: the deck as it "
         "was, cards and the deck's own name, description, format, bracket and privacy, kept on the "
         "gateway and listed under History "
@@ -1610,9 +1611,9 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             csrf=_csrf(s, sid),
             admin=admin,
             sub=sub,
-            wide=True,
             current=current,
             heading=False,
+            main_class="ui-wide",
             head_extra=f"<style>{GUIDE_CSS}</style><script src='/static/guide.js' defer></script>",
         )
 

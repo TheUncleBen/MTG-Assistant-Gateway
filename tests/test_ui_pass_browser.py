@@ -199,7 +199,7 @@ TOUCH_TARGETS = {
     " main input:not([type=hidden])",
     "/reports": ".rp-t .title .t a, .rp-t .act > a",
     "/collection?view=list": ".ui-widgets a.ext",
-    "/guide/how-export": ".guide h4 .anchor",
+    "/guide/how-export": ".guide h2 .anchor",
     "/decks/42": ".curveaxis .mv, .rowbtn, .banner .social .soc",
     "/decks/42?view=table": "ul.rows .row",
     "/decks/42/edit": ".addbox form.addcard .go .foil",

@@ -142,9 +142,19 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
     return out
 
 
+def back_head(back_href: str, back_text: str, title: str) -> str:
+    """The head of a page one level in (Account details, Assistants, a section's page): the way
+    back a level, as Binder's pages draw it (theme's .bn-back), then the page title in the shared
+    page head (ui.page_head's .ui-head). ``title`` is plain text. Render with heading=False."""
+    return (
+        f"<p class='bn-up'><a class='bn-back yback' href='{html.escape(back_href)}'>{icon('back')}"
+        f"{html.escape(back_text)}</a></p><div class='ui-head'><h1>{html.escape(title)}</h1></div>"
+    )
+
+
 def _group_html(g: tuple[int, str, list[Row]]) -> str:
     return (
-        f"<section class='ygrp'><h2>{html.escape(g[1])}</h2>"
+        f"<section class='ygrp'><h2 class='ui-group'>{html.escape(g[1])}</h2>"
         f"<div class='rows'>{''.join(_row_html(r) for r in g[2])}</div></section>"
     )
 
@@ -164,7 +174,7 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
     # side by side left a hole under the shorter one on a desktop (the owner, 0.7.46 checklist)
     gs = sorted(groups(csrf, admin=admin, app=app))
     return (
-        "<div class='yhub'>"
+        ui.page_head("Account") + "<div class='yhub'>"
         "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
         f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
         f"<span class='sub'>{sub_line}</span></span></div>"
@@ -181,9 +191,15 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
 
 
 HUB_CSS = """
-.yhub{max-width:42rem;margin:0 auto}
-.yhub .yme{display:flex;align-items:center;gap:1rem;padding:.9rem 1rem;margin:0 0 1.25rem;border-radius:14px;
-  background:var(--surface);border:1px solid var(--border-soft);color:var(--text);text-decoration:none}
+/* the standard's narrow column (render(main_class='ui-narrow')) for a page of grouped lists: the
+   theme's older 42rem rule for these pages (main.wrap:has(> .yhub, > .acc)) gives way to it */
+main.wrap.ui-narrow.ui-narrow:has(> .yhub, > .acc){max-width:calc(44rem + 2 * var(--gutter))}
+/* the title has no purpose line under it on these pages: the list starts a line lower */
+.ui-head + .yhub,.ui-head + .acc,.ui-head + .notice{margin-top:.75rem}
+.yhub{max-width:44rem;margin:0 auto}
+.yhub .yme{display:flex;align-items:center;gap:1rem;padding:.9rem 1rem;margin:0 0 1.25rem;
+  border-radius:var(--radius-lg);
+  background:var(--group-bg);border:1px solid var(--border-soft);color:var(--text);text-decoration:none}
 .yhub .yme img.av{width:56px;height:56px;border-radius:50%;object-fit:cover;flex:none}
 /* the words go under the picture when they have less than 12em beside it (200% text on a phone) */
 .yhub .yme{flex-wrap:wrap}
@@ -196,9 +212,14 @@ HUB_CSS = """
 /* a group with no row left (This app in an app without the bridge, or an older one) shows no
    heading over nothing (audit D16); feedback.js hides the rows an app can't answer */
 .ygrp:not(:has(.yrow:not([hidden]))){display:none}
-.ygrp h2{margin:0 0 .4rem .9rem;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
-  color:var(--menu-head)}
-.ygrp .rows{background:var(--surface);border:1px solid var(--border-soft);border-radius:14px;overflow:hidden}
+/* the group's label is the shared h2.ui-group (docs/UI-STANDARD.md); the rows are the inset
+   grouped list: --group-bg, --radius-lg, a divider between rows */
+.ygrp .rows{background:var(--group-bg);border:1px solid var(--border-soft);border-radius:var(--radius-lg);
+  overflow:hidden}
+/* Collection and Lists still write a bare <h2> in a group: it gets the same look until those pages
+   add class='ui-group' (then this rule goes) */
+.ygrp h2:not(.ui-group){margin:0 0 .4rem .9rem;font-size:.8rem;font-weight:700;line-height:1.3;
+  text-transform:uppercase;letter-spacing:.04em;color:var(--menu-head)}
 .ygrp .yrow{display:flex;align-items:center;gap:.8rem;width:100%;min-height:50px;margin:0;padding:0 1rem;
   border:0;border-radius:0;background:transparent;color:var(--text);text-decoration:none;font:inherit;
   font-weight:400;text-align:left;cursor:pointer;justify-content:flex-start}
@@ -247,9 +268,5 @@ HUB_CSS = """
    it clears on its own line under it (beside the button, the note ran out of a 320 px window) */
 .ysignout{display:flex;flex-direction:column;align-items:stretch;gap:.5rem;margin:.5rem 0 1rem}
 .ysignout > p{margin:0 .9rem;max-width:100%}
-.ysignout .btn{display:flex;align-items:center;justify-content:center;gap:.5rem;min-height:50px;width:100%;
-  margin:0;padding:0 1.5rem;border-radius:14px;background:var(--surface);
-  border:1px solid var(--border);color:var(--danger-text);font-weight:700;line-height:1.2}
-.ysignout .btn svg.i{width:18px;height:18px}
-.ysignout .btn:hover{background:var(--surface-2);color:var(--danger-text)}
+.ysignout .btn{display:flex;width:100%;margin:0}
 """

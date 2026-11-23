@@ -25,7 +25,7 @@ import segno
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
-from . import ui
+from . import account_hub, ui
 from .app_page import APK_NAME, RELEASES_URL, android_facts
 from .pages import _csrf, browser_session
 from .plugin_page import (
@@ -795,32 +795,20 @@ Connector URL: `{mcp}`
 {BLOCKED_TOOLS.format(public_url=public_url)}"""
 
 
-# The install page (F11): the app list beside the steps on a computer (from 760 px of the page's
-# width), a "Steps for:" drop-down above them on a phone or a narrow window; the copy boxes and
-# numbered steps (export.js runs the Copy buttons). The picked app is tinted with an orange edge,
-# never an orange button, so each section's own main button is the page's one orange.
+# The install page: the standard's narrow column (docs/UI-STANDARD.md) on every screen. With no
+# app picked yet, the apps are an inset grouped list under the "Which app will you use?" group
+# label (account_hub.HUB_CSS draws it, as on Account); with one picked, a "Steps for:" drop-down
+# over its steps holds the others. The copy boxes and numbered steps (export.js runs the Copy
+# buttons). The picked app is tinted with an orange edge, never an orange button, so each
+# section's own main button is the page's one orange.
 INSTALL_CSS = (
-    ".inst{container:inst/inline-size}"
-    ".inst .cols{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}"
-    ".inst .pick{display:none}"
-    # 760px at the pages' 14px text (54.29em): at 200% the steps keep the row until 1520px, instead of
-    # a 17rem app list leaving them 258px
-    "@container inst (min-width:54.29em){.inst .cols{grid-template-columns:17rem minmax(0,1fr)}"
-    ".inst .drop{display:none}.inst .pick{display:block}}"
-    "@supports not (container-type:inline-size){@media (min-width:900px){"
-    ".inst .cols{grid-template-columns:17rem minmax(0,1fr)}.inst .drop{display:none}"
-    ".inst .pick{display:block}}}"
-    ".inst .pick{position:sticky;top:.5rem;border:1px solid var(--border);border-radius:var(--radius-panel);"
-    "background:var(--surface);padding:.5rem}"
-    ".inst .pick h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.03em;color:var(--text-muted);"
-    "margin:.25rem .5rem .4rem}"
-    ".inst .pick a,.inst .drop .list a{display:flex;align-items:center;min-height:44px;white-space:normal;"
+    ".inst .drop .list a{display:flex;align-items:center;min-height:44px;white-space:normal;"
     "line-height:1.25;width:100%;text-align:left;border:0;border-left:3px solid transparent;border-radius:0;"
     "background:transparent;color:var(--text);font-weight:700;padding:.4rem .6rem;text-decoration:none}"
-    ".inst .pick a:hover,.inst .drop .list a:hover{background:var(--surface-2)}"
-    ".inst .pick a[aria-current=true],.inst .drop .list a[aria-current=true]{background:var(--orange-tint);"
+    ".inst .drop .list a:hover{background:var(--surface-2)}"
+    ".inst .drop .list a[aria-current=true]{background:var(--orange-tint);"
     "color:var(--orange-text);border-left-color:var(--orange)}"
-    ".inst .pick .grp{border-top:1px solid var(--border-soft);margin:.4rem 0 0;padding-top:.4rem}"
+    ".inst .drop .list .grp{border-top:1px solid var(--border-soft);margin:.25rem 0}"
     ".inst .drop{border:1px solid var(--border);border-radius:var(--radius-panel);background:var(--surface);"
     "margin:0 0 1rem}"
     ".inst .drop>summary{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;min-height:44px;"
@@ -833,7 +821,6 @@ INSTALL_CSS = (
     ".inst .drop>summary svg{flex:none;transition:transform .15s}"
     ".inst .drop[open]>summary svg{transform:rotate(180deg)}"
     ".inst .drop .list{border-top:1px solid var(--border-soft);padding:.25rem 0}"
-    ".inst .card>h2{margin-bottom:.4rem}"
     ".inst p,.inst li{overflow-wrap:anywhere}"
     # a step's button keeps its words whole and wraps at its spaces, inside its step: the steps'
     # overflow-wrap above reached the Download button and broke "Downlo/ad" at 200% text (final
@@ -854,38 +841,48 @@ INSTALL_CSS = (
     # with the browser's font doubled: final audit F02)
     ".copyline{display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-start}"
     ".copyline input,.copyline textarea{flex:1 1 8em;min-width:0;margin:0;"
-    "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
-    "font-size:.85rem}"
+    "font-family:ui-monospace,SFMono-Regular,Menlo,monospace}"
     ".copyline .btn{flex:none;margin:0}"
     ".notice.stepnote{margin:.5rem 0 0;overflow-wrap:anywhere}"
 )
 
 
-def _picker(client: str | None, e) -> tuple[str, str]:
-    """The app list (the left column on a computer) and the drop-down (narrow screens), both with
-    the picked app marked; each app keeps its own ?for= address."""
+def _picker(client: str | None, e) -> str:
+    """The way to an app's steps, each app at its own ?for= address. With none picked: the apps
+    as an inset grouped list (the assistants, then the skill and the Android app). With one
+    picked: the "Steps for:" drop-down, the picked app marked in its list."""
+    # inside the Android app, no Android app download (Account › This app checks for updates)
+    apps = [(k, label) for k, label in SECTIONS.items() if not (k == "android" and in_app())]
+    n = len(CLIENTS)  # the assistants, a divider, then the skill and the app
+    if client is None:
+
+        def row(key: str, label: str) -> str:
+            return (
+                f"<a class='yrow' href='/install?for={key}'><span class='lbl'>{e(label)}</span>"
+                f"<span class='ch'>{icon('chev')}</span></a>"
+            )
+
+        def group(items: list[tuple[str, str]], head: str = "") -> str:
+            rows = "".join(row(k, label) for k, label in items)
+            return f"<section class='ygrp'>{head}<div class='rows'>{rows}</div></section>"
+
+        return (
+            "<nav class='pick' aria-labelledby='pick-h'>"
+            + group(apps[:n], f"<h2 class='ui-group' id='pick-h'>{PICK}</h2>")
+            + group(apps[n:], "<h2 class='ui-group'>More</h2>")
+            + "</nav>"
+        )
 
     def item(key: str, label: str) -> str:
         cur = " aria-current='true'" if key == client else ""
         return f"<a href='/install?for={key}'{cur}>{e(label)}</a>"
 
-    # inside the Android app, no Android app download (Account › This app checks for updates)
-    items = [item(k, label) for k, label in SECTIONS.items() if not (k == "android" and in_app())]
-    n = len(CLIENTS)  # the assistants, a divider, then the skill and the app
-    nav = (
-        f"<nav class='pick' aria-label='Which app'><h2>{PICK}</h2>{''.join(items[:n])}"
-        f"<div class='grp'></div>{''.join(items[n:])}</nav>"
+    items = [item(k, label) for k, label in apps]
+    return (
+        "<details class='drop'><summary><span class='sfk'>Steps for:</span>"
+        f"<span class='v'>{e(SECTIONS[client])}</span>{icon('chev')}</summary>"
+        f"<div class='list'>{''.join(items[:n])}<div class='grp'></div>{''.join(items[n:])}</div></details>"
     )
-    summary = (
-        f"<span class='sfk'>Steps for:</span><span class='v'>{e(SECTIONS[client])}</span>"
-        if client
-        else f"<span class='v'>{PICK}</span>"
-    )
-    drop = (
-        f"<details class='drop'><summary>{summary}{icon('chev')}</summary>"
-        f"<div class='list'>{''.join(items)}</div></details>"
-    )
-    return nav, drop
 
 
 def _context(state: AppState, *, page: bool, signed_in: bool = True) -> Context:
@@ -946,7 +943,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             f"plugin” is enough: the plain-text version is at <a class='mdaddr' href='{e(md_url)}'>"
             f"<code>{md_shown}</code></a>.</p></div>"
         )
-        nav, drop = _picker(client, e)
+        picker = _picker(client, e)
         if client is None:
             right = (
                 intro + "<div class='card'>"
@@ -963,7 +960,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             )
         body = (
             f"<div class='inst'>{ui.page_head('Guided setup', PURPOSE_APP if in_app() else PURPOSE)}"
-            f"<div class='cols'><div>{drop}{nav}</div><div>{right}</div></div></div>"
+            f"{picker}{right}</div>"
         )
         # Signed in, the page gets the member's navigation (tab bar, rail, account menu).
         user = (state.db.get_user(sub) or {}) if sub else {}
@@ -978,8 +975,9 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             sub=sub,
             current="/install",
             heading=False,
-            main_class="ui-wide",
-            head_extra=f"<style>{INSTALL_CSS}</style><script src='/static/export.js' defer></script>",
+            main_class="ui-narrow",
+            head_extra=f"<style>{account_hub.HUB_CSS}{INSTALL_CSS}</style>"
+            "<script src='/static/export.js' defer></script>",
         )
         resp.headers["Cache-Control"] = "no-store"
         return resp

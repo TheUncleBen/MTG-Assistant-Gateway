@@ -261,18 +261,20 @@ def needs_confirm(key: str, before: Any, after: Any) -> bool:
 SETTINGS_CSS = """
 /* the admin Settings page: one flat card per group, one row per setting,
    every control in the same 16rem column so the boxes, switches and lists line up */
-/* the form stays in the 52rem column under the tab bar (the page itself is 1200 px) */
-.set-page{max-width:52rem;margin-left:auto;margin-right:auto}
+/* the form is the standard's narrow column (44rem, docs/UI-STANDARD.md), centred under the tab
+   bar; the page itself is the admin tabs' 1200 px, so the tab bar stays in one place on every tab */
+.set-page{max-width:44rem;margin-left:auto;margin-right:auto}
 /* (0.7.47 polish) centred under the tab bar, not hugging its left; with room the group chips wrap
    onto a second line rather than run out of the column with no sign that more follow */
 @media (min-width:900px){.set-nav{flex-wrap:wrap;overflow:visible}}
 .set-page .notice{margin:0 0 1rem}
 .set-nav{margin:0 0 1rem}
-.set-nav .ui-chip{background:var(--surface);min-height:var(--ctl)}
-.set-nav .ui-chip[aria-pressed=true]{background:var(--orange-tint)}
 .set-group{padding:1rem 1rem .25rem;scroll-margin-top:4.5rem}
 .set-group .gh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .15rem}
-.set-group .gh h2,.set-group .h2{margin:0;font-size:1.25rem;font-weight:700}
+.set-group .gh h2,.set-group .sum h2{margin:0}
+/* in the folded group's row the heading keeps each word whole and wraps between them ("Card scanning
+   (advanced)" at 200% text on a phone), instead of shrinking under its longest word */
+.set-group .sum h2{overflow-wrap:break-word;min-width:min-content}
 /* the "set in your stack" label wraps on a narrow phone at large text instead of running out of
    the page (final audit F02) */
 .set-group .gh .ui-lbl{white-space:normal;height:auto;min-height:24px;max-width:100%;line-height:1.2;
@@ -301,9 +303,15 @@ SETTINGS_CSS = """
 .set-row .set-sw input:disabled{opacity:0}
 .set-row.locked .set-sw .track{opacity:.6;outline:1px dashed var(--text-muted);outline-offset:2px}
 form > .set-row:first-of-type{border-top:0}
+/* a setting with a list of choices: the list under its name, the column's whole width, so each
+   choice keeps one line and no empty block is left beside a three-row list */
+.set-row:has(.set-choices){grid-template-columns:minmax(0,1fr)}
 .set-row .sl{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem}
 .set-label{display:inline;margin:0;font-weight:700}
-.set-row .sl .ui-lbl{min-height:22px;font-size:.78rem}
+/* a row's label ("Set in your stack") wraps inside the row on a narrow phone at large text, as the
+   group's does, instead of running a pixel out of the page */
+.set-row .sl .ui-lbl{white-space:normal;height:auto;max-width:100%;line-height:1.2;
+  padding-top:.15rem;padding-bottom:.15rem}
 .set-help{margin:.3rem 0 0;color:var(--text-muted);font-size:.88rem;line-height:1.4}
 .set-src{margin:.3rem 0 0;font-size:.86rem}
 .set-src code{font-size:.8rem}
@@ -373,11 +381,11 @@ p.set-saved{margin:0} ul.set-saved{margin:.35rem 0 0;padding-left:1.2rem}
 /* The fold follows the text size too (final polish Z3): at 200% text on a 720 px window the
    control column's 16 rem doubled, the approval modes' box covered "Approval mode for new
    members" and the help was one word a line. Each group's form is a container measured in its
-   own em: below 45 em (the 16 em of control, 1.5 of gap and at least 27 for the words) the
-   label stacks over the control, as below 720 px. At 100% a 720 px window gives the form 47 em,
+   own em: below 40 em (the 16 em of control, 1.5 of gap and at least 22 for the words) the
+   label stacks over the control, as below 720 px. At 100% the 44rem column gives the form 42 em,
    so nothing moves there. */
 .set-group form{container-type:inline-size}
-@media (min-width:720px){ @container (max-width:45em){ .set-row{grid-template-columns:minmax(0,1fr)} } }
+@media (min-width:720px){ @container (max-width:40em){ .set-row{grid-template-columns:minmax(0,1fr)} } }
 /* a form too narrow for 12em of words beside a switch: the switch goes under them, at the end */
 @container (max-width:17em){ .set-row.sw,.set-row.sw.ui-row{grid-template-columns:minmax(0,1fr)!important}
   .set-row.sw .set-ctl{grid-column:1;grid-row:auto} }
@@ -588,7 +596,7 @@ def settings_body(
             opened = focus == group or any(k in outcome.errors for k in keys) or (locked_only and n_locked)
             inner = (
                 f"<details{' open' if opened else ''}><summary><span class='sum'>"
-                f"<span class='h2'>{html.escape(title)}</span>"
+                f"<h2>{html.escape(title)}</h2>"
                 f"<span class='ui-sub'>{len(keys)} setting{'' if len(keys) == 1 else 's'}</span>"
                 f"{stack}</span>{icon('chev')}</summary>"
                 f"{intro_html}{form}</details>"

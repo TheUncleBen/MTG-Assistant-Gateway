@@ -219,7 +219,7 @@ async def test_view_choices_asks_in_a_box_and_delete_my_data_puts_the_tick_above
         assert "<input type='checkbox' id='delete-tick' name='confirm' value='yes' required>" in delete
         assert "<span>Yes, delete my data from this gateway</span></label>" in delete
         # Approval mode and Connected apps are one Assistants row (per-assistant modes), still #apps
-        assert "<section class='ygrp' data-g='1' id='apps'><h2>Assistant</h2>" in page
+        assert "<section class='ygrp' data-g='1' id='apps'><h2 class='ui-group'>Assistant</h2>" in page
         assert "<a class='yrow' href='/account/assistants'>" in page
     finally:
         await b.aclose()
