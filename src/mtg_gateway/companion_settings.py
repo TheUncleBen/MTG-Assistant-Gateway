@@ -210,6 +210,9 @@ SETTINGS_CSS = """
 .ds .ds-inline > .btn,.ds .ds-inline > button{flex:0 0 auto;width:auto;margin:0;max-width:100%;
   white-space:normal}
 .ds .ds-inline .msel-btn,.ds .ui-row .ctl .msel-btn{max-width:100%}
+/* the narrowest phone at the browser's largest text (320 px, 200%): the box's side room gives way
+   to its hint ("Find a tag", "Username", "e.g. Removal" were cut); 1rem at every usual size */
+.ds .ds-inline input,.ds form.catnew .row input[type=text]{padding-inline:min(1rem,4vw)}
 .ds ul.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .75rem;padding:0}
 .ds .follownote{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;margin:.75rem 0 0}
 .ds .follownote p{margin:0;font-weight:400}

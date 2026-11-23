@@ -303,6 +303,9 @@ NEW_DECK_CSS = """
 .ndtile .fmt{font-size:.86rem;color:var(--text-muted)}
 .nd-pc{margin:.4rem 0 0;text-align:center} .nd-pc[hidden]{display:none}
 .nd-box .notice{margin:0 0 .75rem}
+/* the New package box on a 320 px phone at doubled text: its name and keyword boxes give their
+   side room to their hints ("Golgari staples", "e.g. shocklands" were cut); 1rem from 332 px up */
+.np-box .body .field input[type=text]{padding-inline:min(1rem,max(8px,calc(50vw - 152px)))}
 /* without scripts the box is a panel: every field shows, the tabs are not drawn */
 .ui-box.nd-box:not(.in-scrim) .nd-tabs{display:none}
 @media (max-width:759.98px){ .nd-grid{grid-template-columns:minmax(0,1fr)} .nd-prev{display:none} }

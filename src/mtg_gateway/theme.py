@@ -2560,7 +2560,8 @@ SEARCH_PANEL_CSS = """
 .spanel .sp-name{flex:1 1 16rem;min-width:0}
 .spanel .sp-name > label{display:block;font-weight:700;margin:0 0 .35rem}
 .spanel .sp-name .search{margin:0}
-.spanel .sp-name .search > input{flex:1 1 auto;min-width:0}
+/* 320 px at the browser's largest text: the box's side room gives way to its hint; 1rem otherwise */
+.spanel .sp-name .search > input{flex:1 1 auto;min-width:0;padding-inline:min(1rem,4vw)}
 /* the search button is as tall as its box at every text size (polish AG2: 44 px beside 64 px) */
 .spanel .sp-name .search button{height:auto;align-self:stretch;min-height:var(--ctl);width:var(--ctl);
   padding:0;flex:none;display:inline-flex;align-items:center;justify-content:center}
