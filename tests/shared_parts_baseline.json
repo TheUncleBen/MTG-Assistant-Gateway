@@ -1,0 +1,166 @@
+{
+ "account_hub.py": {
+  "css:button": 8
+ },
+ "activity_view.py": {
+  "css:button": 9
+ },
+ "admin.py": {
+  "css:button": 5,
+  "css:chip": 3
+ },
+ "alerts_page.py": {
+  "markup:menu": 1,
+  "markup:title": 1
+ },
+ "archidekt_log.py": {
+  "css:button": 1,
+  "markup:title": 1
+ },
+ "assistants.py": {
+  "css:box": 1,
+  "css:button": 1
+ },
+ "binder_hub.py": {
+  "css:button": 3,
+  "markup:title": 2
+ },
+ "browse.py": {
+  "css:button": 8,
+  "markup:title": 1
+ },
+ "card_models_view.py": {
+  "css:button": 2
+ },
+ "cardsearch_view.py": {
+  "css:heading": 5
+ },
+ "collection.py": {
+  "css:box": 34,
+  "css:button": 17,
+  "css:heading": 5,
+  "css:menu": 1
+ },
+ "companion.py": {
+  "markup:title": 1
+ },
+ "companion_decks.py": {
+  "css:box": 3,
+  "css:button": 1,
+  "css:chip": 6,
+  "markup:title": 1
+ },
+ "companion_history.py": {
+  "css:button": 1
+ },
+ "companion_settings.py": {
+  "css:box": 2,
+  "css:button": 6,
+  "css:heading": 1
+ },
+ "companion_tools.py": {
+  "css:button": 3,
+  "css:chip": 3
+ },
+ "dbwait.py": {
+  "markup:title": 1
+ },
+ "deck_bulk.py": {
+  "css:box": 2
+ },
+ "deck_extras.py": {
+  "css:box": 3,
+  "css:button": 1,
+  "css:chip": 3
+ },
+ "deckpage.py": {
+  "css:box": 9,
+  "css:button": 149,
+  "css:chip": 8,
+  "css:heading": 11,
+  "css:menu": 44,
+  "css:title": 6,
+  "markup:title": 2
+ },
+ "folderview.py": {
+  "css:chip": 3
+ },
+ "forum_page.py": {
+  "css:button": 19
+ },
+ "guide.py": {
+  "css:button": 3,
+  "markup:title": 1
+ },
+ "home.py": {
+  "markup:title": 1
+ },
+ "lists_page.py": {
+  "css:box": 5,
+  "css:button": 16,
+  "css:menu": 3
+ },
+ "notify.py": {
+  "css:heading": 1
+ },
+ "pages.py": {
+  "css:button": 5,
+  "css:chip": 1,
+  "markup:title": 1
+ },
+ "proposals_view.py": {
+  "css:button": 3,
+  "css:chip": 1
+ },
+ "report_page.py": {
+  "css:button": 11,
+  "css:chip": 6,
+  "markup:title": 2
+ },
+ "report_view.py": {
+  "css:button": 1,
+  "css:chip": 2,
+  "css:heading": 2,
+  "css:title": 1,
+  "markup:title": 1
+ },
+ "reports_page.py": {
+  "css:button": 1,
+  "css:chip": 6
+ },
+ "settings_page.py": {
+  "css:button": 1,
+  "css:chip": 9
+ },
+ "setup_hub.py": {
+  "css:button": 2
+ },
+ "smallpage.py": {
+  "markup:title": 1
+ },
+ "static/deck.js": {
+  "script:look": 1
+ },
+ "static/deckextras.js": {
+  "script:look": 1
+ },
+ "static/lists.js": {
+  "script:look": 1
+ },
+ "static/sitesearch.js": {
+  "markup:box": 1
+ },
+ "waiting_strip.py": {
+  "css:button": 2
+ },
+ "watchlist.py": {
+  "css:button": 16,
+  "css:chip": 6,
+  "css:heading": 1
+ },
+ "watchlist_page.py": {
+  "css:button": 16,
+  "css:chip": 9,
+  "css:heading": 1
+ }
+}

@@ -280,6 +280,26 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
             await b.aclose()
 
 
+async def test_a_card_watch_limit_of_0_is_no_limit(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
+    """The admin Settings row Cards one member may watch at 0 (the default since 0.7.47) lets a member
+    watch past any old number, with no limit message."""
+    Clock(monkeypatch)
+    async with open_stack(tmp_path, idp, _options()) as st:
+        st.gw.live.set("watch_max_cards", 1, by="admin-1")
+        b = await _browser(st)
+        try:
+            assert (await _watch(b, name="Sol Ring")).status_code == 303
+            r = await _watch(b, name="Command Tower")
+            assert r.status_code == 429 and "watch at most 1" in r.text
+            st.gw.live.set("watch_max_cards", 0, by="admin-1")
+            for name in ("Command Tower", "Cultivate"):
+                r = await _watch(b, name=name)
+                assert r.status_code == 303, (name, r.status_code, r.text[:300])
+                assert "at most" not in r.text
+        finally:
+            await b.aclose()
+
+
 async def test_card_viewer_watch_button_needs_the_form_token(stack: Stack, monkeypatch) -> None:
     Clock(monkeypatch)
     b = await _browser(stack)

@@ -79,6 +79,41 @@ and needs a public Archidekt deck id (its `deck_id` input or the
 `LIVE_SMOKE_DECK_ID` repository variable); a fork must change the image names
 in it.
 
+### Checking that a change reached everywhere, and nowhere else
+
+A change asked for in a sentence ("rename Torch to Flash") usually touches more
+than one place: a page, its script, the Android app, the Claude and ChatGPT
+cards, the assistant tools, the docs. These tools check that it reached all of
+them and changed nothing it should not have. None of them needs the network.
+
+1. **Write the impact map first.** `python -m tests.impact_map find WORD ...`
+   lists every file on every surface that holds the words. Write the map
+   (format at the top of `tests/impact_map.py`): the files to change, the
+   files checked and left alone with the reason, each surface considered, and
+   the pages expected to look different. Keep it outside the repository.
+2. **Make the change**, as small as it can be.
+3. **Run the change check:**
+   `python -m tests.change_check OUT_DIR --map MAP.md`. It fails when a file
+   on the map was not changed, a file not on the map was (scope creep), words
+   the change took out of one place are still in another, a test of anything
+   the change could reach fails, a control on an affected page does nothing,
+   or a page outside the map looks different from before (it draws every page
+   on a phone, an open Fold and a laptop from the base commit and from the
+   change, and compares them). Read `OUT_DIR/CHECK.md`, then look at the
+   pictures in `OUT_DIR/shots/report.md`: only the pages that changed are
+   there.
+
+`python -m tests.impact_map deps` shows what a change could reach, found from
+the code (calls, CSS classes, scripts and routes), not from its words. Every
+reported problem is a rule in `tests/issue_rules.py` with the checks that hold
+it; a new kind of problem gets a rule and a check that fails before the fix.
+`tests/shared_parts_baseline.json` counts each page's own versions of the
+shared parts (titles, buttons, chips, panels, boxes, menus): it may only go
+down (`python -m tests.shared_parts --lower` after moving a page onto the
+shared part). The click sweep runs on a change's pages with
+`MTG_CHECK_PAGES=/a,/b` and on every page with `MTG_FULL_SWEEP=1` before a
+release.
+
 Never point tests at real Archidekt accounts or decks you don't own.
 `tests/live/` has opt-in live checks; read the safety rules at the top of
 each script first.
