@@ -129,12 +129,13 @@ def test_the_deck_page_banner_list_and_tools_line_up(server: Server, width: int)
             assert qs.first.evaluate("e => getComputedStyle(e).textAlign") == "right"
         # B3: no lone grip icon in the toolbar
         assert page.locator(".toolbar .hint").count() == 0
-        # B5: Bar and Pie are one joined switch; Lands only sits apart as a toggle of its own
+        # B5: Bar and Pie sit together (the site's choice chips, 0.7.48); Lands only sits further
+        # apart as a toggle of its own
         bar, pie, lands = (
             page.locator(".statctl[aria-label=Colors] button").nth(i).evaluate(RECT) for i in range(3)
         )
-        assert pie[0] <= bar[2] and bar[1] == pie[1] and bar[4] == pie[4], (bar, pie)
-        assert lands[0] - pie[2] >= 8, (pie, lands)
+        assert 0 <= pie[0] - bar[2] <= 6 and bar[1] == pie[1] and bar[4] == pie[4], (bar, pie)
+        assert lands[0] - pie[2] >= (pie[0] - bar[2]) + 6, (pie, lands)
         if width >= 1280:
             # B4: Undo and Redo are drawn as their neighbour Select cards is: a bordered 44 px button
             undo = page.locator(".bulkbar .histtools button").first

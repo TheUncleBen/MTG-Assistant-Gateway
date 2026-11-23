@@ -1798,7 +1798,8 @@ def _focus(cards: list[DeckCard], label: str) -> str:
 
 def _toggle(group: str, value: str, label: str, pressed: bool) -> str:
     return (
-        f"<button type='button' data-set='{group}' data-value='{value}' "
+        # the site's choice chip (.ui-chip, docs/UI-STANDARD.md): chosen = orange tint and edge
+        f"<button type='button' class='ui-chip' data-set='{group}' data-value='{value}' "
         f"aria-pressed='{'true' if pressed else 'false'}'>{esc(label)}</button>"
     )
 
@@ -2026,7 +2027,8 @@ def colours_html(deck: Deck, stats: dict[str, Any]) -> str:
         "<span class='seg2' role='group' aria-label='Chart'>"
         + _toggle("chart", "bar", "Bar", True)
         + _toggle("chart", "pie", "Pie", False)
-        + "</span><button type='button' data-set='lands' aria-pressed='false'>Lands only</button></div>"
+        + "</span><button type='button' class='ui-chip' data-set='lands' aria-pressed='false'>"
+        "Lands only</button></div>"
     )
     return f"<div class='colourbox statbox'>{ctl}{''.join(variants)}{_identity_html(deck, stats)}</div>"
 
@@ -2598,7 +2600,7 @@ COMPARE_CSS = """
   align-items:start;margin:0 0 1rem}
 .cmp-h{display:flex;align-items:baseline;gap:.35rem;margin:0 0 .5rem;overflow-wrap:anywhere}
 .cmp-h .n{color:var(--text-muted);font-weight:400}
-.cmp-sub{font-size:1rem;margin:1rem 0 .5rem}
+.cmp-sub{margin:1rem 0 .5rem}
 .cmp-t{--cols:4rem minmax(0,1fr) 44px;--cols-md:4rem minmax(0,1fr) 44px;--cols-sm:3.6rem minmax(0,1fr) 44px}
 .cmp-t .tr{min-height:44px;align-items:center}
 .cmp-t .q{font-weight:900;color:var(--text-muted);white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -3390,7 +3392,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .panel-head h2{margin:0}
 /* one-word headings can't wrap whole: with large text on a narrow phone they stop growing at 8% of the
    screen width (min(), so 100% text and wider screens are unchanged); a longer word still breaks */
-.panel.description > h2,.comments .panel-head h2{min-width:0;overflow-wrap:anywhere;font-size:min(1.5rem,8vw)}
+.panel.description > h2,.comments .panel-head h2{min-width:0;overflow-wrap:anywhere}
 /* the View as / Group by / Sort by boxes on a phone: two a row as before (each column at least half
    the row, so never three), one a row when large text makes a box wider than half the row (scripts
    off, the longest choice used to push the page 39 px wide) */
@@ -3676,13 +3678,10 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .stackhead .kebab{width:44px;height:44px;margin:-8px -6px -8px 0}
 /* a press and hold on a category's head opens its menu: no text selection under the finger */
 .deckview[data-catinfo] .stackhead h2{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-/* "+ Add category" after the last stack: a dashed outline, the width of a stack */
+/* "+ Add category" after the last stack: the site's plain button (.btn), the width of a stack */
 .deckview .addcat{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.4rem;
   width:100%;min-height:var(--ctl);margin:.5rem 0 0;padding-left:min(1rem,6%);padding-right:min(1rem,6%);
-  border:2px dashed var(--control-border);background:transparent;
-  color:var(--text);font-weight:700;text-decoration:none;break-inside:avoid;page-break-inside:avoid}
-.deckview .addcat:hover,.deckview .addcat:focus-visible{border-color:var(--orange-text);
-  color:var(--orange-text)}
+  break-inside:avoid;page-break-inside:avoid}
 .deckview.text .addcat,.deckview.brewer .addcat{display:inline-flex;width:100%}
 /* the category boxes (Rename, Add category, Add from template, Delete; deck.js): the switches
    in one row, each a finger-sized label; the template list one tick per line */
@@ -4172,17 +4171,10 @@ html.cardview-open{overflow:hidden}
 .statctl{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.75rem 0 .25rem;font-size:.9rem}
 .statctl[hidden]{display:none}
 .statctl span{font-weight:700;margin-right:.25rem}
-.statctl button{min-height:32px;padding:0 .7rem;font-size:.9rem}
-.statctl button[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--on-orange);
-  font-weight:700}
-/* Bar and Pie are one joined switch; Lands only is a toggle of its own, a gap apart (polish B5) */
-.statctl .seg2{display:inline-flex}
-.statctl .seg2 button{margin:0;border-radius:0}
-.statctl .seg2 button:first-child{border-radius:var(--radius) 0 0 var(--radius)}
-.statctl .seg2 button:last-child{border-radius:0 var(--radius) var(--radius) 0;margin-left:-1px}
-/* the space before Lands only is the switch's trailing margin: wrapped to a line of its own (large
-   text on a phone), Lands only starts at the line's edge, not .5rem in (0.7.47) */
-.statctl .seg2{margin-right:.5rem}
+/* the toggles are the site's choice chips (.ui-chip); Bar and Pie sit together, Lands only a gap
+   apart (polish B5). Wrapped to a line of its own (large text on a phone), Lands only starts at
+   the line's edge (0.7.47) */
+.statctl .seg2{display:inline-flex;flex-wrap:wrap;gap:.35rem;margin-right:.5rem}
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
 .k5{background:#e87ba4} .k6{background:#9085e9} .k7{background:#e34948} .k0{background:#8a8a8a}
@@ -4242,7 +4234,7 @@ table.qty td:last-child,table.qty th:last-child{width:1%;white-space:nowrap}
   color:var(--text-muted)}
 .odds .oddsform select:not(.msel-native),.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;
   padding:.25em .4rem;
-  font-size:.9rem;width:auto;min-width:6rem;flex:none}
+  font-size:1rem;width:auto;min-width:6rem;flex:none}
 .odds .oddsform .msel-btn{padding-right:1.5rem;background-position:right .5rem center}
 /* a long choice (Group by) never runs past the panel on a narrow phone with large text; the hidden
    native select behind a script-drawn one keeps the theme's 1 px size (it used to get 6rem here) */
@@ -4527,8 +4519,7 @@ html.printpick-open{overflow:hidden}
      buttons, the legend and the dialog strip's buttons: 44 px, set here, after their own rules
      above, so the touch size wins */
   .rowbtn,.curveaxis .mv,.slegend button{min-height:44px}
-  .rowbtn,.statctl button{min-width:44px}
-  .statctl button{min-height:44px}
+  .rowbtn{min-width:44px}
   /* the curve's eight axis buttons share the box's width with no gap, each at least 44 px wide:
      on a phone too narrow for eight of them (320 and 360 px) the curve scrolls inside its box,
      the axis with it (final polish P-11) */
