@@ -28,7 +28,7 @@ targets, 200% text, menus and stranded buttons.
 | Sub-heading | `h3` | 1.05rem, 700 | inside a section |
 
 Exceptions, on purpose: the deck page's title sits on the deck's art in white (the deck banner);
-pages whose switch names them (Assistant, Binder, Decks) keep the `h1` for screen readers only;
+pages whose switch names them (Assistant, Decks) keep the `h1` for screen readers only;
 the deck list's category headings are part of the list.
 
 ## Buttons
@@ -41,6 +41,17 @@ the deck list's category headings are part of the list.
 | Final "are you sure" step | `button.danger`, `.btn-danger` | solid red |
 | Quiet (inside a toolbar or a row) | `button.secondary`, `.btn-ghost` | no fill and no edge until hovered |
 | Icon only | `button.icon-only` | square, the control height, with an `aria-label` |
+| Row or inline action | `.ui-cap` (`ui.cap_link`) | grey capsule: `--surface-2` fill, no edge, .86rem 600, 36 px drawn inside a 44 px tap area |
+| Show more in place | `summary.fold-btn`, `.disc` | the same capsule with a chevron that turns when open |
+| The way back a level | `ui.back_link` (`a.ui-cap.ui-back`) | the capsule with the back arrow, on a line of its own at the page's top left, above the title |
+
+Which one: an action that stands for a page or a panel (Open, Review, Details, Open deck, Open
+report, Test a pasted list) is a standard button, in a tile, a toolbar or a list row alike; on a
+phone a list row's main action is its 44 px chevron. A capsule is only for a small action inside a
+row, a list line or a sentence (Why, Undo, Show oldest first, Group by deck, Review all 3). The
+same verb on the same page is the same piece. Every page that has a way back a level uses
+`ui.back_link`; a trail of several levels (Guide, Forum, Lists, folders) is capsules with `›`
+between them.
 
 All of them: 1rem (14 px), 700, 1rem padding at the sides, `--radius` (5 px) corners, the
 control height (`--ctl`, 44 px). A narrow row wraps whole buttons onto the next line
@@ -73,14 +84,15 @@ Every text box, number box, select and pick list (`.msel-btn`): the control heig
 ## Switches
 
 A segmented switch (`.hubseg`, `.seg`) is centred, or full width on a phone, never left hanging
-to one side. One look on every page.
+to one side. One look on every page. Parts are equal in width; where they need more than one
+row, a shorter last row sits in the middle (seven parts: four over three), and no word is broken.
 
 ## Page column
 
 | Kind | Width | Pages |
 |---|---|---|
 | Wide (lists, dashboards, grids) | up to 1200 px (2300 px where the page is a grid of cards) | Home, Decks, Binder, Proposals, History, Reports, Watchlist, Search, Cards, Admin |
-| Narrow (forms, settings, grouped lists, reading) | 44rem (616 px) | Account and its pages, Binder settings, Alerts, Card models, Scan, deck settings, Install |
+| Narrow (forms, settings, grouped lists, reading) | 44rem (616 px) | Account and its pages, the Binder page where it is one column (a phone, an open Fold), Binder settings, Alerts, Card models, Scan, deck settings, Install |
 
 Both are centred, with the page's gutter at the sides on a phone.
 

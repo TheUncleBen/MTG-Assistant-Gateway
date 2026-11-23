@@ -110,7 +110,6 @@ SETTINGS_CSS = """
   text-decoration:none;font-weight:700;font-size:.92rem;margin-left:-2px;border-left:2px solid transparent}
 .ds-nav a:hover,.ds-nav a:focus-visible{color:var(--text);border-left-color:var(--border)}
 .ds-nav a.dz{color:var(--danger-text)}
-.ds .back{margin-bottom:.25rem}
 /* each topic is a panel (.panel); a narrow one is measured in its own text (the switch rows) */
 .ds .ds-card{margin:0 0 1rem;container-type:inline-size}
 .ds .ds-card h2{display:flex;align-items:center;gap:.5rem}
@@ -498,7 +497,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         return (
             "<div class='ds-wrap'>"
             + nav
-            + f"<div class='ds'><a class='back ui-cap' href='/decks/{did}'>← {_esc(title)}</a>"
+            + f"<div class='ds'>{ui.back_link(title, f'/decks/{did}')}"
             + ui.page_head("Deck settings", f"“{title}”" + (" · package" if is_package else ""))
             + f"<form method='post' action='/decks/{did}/settings' class='panel ds-card settings' "
             "id='ds-main' "

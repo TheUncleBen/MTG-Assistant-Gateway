@@ -362,7 +362,7 @@ def test_deck_settings_save_each_change_at_once_with_undo(server: Server, width:
 
 
 _LABELS = (
-    "() => [document.querySelector('.ds > a.back').textContent,"
+    "() => [document.querySelector('.ds a.ui-back').textContent,"
     " document.querySelector('.ds > .ui-sub').textContent]"
 )
 
@@ -379,18 +379,18 @@ def test_a_rename_on_deck_settings_renames_the_pages_own_labels(server: Server, 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width)
         page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
-        assert page.evaluate(_LABELS) == [f"← {old}", f"“{old}”"]
+        assert page.evaluate(_LABELS) == [old, f"“{old}”"]
         name = page.locator("#name")
         name.fill("Renamed on the page")
         name.press("Tab")
         page.locator(".toast .msg", has_text="Saved to Archidekt").wait_for(timeout=8000)
         assert server.ark.decks[42]["name"] == "Renamed on the page"
-        assert page.evaluate(_LABELS) == ["← Renamed on the page", "“Renamed on the page”"]
+        assert page.evaluate(_LABELS) == ["Renamed on the page", "“Renamed on the page”"]
         page.locator(".toast button", has_text="Undo").click()
         page.wait_for_function(_WAS % ("name", old), timeout=8000)
-        assert page.evaluate(_LABELS) == [f"← {old}", f"“{old}”"]
+        assert page.evaluate(_LABELS) == [old, f"“{old}”"]
         page.reload(wait_until="networkidle")
-        assert page.evaluate(_LABELS) == [f"← {old}", f"“{old}”"]
+        assert page.evaluate(_LABELS) == [old, f"“{old}”"]
         assert errors == []
         browser.close()
 

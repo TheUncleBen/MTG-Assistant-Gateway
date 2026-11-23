@@ -291,7 +291,7 @@ async def test_history_lists_applied_changes_and_tests_open_their_report(stack: 
         assert ">Changes <span class='n'>1</span>" in body and ">Tests <span class='n'>1</span>" in body
         assert f"open=p-{p['proposal_id']}'" in body and ">Change</span>" in body
         assert f"/proposals/{waiting['proposal_id']}'" not in body  # waiting: on Proposals only
-        assert "<a class='ui-cap' href='/history/reports/rep_t' aria-label='Open report'>" in body
+        assert "<a class='btn' href='/history/reports/rep_t' aria-label='Open report'>" in body
         assert "open=r-rep_t" not in body
         r = await b.http.get("/history?open=r-rep_t", headers=NAV, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"] == "/history/reports/rep_t"

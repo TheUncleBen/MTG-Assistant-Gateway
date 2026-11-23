@@ -74,15 +74,20 @@ def test_every_admin_page_fits_and_reads(server: Server, width: int, theme: str)
                 ".filter(h => h > 0)"
             )
             assert not kebabs or min(kebabs) >= 43.5, (path, kebabs)
-            # every part of the admin switch stays on one line ("Card models"): the strip scrolls
-            # instead (final audit D11)
+            # a part of the admin switch keeps its words whole: on a phone the seven tabs are two rows
+            # of equal parts (docs/UI-STANDARD.md), where a two-word tab ("Card models") may take two
+            # lines, never more, and no word is cut
             if path.startswith("/admin"):
                 lines = page.evaluate(
                     "() => [...document.querySelectorAll('.adm-nav a')].map(a => {"
                     " const r = document.createRange(); r.selectNodeContents(a);"
                     " return [a.textContent.trim(), r.getClientRects().length]; })"
                 )
-                assert len(lines) == 7 and all(n == 1 for _, n in lines), (path, lines)
+                assert len(lines) == 7 and all(n <= 2 for _, n in lines), (path, lines)
+                assert page.evaluate(
+                    "() => [...document.querySelectorAll('.adm-nav a')]"
+                    ".every(a => a.scrollWidth <= a.clientWidth + 1)"
+                ), path
             _shot(page, f"admin-{path.strip('/').replace('/', '-') or 'overview'}-{width}-{theme}.png")
         # the six admin tabs sit in the same place on every tab (the 1200 px width)
         lefts = set()

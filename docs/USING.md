@@ -35,15 +35,16 @@ you the exact change first.
 On a phone the tabs at the bottom are Home, Decks, Binder and Assistant, then
 More. Binder holds Cards, Lists and Watchlist, switched at its top; Assistant
 holds Proposals, History and Reports the same way, and shows how many
-proposals are waiting. More opens Search decks and cards, Precons, Scan, Card models and Forum; the magnifier at the top opens the search box for cards
-and decks. On a wider touch screen, such as an unfolded foldable or a tablet,
-and in the Android app from 600 px, the same places are on a rail down the
-left edge, then Scan, Precons, Card models, Forum and Alerts, with no More. A
-computer's browser shows them all in the top bar when it is wide enough, else
-the four places with More as a drop-down, and a search box beside them. Your
-picture at the top right opens the Account page: Account details, Lists,
-My activity, the look, the Guide, the assistant skill and the apps, and Sign
-out.
+proposals are waiting. More opens Search decks and cards, Precons, Scan and
+Forum; the magnifier at the top opens the search box for cards and decks. On a
+wider touch screen, such as an unfolded foldable or a tablet, and in the
+Android app from 600 px, the same places are on a rail down the left edge,
+then Scan, Precons, Forum and Alerts, with no More. A computer's browser shows
+them all in the top bar when it is wide enough, else the four places with More
+as a drop-down, and a search box beside them. Your picture at the top right
+opens the Account page: Account details, Lists, My activity, the look, your
+assistants and their Card models, the Guide, the assistant skill and the apps,
+and Sign out.
 
 <!-- nav:end -->
 

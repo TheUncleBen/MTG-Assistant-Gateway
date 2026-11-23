@@ -362,7 +362,10 @@ async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
         panel = (await b.http.get("/proposals/p01", headers=NAV)).text.split("<main")[1]
         # the list stays beside the panel, which a narrow screen shows as the page itself
         assert "class='ui-split with-panel'" in panel and "<aside class='ui-drawer'" in panel
-        assert "← Back to Proposals" in panel and "href='/proposals/p01?full=1'>Open as a full page" in panel
+        assert (
+            "<span>Back to Proposals</span>" in panel
+            and "href='/proposals/p01?full=1'>Open as a full page" in panel
+        )
         assert "name='pick'" in panel.split("<aside")[0]
         assert "(deck 4" not in panel
         assert "14 other changes also wait on this deck." in panel and "Review all 15" in panel
@@ -370,7 +373,7 @@ async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
         assert "class='pr-full'" in full and "name='pick'" not in full
         # a closed one: back to All, no expiry, its result data folded under Technical details
         closed = (await b.http.get("/proposals/p00", headers=NAV)).text.split("<main")[1]
-        assert "href='/proposals?show=all'>← Back to Proposals" in closed
+        assert "<a class='ui-cap ui-back' href='/proposals?show=all'>" in closed
         assert "<dt>Expires</dt>" not in closed
         assert "<summary class='fold-btn'>Technical details</summary>" in closed
     finally:
@@ -436,10 +439,10 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         assert "Snapshots kept</span>" in body and "Backup copies</span>" in body
         details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]
         drawer = details.split("<aside class='ui-drawer'")[1]
-        assert "← Back to History" in drawer and "Restore (review first)" in drawer
+        assert "<span>Back to History</span>" in drawer and "Restore (review first)" in drawer
         assert "<dd><span class='muted'>Not recorded</span></dd>" in drawer and "<dd>—</dd>" not in drawer
         # the back link is a grey capsule, not bare blue text (style only: it stays where it was)
-        assert "<p class='page-only'><a class='ui-cap' href='/history'>← Back to History</a></p>" in drawer
+        assert "<p class='ui-back-line page-only'><a class='ui-cap ui-back' href='/history'>" in drawer
     finally:
         await b.aclose()
 

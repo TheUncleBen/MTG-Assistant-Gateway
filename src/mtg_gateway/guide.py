@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import modes, tool_labels, ui
+from . import card_models, modes, tool_labels, ui
 from .pages import _csrf, browser_session
 from .theme import ASSISTANT_PAGES, NAV_LINKS, binder_pages, icon, in_app, more_groups, rail_extra, render
 
@@ -400,7 +400,8 @@ def nav_description(*, html_out: bool = True) -> str:
         "A computer's browser shows them all in the top bar when it is wide enough, else the four "
         "places with More as a drop-down, and a search box beside them. Your "
         "picture at the top right opens the Account page: Account details, Lists, My activity, "
-        "the look, the Guide, the assistant skill and the apps, and Sign out."
+        f"the look, your assistants{' and their Card models' if card_models.SWITCHED_ON else ''}, "
+        "the Guide, the assistant skill and the apps, and Sign out."
     )
     if html_out:
         text = text.replace("the Account page", "the <a href='/account'>Account</a> page")
@@ -731,7 +732,7 @@ def build(
         "<strong>Group by</strong>). The chips pick Everything, Changes, Snapshots or Tests; the search "
         "finds a deck by name, and the filters "
         "narrow by deck and when "
-        "(today, the last 7, 30 or 90 days or this year, counted in UTC days), and "
+        "(today, the last 7, 30 or 90 days or this year, counted in your own local days), and "
         "<strong>Load more</strong> adds the next 25 under the list. Changes waiting for you, and every "
         "change your assistants proposed, are on <a href='/proposals?show=all'>Proposals</a>.</span></li>"
         "<li><span>A snapshot row links to the change it was taken before and has <strong>Restore (review "

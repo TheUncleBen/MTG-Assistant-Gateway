@@ -395,6 +395,10 @@ def test_my_decks_filters_in_the_browser_as_you_type_and_pick(server: Server, wi
         with page.expect_navigation():
             page.locator(".sp-clear:visible").first.click()
         assert urlparse(page.url).path == "/decks" and not urlparse(page.url).query
+        # measured once the shared stylesheet is in (static/topbar.js lifts html.preload then): the
+        # press closes the sheet's history step too, and the wait above can end on that step, with
+        # the new page's stylesheet still on its way and its buttons at their unstyled width
+        page.wait_for_function("() => !document.documentElement.classList.contains('preload')")
         assert page.evaluate(PANEL)["sw"] <= width
         assert errors == [], errors
         browser.close()

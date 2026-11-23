@@ -1683,9 +1683,9 @@ def head_to_head_html(a: dict[str, Any], b: dict[str, Any], *, csrf: str = "") -
         else ""
     )
     more = more_html(fa, csrf, str(a.get("report_id") or "")) if csrf else ""
-    back = ui.cap_link("← Back to the report", f"/history/reports/{_esc(b.get('report_id') or '')}")
+    back = ui.back_link("Back to the report", f"/history/reports/{b.get('report_id') or ''}")
     return (
-        f"<div class='h2h-page gb-dash'{marks}><p class='hy-back'>{back}</p>"
+        f"<div class='h2h-page gb-dash'{marks}>{back}"
         + ui.page_head("Head to head", HEAD_TO_HEAD_SUB)
         + f"<p class='rv-verdict' role='status'>{_esc(head_to_head_verdict(a, b))}</p>"
         + f"<div class='h2h-sides'>{_side_html(a)}{_side_html(b)}</div>"
@@ -1836,8 +1836,8 @@ def report_page_html(
         "<nav class='crumbs rv-crumbs' aria-label='Back'>"
         # capsules, as History's way back (ui.cap_link): never bare blue text
         + (
-            f"<a class='ui-cap' href='/decks/{deck_id}'>← Back to the deck</a>"
-            f"<a class='ui-cap' href='/history?deck_id={deck_id}'>Deck history</a>"
+            ui.back_link("Back to the deck", f"/decks/{r.get('deck_id')}", line=False)
+            + f"<a class='ui-cap' href='/history?deck_id={deck_id}'>Deck history</a>"
             if on_deck
             else ""
         )
@@ -2054,8 +2054,9 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-notes ul{margin:.2rem 0 0;padding-left:1.1rem;list-style:circle}
 .rv-page .rv-det{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
 /* what the quick solo test leaves out: inset grouped lists, as on the account settings pages */
-.rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--surface);
-  border:1px solid var(--border-soft);border-radius:14px;overflow:hidden}
+/* the standard's inset grouped list (docs/UI-STANDARD.md): --group-bg, --radius-lg */
+.rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--group-bg);
+  border:1px solid var(--border-soft);border-radius:var(--radius-lg);overflow:hidden}
 .rv-page .ig-list{list-style:none;margin:0;padding:0}
 .rv-page .ig.ig-list{margin:.5rem 0 0}
 .rv-page .ig-list li{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;min-height:44px;

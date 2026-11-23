@@ -281,7 +281,8 @@ def test_components_fit_touch_and_read_at_every_size(kit: KitServer) -> None:
                         h = page.evaluate(
                             "document.querySelector('.act-table .evt .ui-lbl').getBoundingClientRect().height"
                         )
-                        assert abs(h - 22) < 0.5, (where, h)
+                        # the standard's status label: 24 px wherever it sits (docs/UI-STANDARD.md)
+                        assert abs(h - 24) < 0.5, (where, h)
                         for name, tw, th in targets:
                             assert th >= 44 - 0.5 and tw >= 44 - 0.5, (where, name, tw, th)
                     # 200% text: nothing in the page runs past the window's edge (the chips' row
@@ -366,7 +367,11 @@ def test_side_panel_beside_the_list_from_1100_and_its_own_page_below(kit: KitSer
             lst = page.locator(".list-only").bounding_box()
             drawer = page.locator(".ui-drawer").bounding_box()
             assert lst and drawer, width
-            assert abs(drawer["width"] - 440) < 1 and drawer["x"] >= lst["x"] + lst["width"], (
+            # the panel is 440 px, or 36% of the page where that is less (the list keeps its room)
+            split = page.locator(".ui-split").bounding_box()
+            assert split and split["width"] <= 1200 + 1, split
+            want = min(440, 0.36 * split["width"])
+            assert abs(drawer["width"] - want) < 1 and drawer["x"] >= lst["x"] + lst["width"], (
                 width,
                 lst,
                 drawer,

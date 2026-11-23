@@ -200,7 +200,8 @@ def page_html(models: list[dict[str, Any]], *, csrf: str, remove: str = "", noti
     saved and what can be done with it (Open card, change through the assistant, Remove). One
     hidden form removes (its card filled in by the press); ``remove`` names a card whose confirm
     box is drawn open (the no-script path)."""
-    body = [ui.page_head(TITLE, SUB_TEXT), notice_html, explain_html()]
+    # its row is on the Account page, so the way back a level goes there
+    body = [ui.back_link("Account", "/account"), ui.page_head(TITLE, SUB_TEXT), notice_html, explain_html()]
     if models:
         n = len(models)
         body.append(

@@ -111,7 +111,7 @@ async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
     for slug, (label, names, extra) in want.items():
         page = (await member.http.get(_page_of(slug))).text
         # every list is one of Binder's Archidekt lists: "‹ Binder" back, the tab names the list
-        assert "<a class='bn-back' href='/binder'>" in page, slug
+        assert "<a class='ui-cap ui-back' href='/binder'>" in page, slug
         assert f"<a href='{_page_of(slug)}' aria-current='page'>{label}" in page, slug
         assert f"<title>Binder: {label}" in page and extra in page, slug
         for n in names:
@@ -464,8 +464,9 @@ async def test_the_account_page_links_to_the_lists_and_more_does_not(member: Bro
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # the lists live in Binder (mockup screen 8): More's Your cards group has Scan and Card models
-    assert labels[-3:] == ["Scan", "Card models", "Forum"]
+    # the lists live in Binder (mockup screen 8): More's Your cards group has Scan (Card models are
+    # on the Account page)
+    assert labels[-2:] == ["Scan", "Forum"]
     assert "href='/lists'" not in page and "href='/collection/lists'" not in nav
     hub = (await member.http.get("/account")).text
     assert "<a class='yrow' href='/collection/lists'>" in hub and ">Lists</span>" in hub

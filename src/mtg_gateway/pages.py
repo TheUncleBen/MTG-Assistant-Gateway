@@ -1334,11 +1334,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             label=f"Proposal {no}for {where}",
             close_href=close,
             back_text="Back to Proposals",
-        ).replace(
-            "<div class='dh'>",
-            # its own page (a phone, a Fold, "Open as a full page") has the page's title
-            f"<h1 class='page-only'>{html.escape(f'Proposal {no}for {where}')}</h1><div class='dh'>",
-            1,
+            # its own page (a phone, a Fold, "Open as a full page") has the page's title, which
+            # carries the number: the heading under it then says only what changes
+            page_title=f"Proposal {no}for {where}",
         )
         if full:
             body = f"<div class='pr-full'>{ui.split('', panel)}</div>"
@@ -1925,7 +1923,7 @@ def notice_section(ok: str | None, err: str | None) -> str | None:
 # The Account details pages: the list's folds and red row, a section's cards, the disclosure as
 # a tinted strip, buttons that wrap.
 ACCOUNT_CSS = (
-    # the way back a level is the shared .bn-back (account_hub.back_head)
+    # the way back a level is the shared ui.back_link (account_hub.back_head)
     ".yhub.ydetails{max-width:none;margin:0 auto}"
     # a row that folds open on the list (Your Archidekt lists, What your sign-in shares): its
     # words start under the row's label
@@ -3266,7 +3264,8 @@ def proposal_heading(p: dict[str, Any], no: int | None = None) -> str:
     lines = str(p.get("diff") or "").splitlines()
     text = ", ".join(lines[:4]) + (f" (+{len(lines) - 4} more)" if len(lines) > 4 else "")
     text = text[:300] or str(p.get("deck_name") or "Proposal")
-    return (f"<span class='no'>#{int(no)}</span> " if no else "") + html.escape(text)
+    # the number is the panel's (beside the list); as its own page the page title has it
+    return (f"<span class='no panel-only'>#{int(no)} </span>" if no else "") + html.escape(text)
 
 
 def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str:
@@ -3517,7 +3516,7 @@ def _proposal_body(
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
         summary = [
-            f"<span class='ui-lbl grey'>{total} deck detail{'s' if total != 1 else ''} changed; "
+            f"<span class='ui-tag'>{total} deck detail{'s' if total != 1 else ''} changed; "
             "no cards change</span>"
         ]
         heading, aria = "Deck details that will change", "Deck details"
@@ -3525,14 +3524,13 @@ def _proposal_body(
         # the deck's own categories (decks.category_line): said in words, no card count
         rows, total = _category_rows(p.get("rows"), p["diff"])
         summary = [
-            f"<span class='ui-lbl grey'>{total} category change{'s' if total != 1 else ''}; "
-            "no cards change</span>"
+            f"<span class='ui-tag'>{total} category change{'s' if total != 1 else ''}; no cards change</span>"
         ]
         heading, aria = "Categories that will change", "Category changes"
     else:
         rows, counts, net = _change_rows(p.get("rows"), p["diff"])
         total = sum(counts.values())
-        summary = [f"<span class='ui-lbl grey'>{total} change{'s' if total != 1 else ''}</span>"]
+        summary = [f"<span class='ui-tag'>{total} change{'s' if total != 1 else ''}</span>"]
         if counts["add"]:
             summary.append(f"<span class='ui-lbl green'>{counts['add']} added</span>")
         if counts["del"]:
@@ -3542,19 +3540,19 @@ def _proposal_body(
         if counts["cat"]:
             summary.append(f"<span class='ui-lbl orange'>{counts['cat']} recategorized</span>")
         summary.append(
-            f"<span class='ui-lbl grey'>Net {'+' if net > 0 else ''}{net} "
+            f"<span class='ui-tag'>Net {'+' if net > 0 else ''}{net} "
             f"card{'s' if abs(net) != 1 else ''}</span>"
         )
         heading, aria = "What will change", "Card changes"
         if p.get("kind") == "lists":  # the member's account-wide lists: no cards change
             summary = [
-                f"<span class='ui-lbl grey'>{total} change{'s' if total != 1 else ''} to your Archidekt "
+                f"<span class='ui-tag'>{total} change{'s' if total != 1 else ''} to your Archidekt "
                 "lists; no deck changes</span>"
             ]
             heading, aria = "What will change", "List changes"
         if p.get("kind") == "action":  # an Archidekt account action: no cards change
             summary = [
-                f"<span class='ui-lbl grey'>{total} Archidekt action{'s' if total != 1 else ''}; "
+                f"<span class='ui-tag'>{total} Archidekt action{'s' if total != 1 else ''}; "
                 "no cards change</span>"
             ]
             heading, aria = "What will happen", "Archidekt action"

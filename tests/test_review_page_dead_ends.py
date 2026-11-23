@@ -203,7 +203,7 @@ async def test_a_failed_change_keeps_its_number_in_the_heading_while_no_other_ho
     assert out.get("error"), out
     assert h.db.get_proposal(pid, SUB)["state"] == "failed"
     page = await _page(h, f"/proposals/{pid}?err=failed")
-    assert "<h2><span class='no'>#1</span> +1 Opt</h2>" in page
+    assert "<h2><span class='no panel-only'>#1 </span>+1 Opt</h2>" in page
     assert "Proposal #1 for " in page
     assert "What will change" not in page
     ark.decks[42] = deck

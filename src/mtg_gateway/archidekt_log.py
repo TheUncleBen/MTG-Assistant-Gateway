@@ -111,7 +111,7 @@ def _removed_html(r: dict[str, Any], deck_id: str, csrf_in: str) -> str:
 
 def page_html(got: dict[str, Any], csrf_in: str) -> str:
     did = got["deck_id"]
-    back = ui.cap_link("← Back to the deck's History", f"/history?deck_id={quote(did)}")
+    back = ui.back_link("Back to the deck's History", f"/history?deck_id={quote(did)}")
     intro = (
         f"<p class='ui-sub'>Archidekt's own record of changes to “{esc(got['deck_name'])}”, as Archidekt "
         "keeps it. The gateway's own snapshots and changes are on the deck's History.</p>"
@@ -148,7 +148,7 @@ def page_html(got: dict[str, Any], csrf_in: str) -> str:
     else:
         removed_html = "<p class='muted'>Archidekt keeps no rows of cards taken out of this deck.</p>"
     return (
-        f"<div class='alog'><p class='hy-back'>{back}</p>"
+        f"<div class='alog'>{back}"
         f"<h1>{TITLE}</h1>{intro}"
         "<section class='ui-card' aria-labelledby='alog-h'>"
         f"<h2 id='alog-h' class='ui-section'>Changes Archidekt logged</h2>{log_html}</section>"

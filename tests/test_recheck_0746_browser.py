@@ -378,7 +378,7 @@ def test_the_watchlists_price_alert_defaults_chip_is_one_line(
 
 GROUP_ROW = """() => {
   const row = document.querySelector('.ui-table.ui-rows .tr.group');
-  const cap = row.querySelector('.act .ui-cap'), cs = getComputedStyle(cap);
+  const cap = row.querySelector('.act .btn'), cs = getComputedStyle(cap);
   const r = cap.getBoundingClientRect(), rr = row.getBoundingClientRect();
   const tick = row.querySelector('input[type=checkbox]').getBoundingClientRect();
   const keb = document.querySelector('.ui-table.ui-rows .tr:not(.group) .act .kebab svg')

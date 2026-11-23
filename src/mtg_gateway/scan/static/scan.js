@@ -453,7 +453,7 @@
     const guide = h('div', { class: 'guide', id: 'scan-guide' }, PICTURES ? null : h('div', { class: 'title' }),
       h('span', { class: 'grip', 'aria-hidden': 'true' }));
     const areaBtn = h('button', { type: 'button', class: 'area-btn', id: 'area-btn', 'aria-pressed': 'false', 'aria-label': 'Scan area', hidden: app,
-      title: 'Move or resize the scan area', onclick: () => editArea(true) }, icon('edit'), h('span', { class: 'lbl', text: 'Scan area' }));
+      title: 'Move or resize the scan area', onclick: () => editArea(true) }, icon('scan'), h('span', { class: 'lbl', text: 'Scan area' }));
     const zoom = h('div', { class: 'zoom-chips', id: 'zoom-chips', role: 'group', 'aria-label': 'Zoom', hidden: true });
     const settingsBtn = PICTURES ? h('button', { type: 'button', class: 'cam-settings-btn', id: 'settings-btn', 'aria-label': 'Camera settings',
       title: 'Camera settings', 'aria-haspopup': 'dialog', onclick: () => openSettings() }, icon('settings')) : null;
@@ -533,6 +533,12 @@
     const tb = tabbar ? tabbar.getBoundingClientRect() : null;
     const below = tb && tb.height && tb.top > window.innerHeight / 2 ? window.innerHeight - tb.top : 0;
     const free = window.innerHeight - topH - (tabs ? tabs.offsetHeight + 8 : 0) - (bar ? bar.offsetHeight : 0) - below - 24;
+    // where the camera's top must be to show: under the site's bar, and under the tabs where they
+    // are sticky. A text size that grew after the page opened makes the page taller above it and
+    // the tabs taller over it, which left the camera's top out of view: the page scrolls again then
+    const sticky = !!tabs && getComputedStyle(tabs).position === 'sticky';
+    const lead = topH + (sticky ? tabs.offsetHeight + 16 : 0);
+    if (!scroll && cam.getBoundingClientRect().top < lead - 1) scroll = true;
     // never past the bottom of the screen from where it sits now
     const room = window.innerHeight - cam.getBoundingClientRect().top - (bar ? bar.offsetHeight + 8 : 0) - below - 12;
     cam.style.height = Math.max(260, Math.round(scroll ? free : Math.min(free, room))) + 'px';
@@ -540,10 +546,10 @@
       const r = cam.getBoundingClientRect();
       const end = r.bottom + (bar ? bar.offsetHeight + 8 : 0);
       // the tabs stay in view above it on a phone, where they are sticky
-      const target = getComputedStyle(tabs).position === 'sticky'
+      const target = sticky
         ? r.top + window.scrollY - topH - tabs.offsetHeight - 16
         : tabs.getBoundingClientRect().top + window.scrollY - topH - 8;
-      if (end > window.innerHeight - below) window.scrollTo(0, Math.max(0, target));
+      if (end > window.innerHeight - below || r.top < lead - 1) window.scrollTo(0, Math.max(0, target));
       // where the page could scroll to decides: the camera ends just above the added bar
       const now = cam.getBoundingClientRect().top;
       const fit = window.innerHeight - now - (bar ? bar.offsetHeight + 8 : 0) - below - 12;

@@ -794,7 +794,7 @@ def _waiting_table(
             f"<label class='chk'><input type='checkbox' class='all' data-all='{esc(key)}' "
             f"aria-label='{esc(aria)}'></label>"
         )
-        open_html = ui.cap_link("Open deck", open_deck) if open_deck else " "
+        open_html = ui.button_link("Open deck", open_deck) if open_deck else " "
         out.append(ui.group_row(title_html, meta, check_html=box, action_html=open_html))
         for x in lines:
             out.append(
@@ -1068,6 +1068,17 @@ PROPOSALS_CSS = """
 .ui-drawer .pr-why{margin:-.25rem 0 .5rem}
 .ui-drawer .summary-pills .ui-lbl{font-weight:700}
 .ui-drawer ul.changes li{background:transparent;border-left-color:transparent}
+/* a row's Add, Remove or Change is the standard status label (docs/UI-STANDARD.md): a pill, 24 px,
+   .82rem 700, the colour's tint */
+.ui-drawer ul.changes .act{display:inline-flex;align-items:center;justify-content:center;min-height:24px;
+  padding:.1em .3rem;border:0;border-radius:999px;background:var(--surface-2);font-size:.82rem;
+  font-weight:700;line-height:1.2}
+.ui-drawer ul.changes li.add .act{background:var(--green-tint)}
+.ui-drawer ul.changes li.del .act{background:var(--red-tint)}
+.ui-drawer ul.changes li.chg .act{background:var(--orange-tint)}
+/* the pill is a little wider than the old boxed label: the gap beside it gives that back, so the
+   change keeps half the row on a small phone (test_every_change_label_fits_its_box) */
+.ui-drawer ul.changes li{column-gap:.5rem}
 .ui-drawer .apply{margin-top:1rem}
 .ui-drawer .apply .choice{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 .25rem}
 .ui-drawer .apply .choice button,.ui-drawer .apply .choice .btn{margin:0}
@@ -1078,8 +1089,6 @@ PROPOSALS_CSS = """
 .ui-drawer .apply .choice > form > button{width:100%}
 .ui-drawer .pr-tech pre{max-height:22rem;overflow:auto;font-size:.82rem}
 .ui-drawer details > summary:not(.fold-btn){min-height:44px;display:flex;align-items:center;cursor:pointer}
-.ui-drawer .page-only{margin:0 0 .5rem}
-.ui-drawer .page-only a{display:inline-flex;align-items:center;min-height:44px}
 /* "Open as a full page": the panel alone, in the page's own column */
 .pr-full .ui-split.with-panel{display:block}
 .pr-full .ui-split.with-panel .ui-drawer{display:block;position:static;max-height:none;overflow:visible;

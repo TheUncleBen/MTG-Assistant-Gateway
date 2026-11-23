@@ -583,7 +583,7 @@ def test_the_brand_is_whole_at_1280_px_with_every_link(server: Server, path: str
         # them all as links and no More (theme.TOPBAR_FULL_FROM, redesign screen 1)
         from mtg_gateway import theme
 
-        assert got["links"] == len(theme.NAV_LINKS) + len(theme.rail_extra()) == 8, got
+        assert got["links"] == len(theme.NAV_LINKS) + len(theme.rail_extra()) == 7, got
         assert not page.locator(".topbar nav.site .navmore").is_visible()
         assert errors == [], errors
         browser.close()
