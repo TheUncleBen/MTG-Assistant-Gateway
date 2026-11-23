@@ -2591,7 +2591,7 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
 COMPARE_CSS = """
 .cmp-back{margin-bottom:.25rem}
 .cmp-ab .cmp-ab-forge{display:flex;width:100%;min-height:44px;margin:.25rem 0 .75rem}
-.cmp-form{padding:.75rem 1rem;margin:0 0 1rem}
+.cmp-form{margin:0 0 1rem}
 .cmp-form .row{display:flex;gap:.5rem;align-items:flex-end}
 .cmp-form .row .fld{flex:1;min-width:0;margin:0}
 .cmp-form .fld label{display:block;font-weight:700;margin:0 0 .25rem}
@@ -2604,7 +2604,7 @@ COMPARE_CSS = """
   align-items:start;margin:0 0 1rem}
 .cmp-h{display:flex;align-items:baseline;gap:.35rem;margin:0 0 .5rem;overflow-wrap:anywhere}
 .cmp-h .n{color:var(--text-muted);font-weight:400}
-.cmp-sub{margin:1rem 0 .5rem}
+.cmp-sub{margin-top:1rem}
 .cmp-t{--cols:4rem minmax(0,1fr) 44px;--cols-md:4rem minmax(0,1fr) 44px;--cols-sm:3.6rem minmax(0,1fr) 44px}
 .cmp-t .tr{min-height:44px;align-items:center}
 .cmp-t .q{font-weight:900;color:var(--text-muted);white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -2871,8 +2871,9 @@ GOLDFISH_CSS = """
 .gf-size .sizeseg{max-width:100%}
 .gf-size .sizeseg button{flex:0 1 auto;min-width:min(2.75rem,44px)}
 .gf-size .sizeseg button{min-width:44px}
-.gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
-  padding:.75rem;margin:0 0 1rem;min-width:0}
+/* each zone is a panel in the site's one look (.panel: the card edge, 1rem inside) */
+.gf-zone{background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-panel);
+  padding:1rem;margin:0 0 1rem;min-width:0}
 .gf-zone h2{margin:0 0 .5rem}
 .gf-zone .gf-n{color:var(--text-muted);font-weight:400}
 /* the cards wrap at every size: a grid of columns the card's width (--gw), never a sideways scroll */
@@ -3693,7 +3694,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .deckview[data-catinfo] .stackhead h2{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 /* "+ Add category" after the last stack: the site's plain button (.btn), the width of a stack */
 .deckview .addcat{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.4rem;
-  width:100%;min-height:var(--ctl);margin:.5rem 0 0;padding-left:min(1rem,6%);padding-right:min(1rem,6%);
+  width:100%;min-height:var(--ctl);margin:.5rem 0 0;
   break-inside:avoid;page-break-inside:avoid}
 .deckview.text .addcat,.deckview.brewer .addcat{display:inline-flex;width:100%}
 /* the category boxes (Rename, Add category, Add from template, Delete; deck.js): the switches
