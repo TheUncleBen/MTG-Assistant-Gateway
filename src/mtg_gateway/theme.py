@@ -173,7 +173,7 @@ VIZ_CSS = """
 .sel{position:relative;display:block}
 .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
-.sel > svg ~ select,.sel > svg ~ .msel-btn{padding-left:calc(.75rem + 20px)}
+.sel > svg ~ select,.sel > svg ~ .msel-btn{padding-left:calc(.75rem + max(20px, 1.5em))}
 """
 
 CSS = (
@@ -711,14 +711,15 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (sprite from mana.py) */
 .mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap;vertical-align:middle}
 .mana .sep{color:var(--text-muted);font-size:.8em;margin:0 .15em}
-.pip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+.pip{display:inline-flex;align-items:center;justify-content:center;width:max(16px,1.15em);
+  height:max(16px,1.15em);border-radius:50%;
   color:#111;background:#cbc2bf;box-shadow:-1px 1px 0 rgba(0,0,0,.55);flex:none;vertical-align:-.2em;
   font-style:normal;line-height:1}
 .pip svg{width:70%;height:70%;fill:currentColor;display:block}
-.pip b{font-size:10px;font-weight:900;line-height:1}
-.pip.big b{font-size:8px}
-.pip.sm{width:14px;height:14px;margin:0 1px}
-.pip.sm b{font-size:9px}
+.pip b{font-size:max(10px,.72em);font-weight:900;line-height:1}
+.pip.big b{font-size:max(8px,.58em)}
+.pip.sm{width:max(14px,1em);height:max(14px,1em);margin:0 1px}
+.pip.sm b{font-size:max(9px,.65em)}
 .pip-W{background:#f8f6d8} .pip-U{background:#c1d7e9} .pip-B{background:#bab1ab} .pip-R{background:#e49977}
 .pip-G{background:#a3c095} .pip-C{background:#cbc2bf} .pip-g{background:#cbc2bf}
 .pip-T,.pip-Q,.pip-E,.pip-P{background:#cbc2bf} .pip-S{background:#dfe8ee}
@@ -1541,7 +1542,8 @@ main.wrap.ui-narrow{max-width:calc(44rem + 2 * var(--gutter))}
   min-height:38px;height:auto;margin:0;padding:0 1.1rem;border:0;border-radius:9px;background:transparent;
   color:var(--text);font:inherit;font-weight:700;white-space:normal;cursor:pointer;line-height:1.2}
 .hubseg > button:hover{background:var(--surface-2);color:var(--text)}
-.hubseg > button[aria-selected=true]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.hubseg > button[aria-selected=true],.hubseg > button[aria-pressed=true]{background:var(--seg-on);
+  box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .hubseg > button:disabled{opacity:.5;cursor:default;background:transparent}
 .hubseg > button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .hubseg > button svg.i{width:16px;height:16px;flex:none}
@@ -1822,7 +1824,6 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-table.ui-rows .title .t{font-weight:600}
 .ui-table.ui-rows .title .t a{font-weight:600}
 .ui-table.ui-rows .sub{display:flex;margin-top:.25rem}
-.ui-table.ui-rows .sub .ui-lbl{min-height:20px;font-size:.76rem}
 .ui-table.ui-rows .flag{margin-top:.2rem}
 .ui-table.ui-rows .tr .act{display:flex;align-items:center;justify-content:flex-end;gap:.15rem;
   justify-self:end;margin-right:-8px}
@@ -1992,8 +1993,9 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-split{position:relative}
 .ui-drawer{display:none}
 @media (min-width:1100px){
-  main.wrap.ui-wide:has(.ui-split.with-panel){max-width:1440px}
-  .ui-split.with-panel{display:grid;grid-template-columns:minmax(0,1fr) 440px;gap:1rem;align-items:start}
+  main.wrap.ui-wide:has(.ui-split.with-panel){max-width:1200px}
+  .ui-split.with-panel{display:grid;grid-template-columns:minmax(0,1fr) min(440px,36%);gap:1rem;
+    align-items:start}
   .ui-split.with-panel .ui-drawer{display:block;position:sticky;top:var(--bar-room,60px);
     max-height:calc(100vh - var(--bar-room,60px) - 12px);overflow:auto;background:var(--surface);
     border:1px solid var(--card-border);border-radius:var(--radius-panel);padding:1rem 1.25rem 1.5rem;
@@ -2006,15 +2008,20 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 }
 @media (max-width:1099.98px){
   .ui-split.with-panel .list-only{display:none}
-  .ui-split.with-panel .ui-drawer{display:block}
+  .ui-split.with-panel .ui-drawer{display:block;max-width:44rem;margin:0 auto}
   .ui-split.with-panel .panel-only{display:none}
 }
+/* a panel's buttons fill their rows: when they wrap, no button is left alone at one side */
+.ui-drawer .ui-actions form{display:flex;flex:1 1 auto;margin:0}
+.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{flex:1 1 auto;margin:0}
 /* a drawer narrow in its own text (under 20em: 200% text on a phone) puts each fact under its
    key: "Proposed by" and "An assistant" do not fit side by side at 320 px (batch 10, AB6) */
 .ui-drawer{container-type:inline-size}
 @container (max-width:20em){ .ui-drawer .ui-meta{grid-template-columns:minmax(0,1fr)} }
 .ui-drawer .dh{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .5rem}
-.ui-drawer .dh h2{margin:0;flex:1;font-size:min(1.3rem,6.5vw);overflow-wrap:anywhere}
+.ui-drawer .dh h2{margin:0;flex:1;overflow-wrap:anywhere}
+.ui-drawer h1.page-only{margin:0}
+.ui-drawer h1 + .dh{margin-top:.5rem}
 .ui-drawer .close{min-width:44px;min-height:44px;display:inline-grid;place-items:center;
   background:transparent;
   border:1px solid var(--control-border);padding:0;color:var(--text);text-decoration:none}
@@ -2047,7 +2054,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .ui-actions button,.ui-actions .btn,.ui-actions form > button{margin:0}
 .ui-actions form{display:contents}
 .ui-hint{color:var(--text-muted);font-size:.84rem;margin:.25rem 0 0}
-.ui-section{margin:1.25rem 0 .5rem;font-size:1.05rem}
+.ui-section{margin:1.25rem 0 .4rem;font-size:1.05rem}
 .ui-next{margin:0 0 .75rem;padding:.5rem .75rem;border-left:3px solid var(--blue-text);
   background:var(--surface-2)}
 
@@ -2056,7 +2063,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .ui-card{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
   padding:1rem;margin:0 0 1rem}
 /* 6vw: "Collaborators" whole at 200% text */
-.ui-card > h2{margin:0 0 .25rem;font-size:min(1.15rem,6vw)}
+.ui-card > h2{margin:0 0 .25rem}
 .ui-card > .ui-sub{margin:0 0 .75rem}
 .ui-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,min(16rem,100% - 9em));gap:.25rem 1rem;
   align-items:center;
@@ -2136,10 +2143,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .det .tx.ui-dots{display:flex}
 .wdg .det .tx.ui-dots.balanced{display:block}
 .wdg .det a{font-weight:700}
-.wdg .det .ui-lbl{min-height:22px;font-size:.78rem}
 .wdg .go{margin-top:auto;padding-top:.35rem;display:flex;flex-wrap:wrap;gap:.4rem}
-.wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{min-height:var(--ctl);padding:0 .8rem;font-size:.92rem;
-  margin:0}
+.wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{min-height:var(--ctl);padding:0 1rem;margin:0}
 .wdg .go form{display:contents}
 .wdg.accent{border-top:3px solid var(--orange)}
 .wdg.alert{border-top:3px solid var(--red-text)}
@@ -2162,8 +2167,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .wdg{padding:.6rem min(.7rem,10px)}  /* the side padding stops at its 100% size, as the fold's */
   .wdg .big{font-size:1.5rem}
   .wdg .det{font-size:.82rem}
-  .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center;padding:0 .4rem;
-    font-size:.86rem}
+  .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center}
   .ui-widgets > .wdg.wide-sm{flex-basis:100%}
 }
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
@@ -2182,7 +2186,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .act-table .none,.act-table .gone{color:var(--text-muted)}
 .act-table .gone{font-style:italic}
 .act-table .evt{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .45rem;min-width:0}
-.act-table .evt .ui-lbl{min-height:22px;font-size:.78rem;flex:none}
+.act-table .evt .ui-lbl{flex:none}
 /* break-word, not anywhere: the name's longest word is its column's least width (its min-content),
    so a layout never squeezes "Archidekt" into one letter a line (batch 10, AB1) */
 .act-table .evt .en{display:inline-flex;align-items:flex-start;gap:.35rem;font-weight:700;font-size:.92rem;
@@ -2372,6 +2376,8 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
     border-radius:0}
   .mtgbox .acts{justify-content:stretch}
   .mtgbox .acts button,.mtgbox .acts .btn{flex:1 1 auto}
+  /* a full-width button's focus ring is drawn inside it: outside, the sheet's edge cut it off */
+  .mtgbox .acts :is(button,.btn):focus-visible{outline-offset:-4px}
 }
 """
 CSS += BOX_CSS

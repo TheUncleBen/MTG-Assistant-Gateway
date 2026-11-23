@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 
 from . import localday, ui
 from .decks import actor_label, without_tabs_note
-from .reports_page import ONE_LOOK_CSS, source_label_html
+from .reports_page import source_label_html
 from .theme import esc as _esc
 from .theme import icon, time_html
 
@@ -970,8 +970,7 @@ HISTORY_CSS_C = ""
 
 
 HISTORY_CSS = (
-    ONE_LOOK_CSS
-    + """
+    """
 /* History (UI standard): the shared table, widgets and side panel are theme.UI_CSS */
 .hy-table .title .deck a{font-weight:400}
 .hy-table .ui-lbl + .ui-lbl{margin-left:.25rem}

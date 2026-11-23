@@ -26,7 +26,6 @@ from .decks import ADMIN_CLIENT, BROWSER_CLIENT, UNDO_KINDS
 from .digits import is_digits
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
-from .reports_page import ONE_LOOK_CSS
 from .theme import esc
 from .waiting_strip import line_for
 
@@ -1028,9 +1027,7 @@ __all__ = [
 
 # The Proposals page's own styles (pages.py puts them in the page's head; the shared pieces are
 # theme.UI_CSS). Theme tokens only.
-PROPOSALS_CSS = (
-    ONE_LOOK_CSS
-    + """
+PROPOSALS_CSS = """
 /* a waiting row's cells are labels of its tick box: the whole row is the tap target */
 .pr-table label{margin:0;font-weight:inherit;cursor:pointer}
 /* a list narrow in its own text (under 12em: 200% text on a phone) puts Review and the ⋮ under the
@@ -1102,4 +1099,3 @@ PROPOSALS_CSS = (
 .wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
 .wdg .big small{margin-left:0}
 """
-)

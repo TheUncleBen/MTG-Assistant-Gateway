@@ -73,7 +73,7 @@ from .report_view import (
     split_card_names,
     validation_html,
 )
-from .reports_page import ONE_LOOK_CSS, PHONE_WIDGETS_CSS, STATUS_LABEL, source_label_html, status_label
+from .reports_page import PHONE_WIDGETS_CSS, STATUS_LABEL, source_label_html, status_label
 from .theme import SPINNER, UNPRICED_HTML, icon
 
 # The "Played with their effect" widget takes the orange edge below this share of the deck.
@@ -1969,7 +1969,6 @@ def report_page_html(
 # The page's own styles, scoped to .rv-page (the export keeps report_view.EXPORT_CSS).
 REPORT_PAGE_CSS = (
     PHONE_WIDGETS_CSS
-    + ONE_LOOK_CSS
     + """
 /* one report */
 /* the way-back capsules sit 8 px apart like any chip row, never touching (polish B11): the

@@ -589,25 +589,6 @@ def paste_test_html(csrf: str) -> str:
 # 24 px with .82rem words wherever it sits, a panel's heading is the section heading, a sub-heading
 # has the one bottom margin. The Assistant place's pages (Proposals, History, Reports, a report,
 # My activity) add this after the shared sheet.
-ONE_LOOK_CSS = """
-.wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{padding:0 1rem;font-size:1rem}
-.ui-table.ui-rows .sub .ui-lbl,.wdg .det .ui-lbl,.act-table .evt .ui-lbl{min-height:24px;font-size:.82rem}
-.ui-drawer .dh h2,.ui-card > h2{font-size:min(1.2rem,7vw)}
-.ui-section{margin-bottom:.4rem}
-/* one item opened from a list (a proposal, a History row's Details). Beside the list it keeps the
-   lists' column (1200 px), the panel a third of it; as its own page (a phone, a Fold, "Open as a
-   full page") it is the narrow reading column, centred, under the page's title (the standard's
-   h1), with the panel's heading as its first section heading */
-@media (min-width:1100px){main.wrap.ui-wide:has(.ui-split.with-panel){max-width:1200px}
-  .ui-split.with-panel{grid-template-columns:minmax(0,1fr) min(440px,36%)}}
-@media (max-width:1099.98px){.ui-split.with-panel .ui-drawer{max-width:44rem;margin:0 auto}}
-.ui-drawer h1.page-only{margin:0}
-.ui-drawer h1 + .dh{margin-top:.5rem}
-/* the panel's buttons fill their rows: when they wrap, no button is left alone at one side (a
-   button's form is the row's item, the button fills it) */
-.ui-drawer .ui-actions form{display:flex;flex:1 1 auto;margin:0}
-.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{flex:1 1 auto;margin:0}
-"""
 
 PHONE_WIDGETS_CSS = """
 @media (max-width:599.98px){
@@ -622,7 +603,6 @@ PHONE_WIDGETS_CSS = """
 
 REPORTS_PAGE_CSS = (
     PHONE_WIDGETS_CSS
-    + ONE_LOOK_CSS
     + """
 /* the Reports page */
 .reports-page .rp-paste{margin:1rem 0}
