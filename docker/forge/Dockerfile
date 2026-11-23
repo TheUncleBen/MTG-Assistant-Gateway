@@ -7,11 +7,11 @@
 # workflow reads these lines and passes FORGE_URL (the release asset's address). Before a
 # local build, run: python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json
 # and python3 docker/forge/precons.py docker/forge/precons.json
-ARG FORGE_VERSION=2.0.15
-ARG FORGE_ASSET=forge-installer-2.0.15.tar.bz2
-ARG FORGE_SHA256=4468f182b60f6ca62d89697baa208981085af744f116781af751c611826db600
+ARG FORGE_VERSION=2.0.16
+ARG FORGE_ASSET=forge-installer-2.0.16.tar.bz2
+ARG FORGE_SHA256=feb1338c2f4a8c62e9289b6270caa7fcc38f2441d5ec4d7cff237c2c1a3b15d0
 # Bump when this image changes without a new Forge release. The image is tagged <FORGE_VERSION>-<FORGE_LOCAL>.
-ARG FORGE_LOCAL=mag6
+ARG FORGE_LOCAL=mag1
 
 FROM mirror.gcr.io/library/eclipse-temurin:21-jre@sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99 AS source
 ARG FORGE_URL
