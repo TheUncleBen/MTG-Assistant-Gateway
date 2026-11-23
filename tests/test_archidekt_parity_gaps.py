@@ -107,7 +107,7 @@ async def test_a_profile_with_no_public_decks_has_an_empty_state_and_follow(stac
         r = await b.http.get("/users/bo", headers=NAV)
         assert r.status_code == 200, r.text
         page = r.text
-        assert "<h1 class='uname'>bo</h1>" in page and "<p class='sub'>Archidekt profile</p>" in page
+        assert "<h1 class='uname'>bo</h1>" in page and "<p class='ui-sub'>Archidekt profile</p>" in page
         assert "data-social='follow' data-user='79' data-name='bo'" in page
         assert "<h2 id='pempty-h'>No public decks yet</h2>" in page
         assert "“bo” has no public decks on Archidekt yet. When they make one public, it shows here." in page
@@ -116,7 +116,7 @@ async def test_a_profile_with_no_public_decks_has_an_empty_state_and_follow(stac
         r = await b.http.get("/users/nobody-here", headers=NAV)
         assert "<h2 id='pempty-h'>No such user</h2>" in r.text
         assert "No Archidekt user called “nobody-here” was found. Check the spelling." in r.text
-        assert "<p class='sub'>No such user on Archidekt</p>" in r.text
+        assert "<p class='ui-sub'>No such user on Archidekt</p>" in r.text
         assert "data-social='follow'" not in r.text
     finally:
         await b.aclose()

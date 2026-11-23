@@ -112,7 +112,7 @@ async def test_a_profile_has_one_header_the_results_bar_and_load_more(stack: Sta
         assert r.status_code == 200
         page = r.text
         assert page.count("<h1") == 1 and "<h1 class='uname'>alice</h1>" in page
-        assert "<p class='sub'>Public decks on Archidekt</p>" in page
+        assert "<p class='ui-sub'>Public decks on Archidekt</p>" in page
         assert "class='avatar xl'" in page
         assert "<time class='ui-when'" in page.split("<ul class='plain decklist", 1)[1]  # the list date
         assert "Archidekt profile</a>" in page and "href='https://archidekt.com/u/alice'" in page
@@ -135,7 +135,7 @@ async def test_a_profile_has_one_header_the_results_bar_and_load_more(stack: Sta
         assert "Sample Commander Deck" in page
         # a member without public decks: the empty state, no results bar (0.7.46)
         r = await b.http.get("/users/amy", headers=NAV)
-        assert "<p class='sub'>Archidekt profile</p>" in r.text
+        assert "<p class='ui-sub'>Archidekt profile</p>" in r.text
         assert "<h2 id='pempty-h'>No public decks yet</h2>" in r.text and "Try fewer filters" not in r.text
         assert "id='s-count'" not in r.text
     finally:

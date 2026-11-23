@@ -356,7 +356,7 @@ LAYOUT = """({touch, rail}) => {
   }
   const site = q('.topbar #site-q');
   if (site && site.getClientRects().length) out.siteSearchH = R(site).h;
-  const head = q('.ui-head.phead'), panel = q('.spanel'), crumbs = q('nav.crumbs');
+  const head = q('.dkhead, .ui-head.phead'), panel = q('.spanel'), crumbs = q('nav.crumbs');
   const areas = qa('section.fv-area');
   if (head && panel) out.headToPanel = R(panel).t - R(head).b;
   if (panel && crumbs) out.panelToCrumbs = R(crumbs).t - R(panel).b;

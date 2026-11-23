@@ -108,8 +108,7 @@ BROWSE_CSS = """
 .profile .who .uname{overflow-wrap:anywhere}
 .profile .social-off{flex-basis:100%;margin:0}
 .profile .who{display:flex;flex-direction:column;flex:1 1 16rem;min-width:0}
-.profile .who .uname{font-size:1.5rem;font-weight:900}
-.profile .who .sub{color:var(--text-muted)}
+
 .profile .social{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-left:auto;flex:0 0 auto;
   max-width:100%}
 .profile .social .btn,.profile .social .soc{margin:0;display:inline-flex;align-items:center;gap:.4rem}
@@ -125,21 +124,20 @@ BROWSE_CSS = """
 /* focus moves to Follow by script after a tap: always ring it, as the deck page's confirms do */
 .profile .social .confirm button:focus{outline:2px solid var(--focus);outline-offset:2px}
 .profile .social .note{flex-basis:100%;color:var(--text-muted);font-size:.9rem;margin:0}
-@media (max-width:600px){ .profile .social{margin-left:0;flex-basis:100%} }
-.popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
-.popular a{display:inline-flex;align-items:center;min-height:44px;padding:.1rem .7rem;border-radius:15px;
-  max-width:100%;overflow-wrap:break-word;
-  background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
-    border:1px solid var(--border)}
-.popular a:hover{border-color:var(--orange);color:var(--orange)}
-.popular a.precons{gap:.4rem;font-weight:700;flex-wrap:wrap}
+/* a phone: the row's buttons share its width, none hanging at the left */
+@media (max-width:600px){ .profile .social{margin-left:0;flex-basis:100%}
+  .profile .social > .btn,.profile .social > .soc{flex:1 1 auto;justify-content:center} }
+.popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:0}
+/* the ready-made searches are the shared chips (.ui-chip); a long one wraps its words at large text */
+.popular .ui-chip{flex:0 1 auto;max-width:100%;white-space:normal;padding-block:.1rem;flex-wrap:wrap;
+  overflow-wrap:anywhere}
 /* the preconstructed decks: a heading per set, the first row of tiles until Show all */
 .precons .pre-grp{margin:0 0 1.25rem}
 .precons .pre-gh{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;
   margin:0 0 .6rem}
-.precons .pre-gh h2{margin:0;font-size:1.15rem;min-width:0;overflow-wrap:anywhere}
+.precons .pre-gh h2{margin:0;min-width:0}
 .precons .pre-gh .code{color:var(--text-muted);font-weight:400}
-.precons .pre-gh .n{color:var(--text-muted);font-weight:400;font-size:.92rem;white-space:nowrap}
+.precons .pre-gh .n{color:var(--text-muted);font-weight:400;font-size:1rem;white-space:nowrap}
 .precons .pre-gh .pre-all{margin:0}
 .precons .pre-all[hidden]{display:none}
 .precons .pre-grp:not(.open) ul.decklist.grid{grid-template-rows:auto;grid-auto-rows:0;row-gap:0;
@@ -156,13 +154,14 @@ BROWSE_CSS = """
 .precons .loadmore .btn,.profile-page .loadmore .btn{margin:0;min-width:min(12rem,calc(100vw - 2rem))}
 .precons .loadmore p,.profile-page .loadmore p{margin:0}
 /* a profile: the results bar alone in the panel; the follow question's buttons are 44 px */
-.profile .who h1{font-size:1.5rem;margin:0}
-.profile .who .sub{margin:0}
+.profile .who h1{margin:0}
+.profile .who .ui-sub{margin:.1rem 0 0}
 .profile .social .confirm button{height:auto;min-height:var(--ctl);padding:0 .9rem;
   border-radius:var(--radius)}
 .profile .social .confirm{border-radius:var(--radius);padding:.3rem .4rem .3rem .85rem}
 @media (max-width:599.98px){ .profile .social .confirm > span:first-child{flex-basis:100%} }
-.profile-page .spanel .rbar.prof{margin-top:0}
+/* nothing over the bar to be parted from: no rule, no room above it */
+.profile-page .spanel .rbar.prof{margin-top:0;border-top:0;padding-top:0}
 """
 
 
@@ -390,6 +389,7 @@ def search_results_html(
 
 # -- preconstructed decks (UI overhaul 2026-10-21, mockup 21-precons) ----------------------------
 PRECON_PURPOSE = "Archidekt's preconstructed decks, newest set first."
+SEARCH_PURPOSE = "Archidekt's public decks. Open one for its stats, or to clone it."
 PRECON_SETS = 4  # set groups a page shows before Load more sets (a screenful plus a few rows)
 PRECON_DECKS = 24  # decks a page shows when sorted by name
 PRECON_SORTS = (("set", "Set release"), ("name", "Deck name"))
@@ -654,6 +654,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         social: bool = False,
         body_class: str = "",
         scripts: tuple[str, ...] = (),
+        heading: bool | None = None,
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -667,7 +668,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             sub=sub,
             wide=True,
-            heading=not body_class,  # the precons and a profile draw their own title
+            # the search, the precons and a profile draw their own title (ui.page_head)
+            heading=not body_class if heading is None else heading,
             body_class=body_class,
             current=current,
             head_extra=f"{stylesheet_link('deck.css')}<style>{BROWSE_CSS}</style>"
@@ -756,7 +758,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         # a deck link in the name box opens that deck ("Open this deck" under the box): no search
         if deck_ref(query["name"]) and not is_digits(query["name"]):
             asked = False
-        body = ""
+        body = ui.page_head("Search decks", SEARCH_PURPOSE)
         if asked:
             note = ""
             try:
@@ -798,7 +800,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         else:
             body += search_form_html(query, view=view)
             popular = "".join(
-                f"<a href='{_esc(search_link(read_query({}), **q))}'>{_esc(label)}</a>"
+                f"<a class='ui-chip' href='{_esc(search_link(read_query({}), **q))}'>{_esc(label)}</a>"
                 for label, q in (
                     ("Most viewed Commander decks", {"deck_format": 3, "order_by": "-viewCount"}),
                     ("Newest Commander decks", {"deck_format": 3, "order_by": "-createdAt"}),
@@ -811,13 +813,11 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
             body += (
                 "<div id='s-results'><section class='panel'><h2>Browse public decks</h2>"
-                "<p class='muted'>Search Archidekt's public decks. Open one for its stats, or to "
-                "clone it.</p>"
                 f"<div class='popular'>{popular}"
-                f"<a class='precons' href='/precons'>{icon('box')} Preconstructed decks by set</a></div>"
+                f"<a class='ui-chip' href='/precons'>{icon('box')} Preconstructed decks by set</a></div>"
                 "</section></div>"
             )
-        return remembered(page("Search decks", body, sub=sub, sid=sid), sub, view, remember)
+        return remembered(page("Search decks", body, sub=sub, sid=sid, heading=False), sub, view, remember)
 
     @server.custom_route("/search/api/decks", methods=["GET"], include_in_schema=False)
     async def search_api(request: Request) -> Response:
@@ -1037,7 +1037,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         return (
             f"<section class='profile'>{avatar_html(shown, 'xl')}<div class='who'>"
             # a long name breaks after its underscores, never inside a word (0.7.47)
-            f"<h1 class='uname'>{_esc(shown).replace('_', '_<wbr>')}</h1><p class='sub'>{line}</p></div>"
+            f"<h1 class='uname'>{_esc(shown).replace('_', '_<wbr>')}</h1><p class='ui-sub'>{line}</p></div>"
             f"<div class='social'>{follow}"
             f"<a class='btn btn-plain ext' href='https://archidekt.com/u/{_esc(shown)}' "
             "target='_blank' rel='noreferrer noopener'>"

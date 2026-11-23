@@ -298,8 +298,12 @@ def test_the_decks_buttons_lead_with_new_deck() -> None:
     from mtg_gateway import companion_decks
 
     src = Path(companion_decks.__file__).read_text(encoding="utf-8")
-    acts = src.split("\"<span class='acts'>\"")[1].split('"</span></div>"')[0]
-    assert acts.index("New deck</a>") < acts.index("New folder</button>") < acts.index("New package</a>")
+    acts = src.split("\"<span class='acts'>\"")[1].split('"</span></div></div>"')[0]
+    assert (
+        acts.index("new_words('deck')")
+        < acts.index("new_words('folder')")
+        < acts.index("new_words('package')")
+    )
 
 
 def test_the_packages_side_names_packages_and_says_when_there_are_none(server: Server) -> None:

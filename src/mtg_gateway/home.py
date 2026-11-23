@@ -46,10 +46,10 @@ DECKS_TIMEOUT = 6.0  # seconds; the home page must not hang on Archidekt
 HOME_CSS = """
 /* Needs you: one row a thing waiting for the member, the way to it at the row's end */
 .home .needs{margin:0 0 1rem}
-.home .needs h2{margin:0 0 .5rem}
+
 .home .needs ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.5rem}
-.home .needs li{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.6rem .9rem;
-  border-radius:var(--radius);background:var(--surface);border:1px solid var(--border)}
+.home .needs li{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:1rem;
+  border-radius:var(--radius-panel);background:var(--surface);border:1px solid var(--border)}
 .home .needs li.accent{border-left:4px solid var(--orange)}
 .home .needs li svg.i{width:20px;height:20px;flex:none;color:var(--orange-text)}
 .home .needs li .what{flex:1 1 14rem;min-width:0}
@@ -430,10 +430,10 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         hero = (
             f"<div class='hero'><div><h1>Hi {_esc(who)}</h1>"
             + (
-                "<p class='sub'>Archidekt account "
+                "<p class='ui-sub'>Archidekt account "
                 f"<strong>{_esc(link['archidekt_username'] or '')}</strong> is linked.</p>"
                 if link["linked"]
-                else "<p class='sub'>Link your Archidekt account to see and edit your decks here.</p>"
+                else "<p class='ui-sub'>Link your Archidekt account to see and edit your decks here.</p>"
             )
             + "</div>"
             + (

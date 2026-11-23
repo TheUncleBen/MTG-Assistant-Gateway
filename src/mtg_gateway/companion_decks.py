@@ -235,6 +235,13 @@ def new_deck_box_html(
     )
 
 
+def new_words(what: str) -> str:
+    """ "New deck" on My decks' three buttons. A phone's row shows the plus and the thing ("+ Deck",
+    "+ Folder", "+ Package": the three whole on one 360 px row at the standard button size); "New"
+    stays in the button's name for a screen reader (folderview.FOLDER_CSS .dkhead)."""
+    return f"<span><span class='nw'>New </span><span class='nn'>{what}</span></span>"
+
+
 NEW_PACKAGE_CSS = deck_extras.CSS + deck_extras.PACKAGE_FIELDS_CSS  # the New package box
 
 NEW_DECK_CSS = """
@@ -394,7 +401,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # the switch keeps the folder open, as the Show filter it replaced did
         in_folder = f"folder={quote(folder, safe='')}" if folder else ""
         head = (
-            "<div class='ui-head phead hubhead'>"
+            "<div class='dkhead'><div class='ui-head dkrow'>"
             f"<h1 class='sr-only'>{'Packages' if packages else 'My Decks'}</h1>"
             + hub_switch(
                 "Decks",
@@ -409,11 +416,11 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             # Decks, New package on Packages (0.7.46 audit D-25)
             + "<span class='acts'>"
             f"<a class='btn{'' if packages else ' btn-primary'}' href='/decks/new' "
-            f"{ui.box_open_attr('newdeck')}>{icon('plus')} New deck</a>"
-            f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
+            f"{ui.box_open_attr('newdeck')}>{icon('plus')} {new_words('deck')}</a>"
+            f"<button type='button' class='btn' data-new-folder>{icon('plus')} {new_words('folder')}</button>"
             f"<a class='btn{' btn-primary' if packages else ''}' href='/decks/new-package' "
-            f"{ui.box_open_attr('newpkg')}>{icon('package')} New package</a>"
-            "</span></div>"
+            f"{ui.box_open_attr('newpkg')}>{icon('plus')} {new_words('package')}</a>"
+            "</span></div></div>"
         )
         notice = ""
         if qp.get("err") == "bad_ref":

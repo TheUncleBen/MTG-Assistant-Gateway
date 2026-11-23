@@ -95,14 +95,15 @@ OK_SECTIONS = {
 TEMPLATES_NONE_LEFT = "Every template's name is already a category in this deck."
 
 SETTINGS_CSS = """
-.ds-wrap{display:grid;grid-template-columns:minmax(0,52rem);justify-content:center;gap:24px}
+/* a form: the standard's narrow column (44rem, as main.ui-narrow), every row a label and its
+   control. The section list is a way around a long page, not a second column of settings: with
+   room for it and for an empty track its width on the right (a computer), it stands beside the
+   column and stays in view, and the settings keep the middle of the window under the page's
+   heading. Without that room (a narrower window, or large text) the page is the one column */
+.ds-wrap{display:grid;grid-template-columns:minmax(0,44rem);justify-content:center;gap:24px}
 .ds-nav{display:none}
-/* the section list shows only with room for it and for an empty track its width on the right, which
-   keeps the settings themselves in the middle of the window, under the page's heading. Without
-   that room (a narrower window, or large text) the page is one centred column: a list on the left
-   alone pushed the settings to the right (0.7.47 UI sweep; at 200% text, audit AW1) */
-@media (min-width:1280px){main.wrap:has(> .ds-wrap){max-width:calc(74rem + 48px + 2 * var(--gutter))}}
-@container (min-width:calc(74rem + 48px)){.ds-wrap{grid-template-columns:11rem minmax(0,52rem) 11rem}
+@media (min-width:1100px){main.wrap:has(> .ds-wrap){max-width:calc(66rem + 48px + 2 * var(--gutter))}}
+@container (min-width:calc(66rem + 48px)){.ds-wrap{grid-template-columns:11rem minmax(0,44rem) 11rem}
   .ds-nav{display:block;position:sticky;top:12px;align-self:start;margin-top:118px}}
 .ds-nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--border-soft)}
 .ds-nav a{display:flex;align-items:center;min-height:44px;padding:0 .75rem;color:var(--text-muted);
@@ -110,16 +111,22 @@ SETTINGS_CSS = """
 .ds-nav a:hover,.ds-nav a:focus-visible{color:var(--text);border-left-color:var(--border)}
 .ds-nav a.dz{color:var(--danger-text)}
 .ds .back{margin-bottom:.25rem}
-.ds .ui-card{margin:0 0 1rem}
-.ds .ui-card h2{display:flex;align-items:center;gap:.5rem}
-.ds .ui-card.danger{border-color:var(--danger-fill)}
-.ds .ui-card.danger h2{color:var(--danger-text)}
+/* each topic is a panel (.panel); a narrow one is measured in its own text (the switch rows) */
+.ds .ds-card{margin:0 0 1rem;container-type:inline-size}
+.ds .ds-card h2{display:flex;align-items:center;gap:.5rem}
+.ds .ds-card > h2{margin-top:0}  /* the main form's heading follows its hidden fields */
+.ds .ds-card.danger{border-color:var(--danger-fill)}
+.ds .ds-card.danger h2{color:var(--danger-text)}
 .ds .ds-note{margin:0 0 .75rem}
 .ds .ui-row .help{margin:.15rem 0 0}
 .ds .ui-row label{font-weight:700}
 .ds .ui-row.plain .lab{font-weight:400}
 .ds .ui-row.plain .ctl{justify-self:end}
-.ds .ui-row.wctl{grid-template-columns:minmax(0,1fr) minmax(0,min(26rem,100% - 9em))}
+/* a row whose control is a box with its button (Add a tag, Folder, Add someone you follow): the
+   control under its label and help, the row's width, at every size (beside them in the narrow
+   column the words had a third of the row) */
+.ds .ui-row.wctl{grid-template-columns:1fr}
+.ds .ui-row.wctl .ctl{grid-column:1;grid-row:auto}
 .ds .ui-row.full{grid-template-columns:1fr}
 .ds .ui-row.full .ctl{grid-column:1;grid-row:auto}
 .ds .ui-row .ctl input,.ds .ui-row .ctl select:not(.msel-native),.ds .ui-row .ctl textarea{width:100%;
@@ -169,7 +176,7 @@ SETTINGS_CSS = """
 /* Delete unused categories: its own right-aligned line under the list, apart from Save and Undo */
 .ds .acts.ds-unused{justify-content:flex-end;border-top:0;padding-top:0;margin-top:.5rem}
 .ds form.catnew{margin-top:1rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
-.ds form.catnew h3{margin:0 0 .5rem;font-size:1rem}
+.ds form.catnew h3{margin:0 0 .5rem}
 .ds form.catnew .row{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center}
 .ds form.catnew{container-type:inline-size}
 .ds form.catnew .row input[type=text]{flex:1 1 14rem;min-height:44px;margin:0}
@@ -209,8 +216,9 @@ SETTINGS_CSS = """
 .ds .follownote p.lead{font-weight:700}
 .ds .follownote .btn{color:var(--text)}
 .ds .taglist button.mini{width:44px;height:44px}
-@media (max-width:599.98px){.ds .ui-row.wctl{grid-template-columns:1fr}
-  .ds .ui-row.plain .ctl{justify-self:start}
+@media (max-width:599.98px){
+  .ds .ui-row.plain .ctl{justify-self:stretch}
+  .ds .ui-row.plain .ctl > .btn{display:flex;width:100%;margin:0;height:auto;white-space:normal}
   .ds .ds-cover{grid-template-columns:1fr}.ds .ds-cover .pv{max-width:12rem}
   .ds .ds-inline{flex-wrap:wrap}.ds .ds-inline > *{flex:1 1 100%}
   .ds .ds-inline > .btn,.ds .ds-inline > button{flex:1 1 100%;width:100%}
@@ -489,7 +497,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + nav
             + f"<div class='ds'><a class='back ui-cap' href='/decks/{did}'>← {_esc(title)}</a>"
             + ui.page_head("Deck settings", f"“{title}”" + (" · package" if is_package else ""))
-            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main' "
+            + f"<form method='post' action='/decks/{did}/settings' class='panel ds-card settings' "
+            "id='ds-main' "
             f"data-draft='settings:{did}'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + "".join(
@@ -561,7 +570,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 note("collaborators"),
             )
             # (ds-delete: the Delete box the page holds is #delete)
-            + "<section class='ui-card danger' id='ds-delete'><h2>Delete this deck</h2>"
+            + "<section class='panel ds-card danger' id='ds-delete'><h2>Delete this deck</h2>"
             + row(
                 f"{icon('history')} A snapshot is kept under History; no copy is made on Archidekt.",
                 "",
@@ -594,7 +603,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             else "\n".join(FORMAT_NAMES[i] for i in packages.format_ids(block.get("intendedFormats")))
         )
         return (
-            f"<form method='post' action='/decks/{did}/package-settings#package' class='ui-card ds-pkg' "
+            f"<form method='post' action='/decks/{did}/package-settings#package' "
+            "class='panel ds-card ds-pkg' "
             f"id='package'><input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             f"<h2>{icon('package')} Package</h2>"
             + note
@@ -743,7 +753,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             modes.CATEGORY_COUNTS_REASON: modes.CATEGORY_COUNTS_CONFIRM,
         }.get(unused_wait or "", "")
         return (
-            "<section class='ui-card' id='categories' data-confirm-title='Change the commander category?' "
+            "<section class='panel ds-card' id='categories' "
+            "data-confirm-title='Change the commander category?' "
             f"data-confirm='{_esc(modes.CATEGORY_COMMANDER_CONFIRM)}' "
             f"data-counts-confirm-title='{_esc(COUNTS_TITLE)}' "
             f"data-counts-confirm='{_esc(modes.CATEGORY_COUNTS_CONFIRM)}' "
@@ -815,7 +826,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"<option value='{_esc(uid)}'{' selected' if uid == chosen else ''}>{_esc(label)}</option>"
             )
         return (
-            "<section class='ui-card coverbox' id='cover'><h2>Cover image</h2>"
+            "<section class='panel ds-card coverbox' id='cover'><h2>Cover image</h2>"
             + note
             + f"<form method='post' action='/decks/{did}/cover#cover' class='ds-cover'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
@@ -854,7 +865,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         taken = [str(r["name"]) for r in deck.tag_relations if r.get("name")]
         bad = "id='tags-msg'" in note
         return (
-            "<section class='ui-card tagbox' id='tags'><h2>Deck tags</h2>"
+            "<section class='panel ds-card tagbox' id='tags'><h2>Deck tags</h2>"
             + note
             + f"<ul class='plain taglist'>{items or '<li class=muted>No deck tags yet.</li>'}</ul>"
             f"<form method='post' action='/decks/{did}/tags#tags' class='addtag'>{csrf_in}"
@@ -881,7 +892,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         did = _esc(deck.id)
         if not folders:
             return (
-                "<section class='ui-card folderbox' id='folder'><h2>Folder</h2>"
+                "<section class='panel ds-card folderbox' id='folder'><h2>Folder</h2>"
                 + note
                 + ui.notice(
                     "Your folders could not be read from Archidekt right now.", "error", cls="ds-note"
@@ -897,7 +908,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             if not f.get("backup") or f["id"] == current
         )
         return (
-            "<section class='ui-card folderbox' id='folder'><h2>Folder</h2>"
+            "<section class='panel ds-card folderbox' id='folder'><h2>Folder</h2>"
             + note
             + f"<form method='post' action='/decks/{did}/move#folder'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
@@ -987,7 +998,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         # the deck's name and the note for the box the forms ask in first (static/menus.js); the
         # confirmation page does the same without scripts
         return (
-            "<section class='ui-card collabbox' id='collaborators' "
+            "<section class='panel ds-card collabbox' id='collaborators' "
             f"data-deck-name='{_esc(deck_title(deck))}' "
             f"data-note='{_esc(COLLABORATOR_NOTE)}'><h2>Collaborators</h2>"
             + listing
