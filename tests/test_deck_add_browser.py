@@ -295,3 +295,38 @@ def test_paste_a_list_says_which_lines_it_left_out(server: Server) -> None:  # n
         box.get_by_text("Left out: 1 line too long to be a card line.").wait_for(timeout=3000)
         assert edits == [] and errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("width", [390, 1366])
+def test_the_add_row_keeps_its_box_wide_and_cancel_leaves_it_empty(server: Server, width: int) -> None:  # noqa: F811
+    """0.7.48 polish: on a wide screen the name box and More ways to add share one row and the
+    box takes the room; on a phone the Add a card here chip never squeezes the box under 8rem.
+    Cancel on the preview empties the box, so no suggestion list reopens over the toolbar."""
+    from playwright.sync_api import sync_playwright
+
+    _skip_without_chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors, edits = _open(p, server, sid, width)
+        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        quick = page.locator("#quick")
+        if width > 600:
+            ways = page.locator(".toolbar .addways").bounding_box()
+            box = quick.bounding_box()
+            assert abs(ways["y"] - box["y"]) < 2, (ways, box)  # one row
+            assert box["width"] >= 300, box
+        page.locator(".stack[data-group='Artifact'] .stackhead .kebab").click()
+        page.locator("[role=menuitem]:visible", has_text="Add a card here").click()
+        page.locator("form.quick .addto").wait_for(timeout=3000)
+        assert quick.bounding_box()["width"] >= 8 * 14 - 1, quick.bounding_box()
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        quick.fill("Swamp")
+        quick.press("Enter")
+        page.locator(".mtgbox.addbox-preview").wait_for(timeout=5000)
+        page.locator(".mtgbox.addbox-preview button", has_text="Cancel").click()
+        page.wait_for_function("() => !document.querySelector('.mtgbox-scrim')", timeout=3000)
+        assert quick.input_value() == ""
+        assert page.evaluate("() => document.activeElement.id") == "quick"
+        assert page.locator(".suggest [role=listbox]:visible, .suggest ul:visible").count() == 0
+        assert edits == [] and errors == []
+        browser.close()

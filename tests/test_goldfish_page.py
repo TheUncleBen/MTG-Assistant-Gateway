@@ -61,9 +61,27 @@ def test_goldfish_and_compare_use_the_sites_page_head_and_plain_section_headings
     from mtg_gateway import deckpage
 
     page = goldfish_page_html(parse_deck(_deck()))
-    assert "<div class='ui-head'><h1>Goldfish <span class='gf-deck'>" in page
+    assert (
+        "<div class='ui-head'><h1>Goldfish</h1></div>"
+        "<p class='ui-sub gf-intro ui-dots'><span class='gf-deck'>" in page
+    )
+    # the head sits outside the panel
+    assert page.index("gf-intro") < page.index("class='panel gf-head'")
     assert "class='ui-sub gf-intro" in page and "class='ui-cap'" in page
     for rule in (".gf-zone h2{", ".gf-guide h2{"):
         assert "font-size" not in deckpage.GOLDFISH_CSS.split(rule)[1].split("}")[0], rule
     assert "font-size" not in deckpage.COMPARE_CSS.split(".cmp-h{")[1].split("}")[0]
-    assert ".gf-head h1{" not in deckpage.GOLDFISH_CSS
+    assert ".gf-head h1" not in deckpage.GOLDFISH_CSS
+
+
+def test_compare_names_the_deck_once_escaped() -> None:
+    """A deck title with & or < reads as typed in Compare's purpose line (page_head escapes; the
+    name was escaped before it too, so "&" showed as "&amp;")."""
+    from mtg_gateway.deckpage import compare_page_html
+
+    raw = _deck(name="Tom & <Jerry>")
+    page = compare_page_html(
+        parse_deck(raw), other=None, other_name="", other_ref="", precons={}, paste="", result=None
+    )
+    assert "“Tom &amp; &lt;Jerry&gt;” and another deck" in page
+    assert "&amp;amp;" not in page

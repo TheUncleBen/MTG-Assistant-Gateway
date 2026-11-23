@@ -291,7 +291,8 @@ async def test_goldfish_intro_and_forge_solo_line(stack: Stack) -> None:
         page = (await b.http.get(f"{DECK}/goldfish", headers=NAV)).text
         # the facts line's dots are drawn by CSS, so none dangles at a wrapped line's end (polish C1)
         assert (
-            "<p class='ui-sub gf-intro ui-dots'><span>100 cards</span>"
+            "<p class='ui-sub gf-intro ui-dots'><span class='gf-deck'>Sample Commander Deck</span>"
+            "<span>100 cards</span>"
             "<span>Commander: first mulligan free</span><span>on the play</span>"
             "<span>Nothing is saved or sent to Archidekt" in page
         )
@@ -327,7 +328,7 @@ async def test_compare_page_has_a_heading_one_orange_button_and_no_size_control(
     try:
         page = (await b.http.get(f"{DECK}/compare?with=Sample+Commander+Deck", headers=NAV)).text
         assert "<h1>Compare decks</h1>" in page
-        assert "What “Sample Commander Deck” took out of another deck, put in and changed." in page
+        assert "Which cards differ between “Sample Commander Deck” and another deck or list." in page
         assert len(re.findall(r"class='(?:btn-primary|primary)'", page)) == 1
         assert "cardsize" not in page and "Statistics: this deck minus “Sample Commander Deck”</h2>" in page
         assert "Taken out of “Sample Commander Deck” <span class='n'>0</span>" in page

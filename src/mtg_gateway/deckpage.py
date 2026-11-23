@@ -671,7 +671,7 @@ def compare_box_html(deck: Deck, *, open: bool = False) -> str:
         "<div class='field'><label for='cmp-with'>Other deck</label>"
         "<input id='cmp-with' type='text' name='with' placeholder='Link or ID' "
         "autocomplete='off'></div>"
-        "<details class='fold'><summary class='fold-btn'>…or paste a decklist</summary>"
+        "<details class='fold'><summary class='fold-btn'>Paste a decklist instead</summary>"
         "<textarea name='paste' rows='5' aria-label='Paste a decklist' "
         "placeholder='1 Sol Ring&#10;1 Arcane Signet'></textarea></details></form>"
     )
@@ -2339,7 +2339,11 @@ def compare_page_html(
     form = (
         "<nav class='crumbs cmp-back' aria-label='Back'>"
         f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
-        + ui.page_head("Compare decks", f"What “{name}” took out of another deck, put in and changed.")
+        + ui.page_head(
+            # page_head escapes its words: the raw title (name is escaped already)
+            "Compare decks",
+            f"Which cards differ between “{deck_title(deck)}” and another deck or list.",
+        )
         + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form' "
         f"data-draft='compare:{did}'>"
         "<div class='row'><div class='field fld'><label for='cmp-with'>Other deck</label>"
@@ -2347,7 +2351,7 @@ def compare_page_html(
         f"value='{esc('' if is_snap else other_ref)}' placeholder='Link or ID' "
         "autocomplete='off'></div>"
         f"<button type='submit' class='{compare_kind}'>{icon('swap')} Compare</button></div>"
-        f"<details class='fold'{' open' if paste else ''}><summary class='fold-btn'>…or paste a decklist"
+        f"<details class='fold'{' open' if paste else ''}><summary class='fold-btn'>Paste a decklist instead"
         "</summary><textarea name='paste' rows='5' aria-label='Paste a decklist' "
         "placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
         f"{esc(paste)}</textarea></details></form>"
@@ -2803,15 +2807,15 @@ def goldfish_page_html(
     js_data = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
     solo = "" if forge_solo is _NO_SOLO_LINE else forge_solo_line(deck, forge_solo, csrf=csrf)
     return (
-        "<section class='panel gf-head'>"
-        # the way back is the report and review pages' grey capsule (ui.cap_link), never blue text
+        # the page's head as on Compare (no panel around it): the way back, the title, and the facts
+        # line led by the deck's name; the game's panel follows
         "<nav class='crumbs gf-crumbs' aria-label='Back'>"
         f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
-        # the site's page title (ui.page_head's look), the deck's name beside it, muted
-        f"<div class='ui-head'><h1>Goldfish <span class='gf-deck'>{name}</span></h1></div>"
-        "<p class='ui-sub gf-intro ui-dots'>"
+        "<div class='ui-head'><h1>Goldfish</h1></div>"
+        f"<p class='ui-sub gf-intro ui-dots'><span class='gf-deck'>{name}</span>"
         + "".join(f"<span>{esc(x)}</span>" for x in goldfish_intro(size, commander=commander).split(" · "))
         + "</p>"
+        "<section class='panel gf-head'>"
         + solo
         + extra_head
         # the game's facts line (static/goldfish.js fills it): balanced lines, the dots in the gaps
@@ -2848,10 +2852,8 @@ def goldfish_page_html(
 
 GOLDFISH_CSS = """
 .gf-crumbs{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .25rem}
-.gf-head h1 .gf-deck{font-size:.5em;font-weight:400;color:var(--text-muted);margin-left:.4rem;
-  overflow-wrap:anywhere}
-.gf-intro{margin:0}
-.gf-solo{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:.6rem 0 0}
+.gf-intro .gf-deck{font-weight:700;color:var(--text);overflow-wrap:anywhere}
+.gf-solo{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:0}
 .gf-solo form.inline{display:contents} .gf-solo button{margin:0}
 .gf-status{font-weight:700;margin:.6rem 0 .25rem}
 .gf-hint{margin:0 0 .5rem} .gf-hint:empty{display:none}
@@ -3503,7 +3505,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 
 /* toolbar panel (filterBar) */
 .toolbar{padding:.5rem 1rem 1rem;position:relative;z-index:1}
-.toolbar .controls{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,2fr);gap:1rem;align-items:end}
+.toolbar .controls{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr);gap:1rem;align-items:end}
 /* a deck that is not the member's own has no Quick add, so the view controls take the whole row:
    the first child, not the only one, because static/deck.js adds the phone's View and More
    buttons after the form (with :only-child the form sat in the 1.2fr column at 1280 px and at
@@ -3513,6 +3515,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar .quickrow input{min-width:0;flex:1}
 .toolbar .quickrow button{margin:0;flex:none}
 .toolbar .quickrow{flex-wrap:wrap} .toolbar .quickrow input{flex:1 1 10rem}
+/* suggest.js wraps the box in span.suggest: that span is the row's growing part, the box fills it */
+.toolbar .quickrow > .suggest{flex:1 1 10rem;min-width:min(10rem,100%)}
+.toolbar .quickrow > .suggest > input{width:100%}
 .toolbar .quickrow .addways{margin:0;flex:none;white-space:nowrap}
 /* Add a card here: the category chip in front of the name box, which the next adds start in */
 .toolbar .quickrow .addto{flex:none;max-width:12rem;min-height:var(--ctl);margin:0}
@@ -3537,6 +3542,11 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0)}
   .toolbar.compact .quickrow{flex-wrap:nowrap}
+  /* Add a card here's chip on a phone: the form takes the row and the box wraps under the chip
+     when both don't fit, so the box keeps room to type in */
+  .toolbar.compact form.quick:has(.addto){flex-basis:100%}
+  .toolbar.compact .quickrow:has(.addto){flex-wrap:wrap}
+  .toolbar.compact .quickrow .addto{max-width:100%}
   .toolbar.compact .quickrow .addways,.toolbar.compact form.views{display:none}
   .toolbar.compact .viewbtn{display:inline-flex;flex:0 0 auto;margin:0;min-height:var(--ctl);gap:.35rem;
     justify-content:center;max-width:100%}
@@ -3638,6 +3648,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* Paste a list / Add from a scan (deck.js openBatch): the list, the review of what was found,
    each card with its category, and the lines left out */
 .batch textarea{width:100%;min-height:6rem;height:8rem;margin:.25rem 0 .75rem;font-family:inherit}
+/* once checked, the list is the box's subject: the text shrinks to a few lines (it grows back on
+   typing), so the results stay in view at 200% text too */
+.batch.checked textarea{min-height:0;height:4.5em}
 .batch .batchall{margin:.5rem 0 .75rem}
 .mtgbox .batch .batchlist{list-style:none;margin:0;padding:0;border-top:1px solid var(--border-soft)}
 .batch .batchlist li{display:grid;grid-template-columns:3ch minmax(0,1fr) minmax(9rem,14rem);

@@ -127,8 +127,8 @@ def test_the_goldfish_way_back_is_the_grey_capsule(server: Server) -> None:
                     " getComputedStyle(document.documentElement).getPropertyValue('--link').trim()]"
                 )
                 assert colours[0] == colours[1], (scheme, colours)
-                # the deck is still named, beside the page's title
-                assert "Sample Commander Deck" in page.locator(".gf-head h1 .gf-deck").inner_text()
+                # the deck is still named, first on the facts line under the page's title
+                assert "Sample Commander Deck" in page.locator(".gf-intro .gf-deck").inner_text()
                 ctx.close()
         finally:
             browser.close()

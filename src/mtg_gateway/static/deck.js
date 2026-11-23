@@ -1146,6 +1146,9 @@
     });
     box = Box.open({
       title: name, label: "Add " + name, wide: true, body: form, returnFocus: quickInput,
+      // Cancel, Escape or the ×: the box is empty again for the next name, and the suggestion list
+      // does not reopen over the toolbar when the focus comes back
+      onClose: function () { if (!sent) quickInput.value = ""; },
       actions: [Box.button("Cancel", "btn", null, { cancel: true }), addBtn]
     });
     box.panel.classList.add("addbox-preview");
@@ -1313,7 +1316,7 @@
       e.preventDefault();
       e.stopPropagation();
       var r = addWays.getBoundingClientRect();
-      Menu.open({ head: "Add cards", label: "More ways to add", items: addWayItems(), focusBack: addWays, anchor: addWays }, r.left, r.bottom + 4);
+      Menu.open({ head: "More ways to add", label: "More ways to add", items: addWayItems(), focusBack: addWays, anchor: addWays }, r.left, r.bottom + 4);
     });
   }
 
@@ -1464,6 +1467,7 @@
           if (window.MtgSelect) window.MtgSelect.refresh(f.select);
         });
       });
+      body.classList.add("checked");
       var copies = changes.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
       review.appendChild(el("p", "muted small batchsum", copies + (copies === 1 ? " card" : " cards") + " ready" + (missed.length ? " · " + missed.length + (missed.length === 1 ? " line matches" : " lines match") + " no card and will be left out" : "") + "."));
       add.textContent = "";
@@ -1522,7 +1526,10 @@
       }
     }
     check.addEventListener("click", lookUp);
-    if (area) area.addEventListener("input", function () { if (found.length) { review.textContent = ""; found = []; add.hidden = true; check.hidden = false; } });
+    if (area) area.addEventListener("input", function () {
+      body.classList.remove("checked");
+      if (found.length) { review.textContent = ""; found = []; add.hidden = true; check.hidden = false; }
+    });
     var sent = false;  // a second press while the box fades out never adds the list twice
     add.addEventListener("click", function () {
       if (sent || !found.length) return;

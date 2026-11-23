@@ -63,7 +63,8 @@ CONTRAST = """() => {
     return [255, 255, 255];
   }
   var worst = 99, what = "";
-  var sel = ".gf-head p, .gf-head a, .gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "
+  var sel = ".gf-intro span, .gf-crumbs a, .gf-head p, .gf-head a, "
+    + ".gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "
     + ".gf-controls button[data-act], .gf-controls button[data-guide]";
   document.querySelectorAll(sel)
     .forEach(function (e) {
@@ -247,7 +248,8 @@ def test_sixty_card_goldfish_by_keyboard_and_touch(server: Server) -> None:
 
 
 GUIDE_CONTRAST = CONTRAST.replace(
-    'var sel = ".gf-head p, .gf-head a, .gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "\n'
+    'var sel = ".gf-intro span, .gf-crumbs a, .gf-head p, .gf-head a, "\n'
+    '    + ".gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "\n'
     '    + ".gf-controls button[data-act], .gf-controls button[data-guide]";',
     'var sel = ".gf-guide h2, .gf-guide p, .gf-guide li span, .gf-guide button, "\n'
     '    + ".gf-controls button[data-act], .gf-controls button[data-guide]";',
