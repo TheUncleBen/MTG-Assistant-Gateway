@@ -54,7 +54,8 @@ ENUM = r"""
     // a long run of one kind with differing words (card rows, deck tiles) shares one handler
     if (seen[kind] > 2 && all.filter(e => e.tagName === el.tagName && e.className === el.className).length > 6) return;
     const chrome = !!el.closest('header, nav, footer, .topbar, .rail, .tabbar, .bottombar, #mtg-top, .appbar, .skip');
-    out.push({i, text: t, kind, href: el.getAttribute('href') || '', chrome, target: el.getAttribute('target') || '', download: el.hasAttribute('download')});
+    const cur = el.getAttribute('aria-current') === 'page' || (el.getAttribute('href') && new URL(el.href, location.href).href === location.href);
+    out.push({i, text: t, kind, href: el.getAttribute('href') || '', chrome, current: !!cur, target: el.getAttribute('target') || '', download: el.hasAttribute('download')});
   });
   return out;
 }
@@ -111,7 +112,7 @@ MARK_LAYERS = r"""
 """
 
 PICK = r"""
-([root, i]) => {
+([root, i, want]) => {
   const R = root ? document.querySelector(root) : document;
   const sel = 'a[href], button, [role=button], [role=menuitem], [role=menuitemradio], [role=tab], [role=option], [role=switch], summary, input[type=checkbox], input[type=radio], input[type=submit], input[type=button], label.btn, label.ui-chip, [onclick], [data-href]';
   const vis = (el) => {
@@ -127,7 +128,14 @@ PICK = r"""
     return true;
   };
   const all = R ? [...R.querySelectorAll(sel)].filter(el => vis(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') : [];
-  const el = all[i];
+  const label = (e) => (e.getAttribute('aria-label') || e.innerText || e.value || e.title || '').trim().replace(/\s+/g, ' ').slice(0, 50);
+  // the same words first (a list whose rows moved since the first look), nearest the old place
+  let el = null;
+  if (want) {
+    let best = 1e9;
+    all.forEach((e, k) => { if (label(e) === want && Math.abs(k - i) < best) { best = Math.abs(k - i); el = e; } });
+  }
+  if (!el) el = all[i];
   if (!el) return null;
   document.querySelectorAll('[data-ck-target]').forEach(e => e.removeAttribute('data-ck-target'));
   el.setAttribute('data-ck-target', '1');
@@ -244,12 +252,17 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                 fresh.restore()
                 server.db.delete_prefs("user-1", prefixes=("view.",))
                 try:
-                    r = page.goto(f"{base}{path}", wait_until="networkidle", timeout=30_000)
+                    r = page.goto(f"{base}{path}", wait_until="load", timeout=30_000)
                 except Exception as exc:  # noqa: BLE001
                     log(f"  load failed {path}: {exc}")
                     return False
                 if r is None or r.status != 200:
+                    log(f"  load failed {path}: status {r and r.status}")
                     return False
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:  # noqa: BLE001  (a page that keeps a connection open)
+                    pass
                 redrawn(page)
                 page.evaluate(MARK_LAYERS)
                 return True
@@ -263,7 +276,7 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         root = page.evaluate(LAYER)
                         if not root:
                             return {"verdict": "unstable", "detail": "the layer did not open again"}
-                    got = page.evaluate(PICK, [root, i])
+                    got = page.evaluate(PICK, [root, i, text])
                     if got is None or (got != text and text):
                         return {"verdict": "unstable", "detail": f"expected {text!r} found {got!r}"}
                     last = k == len(chain) - 1
@@ -365,7 +378,19 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                 items = page.evaluate(ENUM, None)
                 log(f"{d.key} {path}: {len(items)} controls")
                 for it in items:
-                    if SKIP_TEXT.match(it["text"]):
+                    if SKIP_TEXT.match(it["text"]) or it["kind"].startswith("a.skip"):
+                        continue  # Sign out ends the sweep's session; the skip link shows on focus only
+                    if it.get("current"):
+                        rows.append(
+                            {
+                                "page": path,
+                                "display": d.key,
+                                "level": 1,
+                                **it,
+                                "verdict": "ok",
+                                "effect": "the page it is on",
+                            }
+                        )
                         continue
                     if it["chrome"]:
                         key = (d.key, it["kind"] + "|" + it["text"] + "|" + it["href"])
