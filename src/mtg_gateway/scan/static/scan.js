@@ -388,13 +388,13 @@
     input.addEventListener('input', () => { input.value = input.value.toUpperCase(); });
     input.addEventListener('change', applySet);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applySet(); input.blur(); } });
-    const sw = h('button', { type: 'button', id: 'foil-switch', class: 'switch', role: 'switch', 'aria-checked': scanOpts.foil() ? 'true' : 'false',
+    const sw = h('button', { type: 'button', id: 'foil-switch', class: 'switch ui-chip', role: 'switch', 'aria-checked': scanOpts.foil() ? 'true' : 'false',
       title: 'Count cards as foil unless the card says otherwise',
       onclick: () => { const on = sw.getAttribute('aria-checked') !== 'true'; sw.setAttribute('aria-checked', on ? 'true' : 'false'); scanOpts.setFoil(on); } },
       'Foil');
     bar.append(field, help, sw);
     if (!PICTURES) {
-      const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
+      const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto ui-chip', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
         title: phoneCamera() ? 'Scan with the phone camera, adding cards as they are read' : null,
         onclick: () => {
           if (phoneCamera()) openPhoneCamera(true);
@@ -2077,7 +2077,7 @@
     const grid = h('div', { class: 'tiles', role: 'listbox', 'aria-label': 'Printings of ' + (card.name || 'this card') });
     const status = h('p', { class: 'muted pick-status', text: 'Loading printings…' });
     const filter = h('input', { type: 'search', id: 'pick-filter', placeholder: 'Filter by set code or name', autocomplete: 'off', 'aria-label': 'Filter printings' });
-    const foilSw = h('button', { type: 'button', class: 'switch', role: 'switch', 'aria-checked': foil ? 'true' : 'false',
+    const foilSw = h('button', { type: 'button', class: 'switch ui-chip', role: 'switch', 'aria-checked': foil ? 'true' : 'false',
       onclick: () => { foil = !foil; foilSw.setAttribute('aria-checked', foil ? 'true' : 'false'); } },
       'Foil');
     const close = h('button', { type: 'button', class: 'close', 'aria-label': 'Close', title: 'Close', onclick: closePicker }, icon('x'));

@@ -47,21 +47,19 @@
 .scan .setbox .pre{flex:none;padding:0 0 0 10px;font-weight:700;color:var(--text-muted);margin:0}
 .scan .setbox input#set-lock{flex:1 1 auto;width:100%;min-width:3.5em;height:auto;min-height:0;align-self:stretch;
   padding:.3em 2px .3em 6px;border:0;border-radius:0;
-  background:transparent;color:inherit;font-weight:700;font-size:.95rem;letter-spacing:.04em;text-transform:uppercase;
+  background:transparent;color:inherit;font-weight:700;font-size:1rem;letter-spacing:.04em;text-transform:uppercase;
   font-family:ui-monospace,Menlo,Consolas,monospace}
 .scan .setbox input#set-lock:focus,.scan .setbox input#set-lock:focus-visible{outline:none;box-shadow:none}
 .scan .setbox input#set-lock::placeholder{text-transform:none;letter-spacing:0;font-family:inherit;font-weight:400}
-.scan .scan-opts.locked .setbox{border-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
+.scan .scan-opts.locked .setbox{border-color:var(--orange-text);background:var(--orange-tint);color:var(--orange-text)}
 .scan .scan-opts.invalid .setbox{border-color:var(--danger-text);background:var(--red-tint);color:var(--danger-text)}
 /* the × at the box's right end: a full-height target, no edge of its own */
 .scan .setbox .clear{flex:none;width:var(--ctl);height:auto;align-self:stretch;min-width:0;min-height:0;padding:0;margin:0;
   border:0;border-radius:0 var(--radius) var(--radius) 0;background:transparent;color:var(--text-muted)}
 .scan .setbox .clear:hover{background:var(--surface-2);color:var(--text)}
 /* the toggles (Foil, Auto, the picker's Foil): a pill, filled with the orange tint when on */
-.scan .switch{display:inline-flex;align-items:center;justify-content:center;min-height:var(--ctl);padding:0 .75rem;
-  border-radius:22px;font-weight:700;border:1px solid var(--control-border);background:var(--surface);color:var(--text)}
-.scan .switch:hover{background:var(--surface-2)}
-.scan .switch[aria-checked=true]{background:var(--orange-tint);border-color:var(--orange);color:var(--orange-text)}
+.scan .switch{justify-content:center}  /* the look is the site's chip (.ui-chip) */
+.scan .switch[aria-checked=true]{background:var(--orange-tint);border-color:var(--orange-text);color:var(--orange-text)}
 .scan .scan-opts .switch{flex:1 1 auto;min-width:0}
 .scan .shutter.live{animation:scan-live 1.2s ease-in-out infinite}
 @keyframes scan-live{0%,100%{outline:3px solid transparent;outline-offset:3px}50%{outline:3px solid var(--orange-select);outline-offset:9px}}
@@ -223,15 +221,13 @@ body.picker-open{overflow:hidden}
   color:var(--on-orange);transition:transform .1s;display:inline-flex;align-items:center;justify-content:center}
 .scan .shutter svg.i{width:30px;height:30px}
 /* the two buttons either side of the shutter look alike: bordered, one height, an icon and a text label */
-.scan .controls .ctl,.scan .controls label.ctl{width:100%;max-width:104px;min-height:var(--ctl);height:auto;padding:0 .5rem;
-  margin:0;min-width:0;display:inline-flex;align-items:center;justify-content:center;font-weight:700;
-  border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);cursor:pointer}
+.scan .controls .ctl,.scan .controls label.ctl{width:auto;max-width:100%;min-height:var(--ctl);height:auto;
+  margin:0;min-width:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 /* a control bar too narrow for its words (large text on a 320 px screen: final audit F02) keeps
    the icons alone, their words in the title, rather than pushing the page sideways or breaking
    a word in two; 18.5 em of the bar's own text holds Photo, the capture button and Type */
 .scan .controls{container-type:inline-size}
 @container (max-width:18.5em){.scan .controls .ctl > span{display:none}}
-.scan .controls .ctl:hover{background:var(--surface-2)}
 /* a yes/no question in place of the browser's confirm box */
 .scan .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.5rem 0;padding:.5rem .75rem;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel)}
@@ -386,11 +382,9 @@ body.picker-open{overflow:hidden}
 @media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;outline:3px solid var(--orange-select);outline-offset:6px} }
 
 /* the intro (open on the first visit, folded to its title after) and the "what next" block of the list tab */
-.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
-.scan details.intro{padding:.5rem .75rem}
-.scan details.intro > summary h2{margin:0;font-size:1.05rem;font-weight:700}
+.scan .next h2{margin:0 0 .5rem}
+.scan details.intro > summary h2{margin:0}
 .scan details.intro[open] > summary{margin-bottom:.6rem}
-.scan details.intro[open]{padding-bottom:.9rem}
 /* folded, the intro's steps and Got it have no boxes at all: Chromium only skips a closed
    details' content (content-visibility), keeping its last layout, so a folded intro's Got it still
    reported a rectangle near the page's foot (over "How it works" at 200% text, audit A5) */
@@ -468,13 +462,14 @@ body.picker-open{overflow:hidden}
 /* a 44 px target around the round grip */
 .scan .camera.editing .guide .grip::after{content:"";position:absolute;inset:-8px}
 .scan .camera.looking .guide{border-color:var(--orange)}
-.scan .area-btn{position:absolute;left:.5rem;bottom:.5rem;z-index:2;min-height:var(--ctl);min-width:var(--ctl);padding:.4rem .7rem;
-  border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
-  display:inline-flex;align-items:center;gap:.35rem;backdrop-filter:blur(2px)}
+.scan .area-btn{position:absolute;left:.5rem;bottom:.5rem;z-index:2;width:var(--ctl);height:var(--ctl);min-width:var(--ctl);padding:0;
+  border-radius:50%;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
+  display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.scan .area-btn .lbl{display:none}
 .scan .area-btn[hidden]{display:none}
 .scan .area-btn:hover{background:var(--navbar-bg);color:var(--navbar-text)}
 .scan .camera{container-type:inline-size}
-@container (max-width:20em){.scan .area-btn .lbl,.scan .torch .lbl{display:none}}
+@container (max-width:20em){.scan .torch .lbl{display:none}}
 .scan .area-bar{position:absolute;left:.5rem;right:.5rem;bottom:.5rem;z-index:4;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
   padding:.5rem;border-radius:var(--radius);background:var(--surface-2);border:1px solid var(--border);box-shadow:var(--shadow);color:var(--text)}
 .scan .area-bar[hidden]{display:none}

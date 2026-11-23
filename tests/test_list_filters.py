@@ -23,7 +23,8 @@ async def test_every_lists_table_has_a_search_box_and_rows_it_can_match(stack: S
         ):
             page = (await b.http.get(action, headers=NAV)).text
             assert f"<form class='ui-tools' role='search' method='get' action='{action}'>" in page, slug
-            assert "<input type='search' name='q' value='' placeholder='Name'>" in page, slug
+            # the hint gives way where the box cannot hold it (data-ph: none at 200% on a small phone)
+            assert "<input type='search' name='q' value='' placeholder='Name' data-ph=''>" in page, slug
             assert "data-filter-count" in page, slug
             for name in names:
                 assert f"data-q='{name.casefold()}'" in page, (slug, name)

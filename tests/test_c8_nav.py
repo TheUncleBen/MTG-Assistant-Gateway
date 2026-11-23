@@ -110,7 +110,7 @@ async def test_binder_pages_lead_back_to_the_binder(member: Browser) -> None:
     assert "<nav class='hubseg' aria-label='Binder'>" not in cards
     hub = (await member.http.get("/collection/lists")).text
     assert back in hub and "<h1>Archidekt lists</h1>" in hub
-    assert "<h2>Your Archidekt lists</h2>" in hub and "<h2>Watchlist lists</h2>" not in hub
+    assert "<h2 class='ui-group'>Your Archidekt lists</h2>" in hub and "Watchlist lists</h2>" not in hub
     wants = (await member.http.get("/collection/wants")).text
     assert back in wants and "<h1>Pinned cards</h1>" in wants
     assert "Sol Ring" in wants and "for Meren" in wants  # the pin seeded on Archidekt

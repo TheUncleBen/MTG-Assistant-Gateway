@@ -259,11 +259,13 @@ def library_html(
         "<div class='yhub bn-lib'>"
         f"<form class='bn-find' method='get' action='{PATH}' role='search'>"
         f"<label class='sr-only' for='bn-q'>Search your binder</label>{icon('search')}"
-        f"<input id='bn-q' name='q' type='search' placeholder='Search your binder' value='{esc(view.q)}' "
+        f"<input id='bn-q' name='q' type='search' placeholder='Search your binder' data-ph='Search|' "
+        f"value='{esc(view.q)}' "
         "autocomplete='off' enterkeyhint='search'></form>"
-        f"<section class='ygrp'><h2>Cards</h2><div class='rows'>{cards}</div></section>"
-        f"<section class='ygrp'><h2>Lists</h2><div class='rows'>{''.join(mine)}</div></section>"
-        f"<section class='ygrp'><h2>More</h2><div class='rows'>{more}</div></section>"
+        f"<section class='ygrp'><h2 class='ui-group'>Cards</h2><div class='rows'>{cards}</div></section>"
+        f"<section class='ygrp'><h2 class='ui-group'>Lists</h2><div class='rows'>{''.join(mine)}</div>"
+        "</section>"
+        f"<section class='ygrp'><h2 class='ui-group'>More</h2><div class='rows'>{more}</div></section>"
         "</div>"
     )
 
@@ -282,14 +284,14 @@ def _defaults_words(d: dict[str, float]) -> str:
 def _chips(r: dict[str, Any]) -> str:
     out = []
     if r["own"]:
-        out.append(f"<span class='chip own'>{icon('check')}Own {r['own']:,}</span>")
+        out.append(ui.label(f"Own {r['own']:,}", "green", "check"))
     elif r.get("own_any"):
-        out.append(f"<span class='chip own'>{icon('check')}Own {r['own_any']:,} (any printing)</span>")
+        out.append(ui.label(f"Own {r['own_any']:,} (any printing)", "green", "check"))
     if r["watch_id"]:
         if r["past"]:
-            out.append(f"<span class='chip hit'>{icon('bell')}Past its alert</span>")
+            out.append(ui.label("Past its alert", "blue", "bell"))
         else:
-            out.append(f"<span class='chip want'>{icon('eye')}Want</span>")
+            out.append(ui.label("Want", "orange", "eye"))
         band = []
         if r["under"] is not None:
             band.append(f"under {money(r['under'], r['currency'])}")
@@ -301,9 +303,9 @@ def _chips(r: dict[str, Any]) -> str:
         if band:
             out.append(f"<span class='band'>Alert {esc(' · '.join(band))}</span>")
     if r["list"]:
-        out.append(f"<span class='chip lst'>{esc(r['list'])}</span>")
+        out.append(f"<span class='ui-tag'>{esc(r['list'])}</span>")
     for t in r["tags"][:3]:
-        out.append(f"<span class='chip tg'>{icon('tag')}{esc(t)}</span>")
+        out.append(f"<span class='ui-tag'>{icon('tag')}{esc(t)}</span>")
     return "".join(out)
 
 
@@ -658,9 +660,12 @@ def settings_html(d: dict[str, float], split: tuple[int, int], csrf: str, notice
         ex.append(f"A card added at <b>{money(added)}</b>: " + (f"alert {said}." if said else "no alert."))
     return (
         "<div class='yhub bn-set'>"
-        f"<a class='bn-back' href='{PATH}'>{icon('back')}Binder</a><h1>Watch settings</h1>{notice}"
-        f"<form method='post' action='{SETTINGS}'><input type='hidden' name='csrf' value='{esc(csrf)}'>"
-        "<section class='ygrp bn-keep'><h2>Price alert defaults</h2><div class='rows bn-fields'>"
+        f"<p class='bn-up'><a class='bn-back' href='{PATH}'>{icon('back')}Binder</a></p>"
+        + ui.page_head("Watch settings")
+        + notice
+        + f"<form method='post' action='{SETTINGS}'><input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        "<section class='ygrp bn-keep'><h2 class='ui-group'>Price alert defaults</h2>"
+        "<div class='rows bn-fields'>"
         "<p class='ui-hint'>Every card you watch gets these, unless you give it its own.</p>"
         "<label class='bn-num'><span>Under the price when added by</span><span class='in'>"
         "<input name='alert_drop' "
@@ -682,7 +687,7 @@ def settings_html(d: dict[str, float], split: tuple[int, int], csrf: str, notice
             else ""
         )
         + "</p></div></section>"
-        "<section class='ygrp'><h2>Alerts</h2><div class='rows'>"
+        "<section class='ygrp'><h2 class='ui-group'>Alerts</h2><div class='rows'>"
         + _row_label(
             section_href("notifications"),
             "bell",
@@ -698,13 +703,11 @@ def settings_html(d: dict[str, float], split: tuple[int, int], csrf: str, notice
 CSS = """
 .bn{display:grid;gap:1.25rem;align-items:start}
 .bn .bn-lib{max-width:none;margin:0}
-.bn-find{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0 0 1rem;padding:0 .75rem;
-  border:1px solid var(--control-border);border-radius:10px;background:var(--surface);color:var(--text-muted)}
-.bn-find svg.i{width:18px;height:18px;flex:none}
-.bn-find input{flex:1;min-width:0;border:0;background:transparent;min-height:44px;padding:0;font:inherit;
-  color:var(--text)}
-.bn-find input:focus{outline:none}
-.bn-find:focus-within{outline:2px solid var(--focus);outline-offset:2px}
+/* the search box is the shared field, its magnifier drawn inside its left padding */
+.bn-find{position:relative;display:block;margin:0 0 1rem;color:var(--text-muted)}
+.bn-find svg.i{position:absolute;left:.8rem;top:50%;width:18px;height:18px;transform:translateY(-50%);
+  pointer-events:none}
+.bn-find input{width:100%;margin:0;padding-left:2.5rem}
 .bn .ygrp .yrow small,.bn-set .ygrp .yrow small{display:block;
   color:var(--text-muted);font-size:.82rem;margin-top:.1rem}
 .bn .ygrp .yrow .lbl{padding:.5rem 0}
@@ -725,13 +728,15 @@ CSS = """
 .bn-lib .yrow.wlrow .bn-dd .menu{min-width:12rem;right:0;left:auto}
 .bn .ygrp .yrow.add{color:var(--orange-text);font-weight:700}
 .bn-head{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
-.bn-head h2{margin:0;font-size:1.5rem;margin-right:auto;overflow-wrap:break-word;min-width:0}
+.bn-head h2{margin:0;margin-right:auto;overflow-wrap:break-word;min-width:0}
 .bn-main{display:flex;flex-direction:column;gap:.75rem;min-width:0}
 .bn-seg{display:flex;width:100%;max-width:28rem}
 .bn-seg a{flex:1 1 0;justify-content:center}
 .bn-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0}
 .bn-tools select,.bn-tools .msel-btn{flex:1 1 9rem;width:auto;min-width:0;max-width:16rem}
-.bn-tools .bn-select{margin-left:auto}
+/* Select ends the row beside the order on every screen (a form's button is full width on a
+   phone by default, which left it alone on a line of its own) */
+main form.bn-tools > button.bn-select:not(.mini):not(.inline){margin:0 0 0 auto;width:auto;flex:none}
 .bn-tools .bn-select[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text);
   border-color:var(--orange-text)}
 .bn-sum{display:flex;flex-wrap:wrap;justify-content:space-between;gap:.25rem 1rem;margin:0;
@@ -749,6 +754,10 @@ CSS = """
   .bn-open{grid-template-columns:auto minmax(0,1fr)}
   .bn-open .pr{grid-column:2;flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 .5rem}
   .bn-rows .bn-row .meta{padding-left:0}
+  /* large text on a phone: the row gives its side padding to the name, so a long word stays whole */
+  .bn-rows .bn-row{padding-inline:.4rem}
+  .bn-rows .bn-open{column-gap:.4rem}
+  .bn-rows .bn-open .pic{width:1.9rem}
 }
 .bn-row.sel{background:var(--orange-tint)}
 .bn-row .tick{display:none;align-items:center;justify-content:center;width:44px;height:44px;
@@ -775,14 +784,8 @@ CSS = """
 .bn-row .meta{display:flex;flex-wrap:wrap;gap:.3rem .4rem;align-items:center;padding:.35rem 0 0 3.35rem;
   font-size:.85rem;color:var(--text-muted)}
 .bn-row .meta:empty{display:none}
-.bn-row .chip{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;padding:.1rem .55rem;
-  font-weight:700;
-  min-height:1.6rem;max-width:100%;overflow-wrap:anywhere}
-.bn-row .chip svg.i{width:14px;height:14px;flex:none}
-.bn-row .chip.own{background:var(--green-tint);color:var(--green-text)}
-.bn-row .chip.want{background:var(--orange-tint);color:var(--orange-text)}
-.bn-row .chip.hit{background:var(--blue-tint);color:var(--blue-text)}
-.bn-row .chip.lst,.bn-row .chip.tg{background:var(--surface-2);color:var(--text)}
+.bn-row .meta .ui-lbl{white-space:normal;max-width:100%;overflow-wrap:anywhere}
+.bn-row .ui-tag svg.i{width:14px;height:14px;flex:none}
 .bn-row .band{font-variant-numeric:tabular-nums}
 .bn-empty{padding:1.5rem 1rem;text-align:center;border:1px dashed var(--border);border-radius:14px}
 .bn-more{display:flex;justify-content:center;margin:.25rem 0 0}
@@ -790,7 +793,7 @@ CSS = """
 .bn-num{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0}
 .bn-num > span:first-child{flex:1 1 11rem;min-width:0}
 .bn-num .in{display:inline-flex;align-items:center;gap:.3rem;font-weight:700}
-.bn-num input{width:6rem;min-height:44px;text-align:right}
+.bn-num input{width:7rem;min-height:44px;text-align:right}
 .bn-choice{border:0;margin:0 0 .5rem;padding:0;display:flex;flex-direction:column;gap:.25rem}
 .bn-choice label{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.35rem 0}
 .bn-choice small{display:block;color:var(--text-muted)}
@@ -799,8 +802,10 @@ CSS = """
 .bn-example{background:var(--surface-2);border-radius:10px;padding:.65rem .85rem;margin:.5rem 0 0;
   font-variant-numeric:tabular-nums}
 .bn-example:empty{display:none}
-.bn-set{max-width:42rem}
-.bn-set h1{margin:.25rem 0 1rem;font-size:1.6rem}
+/* settings: the standard's narrow column (render(main_class='ui-narrow')), all of it */
+main#main.wrap.ui-narrow:has(> .bn-set){max-width:calc(44rem + 2 * var(--gutter))}
+.yhub.bn-set{max-width:none}
+.bn-set .ui-head{margin-bottom:1rem}
 .bn-set .ygrp.bn-keep{display:block}  /* a group of fields, no rows: the empty-group rule would hide it */
 .bn-set .bn-fields{display:flex;flex-direction:column;gap:.75rem;padding:.9rem 1rem}
 .bn-set .bn-fields .ui-hint{margin:0}
@@ -836,7 +841,14 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
     def page(
-        title: str, body: str, *, sub: str, sid: str | None, current: str = PATH, status: int = 200
+        title: str,
+        body: str,
+        *,
+        sub: str,
+        sid: str | None,
+        current: str = PATH,
+        status: int = 200,
+        main_class: str = "ui-wide",
     ) -> Response:
         user = state.db.get_user(sub) or {}
         return render(
@@ -849,7 +861,7 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
             admin=bool(s.admin_group and s.admin_group in (user.get("groups") or [])),
             current=current,
             heading=False,
-            main_class="ui-wide",
+            main_class=main_class,
             # deck.css carries the card viewer's own styles (the dialog, its bottom sheet on phones)
             head_extra=f"{stylesheet_link('deck.css')}<style>{account_hub.HUB_CSS}{CSS}</style>"
             "<script src='/static/cardview.js' defer></script>"
@@ -1095,7 +1107,7 @@ def add_binder_routes(server: MCPServer, state: AppState) -> None:
             said = _read_note(sub, qp.get("m") or "")
             notice = ui.notice(said or "Those settings could not be saved.", "error", role="alert")
         body = settings_html(svc.defaults_of(sub), svc.defaults_split(sub), _csrf(s, sid) or "", notice)
-        return page("Watch settings", body, sub=sub, sid=sid)
+        return page("Watch settings", body, sub=sub, sid=sid, main_class="ui-narrow")
 
     @server.custom_route(SETTINGS, methods=["POST"], include_in_schema=False)
     async def settings_post(request: Request) -> Response:

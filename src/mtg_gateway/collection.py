@@ -2552,7 +2552,7 @@ def panel_html(
             label="Filter by name",
             name="q",
             value=q,
-            placeholder="Name",
+            placeholder="Name|",
             input_id="col-q",
             search_label="Filter",
             filters_word=sheet_word,
@@ -2564,6 +2564,13 @@ def panel_html(
 
 
 COLLECTION_CSS = """
+/* one look for the shared pieces (docs/UI-STANDARD.md): the list's count is the site's section
+   heading, and a button keeps its padding and text size in the head, on a phone and in a tile */
+.collection .spanel .rbar .cnt{font-size:min(1.2rem,7vw);font-weight:700}
+.collection .ui-head.bnhead .acts > .btn,.collection .ui-head.bnhead .acts details.colmore > summary.btn,
+.collection .ui-widgets .wdg .go .btn{padding:0 1rem;font-size:1rem}
+/* a tile narrower than its button (large text on a small phone): the words wrap inside the button */
+.collection .ui-widgets .wdg .go .btn{max-width:100%;height:auto;min-height:var(--ctl);white-space:normal}
 .value-reading .ui-spin{margin-right:.35em}
 .collection .ui-head .acts{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .collection .ui-head .acts .btn{margin:0}
@@ -2580,21 +2587,19 @@ COLLECTION_CSS = """
 .collection .ui-head.phead{align-items:center}
 /* on a phone Add cards takes the row and More ends it (one row above the list, as the other
    tabs: final audit N11, F10) */
-@media (max-width:599.98px){ .collection .ui-head .acts{margin-left:0;width:100%;flex-wrap:nowrap}
+@media (max-width:599.98px){ .collection .ui-head .acts{margin-left:0;width:100%;flex-wrap:wrap}
   .collection .ui-head .acts .btn{flex:1 1 auto;justify-content:center;min-width:0}
   .collection .ui-head .acts details.colmore{flex:0 0 auto;order:2}
   .collection .ui-head .acts details.colmore > summary.btn{width:auto;box-sizing:border-box} }
 /* a tag as a chip: the tag's colour as a dot (--tagc) beside its name in the page's own text colour,
    so it reads in both themes whatever colour the member picked */
-.pill.tag{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .5rem;
-  border-radius:999px;border-color:var(--border-soft);background:var(--surface-2);color:var(--text);
-  font-weight:600;font-size:.8rem;line-height:1.5;max-width:100%;min-width:0}
+/* the look is the site's tag (.ui-tag, theme.py) */
+.pill.tag{gap:.3rem;max-width:100%;min-width:0}
 /* the whole name, on more lines where one has no room for it (a narrow phone at large text), never
    cut with an ellipsis (polish, check on c246456a: "landfall-and-ra…" at 320 px and 200%) */
 .pill.tag > .t{min-width:0;white-space:normal;overflow-wrap:break-word}
 .pill.tag .sw,.tagck .sw{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;flex:none;
   background:var(--tagc,var(--text-muted));box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
-.pill.tag.more{padding:.1rem .5rem}
 .tagrow{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.3rem;min-width:0}
 ul.collgrid .meta .tagrow{margin-top:.2rem}
 ul.colllist .cardc .tagrow{margin-top:.25rem}

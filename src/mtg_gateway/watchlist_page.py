@@ -1224,7 +1224,7 @@ def watchlist_page_html(
         f"<form class='ui-tools w-top' role='search' method='get' action='/watchlist'>{keep}"
         "<label class='search'><span class='sr-only'>Search your watchlist</span>"
         f"{icon('search')}<input type='search' name='q' value='{esc(query.q)}' "
-        "placeholder='Search'></label>"
+        "placeholder='Search' data-ph=''></label>"
         f"<a class='btn btn-plain' href='{esc(query.href(box='add'))}' {ui.box_open_attr('w-add')}>"
         f"{icon('plus')}Watch a card</a>"
         "<button type='button' class='btn-plain w-select' aria-pressed='false' hidden>"
@@ -1420,7 +1420,8 @@ WATCH_PAGE_CSS = (
 .watch-page .w-t .tr.open{background:var(--orange-tint)}
 .watch-page .w-t .tr.sel{background:var(--orange-tint)}
 .watch-page .w-t .act{display:inline-flex;align-items:center;gap:.4rem;flex-wrap:nowrap;white-space:nowrap}
-.watch-page .w-t .act .more{min-height:var(--ctl);display:inline-flex;align-items:center;margin:0}
+.watch-page .w-t .act .more{min-height:var(--ctl);display:inline-flex;align-items:center;margin:0;
+  padding:0 1rem;font-size:1rem}  /* the site's button on every screen, never a squeezed one */
 /* a list's head: its name, count and value, and its ⋮ at the row's end */
 .watch-page .w-t .tr.wgrp{grid-template-columns:32px minmax(0,1fr) auto;padding:.35rem .75rem;
   min-height:44px}
