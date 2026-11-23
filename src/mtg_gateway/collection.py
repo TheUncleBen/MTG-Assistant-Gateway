@@ -2552,7 +2552,7 @@ def panel_html(
             label="Filter by name",
             name="q",
             value=q,
-            placeholder="Name",
+            placeholder="Name|",
             input_id="col-q",
             search_label="Filter",
             filters_word=sheet_word,

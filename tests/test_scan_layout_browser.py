@@ -162,7 +162,8 @@ def test_one_column_one_row_bars_and_a_round_centred_capture_button(
             assert "ui-narrow" in (page.locator("main.wrap").get_attribute("class") or "")
             assert page.evaluate(
                 "() => { const m = document.querySelector('main.wrap'), c = getComputedStyle(m);"
-                " return m.clientWidth - parseFloat(c.paddingLeft) - parseFloat(c.paddingRight) <= 44 * 14 + 1; }"
+                " const pad = parseFloat(c.paddingLeft) + parseFloat(c.paddingRight);"
+                " return m.clientWidth - pad <= 44 * 14 + 1; }"
             )
             assert _style(page.locator(".cam-panel"), "display") == "flex"
             # Auto closes the options row; in the app the shutter and the viewfinder are the phone camera

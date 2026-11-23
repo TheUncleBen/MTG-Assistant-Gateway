@@ -418,7 +418,7 @@ def hub_html(
         )
     missing = any(counts.get(t.kind) is None for t in TABS)
     fill = f" data-counts='{COUNTS_API}'" if missing else ""
-    tools = ui.toolbar(HUB, search_label="Find a list", placeholder="List name", q=q)
+    tools = ui.toolbar(HUB, search_label="Find a list", placeholder="List name|Name|", q=q)
     tools += "<p class='muted small lp-count' data-filter-count aria-live='polite'></p>"
     arch = (
         f"<section class='ygrp'{' hidden' if not rows else ''}><h2 class='ui-group'>Your Archidekt lists</h2>"
@@ -637,7 +637,7 @@ def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
         head
         + "<p class='ui-sub'>Categories you can add to any deck in one press. Once added, the deck's copy "
         "and the template are not linked.</p>"
-        + ui.toolbar(tab_href("templates"), search_label="Search by name", placeholder="Name")
+        + ui.toolbar(tab_href("templates"), search_label="Search by name", placeholder="Name|")
         + FILTER_NOTE
         + table
         + template_box(csrf, box if box.get("box") == "tpl-box" else {})
@@ -821,7 +821,7 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) ->
         + "<p class='ui-sub'>When you add one of these cards to a deck, it goes into these categories; ★ is "
         "the main one. Set them from a card's menu on a deck (Lock personal categories) or here. Choices "
         "come from your category templates.</p>"
-        + ui.toolbar(f"{PAGE}/defaults", search_label="Search by name", placeholder="Name", q=q)
+        + ui.toolbar(f"{PAGE}/defaults", search_label="Search by name", placeholder="Name|", q=q)
         + FILTER_NOTE
         + table
         + more
@@ -999,7 +999,7 @@ def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "t
     return (
         head
         + f"<p class='ui-sub'>{esc(w['purpose'])}</p>"
-        + ui.toolbar(tab_href(slug), search_label="Search by name", placeholder="Name")
+        + ui.toolbar(tab_href(slug), search_label="Search by name", placeholder="Name|")
         + FILTER_NOTE
         + table
         + tag_box(csrf, box if box.get("box") == "tag-box" else {}, slug)
@@ -1187,7 +1187,7 @@ def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
     return (
         head
         + "<p class='ui-sub'>Notes save when you leave the box.</p>"
-        + ui.toolbar(tab_href("pins"), search_label="Search by name", placeholder="Name")
+        + ui.toolbar(tab_href("pins"), search_label="Search by name", placeholder="Name|")
         + FILTER_NOTE
         + table
         + pin_remove_box(csrf, box if box.get("box") == "pin-rm" else {})
@@ -1368,7 +1368,7 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
     return (
         head + "<p class='ui-sub'>Cards you made on Archidekt. Deleting one blanks it in every deck that "
         "has it.</p>"
-        + ui.toolbar(f"{PAGE}/custom", search_label="Search by name", placeholder="Name", q=q)
+        + ui.toolbar(f"{PAGE}/custom", search_label="Search by name", placeholder="Name|", q=q)
         + table
         + more
         + custom_box(csrf, box if box.get("box") == "cc-box" else {})
@@ -1459,8 +1459,8 @@ def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: boo
     return (
         f"<div class='lp-face' id='cc-face-{p}'{'' if req else ' hidden'}>"
         f"<div class='lp-two'>{fld(name_label, 'n')}{fld('Mana cost', 'm', '{2}{G}')}</div>"
-        f"<div class='lp-three lp-types'>{fld(types_label, 't', 'Creature')}{fld('Subtypes', 'st', 'Advisor')}"
-        f"{fld('Supertypes', 'su', 'Legendary')}</div>"
+        f"<div class='lp-three lp-types'>{fld(types_label, 't', 'Creature')}"
+        f"{fld('Subtypes', 'st', 'Advisor')}{fld('Supertypes', 'su', 'Legendary')}</div>"
         f"<div class='field'><label for='{p}-x'>Rules text</label><textarea id='{p}-x' name='{p}_x' rows='3' "
         f"maxlength='{account_lists.CUSTOM_TEXT_MAX}'>{esc(text)}</textarea></div>"
         f"<div class='lp-three'>{fld('Power', 'p')}{fld('Toughness', 'tg')}{fld('Loyalty', 'l')}</div>"
@@ -1619,8 +1619,9 @@ CSS = """
   color:var(--text-muted)}
 .lp-thumb-none svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}
 /* a category's name on a row: the site's tag (.ui-tag, theme.py), the main one in orange */
-.lp-chip{display:inline-flex;align-items:center;gap:.25rem;min-height:24px;max-width:100%;padding:.15rem .55rem;
-  border:0;border-radius:999px;background:var(--surface-2);color:var(--text);font-size:.82rem;font-weight:600;
+.lp-chip{display:inline-flex;align-items:center;gap:.25rem;min-height:24px;max-width:100%;
+  padding:.15rem .55rem;border:0;border-radius:999px;background:var(--surface-2);color:var(--text);
+  font-size:.82rem;font-weight:600;
   line-height:1.25;white-space:nowrap}
 .lp-chip.main{color:var(--orange-text);background:var(--orange-tint)}
 .lp-chip svg.i{width:14px;height:14px;fill:currentColor;stroke:currentColor}
@@ -1673,7 +1674,8 @@ CSS = """
   border:1px solid var(--control-border);
   border-radius:var(--radius);background:var(--surface);cursor:pointer}
 .lp-tagpv .hex{flex:0 0 8rem;width:8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.lp-tagpv .lp-chip{flex:0 1 auto;max-width:100%;border:1px solid var(--border)}  /* the preview wears the colour */
+/* the preview wears the tag's colour on its edge */
+.lp-tagpv .lp-chip{flex:0 1 auto;max-width:100%;border:1px solid var(--border)}
 .lp-tagpv .lp-chip .nm{white-space:normal;overflow-wrap:break-word;min-width:0}
 .lp-step{display:inline-flex;align-items:center;gap:4px;margin:0}
 .lp-step button{width:44px;min-width:44px;min-height:44px;padding:0;margin:0}

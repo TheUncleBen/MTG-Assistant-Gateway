@@ -1224,7 +1224,7 @@ def watchlist_page_html(
         f"<form class='ui-tools w-top' role='search' method='get' action='/watchlist'>{keep}"
         "<label class='search'><span class='sr-only'>Search your watchlist</span>"
         f"{icon('search')}<input type='search' name='q' value='{esc(query.q)}' "
-        "placeholder='Search'></label>"
+        "placeholder='Search' data-ph=''></label>"
         f"<a class='btn btn-plain' href='{esc(query.href(box='add'))}' {ui.box_open_attr('w-add')}>"
         f"{icon('plus')}Watch a card</a>"
         "<button type='button' class='btn-plain w-select' aria-pressed='false' hidden>"
