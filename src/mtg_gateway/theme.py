@@ -403,7 +403,7 @@ main.wrap{flex:1;padding:var(--main-top,1rem) var(--gutter) 3rem;container-type:
 /* The type roles (docs/UI-STANDARD.md): one page title, one section heading, one sub-heading, on
    every page. A page never sizes these itself; tests/ui_cohesion.py counts the looks. */
 h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:0 0 .75rem;overflow-wrap:anywhere}
-h2{font-size:min(1.2rem,7vw);font-weight:700;line-height:1.3;margin:0 0 .5rem;overflow-wrap:anywhere}
+h2{font-size:min(1.2rem,6vw);font-weight:700;line-height:1.3;margin:0 0 .5rem;overflow-wrap:anywhere}
 h2:not(:first-child){margin-top:1.5rem}
 h3{font-size:1.05rem;font-weight:700;margin:.5rem 0 .4rem;overflow-wrap:anywhere}
 /* a group label over an inset grouped list (Account, Binder, Install): small capitals */
@@ -416,11 +416,11 @@ details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
 ul.plain{list-style:none;margin:0;padding:0}
 
 /* panels (Archidekt: 3px radius, 1px border, light-background, no shadow) */
-.card,.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
+.card,.panel{background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-panel);
   padding:1rem var(--gutter);margin:0 0 1rem}  /* the sides as the page's gutters, see .wrap */
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
-.panel h2,.card h2{font-size:min(1.2rem,7vw)}
+.panel h2,.card h2{font-size:min(1.2rem,6vw)}
 /* the install page's QR code: dark on white in both themes; not on a phone, which is already there */
 .qr-code svg{display:block;background:#fff;border-radius:var(--radius)}
 @media (hover:none) and (pointer:coarse){.qr-desk{display:none}}
@@ -1781,7 +1781,6 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .ui-table .group{grid-template-columns:32px 1fr}
   .ui-table .group .meta{grid-column:2;white-space:normal}
   .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%}
-  .ui-table .act .btn,.ui-table .act button{padding:0 .6rem;font-size:.86rem}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
   .ui-table .act.ui-cap{padding:0;background:none}
@@ -1804,7 +1803,6 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .ui-table .group{grid-template-columns:32px 1fr}
   .ui-table .group .meta{grid-column:2;white-space:normal}
   .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%}
-  .ui-table .act .btn,.ui-table .act button{padding:0 .6rem;font-size:.86rem}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
   .ui-table .act.ui-cap{padding:0;background:none}
@@ -2816,7 +2814,7 @@ html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,
    "Preconstructed") stays whole at 200% text on a 320 px phone instead of breaking letter by
    letter (last, after the headings' own sizes above; the same bounds as the headings' own, so a
    412 px phone at 200% keeps "Preconstructed" whole too, batch 10 AB5) */
-@media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.2rem,7vw)}
+@media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.2rem,6vw)}
   .home .hero h1{font-size:min(1.6rem,8vw)} .mtgbox .bh{--th:min(1.25rem,9vw)}}
 """
 

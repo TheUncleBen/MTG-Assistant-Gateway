@@ -718,7 +718,7 @@ ADMIN_CSS = """
 }
 /* a card's heading is the site's section heading (docs/UI-STANDARD.md), not the smaller one
    theme's .ui-card > h2 still sets */
-.adm .ui-card > h2{font-size:min(1.2rem,7vw);margin-bottom:.5rem}
+.adm .ui-card > h2{margin-bottom:.5rem}
 .adm .notice{margin:0 0 1rem}
 .adm .ui-widgets .wdg .det{overflow-wrap:anywhere;min-width:0}
 /* the number and its unit ("0.7.37 running") may part at 200% text: two flex items, not one word */

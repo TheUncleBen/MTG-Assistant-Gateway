@@ -23,7 +23,7 @@ targets, 200% text, menus and stranded buttons.
 |---|---|---|---|
 | Page title | `h1` inside `ui.page_head` (`.ui-head`) | 2rem (28 px), 700, no top margin | every page, once |
 | Purpose line | `p.ui-sub` right under the title | .93rem, muted, two lines at most on a phone | every page that needs one |
-| Section heading | `h2` | 1.2rem (17 px), 700, 1.5rem above (none when first), .5rem below | every section; a list's heading with its count (`ui.list_head`) |
+| Section heading | `h2` | 1.2rem (17 px; 6vw on a narrow phone at large text), 700, 1.5rem above (none when first), .5rem below | every section; a list's heading with its count (`ui.list_head`) |
 | Group label | `h2.ui-group` | .8rem, 700, upper case, `--menu-head` | over an inset grouped list (Account, Binder, Install) |
 | Sub-heading | `h3` | 1.05rem, 700 | inside a section |
 
@@ -58,8 +58,8 @@ control height (`--ctl`, 44 px). A narrow row wraps whole buttons onto the next 
 
 | Role | Class | Look |
 |---|---|---|
-| Panel | `.panel`, `.card` | `--surface` fill, 1 px `--border`, `--radius-panel` (3 px), 1rem padding |
-| Inset grouped list | `.ui-group-list` (Account, Binder, Install) | `--group-bg`, `--radius-lg`, rows 44 px with a divider |
+| Panel | `.panel`, `.card`, `.ui-card` | `--surface` fill, 1 px `--card-border`, `--radius-panel` (3 px), 1rem padding |
+| Inset grouped list | `.ygrp .rows` (account_hub.HUB_CSS: Account, Binder, Install) | `--group-bg`, `--radius-lg`, rows 44 px with a divider |
 | Notice | `ui.notice` | tinted strip with a coloured left edge |
 | Tile / widget | `ui.widget` | as §3a of the dashboard rule |
 
