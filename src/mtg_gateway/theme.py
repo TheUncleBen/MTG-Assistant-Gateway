@@ -400,10 +400,15 @@ main.wrap{flex:1;padding:var(--main-top,1rem) var(--gutter) 3rem;container-type:
    Never hyphens:auto: a browser's line breaker is greedy and hyphenates a word that would have
    fitted the next line whole ("snap-shots", "ad-mins" at 100% on a 320 px phone; sweep P-1), so
    the only break inside a word is the bare one of a word wider than its whole line */
-h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:min(1.5rem,7vw);font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
-h2:not(:first-child){margin-top:1.25rem}
-h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem;overflow-wrap:anywhere}
+/* The type roles (docs/UI-STANDARD.md): one page title, one section heading, one sub-heading, on
+   every page. A page never sizes these itself; tests/ui_cohesion.py counts the looks. */
+h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:0 0 .75rem;overflow-wrap:anywhere}
+h2{font-size:min(1.2rem,7vw);font-weight:700;line-height:1.3;margin:0 0 .5rem;overflow-wrap:anywhere}
+h2:not(:first-child){margin-top:1.5rem}
+h3{font-size:1.05rem;font-weight:700;margin:.5rem 0 .4rem;overflow-wrap:anywhere}
+/* a group label over an inset grouped list (Account, Binder, Install): small capitals */
+h2.ui-group,.ui-group{margin:0 0 .4rem .9rem;font-size:.8rem;font-weight:700;line-height:1.3;
+  text-transform:uppercase;letter-spacing:.04em;color:var(--menu-head)}
 h4{font-size:1rem;font-weight:700;margin:0}
 p{margin:.5rem 0}
 details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
@@ -415,7 +420,7 @@ ul.plain{list-style:none;margin:0;padding:0}
   padding:1rem var(--gutter);margin:0 0 1rem}  /* the sides as the page's gutters, see .wrap */
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
-.panel h2,.card h2{font-size:min(1.5rem,7vw)}
+.panel h2,.card h2{font-size:min(1.2rem,7vw)}
 /* the install page's QR code: dark on white in both themes; not on a phone, which is already there */
 .qr-code svg{display:block;background:#fff;border-radius:var(--radius)}
 @media (hover:none) and (pointer:coarse){.qr-desk{display:none}}
@@ -611,8 +616,8 @@ ol,ul:not([class]){padding-left:1.4rem} ol li,ul:not([class]) li{margin:.25rem 0
 button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:var(--ctl);
   margin:0;padding:.35rem 1rem;font:inherit;font-size:1rem;font-weight:700;text-align:center;cursor:pointer;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;
-  border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--text);
-  text-decoration:none;transition:background-color .2s ease-in-out,filter .2s ease-in-out}
+  border-radius:var(--radius);border:1px solid var(--control-border);background:var(--surface);
+  color:var(--text);text-decoration:none;transition:background-color .2s ease-in-out,filter .2s ease-in-out}
 /* a button a script hides stays hidden (inline-flex above would beat the browser's own rule) */
 button[hidden],.btn[hidden]{display:none}
 /* a label that wraps beside an icon keeps its lines against the icon, so the icon reads as part
@@ -759,10 +764,12 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .badge.warn{background:var(--orange);color:var(--on-orange)}
 .badge.danger{background:var(--danger-fill)}
 .badge.info{background:#2a66c9}
-.pill{display:inline-block;padding:.125rem .25rem;border-radius:3px;border:1px solid var(--border);
-  background:var(--toolbar-bg);color:var(--toolbar-text);font-weight:700;font-size:.86rem;line-height:1.3}
-.chip{display:inline-block;padding:.25rem .5rem;border-radius:3px;background:var(--surface-2);
-  font-size:.86rem}
+/* A tag (a deck's or a card's tag, a list's word on a row): one look on every page
+   (docs/UI-STANDARD.md). .pill and a plain .chip are older names for it. */
+.ui-tag,.pill,span.chip,.pill.tag{display:inline-flex;align-items:center;gap:.25rem;min-height:24px;
+  max-width:100%;padding:.15rem .55rem;border-radius:999px;border:0;background:var(--surface-2);
+  color:var(--text);font-size:.82rem;font-weight:600;line-height:1.25;vertical-align:middle;
+  overflow-wrap:anywhere;white-space:normal}
  /* a notice (F8): a tinted strip with a coloured left edge and no border of its own; info (blue),
    ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
 .notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
@@ -1511,6 +1518,8 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
 UI_CSS = """
 /* width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
+/* forms, settings, grouped lists and reading pages: one narrow centred column (docs/UI-STANDARD.md) */
+main.wrap.ui-narrow{max-width:calc(44rem + 2 * var(--gutter))}
 /* One Binder (0.7.47): "‹ Binder" back on the pages that open from the Binder page */
 .bn-up{margin:0}
 .bn-back{display:inline-flex;align-items:center;gap:.2rem;min-height:44px;color:var(--orange-text);font-weight:700;
@@ -1877,8 +1886,9 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .btn-outline-danger,button.btn-outline-danger{background:transparent;color:var(--danger-text);
   border:1px solid var(--danger-text);font-weight:700}
 .btn-outline-danger:hover,button.btn-outline-danger:hover{background:var(--red-tint);color:var(--danger-text)}
-.btn-plain,button.btn-plain{background:transparent;border:1px solid var(--control-border);color:var(--text);
-  font-weight:700}
+/* plain is the same look as every other button: one secondary look (docs/UI-STANDARD.md) */
+.btn-plain,button.btn-plain{background:var(--surface);border:1px solid var(--control-border);
+  color:var(--text);font-weight:700}
 .linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0 .4rem;font-weight:700}
 @media (pointer:fine){.linkbtn{min-height:32px}}
 /* No bare blue text for an action or a way to go (0.7.46). A small one inside a line or a row (Why,
@@ -2798,7 +2808,7 @@ html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,
    "Preconstructed") stays whole at 200% text on a 320 px phone instead of breaking letter by
    letter (last, after the headings' own sizes above; the same bounds as the headings' own, so a
    412 px phone at 200% keeps "Preconstructed" whole too, batch 10 AB5) */
-@media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.5rem,7vw)}
+@media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.2rem,7vw)}
   .home .hero h1{font-size:min(1.6rem,8vw)} .mtgbox .bh{--th:min(1.25rem,9vw)}}
 """
 
