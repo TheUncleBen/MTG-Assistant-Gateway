@@ -43,7 +43,10 @@ ENUM = r"""
     return true;
   };
   const sel = 'a[href], button, [role=button], [role=menuitem], [role=menuitemradio], [role=tab], [role=option], [role=switch], summary, input[type=checkbox], input[type=radio], input[type=submit], input[type=button], label.btn, label.ui-chip, [onclick], [data-href]';
-  const all = [...R.querySelectorAll(sel)].filter(el => vis(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true');
+  // an open modal box covers the page: only its own controls can be reached
+  const modal = [...document.querySelectorAll('[aria-modal=true]')].find(m => { const r = m.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(m).visibility !== 'hidden'; });
+  const reach = (el) => !modal || modal.contains(el);
+  const all = [...R.querySelectorAll(sel)].filter(el => vis(el) && reach(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true');
   const seen = {};
   const out = [];
   all.forEach((el, i) => {
@@ -127,7 +130,10 @@ PICK = r"""
     }
     return true;
   };
-  const all = R ? [...R.querySelectorAll(sel)].filter(el => vis(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') : [];
+  // an open modal box covers the page: only its own controls can be reached
+  const modal = [...document.querySelectorAll('[aria-modal=true]')].find(m => { const r = m.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(m).visibility !== 'hidden'; });
+  const reach = (el) => !modal || modal.contains(el);
+  const all = R ? [...R.querySelectorAll(sel)].filter(el => vis(el) && reach(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') : [];
   const label = (e) => (e.getAttribute('aria-label') || e.innerText || e.value || e.title || '').trim().replace(/\s+/g, ' ').slice(0, 50);
   // the same words first (a list whose rows moved since the first look), nearest the old place
   let el = null;
