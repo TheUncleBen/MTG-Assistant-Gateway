@@ -93,8 +93,8 @@ def add_deck_tool_routes(
         """The deck editor's old address. 0.7.48 folded the editor into the deck page itself (Add
         a card with its preview, every card's menu, drags between categories, More ways to add),
         so the address opens the deck page: ``add=`` opens the named card's preview there and
-        ``scan_session=`` that scan's review (static/deck.js), and a ``#card-…`` or ``#cat-…``
-        part still jumps to its card or category (the browser keeps it through the redirect)."""
+        ``scan_session=`` that scan's review (static/deck.js). An old ``#card-…`` or ``#cat-…``
+        part is kept by the browser but names nothing on the deck page, which opens at its top."""
         deck_id = request.path_params["deck_id"]
         keep = {
             k: (request.query_params.get(k) or "").strip()[:200]

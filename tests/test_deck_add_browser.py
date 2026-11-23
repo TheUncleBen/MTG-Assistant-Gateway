@@ -233,3 +233,65 @@ def test_move_to_can_make_a_new_category(server: Server) -> None:  # noqa: F811
         assert edits[-1]["changes"][0]["category"] == "Value", edits
         assert errors == []
         browser.close()
+
+
+def test_add_to_deck_saves_once_and_a_typed_new_category_counts(server: Server) -> None:  # noqa: F811
+    """0.7.48 audit: Enter pressed again while the preview fades out never adds the card twice,
+    and a name typed in New category… (not yet confirmed with ✓) is the category the card goes
+    to; with no name typed, Add to deck says so and sends nothing."""
+    from playwright.sync_api import sync_playwright
+
+    _skip_without_chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors, edits = _open(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        box = page.locator("#quick")
+        box.fill("Swamp")
+        box.press("Enter")
+        preview = page.locator(".mtgbox.addbox-preview")
+        preview.wait_for(timeout=5000)
+        page.locator("#ap-cat").select_option("New category…")
+        name = preview.locator(".newcat input")
+        name.wait_for(timeout=3000)
+        add = preview.locator("button", has_text="Add to deck")
+        add.click()
+        preview.locator(".note, [role=alert]", has_text="Type a name for the new category").first.wait_for(
+            timeout=3000
+        )
+        assert edits == []
+        name.fill("Mana")
+        # three Enters on Add to deck as fast as a held key: one save
+        add.focus()
+        page.keyboard.press("Enter")
+        page.keyboard.press("Enter")
+        page.keyboard.press("Enter")
+        page.locator(".toast, [role=status]", has_text="Added Swamp").first.wait_for(timeout=8000)
+        page.locator(".stack[data-group='Mana'] [data-card='Swamp']").first.wait_for(timeout=5000)
+        adds = [e for e in edits if any(c.get("action") == "add" for c in e.get("changes", []))]
+        assert len(adds) == 1, edits
+        assert adds[0]["changes"][0]["category"] == "Mana", adds
+        assert errors == []
+        browser.close()
+
+
+def test_paste_a_list_says_which_lines_it_left_out(server: Server) -> None:  # noqa: F811
+    """0.7.48 audit: a line longer than any card line, or past the 250 the gateway checks at once,
+    is named in the box's note, never dropped quietly."""
+    from playwright.sync_api import sync_playwright
+
+    _skip_without_chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors, edits = _open(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        page.locator(".toolbar .addways").click()
+        page.locator("[role=menu]:visible [role=menuitem]", has_text="Paste a list").click()
+        box = page.locator(".mtgbox.batchbox")
+        box.wait_for(timeout=3000)
+        box.locator("textarea").fill("2 Sol Ring\n1 " + "x" * 320 + "\n")
+        box.locator("button", has_text="Check the list").click()
+        box.locator(".batchlist li").first.wait_for(timeout=8000)
+        box.get_by_text("Left out: 1 line too long to be a card line.").wait_for(timeout=3000)
+        assert edits == [] and errors == []
+        browser.close()

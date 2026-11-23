@@ -140,8 +140,8 @@ One deck:
   `*E*` finishes are read), **Add from a scan** (one of your saved scans) and
   **Add a package**. A list or a scan is checked first: each card found with
   its category (its own by type, or one picked for them all) and the lines
-  that match no card, with the closest name to use instead. One press then
-  adds them all, with **Undo**. With backup copies on, their box **Also keep
+  that match no card (in a pasted list, each with the closest name to use
+  instead). One press then adds them all, with **Undo**. With backup copies on, their box **Also keep
   a backup copy on Archidekt** asks for that extra copy.
 - **Playtest** opens the deck in Archidekt's own playtester (draw an
   opening hand, mulligan, play turns by hand) in a new tab, or in your

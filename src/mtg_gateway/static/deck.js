@@ -903,8 +903,9 @@
     return Fetch.json("/scan/api/peek?names=" + enc(name), {})
       .then(function (d) {
         if (d && d.ok === false) { var bad = new Error(d.message || "The card could not be looked up."); bad.code = d.error; throw bad; }
-        var want = frontFace(name);
-        var c = ((d && d.cards) || []).filter(function (x) { return x && (fold(x.name) === fold(name) || frontFace(x.name) === want); })[0] || null;
+        // the gateway answers only for the very name asked (scan/scryfall.same_name: case, accents,
+        // curly quotes and spacing aside), so its one answer is the card
+        var c = ((d && d.cards) || []).filter(function (x) { return x && x.name; })[0] || null;
         if (c) summaries[fold(name)] = c;
         return c;
       });
@@ -949,7 +950,9 @@
     no.appendChild(icon("x"));
     var box = el("span", "newcat");
     box.appendChild(field); box.appendChild(ok); box.appendChild(no);
+    sel.mtgNewField = field;  // catValue reads a name typed but not yet confirmed
     var back = function (value) {
+      sel.mtgNewField = null;
       box.replaceWith(wrap);
       if (value) {
         var o = el("option", null, value);
@@ -971,6 +974,13 @@
     });
     wrap.replaceWith(box);
     field.focus();
+  }
+  // a category select's value: a New category… name typed but not confirmed yet counts; null when
+  // New category… is open with no name typed
+  function catValue(sel) {
+    if (sel.value !== NEW_CAT) return sel.value || "";
+    var v = sel.mtgNewField ? sel.mtgNewField.value.trim().slice(0, 60) : "";
+    return v || null;
   }
   function watchNewCategory(sel, onDone) {
     sel.setAttribute("data-was", sel.value);
@@ -1023,7 +1033,7 @@
         var words = t.text || (t.faces || []).map(function (f) { return f.text || ""; }).filter(Boolean).join("\n\n");
         if (words && window.MtgMana && window.MtgMana.symbolize) { text.textContent = ""; window.MtgMana.symbolize(words, text); }
         else text.textContent = words || "";
-        if (t.price) { price = t.price; showPrint(); }
+        if (t.price && !chosen) { price = t.price; showPrint(); }  // the default printing's price
       });
     }
     // copies already in the deck (or outside it): the add raises that count
@@ -1119,10 +1129,17 @@
     addBtn.type = "submit";
     addBtn.setAttribute("form", "ap-form");
     form.id = "ap-form";
+    var sent = false;  // a second Enter while the box fades out never adds the card twice
     form.addEventListener("submit", function (e) {
       e.preventDefault();
-      if (cat.value === NEW_CAT) return;
-      var category = cat.value || "";
+      if (sent) return;
+      var category = catValue(cat);
+      if (category === null) {
+        box.note("Type a name for the new category, or pick another category.", true);
+        if (cat.mtgNewField) cat.mtgNewField.focus();
+        return;
+      }
+      sent = true;
       var spec = { name: name, qty: count, category: category, zone: isSide(category) ? "side" : "main", printing: chosen ? printing : null, finish: finish.value };
       box.close();
       addOne(spec);
@@ -1181,6 +1198,7 @@
   }
 
   // The box: a pick or Enter opens the preview of the card the box names
+  var addSeq = 0;  // the newest lookup wins
   function startAdd(raw) {
     var parts = splitQty(raw);
     needName(quickInput, !parts.name);
@@ -1190,8 +1208,14 @@
       return;
     }
     quickForm.classList.add("looking");
+    var seq = ++addSeq;
+    // an answer that is no longer wanted (a newer name was asked for, or a box such as a save's
+    // question opened meanwhile) opens nothing: it never replaces what is on screen
+    var stale = function () { return seq !== addSeq || !!(window.MtgBox && window.MtgBox.isOpen && window.MtgBox.isOpen()); };
     summaryOf(parts.name).then(function (card) {
+      if (seq !== addSeq) return;
       quickForm.classList.remove("looking");
+      if (stale()) return;
       if (!card) {
         var find = el("a", "btn", "Search cards");
         find.href = "/cards?q=" + enc(parts.name);
@@ -1200,7 +1224,9 @@
       }
       openPreview(card.name || parts.name, parts.qty, card);
     }, function (err) {
+      if (seq !== addSeq) return;
       quickForm.classList.remove("looking");
+      if (stale()) return;
       // the card lookup (Scryfall) is down or busy, or answered something unreadable: the preview
       // opens on the typed name without its picture, and Archidekt itself checks the name on Add
       if (err && !err.signedOut && !err.noConnection && (err.server || err.code === "unavailable" || err.code === "rate_limited" || err.code === "busy")) {
@@ -1295,6 +1321,7 @@
   // (its own by type, or one picked for all), the lines that matched no card, the backup tick
   // where the admin turned Archidekt backup copies on, and one Add for them all.
   var PASTE_KEY = "mtg-paste-" + deckId;
+  var MAX_PASTE_LINES = 250, MAX_PASTE_LINE = 300;  // scan/service.py MAX_RESOLVE_CARDS, MAX_LINE
   function openBatch(kind, scanId) {
     var Box = window.MtgBox;
     if (!Box) return;
@@ -1340,6 +1367,7 @@
       body.appendChild(bl);
     }
     var found = [];  // [{change, typeCat, select}]
+    var checkSeq = 0, skippedNote = "";  // the newest check wins; what the paste left out
     var check = Box.button(kind === "paste" ? "Check the list" : "Show the cards", "primary", null, {});
     var add = Box.button("Add", "primary", null, { icon: "plus" });
     add.hidden = true;
@@ -1393,6 +1421,7 @@
       missed.forEach(function (it) {
         var li = el("li", "miss");
         var nameIn = (it.input && it.input.name) || "";
+        var rawIn = (it.input && it.input.raw) || "";
         li.appendChild(el("span", "q", String(it.quantity || 1)));
         var why = !it.card ? ": no card has this name" : it.status === "deferred" ? ": not looked up in time, check the list again" : ": its set and name disagree, so it is left out";
         li.appendChild(el("span", "nm", (nameIn || (it.card && it.card.name) || "A line") + why));
@@ -1401,7 +1430,19 @@
           var fix = el("button", "btn", "Use " + sug);
           fix.type = "button";
           fix.addEventListener("click", function () {
-            area.value = area.value.split(/\r?\n/).map(function (line) { return line.indexOf(nameIn) >= 0 ? line.replace(nameIn, sug) : line; }).join("\n");
+            // the line the gateway read (its raw text), with the closest name in place of the name
+            // typed; the count in front stays
+            var done = false;
+            area.value = area.value.split(/\r?\n/).map(function (line) {
+              if (done) return line;
+              if (rawIn && line.trim() === rawIn.trim()) {
+                done = true;
+                var m = /^(\s*\d{1,3}\s*[xX×]?\s+)/.exec(line);
+                return (m ? m[1] : "") + sug;
+              }
+              if (nameIn && line.indexOf(nameIn) >= 0) { done = true; return line.replace(nameIn, sug); }
+              return line;
+            }).join("\n");
             area.dispatchEvent(new Event("input", { bubbles: true }));
             check.click();
           });
@@ -1434,25 +1475,47 @@
     function lookUp() {
       box.note("");
       if (kind === "paste") {
-        var lines = [];
+        var lines = [], tooLong = 0, over = 0;
         area.value.split(/\r?\n/).forEach(function (line) {
           line = line.trim();
           if (!line || /^(deck|sideboard|maybeboard|commander|companion)\s*:?$/i.test(line) || line.charAt(0) === "#") return;
-          if (lines.length < 200 && line.length <= 300) lines.push(line);
+          if (line.length > MAX_PASTE_LINE) tooLong += 1;
+          else if (lines.length >= MAX_PASTE_LINES) over += 1;
+          else lines.push(line);
         });
-        if (!lines.length) { box.note("Paste one card per line first.", true); area.focus(); return; }
+        if (!lines.length) { box.note(tooLong ? "No line reads as a card: each is longer than a card line can be." : "Paste one card per line first.", true); area.focus(); return; }
+        // what is not checked is said, never dropped quietly (the gateway checks 250 lines a time)
+        var left = [];
+        if (over) left.push(over + (over === 1 ? " line" : " lines") + " past the first " + MAX_PASTE_LINES + " (add them in a second paste)");
+        if (tooLong) left.push(tooLong + (tooLong === 1 ? " line" : " lines") + " too long to be a card line");
+        skippedNote = left.length ? "Left out: " + left.join("; ") + "." : "";
+        var seq = ++checkSeq;
         box.busy(true);
         window.MtgFetch.json("/scan/api/resolve", {
           method: "POST", csrf: CSRF, body: JSON.stringify({ cards: lines }), what: "nothing was added"
-        }).then(function (d) { box.busy(false); if (d && d.ok === false) { box.note(d.message || "The list could not be checked. Nothing was added.", true); return; } showReview(d); }, function (err) {
+        }).then(function (d) {
+          if (seq !== checkSeq) return;  // a newer check is on its way
+          box.busy(false);
+          if (d && d.ok === false) { box.note(d.message || "The list could not be checked. Nothing was added.", true); return; }
+          showReview(d);
+          if (skippedNote) box.note(skippedNote, true);
+        }, function (err) {
+          if (seq !== checkSeq) return;
           box.busy(false);
           box.note(err && err.message ? err.message : "The list could not be checked: no connection. Nothing was added.", true);
         });
       } else {
         if (!picker.value) return;
+        var sseq = ++checkSeq;
         box.busy(true);
         window.MtgFetch.json("/scan/api/sessions/" + enc(picker.value), { method: "GET", what: "the scan could not be read" })
-          .then(function (d) { box.busy(false); if (d && d.ok === false) { box.note(d.message || "The scan could not be read.", true); return; } showReview(d); }, function (err) {
+          .then(function (d) {
+            if (sseq !== checkSeq) return;  // another scan was picked meanwhile
+            box.busy(false);
+            if (d && d.ok === false) { box.note(d.message || "The scan could not be read.", true); return; }
+            showReview(d);
+          }, function (err) {
+            if (sseq !== checkSeq) return;
             box.busy(false);
             box.note(err && err.message ? err.message : "The scan could not be read: no connection.", true);
           });
@@ -1460,12 +1523,20 @@
     }
     check.addEventListener("click", lookUp);
     if (area) area.addEventListener("input", function () { if (found.length) { review.textContent = ""; found = []; add.hidden = true; check.hidden = false; } });
+    var sent = false;  // a second press while the box fades out never adds the list twice
     add.addEventListener("click", function () {
-      if (!found.length) return;
+      if (sent || !found.length) return;
+      var open = found.filter(function (f) { return catValue(f.select) === null; })[0];
+      if (open) {
+        box.note("Type a name for the new category, or pick another category.", true);
+        if (open.select.mtgNewField) open.select.mtgNewField.focus();
+        return;
+      }
+      sent = true;
       var changes = found.map(function (f) {
         var ch = {};
         Object.keys(f.change).forEach(function (k) { ch[k] = f.change[k]; });
-        var c = f.select.value === NEW_CAT ? "" : f.select.value;
+        var c = catValue(f.select) || "";
         if (c) ch.category = c; else delete ch.category;
         if (isSide(c)) ch.zone = "side"; else delete ch.zone;
         return ch;
