@@ -90,3 +90,18 @@ def test_compare_names_the_deck_once_escaped() -> None:
     assert "&amp;amp;" not in page
     back = "<p class='ui-back-line cmp-back'><a class='ui-cap ui-back' href='/decks/"
     assert back in page and page.index(back) < page.index("<h1>Compare decks</h1>")
+
+
+def test_an_empty_deck_keeps_the_cards_container_for_adding() -> None:
+    """0.7.48 review: a deck with no cards drew a bare panel without #cards, so deck.js left Add to
+    the deck, More ways to add and the ?add= / ?scan_session= links unwired."""
+    from mtg_gateway.deckpage import cards_html
+
+    deck = parse_deck(_deck(cards=[], customCards=[]))
+    own = cards_html(deck, view="text", group="category", sort="name", q="", own=True)
+    assert own.startswith("<div class='deckview text' id='cards' data-deck='42'")
+    assert "No cards yet. Add one with Add to the deck above." in own and "data-filtered" not in own
+    other = cards_html(deck, view="text", group="category", sort="name", q="", own=False)
+    assert "No cards in this deck yet." in other
+    filtered = cards_html(deck, view="text", group="category", sort="name", q="zz", own=True)
+    assert "No cards match the filter." in filtered and " data-filtered='1'" in filtered

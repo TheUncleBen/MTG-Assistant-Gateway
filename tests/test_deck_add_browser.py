@@ -333,3 +333,60 @@ def test_the_add_row_keeps_its_box_wide_and_cancel_leaves_it_empty(server: Serve
         assert page.locator(".suggest [role=listbox]:visible, .suggest ul:visible").count() == 0
         assert edits == [] and errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("how", ["filter", "add-link"])
+def test_a_deck_page_with_no_cards_shown_still_adds(server: Server, how: str) -> None:  # noqa: F811
+    """0.7.48 review: an empty deck (or a filter that matches nothing) still draws the cards'
+    container, so Add to the deck opens its preview (it did a plain search for the name) and the
+    Scan page's and old editor's links (?add=, ?scan_session=) still open their boxes."""
+    from playwright.sync_api import sync_playwright
+
+    _skip_without_chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors, edits = _open(p, server, sid, 1366)
+        extra = "&add=Swamp" if how == "add-link" else ""
+        page.goto(f"{server.base}/decks/42?q=zzzqqq{extra}", wait_until="networkidle")
+        assert page.locator("#cards.deckview .deck-empty").inner_text() == "No cards match the filter."
+        if how == "filter":
+            box = page.locator("#quick")
+            box.fill("Swamp")
+            box.press("Enter")
+        page.locator(".mtgbox.addbox-preview").wait_for(timeout=5000)
+        assert "/cards" not in page.url and edits == []
+        assert errors == []
+        browser.close()
+
+
+def test_undo_after_a_list_takes_each_card_back_once(server: Server) -> None:  # noqa: F811
+    """0.7.48 review: a list line over 99 copies goes as two changes of one name (as a scan's foil
+    and normal copies do); Undo removes the card once, where it sent two removes the save refused."""
+    from playwright.sync_api import sync_playwright
+
+    _skip_without_chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors, edits = _open(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        assert page.locator("#cards [data-card='Swamp']").count() == 0
+        page.locator(".toolbar .addways").click()
+        page.locator("[role=menu]:visible [role=menuitem]", has_text="Paste a list").click()
+        box = page.locator(".mtgbox.batchbox")
+        box.wait_for(timeout=3000)
+        box.locator("textarea").fill("150 Swamp\n")
+        box.locator("button", has_text="Check the list").click()
+        box.locator(".batchlist li").first.wait_for(timeout=8000)
+        box.locator("button", has_text="Add 150 cards").click()
+        toast = page.locator(".toast", has_text="Added 150 cards").first
+        toast.wait_for(timeout=8000)
+        assert [len(e["changes"]) for e in edits] == [2], edits
+        toast.locator("button", has_text="Undo").click()
+        # the save takes the one remove; 150 cards out is big, so it asks first
+        ask = page.locator(".mtgbox[role=dialog]:not([hidden])", has_text="Remove 150 cards?")
+        ask.wait_for(timeout=8000)
+        assert edits[-1]["changes"] == [{"action": "remove", "card_name": "Swamp"}], edits[-1]
+        ask.locator("button", has_text="Remove 150 cards").click()
+        page.wait_for_function("() => !document.querySelector('#cards [data-card=\"Swamp\"]')", timeout=8000)
+        assert errors == []
+        browser.close()

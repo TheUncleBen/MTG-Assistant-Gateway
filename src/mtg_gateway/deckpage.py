@@ -1430,8 +1430,6 @@ def cards_html(
         ]
     else:
         groups = [*groups, *extra]
-    if not groups:
-        return "<section class='panel'><p class='muted'>No cards match the filter.</p></section>"
     did = esc(deck.id)
     excluded = deck.excluded_categories()
     # the member's own deck grouped by its categories: each stack's ⋮ edits that category on the
@@ -1524,6 +1522,16 @@ def cards_html(
     catinfo = (
         f" data-catinfo='{esc(json.dumps(category_info(deck), separators=(',', ':')))}'" if editable else ""
     )
+    filtered = " data-filtered='1'" if q else ""
+    # an empty deck (or a filter that matches nothing) keeps the #cards container, so the add
+    # row, More ways to add and the ?add= / ?scan_session= deep links still run (deck.js)
+    empty = (
+        "<p class='muted deck-empty'>No cards match the filter.</p>"
+        if q
+        else "<p class='muted deck-empty'>No cards yet. Add one with Add to the deck above.</p>"
+        if own
+        else "<p class='muted deck-empty'>No cards in this deck yet.</p>"
+    )
     addcat = (
         f"<a class='btn addcat' href='/decks/{did}/settings#categories' data-addcat>"
         f"{icon('plus')} Add category</a>"
@@ -1532,7 +1540,8 @@ def cards_html(
     )
     return (
         f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}' "
-        f"data-grouping='{esc(group)}'{droppable}{catinfo}>{icons}{''.join(sections)}{addcat}</div>"
+        f"data-grouping='{esc(group)}'{droppable}{catinfo}{filtered}>"
+        f"{icons}{''.join(sections) or empty}{addcat}</div>"
     )
 
 
@@ -3904,6 +3913,7 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview.stacks .c + .c{margin-top:-123%}
 .deckview.stacks .c .ph{padding:3% 6% max(8%,26px) 42px}
 .deckview{container-type:inline-size}
+.deckview > .deck-empty{grid-column:1 / -1;margin:0}
 @container (max-width:16em){ .deckview.stacks .addcat{grid-column:1 / -1} }
 .deckview.stacks .c:has(.corner) .ph .t{padding-right:26px}
 .deckview.stacks .c .ph .t{align-items:center;min-height:0}
