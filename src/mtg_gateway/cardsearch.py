@@ -27,7 +27,7 @@ from starlette.responses import JSONResponse, Response
 
 from . import cardquery as cq
 from . import cardsearch_view as cv
-from . import prefs
+from . import prefs, ui
 from .busy import outage
 from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .scan.service import ScanError
@@ -365,7 +365,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
         resp = render(
             title,
-            body,
+            ui.page_head(title) + body,
             site=s.server_name,
             status=status,
             signed_in=True,
@@ -373,6 +373,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             sub=sub,
             wide=True,
+            heading=False,
             current="/search",
             head_extra=(
                 # deck.css carries the card viewer's own styles (the dialog, its bottom sheet on phones)

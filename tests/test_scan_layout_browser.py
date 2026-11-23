@@ -158,8 +158,12 @@ def test_one_column_one_row_bars_and_a_round_centred_capture_button(
             browser, page, errors, touch = _open(p, exe, server, server.sign_in(), width, app, scheme)
             problems: list[str] = []
             where = f"{width}px {'app' if app else 'browser'} {scheme}"
-            # the page keeps the standard's form column, not a width of its own
-            assert _style(page.locator("main.wrap"), "maxWidth") == "728px"
+            # the page keeps the standard's narrow column (44rem and the gutters), not a width of its own
+            assert "ui-narrow" in (page.locator("main.wrap").get_attribute("class") or "")
+            assert page.evaluate(
+                "() => { const m = document.querySelector('main.wrap'), c = getComputedStyle(m);"
+                " return m.clientWidth - parseFloat(c.paddingLeft) - parseFloat(c.paddingRight) <= 44 * 14 + 1; }"
+            )
             assert _style(page.locator(".cam-panel"), "display") == "flex"
             # Auto closes the options row; in the app the shutter and the viewfinder are the phone camera
             assert page.locator(".scan-opts > :last-child").get_attribute("id") == "auto-switch"

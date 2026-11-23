@@ -442,7 +442,7 @@ async def test_a_box_in_the_address_draws_open_and_the_way_back_is_kept(stack: S
         assert "List created." in hub
         # the six Archidekt lists as rows, Binder tags among them (not the tab bar's strip),
         # counts filled after
-        arch = hub.split("<h2>Your Archidekt lists</h2>")[1].split("</section>")[0]
+        arch = hub.split("<h2 class='ui-group'>Your Archidekt lists</h2>")[1].split("</section>")[0]
         assert arch.count("<a class='yrow' href=") == 6 and "lp-tabs" not in arch
         assert "<div class='rows lp-hubrows' data-counts='/lists/api/counts'>" in arch
         assert "href='/collection/wants'" in arch and "Pinned cards" in arch

@@ -20,6 +20,12 @@ from .theme import icon
 VIEWS = ("grid", "list")
 
 CARDS_CSS = """
+/* the list's heading with its count is the site's section heading (docs/UI-STANDARD.md) */
+.cs-panel .rbar .cnt{font-size:min(1.2rem,7vw);font-weight:700}
+.ui-head + .cs-panel{margin-top:.5rem}
+/* Mana value: each box holds its hint (From, To) whole inside the field's padding at any text
+   size; the pair goes on two lines where one has no room for both */
+.cs-panel .fg.mv .range input{min-width:calc(2.6em + 4rem + 4px)}
 /* the panel is the shared search panel (theme.SEARCH_PANEL_CSS); the form inside it lays out as
    the panel's own rows */
 .cs-panel > form.cs{display:contents}

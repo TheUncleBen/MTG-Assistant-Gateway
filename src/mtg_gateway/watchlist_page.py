@@ -1420,7 +1420,8 @@ WATCH_PAGE_CSS = (
 .watch-page .w-t .tr.open{background:var(--orange-tint)}
 .watch-page .w-t .tr.sel{background:var(--orange-tint)}
 .watch-page .w-t .act{display:inline-flex;align-items:center;gap:.4rem;flex-wrap:nowrap;white-space:nowrap}
-.watch-page .w-t .act .more{min-height:var(--ctl);display:inline-flex;align-items:center;margin:0}
+.watch-page .w-t .act .more{min-height:var(--ctl);display:inline-flex;align-items:center;margin:0;
+  padding:0 1rem;font-size:1rem}  /* the site's button on every screen, never a squeezed one */
 /* a list's head: its name, count and value, and its ⋮ at the row's end */
 .watch-page .w-t .tr.wgrp{grid-template-columns:32px minmax(0,1fr) auto;padding:.35rem .75rem;
   min-height:44px}
