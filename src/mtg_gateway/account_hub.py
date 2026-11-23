@@ -72,8 +72,6 @@ def _choices(action: str, name: str, csrf: str, options: tuple[tuple[str, str], 
 
 
 THEMES = (("light", "Light"), ("dark", "Dark"), ("system", "System"))
-# The app's answer to signInReturn (BrowserSignIn.returnStatus), in words
-SIGN_IN_RETURN = (("auto", "Comes back by itself"), ("tap", "May need a tap in the browser"))
 LAYOUTS = (("auto", "Fit the screen"), ("desktop", "Desktop layout"))
 
 
@@ -134,9 +132,9 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
                     _row("Reload", "refresh", native="reload"),
                     _row("Open a copied link", "link", native="openCopiedLink"),
                     _row("Change gateway", "swap", native="changeGateway"),
-                    # whether the browser sign-in comes back by itself (an Auth Tab browser on the
-                    # phone) or may wait for a tap on the gateway's page (a Custom Tab)
-                    _row("Sign-in", "login", native="signInReturn", states=SIGN_IN_RETURN),
+                    # No Sign-in line (the owner, 2026-11-23): whoever sees this page is signed in,
+                    # and a line that only said how the browser sign-in comes back did nothing.
+                    # The app's signInReturn method stays for older pages; nothing calls it.
                     # the installed version, from the app's user agent
                     _row("Check for app updates", "download", value=app_version(), native="checkForUpdates"),
                 ],

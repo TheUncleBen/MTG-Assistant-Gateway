@@ -320,8 +320,7 @@ else your gateway serves. A few things are native:
   last page has a button: tap **Open the MTG Assistant Gateway app** there.
   Right after you signed in during that sign-in (after **Sign out**, say),
   the gateway sends the browser straight to the app instead, so you don't see
-  that page where the browser allows it. Account › This app › **Sign-in**
-  says which of the two your phone does, and My activity lists each time the
+  that page where the browser allows it. My activity lists each time the
   page was shown. If the browser is already signed in to the sign-in service,
   you may not be asked anything after **Continue**. Only when the browser can't confirm the app
   belongs to the gateway does the app try once more in a way where the sign-in

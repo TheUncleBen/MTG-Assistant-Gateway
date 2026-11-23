@@ -25,6 +25,8 @@ odd input gets a plain answer instead of an error page, and a connected app read
 ### Changed
 - Card models moved from the rail and More to the Account page, under Assistants and apps, and
   their page has a way back to Account.
+- Account › This app in the Android app no longer shows a Sign-in line: you are signed in when
+  you see it, and the line only said how the browser sign-in comes back.
 - History and Reports group and filter by your own day, and the Watchlist's last check is a
   date like the others in the list.
 - The intros of My activity, History, Proposals, Reports, Search decks, Cards, Alerts, the

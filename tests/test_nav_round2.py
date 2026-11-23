@@ -195,19 +195,14 @@ def test_admins_and_the_app_get_their_own_rows(server: Server) -> None:
     assert "openInBrowser" not in app
 
 
-def test_this_app_says_how_sign_in_comes_back(server: Server) -> None:
-    """Review F2: This app has a line, from the app itself, saying whether the browser sign-in
-    comes back by itself (an Auth Tab browser) or may wait for a tap. Drawn hidden: only an app
-    that answers shows it (feedback.js), so an older app shows no empty row."""
+def test_this_app_has_no_sign_in_line(server: Server) -> None:
+    """The owner (2026-11-23): Account › This app showed a Sign-in line ("Comes back by itself") to
+    a member who is signed in already, and pressing it did nothing. It is gone, app and website."""
     app = _client(server).get("/account", headers=APP_UA).text
-    m = re.search(
-        r"<div class='yrow' data-native-state='signInReturn' data-native-row hidden>(.*?)</div>", app
-    )
-    assert m, app
-    assert "<span class='lbl'>Sign-in</span>" in m.group(1)
-    assert "<span class='val' data-native-show='auto'>Comes back by itself</span>" in m.group(1)
-    assert "<span class='val' data-native-show='tap'>May need a tap in the browser</span>" in m.group(1)
-    assert "signInReturn" not in _client(server).get("/account").text  # not on the website
+    assert "<span class='lbl'>Scan cards</span>" in app  # This app is drawn
+    assert "signInReturn" not in app and "Comes back by itself" not in app
+    assert "<span class='lbl'>Sign-in</span>" not in app
+    assert "signInReturn" not in _client(server).get("/account").text
 
 
 # -- Decks -----------------------------------------------------------------------------------------
