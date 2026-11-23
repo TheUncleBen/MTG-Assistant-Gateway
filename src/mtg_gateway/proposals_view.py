@@ -1071,11 +1071,14 @@ PROPOSALS_CSS = """
 /* a row's Add, Remove or Change is the standard status label (docs/UI-STANDARD.md): a pill, 24 px,
    .82rem 700, the colour's tint */
 .ui-drawer ul.changes .act{display:inline-flex;align-items:center;justify-content:center;min-height:24px;
-  padding:.1em .55rem;border:0;border-radius:999px;background:var(--surface-2);font-size:.82rem;
+  padding:.1em .3rem;border:0;border-radius:999px;background:var(--surface-2);font-size:.82rem;
   font-weight:700;line-height:1.2}
 .ui-drawer ul.changes li.add .act{background:var(--green-tint)}
 .ui-drawer ul.changes li.del .act{background:var(--red-tint)}
 .ui-drawer ul.changes li.chg .act{background:var(--orange-tint)}
+/* the pill is a little wider than the old boxed label: the gap beside it gives that back, so the
+   change keeps half the row on a small phone (test_every_change_label_fits_its_box) */
+.ui-drawer ul.changes li{column-gap:.5rem}
 .ui-drawer .apply{margin-top:1rem}
 .ui-drawer .apply .choice{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 .25rem}
 .ui-drawer .apply .choice button,.ui-drawer .apply .choice .btn{margin:0}
