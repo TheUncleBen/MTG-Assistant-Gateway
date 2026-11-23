@@ -2859,7 +2859,11 @@ html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,
    letter (last, after the headings' own sizes above; the same bounds as the headings' own, so a
    412 px phone at 200% keeps "Preconstructed" whole too, batch 10 AB5) */
 @media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.2rem,6vw)}
-  .mtgbox .bh{--th:min(1.25rem,9vw)}}
+  /* a 31-letter card name in a box title (Price alert on the Watchlist) came within a pixel of the
+     box's width at 200% text on a 320 px and a 412 px phone with CI's fonts: 8vw, not 9, and the
+     header reaches across the box's side padding to its edge (the ×'s 44 px circle with it; its
+     drawn icon keeps 11 px from the edge) */
+  .mtgbox .bh{--th:min(1.25rem,8vw);margin-right:calc(-1 * min(1.25rem, 18px))}}
 """
 
 
