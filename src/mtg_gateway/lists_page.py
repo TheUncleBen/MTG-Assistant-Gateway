@@ -492,7 +492,6 @@ def hub_html(
 
 HUB_CSS = """
 /* a grouped list: the standard's narrow column (render(main_class='ui-narrow')), all of it */
-main#main.wrap.ui-narrow:has(> .lp-col){max-width:calc(44rem + 2 * var(--gutter))}
 .lp-col{max-width:none;margin:0}.lp-hub{max-width:none;margin:0}
 /* the name box narrows the rows (QG-25): a hidden row or group is gone, the count line only shows
    with words */

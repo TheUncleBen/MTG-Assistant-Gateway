@@ -191,9 +191,6 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
 
 
 HUB_CSS = """
-/* the standard's narrow column (render(main_class='ui-narrow')) for a page of grouped lists: the
-   theme's older 42rem rule for these pages (main.wrap:has(> .yhub, > .acc)) gives way to it */
-main.wrap.ui-narrow.ui-narrow:has(> .yhub, > .acc){max-width:calc(44rem + 2 * var(--gutter))}
 /* the title has no purpose line under it on these pages: the list starts a line lower */
 .ui-head + .yhub,.ui-head + .acc,.ui-head + .notice{margin-top:.75rem}
 .yhub{max-width:44rem;margin:0 auto}
@@ -216,10 +213,6 @@ main.wrap.ui-narrow.ui-narrow:has(> .yhub, > .acc){max-width:calc(44rem + 2 * va
    grouped list: --group-bg, --radius-lg, a divider between rows */
 .ygrp .rows{background:var(--group-bg);border:1px solid var(--border-soft);border-radius:var(--radius-lg);
   overflow:hidden}
-/* Collection and Lists still write a bare <h2> in a group: it gets the same look until those pages
-   add class='ui-group' (then this rule goes) */
-.ygrp h2:not(.ui-group){margin:0 0 .4rem .9rem;font-size:.8rem;font-weight:700;line-height:1.3;
-  text-transform:uppercase;letter-spacing:.04em;color:var(--menu-head)}
 .ygrp .yrow{display:flex;align-items:center;gap:.8rem;width:100%;min-height:50px;margin:0;padding:0 1rem;
   border:0;border-radius:0;background:transparent;color:var(--text);text-decoration:none;font:inherit;
   font-weight:400;text-align:left;cursor:pointer;justify-content:flex-start}

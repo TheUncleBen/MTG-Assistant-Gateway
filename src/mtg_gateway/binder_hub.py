@@ -803,7 +803,6 @@ main form.bn-tools > button.bn-select:not(.mini):not(.inline){margin:0 0 0 auto;
   font-variant-numeric:tabular-nums}
 .bn-example:empty{display:none}
 /* settings: the standard's narrow column (render(main_class='ui-narrow')), all of it */
-main#main.wrap.ui-narrow:has(> .bn-set){max-width:calc(44rem + 2 * var(--gutter))}
 .yhub.bn-set{max-width:none}
 .bn-set .ui-head{margin-bottom:1rem}
 .bn-set .ygrp.bn-keep{display:block}  /* a group of fields, no rows: the empty-group rule would hide it */

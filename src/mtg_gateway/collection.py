@@ -2566,7 +2566,6 @@ def panel_html(
 COLLECTION_CSS = """
 /* one look for the shared pieces (docs/UI-STANDARD.md): the list's count is the site's section
    heading, and a button keeps its padding and text size in the head, on a phone and in a tile */
-.collection .spanel .rbar .cnt{font-size:min(1.2rem,7vw);font-weight:700}
 .collection .ui-head.bnhead .acts > .btn,.collection .ui-head.bnhead .acts details.colmore > summary.btn,
 .collection .ui-widgets .wdg .go .btn{padding:0 1rem;font-size:1rem}
 /* a tile narrower than its button (large text on a small phone): the words wrap inside the button */

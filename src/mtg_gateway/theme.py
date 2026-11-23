@@ -1588,7 +1588,7 @@ main.wrap.ui-narrow{max-width:calc(44rem + 2 * var(--gutter))}
    column; its heading and switch line up with the column instead of the wider page (the owner, 0.7.46
    checklist: everything shifted to the left on a desktop) */
 main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
-.wide main.wrap:has(> .yhub, > .acc, > .lp-col){max-width:calc(42rem + 2rem)}
+.wide main.wrap:has(> .yhub, > .acc, > .lp-col){max-width:calc(44rem + 2 * var(--gutter))}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%} .hubseg.seg-grid{display:grid}
   .hubbar{display:block}
   /* large text on a narrow phone: a part keeps its name on one line and moves to the next row
