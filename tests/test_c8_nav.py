@@ -60,7 +60,7 @@ def test_more_holds_forum_and_neither_watchlist_nor_lists(monkeypatch: pytest.Mo
     groups = theme.more_groups()
     assert [g for g, _links in groups] == ["Find", "Your cards", "Community"]
     hrefs = [h for _g, links in groups for h, _l, _i in links]
-    assert hrefs == ["/search", "/precons", "/scan", "/history/models", "/forum"]
+    assert hrefs == ["/search", "/precons", "/scan", "/forum"]
     assert [p[0] for p in theme.binder_pages()] == ["/collection", "/collection/lists", "/watchlist"]
     monkeypatch.setattr(theme, "WATCHLISTS", False)
     assert [p[0] for p in theme.binder_pages()] == ["/collection", "/collection/lists"]
@@ -79,7 +79,6 @@ def test_the_rail_has_forum_before_alerts_and_the_phone_bar_keeps_it_in_more(ser
         ("/proposals", ""),
         ("/scan", "railonly"),
         ("/precons", "railonly"),
-        ("/history/models", "railonly"),
         ("/forum", "railonly"),
         ("/notifications", "railonly bell foot"),
     ]

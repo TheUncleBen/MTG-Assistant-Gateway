@@ -262,7 +262,7 @@ else your gateway serves. A few things are native:
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
   down the left edge with the same places (Home, Decks, Binder, Assistant),
-  then Scan, Precons, Card models and Forum, and Alerts at its foot; the rail
+  then Scan, Precons and Forum, and Alerts at its foot; the rail
   has no More, since every page is on it. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.

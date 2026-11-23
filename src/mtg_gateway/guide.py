@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import modes, tool_labels, ui
+from . import card_models, modes, tool_labels, ui
 from .pages import _csrf, browser_session
 from .theme import ASSISTANT_PAGES, NAV_LINKS, binder_pages, icon, in_app, more_groups, rail_extra, render
 
@@ -400,7 +400,8 @@ def nav_description(*, html_out: bool = True) -> str:
         "A computer's browser shows them all in the top bar when it is wide enough, else the four "
         "places with More as a drop-down, and a search box beside them. Your "
         "picture at the top right opens the Account page: Account details, Lists, My activity, "
-        "the look, the Guide, the assistant skill and the apps, and Sign out."
+        f"the look, your assistants{' and their Card models' if card_models.SWITCHED_ON else ''}, "
+        "the Guide, the assistant skill and the apps, and Sign out."
     )
     if html_out:
         text = text.replace("the Account page", "the <a href='/account'>Account</a> page")

@@ -51,7 +51,7 @@ def test_the_places_are_four_and_more_holds_three_groups(monkeypatch: pytest.Mon
     assert [g for g, _links in groups] == ["Find", "Your cards", "Community"]
     hrefs = [h for _g, links in groups for h, _l, _i in links]
     # Watchlist lives in Binder and My lists under Account (decision C8): neither is in More
-    assert hrefs == ["/search", "/precons", "/scan", "/history/models", "/forum"]
+    assert hrefs == ["/search", "/precons", "/scan", "/forum"]
 
 
 def test_watchlist_leaves_binder_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:

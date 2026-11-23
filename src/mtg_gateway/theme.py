@@ -30,7 +30,7 @@ from urllib.parse import quote
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, card_models, localday, update_check
+from . import __version__, localday, update_check
 from .mana import SPRITE
 from .menus import MENUS_CSS
 
@@ -3183,13 +3183,14 @@ NAV_PLACE = {
     "/watchlist": "/binder",
     "/binder/settings": "/binder",
 }
-# The pages that light the picture (the Account place)
-ACCOUNT_PAGES = ("/account", "/account/details")
+# The pages that light the picture (the Account place). Card models live on the Account page
+# (the owner, 2026-11-23: moved from the rail and More), so their page lights it too.
+ACCOUNT_PAGES = ("/account", "/account/details", "/history/models")
 # More, in groups: the phone's sheet. Account, Guide and Admin live on the Account page your
 # picture opens; the lists and the Watchlist live in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
-    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "layers")]),
+    ("Your cards", [("/scan", "Scan", "scan")]),
     ("Community", [("/forum", "Forum", "comment")]),
 ]
 # The rail without More (0.7.46 redesign, screen 1): an open Fold's rail has room for every page,
@@ -3199,7 +3200,7 @@ MORE_GROUPS = [
 # given homes (Binder's switch and the Account page): the rail follows the code. Forum was on the
 # rail but not in the mockup: it closes the second group, as Community closes More. The phone
 # keeps its tab bar and More sheet. Each choice still open for the owner is one constant here.
-RAIL_PAGES = ("/scan", "/precons", "/history/models", "/forum")
+RAIL_PAGES = ("/scan", "/precons", "/forum")
 RAIL_ALERTS_AT_FOOT = True  # No: Alerts sits inside the second group, under Forum
 RAIL_GROUP_LINE = True  # the thin line between the four places and the rest
 # A computer's top bar lists the rail's pages too, and drops More ▾, once the bar is wide enough:
@@ -3212,10 +3213,9 @@ def binder_pages() -> list[tuple[str, str, str]]:
 
 
 def more_groups() -> list[tuple[str, list[tuple[str, str, str]]]]:
-    """More's groups, without My card models while descriptions are not kept
-    (card_models.SWITCHED_ON)."""
-    off = set() if card_models.SWITCHED_ON else {"/history/models"}
-    return [(head, [x for x in links if x[0] not in off]) for head, links in MORE_GROUPS]
+    """More's groups. Card models are not among them: their row is on the Account page
+    (account_hub.groups)."""
+    return [(head, list(links)) for head, links in MORE_GROUPS]
 
 
 def rail_extra() -> list[tuple[str, str, str]]:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from . import modes, ui
+from . import card_models, modes, ui
 from .theme import app_version, current_layout, current_path, current_theme, display_name, icon, in_app
 
 # what a sign-out clears on the device (Clear-Site-Data "storage", pages.logout_post): said on
@@ -114,6 +114,9 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
                 # each assistant's own approval mode, three taps from any page (0.7.46 re-audit
                 # QG-14): avatar › Assistants › the assistant
                 _row("Assistants", "proposals", "/account/assistants?from=account"),
+                # the notes your assistant writes so the solo test plays a card it can't read; on
+                # this page since the owner's 2026-11-23 ask (they were on the rail and in More)
+                *([_row("Card models", "layers", "/history/models")] if card_models.SWITCHED_ON else []),
                 _row("Guide", "guide", "/guide"),
                 _row("Assistant skill", "report", "/install?for=skill"),
                 *([] if app else [_row("Android app", "download", "/install?for=android")]),
