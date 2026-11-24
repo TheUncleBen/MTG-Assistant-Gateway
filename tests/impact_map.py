@@ -54,6 +54,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -350,6 +351,48 @@ def _safe_read(path: str) -> str:
         return ""
 
 
+def _rg(args: list[str]) -> str:
+    """ripgrep's answer (``rg`` + args, run from the repository): ripgrep where it is installed,
+    else the same search in Python, for the flags this file uses (-l -n -i -F -w --no-heading
+    --no-messages -e PATTERN -- PATHS). A CI runner has no ripgrep."""
+    if shutil.which("rg"):
+        return subprocess.run(["rg", *args], cwd=ROOT, capture_output=True, text=True).stdout
+    flags = set(args[: args.index("-e")])
+    pattern = args[args.index("-e") + 1]
+    paths = args[args.index("--") + 1 :]
+    body = re.escape(pattern) if "-F" in flags else pattern
+    if "-w" in flags:
+        body = rf"\b(?:{body})\b"
+    rx = re.compile(body, re.IGNORECASE if "-i" in flags else 0)
+    files: list[Path] = []
+    for p in paths:
+        f = ROOT / p
+        if f.is_dir():  # as ripgrep: no hidden files, no caches
+            files += sorted(
+                x
+                for x in f.rglob("*")
+                if x.is_file()
+                and not any(q.startswith(".") or q == "__pycache__" for q in x.relative_to(ROOT).parts)
+            )
+        elif f.is_file():
+            files.append(f)
+    out = []
+    for f in files:
+        try:
+            text = f.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        rel = f.relative_to(ROOT).as_posix()
+        if "-l" in flags:
+            if rx.search(text):
+                out.append(rel)
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            if rx.search(line):
+                out.append(f"{rel}:{n}:{line}")
+    return "\n".join(out)
+
+
 def rg_files(pattern: str, *paths: str, fixed: bool = False, word: bool = False) -> set[str]:
     args = ["rg", "-l", "--no-messages"]
     if fixed:
@@ -357,8 +400,7 @@ def rg_files(pattern: str, *paths: str, fixed: bool = False, word: bool = False)
     if word:
         args.append("-w")
     args += ["-e", pattern, "--", *paths]
-    r = subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
-    return set(r.stdout.split())
+    return set(_rg(args[1:]).split())
 
 
 def import_graph() -> dict[str, set[str]]:
@@ -796,9 +838,8 @@ def _glob_hit(path: str, g: str) -> bool:
 def find(words: list[str]) -> str:
     lines = [f"# Places that hold: {', '.join(words)}", ""]
     pattern = "|".join(re.escape(w) for w in words)
-    r = subprocess.run(
+    found = _rg(
         [
-            "rg",
             "-n",
             "-i",
             "--no-heading",
@@ -813,13 +854,10 @@ def find(words: list[str]) -> str:
             "README.md",
             "CHANGELOG.md",
             "tests",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
+        ]
     )
     by: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
-    for row in r.stdout.splitlines():
+    for row in found.splitlines():
         path, _, rest = row.partition(":")
         surface = next((s for s, gs in SURFACES if any(_glob_hit(path, g) for g in gs)), "Other")
         by[surface][path].append(rest[:160])
@@ -932,13 +970,7 @@ def left_behind(base: str, hs: dict[str, Hunk], map_text: str) -> list[str]:
                     gone[ph].add(path)
     out = []
     for ph, sources in sorted(gone.items()):
-        r = subprocess.run(
-            ["rg", "-l", "-F", "--no-messages", "-e", ph, "--", *WORD_SURFACES],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        for f in sorted(set(r.stdout.split())):
+        for f in sorted(set(_rg(["-l", "-F", "--no-messages", "-e", ph, "--", *WORD_SURFACES]).split())):
             if f in sources or any(f == p or f.startswith(p.rstrip("/") + "/") for p in listed):
                 continue
             if f.startswith(("tests/", "CHANGELOG")):
