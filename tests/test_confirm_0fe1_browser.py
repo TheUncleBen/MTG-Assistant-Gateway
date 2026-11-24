@@ -19,7 +19,7 @@ from .test_overflow_sweep_browser import CARDS, SHEETS_LOADED, _seed, server  # 
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
 from .test_ui_standard_0746_browser import APP_UA
-from .waits import quiet, redrawn
+from .waits import quiet, redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -632,6 +632,7 @@ def test_the_inline_action_links_are_44_px_targets(server: Server, site) -> None
             " const b = a.closest('.ui-box'); if (b && window.MtgBox) window.MtgBox.openElement(b.id); }"
         )
         page.wait_for_selector(".mtgbox a[href='/lists/templates']")
+        settled(page)  # the box's opening ends first: its .98 scale reads 44 px as 43.1
         redrawn(page)
         r = page.locator(".mtgbox a[href='/lists/templates']").bounding_box()
         assert r and r["height"] >= 43.5 and r["width"] >= 43.5, r

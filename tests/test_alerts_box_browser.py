@@ -12,6 +12,7 @@ import pytest
 
 from .test_alerts_center_browser import _alerts, _exe
 from .test_suggest_browser import Server
+from .waits import settled
 
 APP_UA = (
     "Mozilla/5.0 (Linux; Android 15; SM-F966U; wv) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -90,6 +91,7 @@ def test_the_bell_box_reads_marks_and_clears_with_undo(
             _press(page.locator("[data-bell]:visible").first, touch)
             box = page.locator(".mtgbox.al-box")
             box.locator(".al-row").first.wait_for()
+            settled(page)  # the box's opening ends first: its .98 scale reads 44 px as 43.1
             # nothing in the box runs off its side (rows were cut at the left)
             over = page.evaluate(
                 "(() => { const b = document.querySelector('.mtgbox .body');"
