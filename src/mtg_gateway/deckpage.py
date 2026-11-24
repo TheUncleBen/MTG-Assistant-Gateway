@@ -1443,7 +1443,11 @@ def cards_html(
         own_customs = customs.get(name, [])
         qty = sum(c.quantity for c in cards) + sum(c.quantity for c in own_customs)
         price = sum((c.price or 0) * c.quantity for c in cards)
-        strike = " strike" if name in excluded else ""
+        # a category kept out of the deck (the maybeboard): its name muted and a "Not in deck" tag,
+        # never struck through (a struck heading reads as deleted)
+        out = name in excluded
+        strike = " out" if out else ""
+        out_tag = "<span class='ui-tag outtag'>Not in deck</span>" if out else ""
         menu = (
             f"<details class='dd catdd'><summary class='icon-only btn-ghost' "
             f"aria-label='Options for {esc(name)}' title='Category options'>{icon('more')}</summary>"
@@ -1455,7 +1459,7 @@ def cards_html(
         )
         head = (
             f"<div class='stackhead'><h2><span class='title{strike}' title='{esc(name)}'>{esc(name)}</span>"
-            f"{menu}</h2>"
+            f"{out_tag}{menu}</h2>"
             # "4 cards · $12.30": the count and the price as words, not "Qty: 4 · Price: $12.30"
             f"<div class='meta'>{plural(qty, 'card')}"
             + (f" · {money(price)}" if price else "")
@@ -2733,7 +2737,7 @@ def goldfish_guide_html(*, hidden: bool = False) -> str:
         "<button type='button' class='disc gf-allsteps' aria-expanded='false' aria-controls='gf-steps' "
         f"data-all='{esc(GOLDFISH_GUIDE_ALL)}' data-current='{esc(GOLDFISH_GUIDE_CURRENT)}'>"
         f"{esc(GOLDFISH_GUIDE_ALL)}</button>"
-        f"<button type='button' class='btn small' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button>"
+        f"<button type='button' class='ui-cap' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button>"
         "</span></div>"
         f"<ol class='gf-steps' id='gf-steps'>{steps}</ol>"
         "</section>"
@@ -3359,20 +3363,17 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .deltatable th{text-align:left;font-weight:500;padding:.3rem 1rem .3rem 0}
 .deltatable td{text-align:right;font-variant-numeric:tabular-nums}
 .banner .social{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
-/* a phone (mockup screen 5): the chips on one row, each its icon and count, the words for a
-   screen reader; a confirmation (social.js) takes the row under them. The chips are equal (each
-   grows from nothing); a chip the confirmation stands in for is hidden and the others share the
-   row (a grid's columns did not: with the confirmation across them the chips fell on top of each
-   other) */
+/* a phone: two to a row, each with its icon and its word (an icon alone did not say which was
+   which; 0.7.48 review), one to a row when large text leaves no room for two words side by side;
+   a confirmation (social.js) takes the row under them. A button the confirmation stands in for is
+   hidden and the others share the row (a grid's columns did not: with the confirmation across them
+   the buttons fell on top of each other) */
 @media (max-width:599.98px){
   .banner .social{display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;align-items:center}
-  .banner .social .soc{flex:1 1 0}
-  /* the chips' row narrower than 20em (large text): two and two, never three and one (P-17) */
+  .banner .social .soc{flex:1 1 calc(50% - .2rem)}
   .banner .info{container-type:inline-size}
-  @container (max-width:20em){ .banner .social .soc{flex:0 1 calc(50% - .2rem)} }
-  .banner .social .soc{justify-content:center;min-width:44px;height:36px;padding:0 .6rem;gap:.3rem}
-  .banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;overflow:hidden;
-    clip:rect(0 0 0 0);white-space:nowrap;padding:0;margin:0;line-height:1}
+  @container (max-width:15em){ .banner .social .soc{flex-basis:100%} }
+  .banner .social .soc{justify-content:center;min-width:44px;min-height:40px;padding:0 .6rem;gap:.35rem}
   /* the count stands alone beside the heart here: its box is trimmed to the digit's cap height, so
      centring the box centres the ink (a digit's ink sits above its line box's centre: polish B1) */
   .banner .social .soc .n{text-box:trim-both cap alphabetic}
@@ -3512,6 +3513,11 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* toolbar panel (filterBar) */
 .toolbar{padding:.5rem 1rem 1rem;position:relative;z-index:1}
 .toolbar .controls{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr);gap:1rem;align-items:end}
+/* the grid views' Card size makes five fields: under the width that holds them beside the add row,
+   the add row takes the first row whole and the five share the next (never a blank top left) */
+@media (max-width:1339.98px){ .toolbar .controls:has(.cardsize){grid-template-columns:1fr}
+  .toolbar .controls .views:has(.cardsize){grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr))}
+  .toolbar .controls .views:has(.cardsize) .filter{grid-column:auto} }
 /* a deck that is not the member's own has no Quick add, so the view controls take the whole row:
    the first child, not the only one, because static/deck.js adds the phone's View and More
    buttons after the form (with :only-child the form sat in the 1.2fr column at 1280 px and at
@@ -3540,13 +3546,13 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar .viewbtn,.toolbar .toolmore{display:none}
 @media (max-width:599.98px){
   .toolbar.compact{padding:.5rem .75rem}
-  .toolbar.compact .controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+  /* the add field keeps its label ("Add to the deck") above it: View and ⋮ line up with the field */
+  .toolbar.compact .controls{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.5rem}
   /* the row's spare width goes to the text field (its placeholder reads whole), not to View,
      which keeps its own width; under 360 px the field has the first row to itself and View fills
      the next one beside ⋮ */
   .toolbar.compact form.quick{flex:1 1 9rem;min-width:0;margin:0}
-  .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
-    clip:rect(0 0 0 0)}
+  .toolbar.compact form.quick > label{display:block;margin:0 0 .3rem}
   .toolbar.compact .quickrow{flex-wrap:nowrap}
   /* Add a card here's chip on a phone: the form takes the row and the box wraps under the chip
      when both don't fit, so the box keeps room to type in */
@@ -3683,7 +3689,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   font-weight:700;min-height:28px;margin:0}
 /* min-width 0: a long unbroken name shortens with … instead of widening the stack past the screen */
 .stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.stackhead .title.strike{text-decoration:line-through;color:var(--text-muted)}
+.stackhead .title.out{color:var(--text-muted)}
+.stackhead h2 .outtag{flex:none;margin-right:auto}
 .stackhead .meta{font-size:.857rem;color:var(--text-muted);display:block}
 .stackhead summary.icon-only{min-width:28px;min-height:28px;width:auto;height:auto;border:0;
   background:transparent;
@@ -4402,6 +4409,8 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .printpick{position:fixed;inset:0;z-index:62;display:none;align-items:center;justify-content:center;
   background:var(--scrim-strong,rgba(0,0,0,.78));padding:1.5rem;
   -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+/* opened from a box (the Add a card preview's Printing): over the box and its scrim (theme.py) */
+body:has(.mtgbox-scrim) .printpick{z-index:98}
 .printpick.open{display:flex}
 html.printpick-open{overflow:hidden}
 .printpick .ppbox{position:relative;width:min(100%,76rem);height:min(100%,56rem);display:flex;

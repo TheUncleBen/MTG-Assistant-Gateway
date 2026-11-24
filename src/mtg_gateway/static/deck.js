@@ -743,7 +743,8 @@
     return later > 1 ? " " + many : later === 1 ? " " + one : "";
   }
   /* job.card: the card drawn changed; job.start(): {changes, inverse, saying} when its turn comes
-     (null when nothing is left to send); job.saved(): after Archidekt took it; job.undo(): puts the
+     (null when nothing is left to send); job.saved(d): after Archidekt took it (d: the answer, whose
+     applied is false when writes are off and the change waits for review); job.undo(): puts the
      card back and returns the note's end ("Cultivate is back in Ramp."); job.what: "Move" and so on. */
   function background(job) {
     bgCount++;
@@ -756,7 +757,7 @@
       // nothing left to send (+ then − before the save went): its Saving note goes too
       if (!plan) { dropSavingNote(job.card, job.what); return null; }
       savingNote(plan.saying, true, job.card, job.what);
-      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(function () { if (job.saved) job.saved(); }, function (err) {
+      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(function (d) { if (job.saved) job.saved(d); }, function (err) {
         notSaved(plan, job, err, false);
       });
     }).then(done, done);
@@ -889,7 +890,9 @@
     if (names.indexOf(sideCat) < 0) names.push(sideCat);
     return names;
   }
-  function isSide(cat) { return !!cat && (cat === sideCat || excluded.indexOf(cat) >= 0); }
+  // outside the deck: the deck's own side category, one it keeps out, or one named Sideboard or
+  // Maybeboard in any case (the gateway files those outside the deck however Archidekt marks them)
+  function isSide(cat) { return !!cat && (cat === sideCat || excluded.indexOf(cat) >= 0 || /^(sideboard|maybeboard)$/i.test(cat)); }
   // the rows of a card already on the page in a zone (the deck proper, or outside it)
   function rowsOf(name, zone) {
     var face = frontFace(name);
@@ -963,7 +966,7 @@
       sel.value = value || was;
       sel.setAttribute("data-was", sel.value);
       if (window.MtgSelect) window.MtgSelect.refresh(sel);
-      if (onDone) onDone(sel.value);
+      if (onDone && value) onDone(sel.value);  // Cancel leaves the others as they were
       var btn = wrap.querySelector("button") || sel;
       btn.focus();
     };
@@ -1041,7 +1044,7 @@
     var main = rowsOf(name, "main"), side = rowsOf(name, "side");
     if (main.length || side.length) {
       var where = main.concat(side).map(function (c) { return qtyOf(c) + " in " + (stackOf(c) || catOf(c) || "the deck"); });
-      info.appendChild(el("p", "notice aphave", "Already here: " + where.join(", ") + ". Adding raises the count."));
+      info.appendChild(el("p", "notice aphave", "Already here: " + where.join(", ") + ". Adding raises that count, and the copies keep its category and finish; pick another printing to give them a row of their own."));
     }
     // Quantity: − n +
     var count = Math.max(1, Math.min(99, qty || 1));
@@ -1157,29 +1160,50 @@
     setTimeout(function () { addBtn.focus(); }, 0);
   }
 
+  // Whether an add grows this row rather than making one of its own: the gateway grows a row when
+  // the add names no printing, or names the row's printing in the row's finish (decks.py
+  // _pinned_entries); otherwise the copies get a row of their own.
+  function growsRow(row, ch) {
+    if (!ch.set_code) return true;
+    var set = String(row.getAttribute("data-set") || "").trim().toUpperCase();
+    if (set !== (String(ch.set_code).toUpperCase() + " " + String(ch.collector_number || "")).trim()) return false;
+    var f = String(row.getAttribute("data-finish") || "").toLowerCase();
+    var want = ch.finish ? String(ch.finish).toLowerCase() : ch.foil === true ? "foil" : "";
+    return (f === "normal" ? "" : f) === (want === "normal" ? "" : want);
+  }
+  // The Undo of one add, from the rows of that card in its zone before it: a card new to the zone
+  // is removed; one row that the add grows is set back to its count. None (null) when the add
+  // makes a row beside an existing one (a set_quantity names the card, and the gateway would keep
+  // whichever row it lists first, perhaps the old one's printing gone) or there are several rows.
+  function undoAdd(ch, had) {
+    var inv = null;
+    if (!had.length) inv = { action: "remove", card_name: ch.card_name };
+    else if (had.length === 1 && growsRow(had[0], ch)) inv = { action: "set_quantity", card_name: had[0].getAttribute("data-card"), quantity: qtyOf(had[0]) };
+    if (inv && ch.zone === "side") inv.zone = "side";
+    return inv;
+  }
   // One add, saved in the background like the page's other edits; Undo takes the copies back out
   function addOne(spec) {
     background({
       card: null, what: "Add",
       start: function () {
-        var had = rowsOf(spec.name, spec.zone);
-        var inv;
-        if (!had.length) inv = { action: "remove", card_name: spec.name };
-        else if (had.length === 1) inv = { action: "set_quantity", card_name: had[0].getAttribute("data-card"), quantity: qtyOf(had[0]) };
-        if (inv && spec.zone === "side") inv.zone = "side";
-        // several rows of it in that zone: an Undo would count them all, so none is offered;
-        // nor on a page drawn with a filter (?q=), whose rows the page does not all hold
-        if (serverFiltered) inv = null;
         var ch = { action: "add", card_name: spec.name, quantity: spec.qty };
         if (spec.category) ch.category = spec.category;
         if (spec.zone === "side") ch.zone = "side";
         if (spec.printing && spec.printing.set_code) { ch.set_code = spec.printing.set_code; ch.collector_number = spec.printing.collector_number; }
         if (spec.finish) ch.finish = spec.finish;
+        var had = rowsOf(spec.name, spec.zone);
+        var inv = undoAdd(ch, had);
+        // nor on a page drawn with a filter (?q=), whose rows the page does not all hold
+        if (serverFiltered) inv = null;
         var what = (spec.qty > 1 ? spec.qty + " × " : "") + spec.name;
+        // a card already there grows its row, which keeps its own category: the note names the
+        // category only when the add makes a row of its own
+        var ownRow = !had.length || !had.some(function (c) { return growsRow(c, ch); });
         return {
           changes: [ch], inverse: inv ? [inv] : [],
           saying: "Adding " + what + "…",
-          note: "Added " + what + (spec.category ? " to " + spec.category : "") + ". Snapshot kept under History."
+          note: "Added " + what + (spec.category && ownRow ? " to " + spec.category : "") + ". Snapshot kept under History."
         };
       },
       saved: function () {
@@ -1313,6 +1337,9 @@
     return items;
   }
   if (addWays && !addWays.hasAttribute("aria-disabled")) {
+    // with the menu layer the press opens the menu only: deckextras.js would start loading the
+    // package list for its box on any [data-box-open] press (the no-menu fallback keeps it)
+    if (window.MtgMenu) addWays.removeAttribute("data-box-open");
     addWays.addEventListener("click", function (e) {
       var Menu = window.MtgMenu;
       if (!Menu) return;  // without the menu layer the link opens the package box's address
@@ -1553,8 +1580,15 @@
       });
       var withBackup = !!(backup && backup.checked);
       box.close();
-      addMany(changes, withBackup);
-      if (kind === "paste") { try { sessionStorage.removeItem(PASTE_KEY); } catch (e) { /* private */ } }
+      // a pasted list stays in Paste a list until every part is saved; a part that stops leaves
+      // the cards not added there, one line each
+      var paste = kind === "paste";
+      addMany(changes, withBackup, paste ? function () {
+        try { sessionStorage.removeItem(PASTE_KEY); } catch (e) { /* private */ }
+      } : null, paste ? function (left) {
+        var lines = left.map(function (ch) { return (ch.quantity || 1) + " " + ch.card_name; });
+        try { sessionStorage.setItem(PASTE_KEY, lines.join("\n") + "\n"); } catch (e) { /* private */ }
+      } : null);
     });
     if (kind === "scan") {
       window.MtgFetch.json("/scan/api/sessions", { method: "GET", what: "your scans could not be listed" }).then(function (d) {
@@ -1588,53 +1622,59 @@
       lookUp();
     }
   }
-  // A batch: one save per 40 changes (the endpoint's limit), each with its own Undo
-  function addMany(changes, withBackup) {
-    for (var i = 0; i < changes.length; i += 40) {
-      (function (part, first) {
-        background({
-          card: null, what: "Add",
-          start: function () {
-            // One Undo step per card and zone: a scan can send one name as several changes
-            // (foil and normal, etched, more than 99 copies), and the save refuses a card
-            // removed twice. A card new to the zone is removed once; a card already there with one
-            // row is set back to its count, unless its changes asked for more than one finish
-            // (those may have made rows of their own, which a count on the name cannot undo).
-            var inverse = [], seen = {}, keys = 0, sure = true;
-            part.forEach(function (ch) {
-              var zone = ch.zone === "side" ? "side" : "main";
-              var key = zone + "\u0000" + frontFace(ch.card_name);
-              var kind = ch.finish === "etched" ? "etched" : ch.foil === true ? "foil" : "normal";
-              if (seen[key]) { seen[key].kinds[kind] = 1; return; }
-              keys++;
-              var had = rowsOf(ch.card_name, zone);
-              var inv = null;
-              if (!had.length) inv = { action: "remove", card_name: ch.card_name };
-              else if (had.length === 1) inv = { action: "set_quantity", card_name: had[0].getAttribute("data-card"), quantity: qtyOf(had[0]) };
-              if (inv && zone === "side") inv.zone = "side";
-              seen[key] = { kinds: {}, inv: inv };
-              seen[key].kinds[kind] = 1;
-              if (inv) inverse.push(inv);
-              else sure = false;
-            });
-            Object.keys(seen).forEach(function (k) {
-              var mixed = Object.keys(seen[k].kinds).length > 1;
-              if (mixed && seen[k].inv && seen[k].inv.action !== "remove") sure = false;
-            });
-            if (serverFiltered) sure = false;  // a page drawn with ?q= does not hold every row
-            // a card with several rows in its zone: the batch's Undo could not put it back alone
-            if (!sure || inverse.length !== keys) inverse = [];
-            var copies = part.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
-            return {
-              changes: part, inverse: inverse, backup: withBackup && first,  // one copy, before the first part
-              saying: "Adding " + copies + (copies === 1 ? " card…" : " cards…"),
-              note: "Added " + copies + (copies === 1 ? " card" : " cards") + ". Snapshot kept under History."
-            };
-          },
-          undo: function () { return ""; }
-        });
-      })(changes.slice(i, i + 40), i === 0);
-    }
+  // A batch: one save per 40 changes (the endpoint's limit), each with its own Undo. Each part
+  // goes once the one before it was saved: a part that fails, or waits for review (writes off),
+  // stops the list there with its own note, and the cards not sent are said (and, for a pasted
+  // list, put back in Paste a list). onAll: once every part was saved.
+  function addMany(changes, withBackup, onAll, keepRest) {
+    var PART = 40;
+    var send = function (i) {
+      var part = changes.slice(i, i + PART), rest = changes.slice(i + PART);
+      var stopped = function () {
+        var left = part.concat(rest);
+        if (keepRest) keepRest(left);
+        var n = left.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
+        return i === 0 && !rest.length ? "" : (n === 1 ? "1 card of the list wasn't added" : n + " cards of the list weren't added") + (keepRest ? "; Paste a list holds them." : ".");
+      };
+      background({
+        card: null, what: "Add",
+        start: function () {
+          // One Undo step per card and zone: a scan can send one name as several changes
+          // (foil and normal, etched, more than 99 copies), and the save refuses a card
+          // removed twice. A card new to the zone is removed once; a card already there with one
+          // row is set back to its count, unless one of its changes makes a row of its own
+          // (another printing or finish), which a count on the name cannot undo.
+          var inverse = [], seen = {}, keys = 0, sure = true;
+          part.forEach(function (ch) {
+            var zone = ch.zone === "side" ? "side" : "main";
+            var key = zone + "\u0000" + frontFace(ch.card_name);
+            var had = rowsOf(ch.card_name, zone);
+            if (had.length && !had.some(function (c) { return growsRow(c, ch); })) sure = false;
+            if (seen[key]) return;
+            seen[key] = 1;
+            keys++;
+            var inv = undoAdd(ch, had);
+            if (inv) inverse.push(inv); else sure = false;
+          });
+          if (serverFiltered) sure = false;  // a page drawn with ?q= does not hold every row
+          if (!sure || inverse.length !== keys) inverse = [];
+          var copies = part.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
+          return {
+            changes: part, inverse: inverse, backup: withBackup && i === 0,  // one copy, before the first part
+            saying: "Adding " + copies + (copies === 1 ? " card…" : " cards…"),
+            note: "Added " + copies + (copies === 1 ? " card" : " cards") + ". Snapshot kept under History."
+          };
+        },
+        saved: function (d) {
+          if (d && d.applied === false) { if (rest.length && keepRest) keepRest(rest); return; }  // kept for review: the page goes there
+          if (rest.length) send(i + PART);
+          else if (onAll) onAll();
+        },
+        // the part was not saved: its note says why, and which cards were not sent
+        undo: stopped
+      });
+    };
+    send(0);
   }
   // The deck editor's old address with a name or a scan (companion_tools.edit_page) and the Scan
   // page's "Add to deck": the preview or the review opens as the page loads
@@ -1662,7 +1702,8 @@
     bgQueue = bgQueue.then(idle).then(function () {
       bgCards.splice(bgCards.indexOf(job.card), 1);
       savingNote(plan.saying, true, job.card, job.what);
-      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(null, function (err) { notSaved(plan, job, err, true); });
+      // a Try again that goes through counts as the job saved (a list's next part goes then)
+      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(function (d) { if (job.saved) job.saved(d); }, function (err) { notSaved(plan, job, err, true); });
     }).then(done, done);
   }
   // Where a card sits and how it is filed, to put it back there when its save does not go through
@@ -1718,9 +1759,11 @@
     st.setAttribute("data-group", name);
     var head = el("div", "stackhead");
     var h2 = el("h2");
-    var title = el("span", "title", name);
+    var out = excluded.indexOf(name) >= 0;  // kept out of the deck: muted, with its tag (deckpage)
+    var title = el("span", out ? "title out" : "title", name);
     title.title = name;
     h2.appendChild(title);
+    if (out) h2.appendChild(el("span", "ui-tag outtag", "Not in deck"));
     head.appendChild(h2);
     head.appendChild(el("div", "meta", "0 cards"));
     st.appendChild(head);
@@ -1741,7 +1784,12 @@
       var first = $(".c, .row", x);
       return first && zoneOf(first) === "side";
     })[0];
-    if (side && excluded.indexOf(name) < 0) cards.insertBefore(st, side); else cards.appendChild(st);
+    // the "+ Add category" link stays last; the empty deck's "No cards yet" goes with the first stack
+    var addcat = $(".addcat", cards), empty = $(".deck-empty", cards);
+    if (empty) empty.remove();
+    if (side && excluded.indexOf(name) < 0) cards.insertBefore(st, side);
+    else if (addcat && addcat.parentNode === cards) cards.insertBefore(st, addcat);
+    else cards.appendChild(st);
     return st;
   }
   // a card the answer brings that the page never had (a quick add): drawn from its own markup
@@ -2244,12 +2292,13 @@
   }
   if (own && deckId) {
     // the editor's keys: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y (Cmd on a Mac), never while typing in a
-    // field, behind the card menu, viewer or EDHPlay dialog, or while a question is up
+    // field, behind the card menu, viewer, EDHPlay dialog or a box, or while a question is up
     document.addEventListener("keydown", function (ev) {
       if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
       var t = ev.target, tag = t && t.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
       if (menu || document.documentElement.classList.contains("cardview-open") || $(".deck-toast[role=alertdialog], .edhplay-dialog, .printpick.open")) return;
+      if (window.MtgBox && window.MtgBox.isOpen && window.MtgBox.isOpen()) return;  // a box is up (the add preview, a list's review)
       var k = (ev.key || "").toLowerCase();
       if (k === "z" && !ev.shiftKey) { if (past.length) { ev.preventDefault(); undoLast(); } }
       else if ((k === "z" && ev.shiftKey) || (k === "y" && !ev.metaKey)) { if (future.length) { ev.preventDefault(); redoLast(); } }

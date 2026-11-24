@@ -105,3 +105,19 @@ def test_an_empty_deck_keeps_the_cards_container_for_adding() -> None:
     assert "No cards in this deck yet." in other
     filtered = cards_html(deck, view="text", group="category", sort="name", q="zz", own=True)
     assert "No cards match the filter." in filtered and " data-filtered='1'" in filtered
+
+
+def test_a_kept_out_category_is_muted_with_a_tag_not_struck() -> None:
+    """0.7.48 loop round: the Maybeboard heading was struck through, which reads as deleted."""
+    from mtg_gateway.deckpage import DECK_CSS, cards_html
+
+    deck = parse_deck(_deck())
+    html = cards_html(deck, view="text", group="category", sort="name", q="", own=True)
+    assert "<span class='ui-tag outtag'>Not in deck</span>" in html
+    assert "strike" not in html and ".title.strike" not in DECK_CSS
+
+
+def test_goldfish_guide_buttons_are_both_capsules() -> None:
+    """0.7.48 loop round: Show all steps (a capsule) sat beside Hide the guide (a button)."""
+    page = goldfish_page_html(parse_deck(_deck()))
+    assert "<button type='button' class='ui-cap' data-guide='hide'>Hide the guide</button>" in page
