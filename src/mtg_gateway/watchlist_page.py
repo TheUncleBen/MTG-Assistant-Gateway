@@ -415,7 +415,7 @@ def _range_buttons(full_days: int) -> str:
         else ""
     )
     return (
-        "<span class='seg' role='group' aria-label='Range'>"
+        "<span class='ui-seg' role='group' aria-label='Range'>"
         f"<button type='button' data-range='30' aria-pressed='true'>30 days</button>{full}</span>"
     )
 
@@ -1233,10 +1233,10 @@ def watchlist_page_html(
     )
     tools = (
         f"<form class='ui-tools w-top' role='search' method='get' action='/watchlist'>{keep}"
-        "<label class='search'><span class='sr-only'>Search your watchlist</span>"
-        f"{icon('search')}<input type='search' name='q' value='{esc(query.q)}' "
-        "placeholder='Search' data-ph=''></label>"
-        f"<a class='btn btn-plain' href='{esc(query.href(box='add'))}' {ui.box_open_attr('w-add')}>"
+        + ui.search_field(
+            "q", label="Search your watchlist", value=query.q, placeholder="Search|", cls="search"
+        )
+        + f"<a class='btn btn-plain' href='{esc(query.href(box='add'))}' {ui.box_open_attr('w-add')}>"
         f"{icon('plus')}Watch a card</a>"
         "<button type='button' class='btn-plain w-select' aria-pressed='false' hidden>"
         f"{icon('check')}Select</button>"
@@ -1517,15 +1517,7 @@ WATCH_PAGE_CSS = (
 .watch-page .wx-h{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.4rem .75rem;
   margin:0 0 .5rem}
-.watch-page .seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--card-border);
-  border-radius:var(--radius);
-  overflow:hidden}
-.watch-page .seg button{margin:0;border:0;border-radius:0;background:transparent;color:var(--text);
-  min-height:36px;
-  padding:0 .75rem;font-weight:700}
-.watch-page .seg button + button{border-left:1px solid var(--card-border)}
-.watch-page .seg button[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text)}
-.watch-page .seg button{min-height:44px}
+/* the chart's range (30 days, Full history) is the site's compact segmented switch (.ui-seg) */
 .watch-page .pc{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:10rem auto;
   gap:.2rem .5rem}
 .watch-page .pc-y{display:flex;flex-direction:column;justify-content:space-between;font-size:.8rem;

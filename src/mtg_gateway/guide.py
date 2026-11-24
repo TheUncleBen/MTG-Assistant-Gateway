@@ -47,11 +47,7 @@ GUIDE_CSS = """
 .guide .gside{min-width:0}
 .gsearch{margin:0 0 .75rem}
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
-/* the box and its button share a row; at large text the button goes under the box, which
-   keeps the whole row, rather than the box shrinking to a letter (audit D13) */
-.gsearch .gsrow{display:flex;flex-wrap:wrap;gap:.5rem;align-items:stretch}
-.gsearch .gsrow input[type=search]{flex:1 1 12rem;min-width:0;margin:0}
-.gsearch .gsrow .btn{margin:0;flex:0 1 auto}
+/* the box is the one search field (ui.search_field): its magnifier, inside it, submits; Enter too */
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
 .gsearch .status:empty{display:none}
 /* the contents page: a card a part, its topics as rows */
@@ -1414,12 +1410,16 @@ def search_form_html(q: str = "") -> str:
     return (
         f"<form class='gsearch' method='get' action='{PAGE}/search' role='search'>"
         "<label for='guide-q'>Search the guide</label>"
-        "<div class='gsrow'>"
-        f"<input id='guide-q' type='search' name='q' value='{_esc(q)}' placeholder='Search' "
-        "maxlength='100' autocomplete='off' spellcheck='false' aria-describedby='guide-status' "
-        f"data-search='{PAGE}/search.json'>"
-        f"<button type='submit' class='btn btn-plain'>{icon('search')} Search</button></div>"
-        "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
+        + ui.search_field(
+            "q",
+            value=q,
+            placeholder="Search",
+            input_id="guide-q",
+            submit_label="Search the guide",
+            attrs=" maxlength='100' autocomplete='off' spellcheck='false' aria-describedby='guide-status' "
+            f"data-search='{PAGE}/search.json'",
+        )
+        + "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
         "<ul id='guide-results' class='gresults' aria-label='Matching topics' hidden></ul></form>"
     )
 

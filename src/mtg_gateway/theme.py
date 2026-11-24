@@ -484,7 +484,9 @@ details.dd .menu .actions button.primary{background:var(--orange);border:1px sol
 details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.primary:focus-visible{
   background:var(--orange);color:var(--on-orange);filter:brightness(1.08)}
 .msel-btn:active:not(:disabled){transform:none;filter:none}
-.msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:normal;
+/* the chosen value keeps to one line and ends in "…" where the box is narrower (loop round #11:
+   "Group by / day" on two lines in a filter row); a row of them wraps whole controls instead */
+.msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   overflow-wrap:normal;line-height:1.25}
 /* above every panel or dialog a list can open from (the card search Filters panel is 80, the add
    sheet 90): the sheet's dim background must cover the panel, or a tap above the sheet reaches it */
@@ -772,10 +774,18 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
    (docs/UI-STANDARD.md). .pill is an older name for it. A component's own .chip (the card
    viewer's Legal in formats, the scan printing picker's finishes) is not a tag: it has its own
    look in its own sheet, and this rule does not reach it. */
-.ui-tag,.pill{display:inline-flex;align-items:center;gap:.25rem;min-height:24px;
+/* One line, always: a tag longer than its row ends in "…" with its whole text in its title
+   (loop round #12: a wrapped tag was a three-line blob and made the tiles of a row uneven). The
+   line box is the pill's 24 px less its padding, so the words sit in its middle. */
+.ui-tag,.pill{display:inline-block;min-height:24px;
   max-width:100%;padding:.15rem .55rem;border-radius:999px;border:0;background:var(--surface-2);
-  color:var(--text);font-size:.82rem;font-weight:600;line-height:1.25;vertical-align:middle;
-  overflow-wrap:anywhere;white-space:normal}
+  color:var(--text);font-size:.82rem;font-weight:600;line-height:max(1.25em,calc(24px - .3rem));
+  vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ui-tag > svg.i,.pill > svg.i{vertical-align:-.15em;margin-right:.25rem}
+/* a review's summary is a sentence in a tag ("3 changes to your Archidekt account"): it wraps */
+.summary-pills :is(.ui-tag,.pill){white-space:normal;overflow-wrap:anywhere;line-height:1.25}
+/* the deck tiles' sheet (deckpage.py) still lets a tile's tag wrap; the one-line rule holds there too */
+ul.decklist .tags .pill.pill{white-space:nowrap;overflow-wrap:normal}
  /* a notice (F8): a tinted strip with a coloured left edge and no border of its own; info (blue),
    ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
 .notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
@@ -1421,19 +1431,32 @@ CARD_SIZE_PAGES = (
     "deck", "editor", "goldfish", "decks", "search", "collection", "watchlist", "scan", "printings"
 )  # fmt: skip
 CSS += """
-/* the S / M / L switch, styled as card search's Grid / List switch */
-.sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
-  overflow:hidden;vertical-align:middle}
+/* The compact segmented switch (.ui-seg: Grid / List, S / M / L, a chart's range, a package's
+   budget): one look with the place switch (.hubseg, docs/UI-STANDARD.md): a grey track with the
+   chosen part as a raised pill, at the control height. A part is 44 px for a finger inside a 44 px
+   track: its pill is the part's padding box, inside a clear 3 px edge (the track's own padding on
+   .hubseg), and neighbours share 4 px of that edge, so pills sit 2 px apart as .hubseg's do.
+   It keeps its own width wherever it sits: a toolbar row ends with it, nothing stretches it. */
+.ui-seg,.sizeseg,.spanel .segc,.budget{display:inline-flex;flex:none;gap:0;padding:0;border:0;
+  border-radius:12px;background:var(--seg-track);vertical-align:middle;width:fit-content;max-width:100%}
 /* .3em above and below, as a text box: at 200% text the letters grew to the box's edges (polish AL2) */
-.sizeseg button{margin:0;min-width:2.75rem;min-height:calc(var(--ctl) - 2px);height:auto;padding:.3em .75rem;
-  border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-weight:400;
-    box-shadow:none}
-.sizeseg button + button{border-left:1px solid var(--control-border)}
-.sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
-.sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-.sizeseg button{min-height:44px;min-width:44px}
-  /* the Grid / List switch: its own rule takes 2 px off --ctl for the border; a finger gets 44 */
-  .spanel .segc label{min-height:44px;min-width:44px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label){position:relative;display:inline-flex;
+  align-items:center;justify-content:center;
+  gap:.35rem;margin:0;min-width:44px;min-height:44px;height:auto;padding:.3em .7rem;
+  border:3px solid transparent;border-radius:12px;background:transparent padding-box;color:var(--text);
+  font:inherit;font-weight:700;line-height:1.2;box-shadow:none;cursor:pointer;filter:none}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label) + :is(button,label){margin-left:-4px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label):hover{
+  background:var(--surface-2) padding-box;color:var(--text);
+  border-color:transparent}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button[aria-pressed=true],label:has(input:checked)){
+  background:var(--seg-on) padding-box;
+  filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.18));z-index:1}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > button:focus-visible,
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > label:has(input:focus-visible){
+  outline:2px solid var(--focus);
+  outline-offset:-2px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label) svg.i{width:16px;height:16px;flex:none}
 .field.cardsize .sizeseg{display:flex;width:max-content}
 @media (min-width:1000.02px){
   .listbar .controls:has(.cardsize){
@@ -1580,6 +1603,12 @@ main.wrap.ui-narrow{max-width:calc(44rem + 2 * var(--gutter))}
 /* one row of parts as wide as their words, the row's room shared out (NC1) */
 .hubseg.seg-row{flex-wrap:nowrap}
 .hubseg.seg-row > *{flex:1 1 auto!important;white-space:nowrap}
+/* on a phone that one row's parts are equal in width too: a part's words take two lines where the
+   share is narrower than they are, and no word is broken (loop round #22: the Export box's
+   "Archidekt text" was twice as wide as "Files") */
+@media (max-width:599.98px){
+  .hubseg.seg-row > *{flex:1 1 0!important;min-width:min-content;white-space:normal!important;
+    text-align:center} }
 .hubseg.seg-measure{display:flex!important;flex-wrap:nowrap!important}
 .hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
 .hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}
@@ -1603,6 +1632,11 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
    (overflow-wrap still breaks a word too long for any screen) */
 @media (max-width:599.98px){.ui-head h1{font-size:min(2rem,10vw)}}
 .ui-sub{color:var(--text-muted);margin:.1rem 0 1rem;font-size:.93rem}
+/* a head with actions holds its purpose line (ui.page_head, ui.binder_head): right under the
+   title in the markup, so on a phone it comes before the actions (loop round #2); from 600 px the
+   actions sit beside the title and the line takes the row under both */
+.ui-head > .ui-sub{flex:0 0 100%;margin:0 0 .15rem}
+@media (min-width:600px){ .ui-head > .ui-sub{order:1;margin-top:.4rem} }
 
 /* labels: a word, a colour and an icon */
 .ui-lbl{display:inline-flex;align-items:center;gap:.3rem;min-height:24px;height:auto;
@@ -1667,6 +1701,9 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
   overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
 .ui-chips::-webkit-scrollbar{display:none}
+/* from 600 px (the Fold, a computer) the chips wrap onto as many rows as they need, every one
+   whole and in view; only a phone keeps the one row that scrolls, with the fade (loop round #10) */
+@media (min-width:600px){ .ui-chips{flex-wrap:wrap;overflow-x:visible} }
 /* more chips that way (static/topbar.js): the edge fades out instead of cutting a chip (N12) */
 .ui-chips.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
   mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
@@ -1689,31 +1726,51 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-chip .n{color:var(--text-muted);font-weight:700}
 .ui-chip[aria-pressed=true] .n,.ui-chip[aria-current] .n{color:inherit}
 .ui-chip svg.i{width:15px;height:15px}
-.list-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.25rem 1rem;
-  margin:0 0 .5rem}
+.list-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.25rem 1rem;
+  min-height:36px;margin:0 0 .5rem}
 .list-head h2{margin:0;font-size:1.2rem}
 .list-head h2 .ui-sub{font-size:1rem;margin:0}
-.list-head > .ui-sub{margin:0}
+/* the note at the row's end, with or without a capsule in it (Reports: "Newest first" and "Show
+   oldest first"), is level with the heading, and every list's head is the capsule's drawn height,
+   so a head with one is no taller than a head without (loop round #18) */
+.list-head > .ui-sub{margin:0;display:flex;align-items:center;gap:.5rem;min-width:0}
+.list-head > .ui-sub .ui-dots.balanced > *{vertical-align:middle}
+.list-head > .ui-sub .ui-cap{margin-block:-4px}
 
 /* toolbar: one search box, then the filters; every piece grows, so each row is filled edge to edge
    and a filter that wraps never sits alone beside empty space */
 .ui-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0 0 .75rem;
   container-type:inline-size}
 .ui-tools > *{min-width:0}
-.ui-tools .search{flex:2 1 20rem;position:relative;min-width:0;align-self:stretch;display:flex;
-  align-items:center}
-.ui-tools label.search{margin:0;font-weight:400}
-.ui-tools .search svg.i{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);width:16px;
-  height:16px;
-  color:var(--text-muted);pointer-events:none}
-.ui-tools .search input{width:100%;margin:0;padding-left:2.2rem;font-weight:400;
-  border-right:1px solid var(--control-border);border-radius:var(--radius)}
+.ui-tools .search{flex:2 1 20rem;min-width:0;align-self:stretch}
+/* The one search field (ui.search_field, docs/UI-STANDARD.md): the magnifier inside the field at
+   its left, on every page. Where the field's form submits, the magnifier is that form's submit
+   button (.go: a whole 44 px tap target over the field's left end) and Enter submits too; a list's
+   filter has the plain magnifier. The magnifier starts where a field's words would (its side
+   padding, which gives way on a very narrow box as every field's does). */
+.ui-search{--glass:min(1rem,4vw);position:relative;display:flex;align-items:center;min-width:0;margin:0;
+  font-weight:400}
+.ui-search > input,.ui-search > input[type=search]{flex:1 1 auto;width:100%;min-width:0;margin:0;
+  font-weight:400;padding-left:calc(var(--glass) + 16px + .55rem);
+  border:1px solid var(--control-border);border-radius:var(--radius)}
+.ui-search > svg.i,.ui-search > .go > svg.i{width:16px;height:16px;flex:none;color:var(--text-muted)}
+.ui-search > svg.i{position:absolute;left:var(--glass);top:50%;transform:translateY(-50%);
+  pointer-events:none}
+.ui-search > button.go{position:absolute;left:0;top:0;bottom:0;z-index:1;display:inline-flex;
+  align-items:center;justify-content:flex-start;width:var(--ctl);min-width:44px;height:auto;min-height:0;
+  margin:0;padding:0 0 0 var(--glass);border:0;border-radius:var(--radius) 0 0 var(--radius);
+  background:transparent;box-shadow:none;cursor:pointer}
+.ui-search > button.go:hover{background:transparent;filter:none}
+.ui-search > button.go:hover > svg.i,.ui-search > button.go:focus-visible > svg.i{color:var(--text)}
+.ui-search > button.go:focus-visible{outline:2px solid var(--focus);outline-offset:-3px}
 /* the filters share a row with level tops: a wrapped value makes its box taller, not lower */
-.ui-tools .f{flex:1 1 9.5rem;display:flex;align-items:center;align-self:stretch}
+/* a filter is as wide as its chosen value needs (9rem at least), so a row that runs out of room
+   wraps a whole control onto the next row before any value is cut (loop round #11) */
+.ui-tools .f{flex:1 1 auto;min-width:min(100%,9rem);display:flex;align-items:center;align-self:stretch}
 .ui-tools .f > :not(.msel-native){width:100%}  /* the hidden native select keeps its own size */
 .ui-tools select{margin:0}
-@media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)}
-  .ui-tools.n3 .f{flex:1 1 calc(33.333% - .34rem)} }
+/* a phone: two a row, so a third takes a row of its own, whole (three a row cut "Group by day") */
+@media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)} }
 /* Balanced rows, by the toolbar's own width (an open side panel narrows it as a Fold does,
    polish R5; C-FINDINGS F13): while the search (20em) and all the filters (9.5em each, .5em
    between) do not share one row, the search takes a row of its own and the filters the next;
@@ -2134,9 +2191,13 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   border:1px solid var(--card-border);border-radius:var(--radius-panel)}
 /* the label wraps at its spaces beside its icon, and a word too wide for the room beside the icon
    goes whole under it (audit 71911eba M1: "ASSISTAN/TS" on a 320 px phone at 200% text) */
-.wdg .lab{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;
-  font-weight:700;text-transform:uppercase;letter-spacing:.03em}
-.wdg .lab svg.i{width:16px;height:16px}
+.wdg .lab{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.4rem;color:var(--text-muted);
+  font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1.3}
+.wdg .lab svg.i{width:16px;height:16px;flex:none;margin-top:max(0px,calc(.65em - 8px))}
+/* the words (.t) take the room beside the icon and wrap there, so the icon is never left alone on
+   a line above them (loop round #13); they need their longest word's width, so only a word wider
+   than that room takes the next line whole */
+.wdg .lab > .t{flex:1 1 0;min-width:min-content}
 /* the big value: a row of flex items, the number and its unit beside it or, where the two do not
    share the line, the unit whole on the next. The words wrap at their spaces only, never inside
    a word: a number ("$310.00", "1,234", "0.7.46") has no space and so is never broken ("$310./00"
@@ -2192,10 +2253,6 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 /* the Activity pages (admin Activity, My activity): a search on its own line on narrow screens,
    and each event as a short label then its name as plain text that wraps. Each page sets its own
    .act-tools and .act-table columns. */
-.act-tools .search{position:relative;display:block;margin:0}
-.act-tools .search svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);
-  color:var(--text-muted)}
-.act-tools .search input{padding-left:2.3rem;width:100%}
 .act-tools .f{min-width:0}
 .act-table .c-ev,.act-table .c-det{min-width:0}
 .act-table .none,.act-table .gone{color:var(--text-muted)}
@@ -2594,12 +2651,10 @@ SEARCH_PANEL_CSS = """
 .spanel .srow{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
 .spanel .sp-name{flex:1 1 16rem;min-width:0}
 .spanel .sp-name > label{display:block;font-weight:700;margin:0 0 .35rem}
+/* the name box is the one search field (.ui-search): its magnifier, inside the field, submits */
 .spanel .sp-name .search{margin:0}
 /* 320 px at the browser's largest text: the box's side room gives way to its hint; 1rem otherwise */
-.spanel .sp-name .search > input{flex:1 1 auto;min-width:0;padding-inline:min(1rem,4vw)}
-/* the search button is as tall as its box at every text size (polish AG2: 44 px beside 64 px) */
-.spanel .sp-name .search button{height:auto;align-self:stretch;min-height:var(--ctl);width:var(--ctl);
-  padding:0;flex:none;display:inline-flex;align-items:center;justify-content:center}
+.spanel .sp-name .search > input{padding-right:min(1rem,4vw)}
 .spanel .sp-name .under:empty{display:none}
 .spanel .openhint{display:flex;align-items:center;gap:.6rem;margin-top:.5rem;padding:.35rem .35rem
   .35rem .7rem;
@@ -2722,21 +2777,16 @@ SEARCH_PANEL_CSS = """
    to edge, its controls sharing the width, so no corner of the panel is left empty (the owner's
    filter panel rule). The count's row keeps its controls at the right, the count at the left */
 @media (min-width:600px){ @container sp (max-width:659.98px){
-  .spanel .rbar:not(.cards) > .g,.spanel .rbar:not(.cards) > .segc{flex:1 1 auto}
+  .spanel .rbar:not(.cards) > .g.sort{flex:1 1 auto}
   .spanel .rbar:not(.cards) > .g.sort > span{flex:1 1 auto}
-  .spanel .rbar:not(.cards) > .g.sort .msel-btn,.spanel .rbar:not(.cards) > .g.sort select{width:100%}
-  .spanel .rbar:not(.cards) > .segc label,.spanel .rbar:not(.cards) .sizeseg button{flex:1 1 auto}
-  .spanel .rbar:not(.cards) .sizeseg{display:flex;flex:1 1 auto} } }
+  .spanel .rbar:not(.cards) > .g.sort .msel-btn,.spanel .rbar:not(.cards) > .g.sort select{width:100%} } }
+/* (loop round #6) the view and card size switches are never part of that sharing: they keep
+   their own width and end the row, on the Fold as on a computer */
 /* a bar with Select beside its count (My decks) has one piece more: on a wider open Fold the
    card size would wrap alone under the row's end, so that bar breaks after Sort up to the width
    where all of it fits one row, the second row filled the same way */
 @media (min-width:600px){ @container sp (min-width:660px) and (max-width:829.98px){
-  .spanel .rbar:has(> .cnt + .btn) .brk{display:block}
-  .spanel .rbar:has(> .cnt + .btn) > .segc{flex:1 1 auto}
-  .spanel .rbar:has(> .cnt + .btn) > .g.size{flex:1 1 auto}
-  .spanel .rbar:has(> .cnt + .btn) > .segc label,
-  .spanel .rbar:has(> .cnt + .btn) .sizeseg button{flex:1 1 auto}
-  .spanel .rbar:has(> .cnt + .btn) .sizeseg{display:flex;flex:1 1 auto} } }
+  .spanel .rbar:has(> .cnt + .btn) .brk{display:block} } }
 @container sp (max-width:879.98px){ .spanel .rbar.cards .brk{display:block} }
 @container sp (max-width:499.98px){ .spanel .rbar.cards .brk{display:none} .spanel .rbar.cards
   .brka{display:block} }
@@ -2747,21 +2797,13 @@ SEARCH_PANEL_CSS = """
 .spanel .rbar .more svg{transform:rotate(-90deg);transition:transform .15s}
 .spanel .rbar .more[aria-expanded=true] svg{transform:none}
 .spanel .rbar .clr{margin:0;white-space:nowrap}
-.spanel .segc{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
-  overflow:hidden;flex:none}
-.spanel .segc label{position:relative;display:inline-flex;align-items:center;justify-content:center;
-  gap:.35rem;
-  margin:0;padding:0 .75rem;min-height:calc(var(--ctl) - 2px);cursor:pointer;font-weight:400;
-    color:var(--text)}
-.spanel .segc label + label{border-left:1px solid var(--control-border)}
+/* Grid / List: the compact segmented switch (.ui-seg's look, above), its radios under the parts */
 .spanel .segc input{position:absolute;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}
-.spanel .segc label:has(input:checked){background:var(--orange-tint);font-weight:700}
-.spanel .segc label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .spanel .rbar .cardsize{display:inline-flex;align-items:center;gap:.5rem}
 .spanel .rbar .cardsize .lbl{display:none}
 /* R-175: the size switch stays whatever the view; in a list it sizes the row pictures (--thumb-scale) */
 @media (max-width:1279.98px){ .spanel .rbar .view .tx{display:none}
-  .spanel .rbar .view label{width:calc(var(--ctl) - 2px);padding:0} }
+  .spanel .rbar .view label{width:var(--ctl);padding:0} }
 /* phones: the filter groups wait in a full-screen sheet behind the Filters button; the name row
    stays; the bar keeps the count, one Sort drop-down and the view */
 .spanel .sp-sheet-head,.spanel .sp-sheet-foot,.spanel .sheet-size{display:none}

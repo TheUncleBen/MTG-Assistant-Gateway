@@ -2593,10 +2593,8 @@ COLLECTION_CSS = """
 /* a tag as a chip: the tag's colour as a dot (--tagc) beside its name in the page's own text colour,
    so it reads in both themes whatever colour the member picked */
 /* the look is the site's tag (.ui-tag, theme.py) */
-.pill.tag{gap:.3rem;max-width:100%;min-width:0}
-/* the whole name, on more lines where one has no room for it (a narrow phone at large text), never
-   cut with an ellipsis (polish, check on c246456a: "landfall-and-ra…" at 320 px and 200%) */
-.pill.tag > .t{min-width:0;white-space:normal;overflow-wrap:break-word}
+/* one line, as every tag: a name longer than its row ends in "…", whole in the chip's title */
+.pill.tag .sw{margin-right:.3rem;vertical-align:baseline}
 .pill.tag .sw,.tagck .sw{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;flex:none;
   background:var(--tagc,var(--text-muted));box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
 .tagrow{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.3rem;min-width:0}

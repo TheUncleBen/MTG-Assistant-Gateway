@@ -469,6 +469,7 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             sid=sid,
             current="/notifications",
             heading=False,
+            main_class="ui-narrow",
         )
 
     @server.custom_route("/notifications/open/{alert_id}", methods=["GET"], include_in_schema=False)

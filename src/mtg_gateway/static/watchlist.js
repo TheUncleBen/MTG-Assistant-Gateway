@@ -128,7 +128,7 @@
     var head = box.querySelector(".wx-h h3");
     var label = (head && head.textContent) || "";
     if (!box.__heading) box.__heading = label;
-    box.querySelectorAll(".seg button").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+    box.querySelectorAll(".ui-seg button").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
     var cur = box.getAttribute("data-currency") || "usd";
     var what = box.getAttribute("data-card") || box.__heading;
     if (btn.getAttribute("data-range") !== "full") {
@@ -334,7 +334,7 @@
       return;
     }
 
-    var range = e.target.closest(".watch-page .seg button[data-range]");
+    var range = e.target.closest(".watch-page .ui-seg button[data-range]");
     if (range) { setRange(range); return; }
     var name = e.target.closest(".watch-page a.wcard");
     if (name && window.MtgCardView) {

@@ -258,10 +258,15 @@ def library_html(
     return (
         "<div class='yhub bn-lib'>"
         f"<form class='bn-find' method='get' action='{PATH}' role='search'>"
-        f"<label class='sr-only' for='bn-q'>Search your binder</label>{icon('search')}"
-        f"<input id='bn-q' name='q' type='search' placeholder='Search your binder' data-ph='Search|' "
-        f"value='{esc(view.q)}' "
-        "autocomplete='off' enterkeyhint='search'></form>"
+        f"<label class='sr-only' for='bn-q'>Search your binder</label>"
+        + ui.search_field(
+            "q",
+            value=view.q,
+            placeholder="Search your binder|Search|",
+            input_id="bn-q",
+            attrs=" autocomplete='off' enterkeyhint='search'",
+        )
+        + "</form>"
         f"<section class='ygrp'><h2 class='ui-group'>Cards</h2><div class='rows'>{cards}</div></section>"
         f"<section class='ygrp'><h2 class='ui-group'>Lists</h2><div class='rows'>{''.join(mine)}</div>"
         "</section>"
@@ -303,9 +308,9 @@ def _chips(r: dict[str, Any]) -> str:
         if band:
             out.append(f"<span class='band'>Alert {esc(' · '.join(band))}</span>")
     if r["list"]:
-        out.append(f"<span class='ui-tag'>{esc(r['list'])}</span>")
+        out.append(ui.tag(r["list"]))
     for t in r["tags"][:3]:
-        out.append(f"<span class='ui-tag'>{icon('tag')}{esc(t)}</span>")
+        out.append(ui.tag(t, icon_name="tag"))
     return "".join(out)
 
 
@@ -712,11 +717,8 @@ CSS = """
 .bn{display:grid;gap:1.25rem;align-items:start}
 .bn .bn-lib{max-width:none;margin:0}
 .bn-top{margin-bottom:-.5rem;min-width:0}
-/* the search box is the shared field, its magnifier drawn inside its left padding */
-.bn-find{position:relative;display:block;margin:0 0 1rem;color:var(--text-muted)}
-.bn-find svg.i{position:absolute;left:.8rem;top:50%;width:18px;height:18px;transform:translateY(-50%);
-  pointer-events:none}
-.bn-find input{width:100%;margin:0;padding-left:2.5rem}
+/* the search box is the one search field (ui.search_field) */
+.bn-find{display:block;margin:0 0 1rem}
 .bn .ygrp .yrow small,.bn-set .ygrp .yrow small{display:block;
   color:var(--text-muted);font-size:.82rem;margin-top:.1rem}
 .bn .ygrp .yrow .lbl{padding:.5rem 0}

@@ -209,8 +209,14 @@ def page_html(models: list[dict[str, Any]], *, csrf: str, remove: str = "", noti
             f"<h2 id='mm-mine-h'>Your card models <span class='mm-n'>{n}</span></h2>"
             + (
                 "<div class='field mm-search'><label for='mm-q' class='sr-only'>Search your card models"
-                "</label><input id='mm-q' type='search' data-models-filter placeholder='Card name'"
-                " autocomplete='off'></div>"
+                "</label>"
+                + ui.search_field(
+                    "q",
+                    placeholder="Card name",
+                    input_id="mm-q",
+                    attrs=" data-models-filter autocomplete='off'",
+                )
+                + "</div>"
                 if n > 5
                 else ""
             )
