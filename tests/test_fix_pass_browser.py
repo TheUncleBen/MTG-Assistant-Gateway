@@ -356,11 +356,13 @@ LAYOUT = """({touch, rail}) => {
   }
   const site = q('.topbar #site-q');
   if (site && site.getClientRects().length) out.siteSearchH = R(site).h;
-  const head = q('.ui-head.phead'), panel = q('.spanel'), crumbs = q('nav.crumbs');
+  // the way back from a folder: the standard capsule one level down, the trail deeper (0.7.48)
+  const head = q('.dkhead, .ui-head.phead'), panel = q('.spanel');
+  const crumbs = q('#decks-list nav.crumbs, #decks-list .ui-back-line a'), here = q('#fv-here');
   const areas = qa('section.fv-area');
   if (head && panel) out.headToPanel = R(panel).t - R(head).b;
   if (panel && crumbs) out.panelToCrumbs = R(crumbs).t - R(panel).b;
-  if (crumbs && areas.length) out.crumbsToArea = R(areas[0].querySelector('h2')).t - R(crumbs).b;
+  if (crumbs && here) out.crumbsToArea = R(here).t - R(crumbs).b;  // the folder's heading under it
   if (areas.length) out.areaBorders = areas.map(a => parseFloat(getComputedStyle(a).borderTopWidth));
   if (panel) {
     const grid = panel.querySelector('.fgrid'), rbar = panel.querySelector('.rbar');
@@ -583,7 +585,7 @@ def test_the_brand_is_whole_at_1280_px_with_every_link(server: Server, path: str
         # them all as links and no More (theme.TOPBAR_FULL_FROM, redesign screen 1)
         from mtg_gateway import theme
 
-        assert got["links"] == len(theme.NAV_LINKS) + len(theme.rail_extra()) == 8, got
+        assert got["links"] == len(theme.NAV_LINKS) + len(theme.rail_extra()) == 7, got
         assert not page.locator(".topbar nav.site .navmore").is_visible()
         assert errors == [], errors
         browser.close()

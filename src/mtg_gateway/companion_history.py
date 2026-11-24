@@ -218,11 +218,7 @@ def add_history_routes(
         )
         # the deck's report trends (none with fewer than two reports)
         trend = trend_html(reports.trend(sub, deck_id)) if deck_id else ""
-        back = (
-            "<p class='hy-back'>" + ui.cap_link("← Back to the deck", f"/decks/{deck_id}") + "</p>"
-            if deck_id
-            else ""
-        )
+        back = ui.back_link("Back to the deck", f"/decks/{deck_id}") if deck_id else ""
         if shown:
             listing = events_html(shown, group=query["group"], query=query, now=int(now))
             # Load more (Standard 13): the next page's link, whose rows static/loadmore.js adds
@@ -1038,6 +1034,7 @@ def add_history_routes(
             heading=False,
             current=card_models_view.PAGE,
             viewer_only=True,
+            main_class="ui-narrow",
             extra_scripts=("export.js", "cardmodels.js"),
             extra_css=card_models_view.CSS,
         )

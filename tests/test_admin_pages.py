@@ -75,7 +75,7 @@ async def _get(b, path: str) -> str:
 
 def _widgets(text: str) -> list[str]:
     block = text.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
-    return re.findall(r"<span class='lab'>(?:<svg.*?</svg>)?([^<]+)</span>", block)
+    return re.findall(r"<span class='lab'>(?:<svg.*?</svg>)?<span class='t'>([^<]+)</span></span>", block)
 
 
 # -- Overview --------------------------------------------------------------------------------------
@@ -218,7 +218,9 @@ async def test_a_members_panel_holds_the_ids_the_actions_and_the_two_boxes(gw: H
     try:
         text = await _get(b, "/admin/users?open=user-2")
         panel = text.split("<aside class='ui-drawer' aria-label='bob'>", 1)[1]
-        assert "<a class='ui-cap' href='/admin/users'>← All members</a>" in panel
+        assert (
+            "<a class='ui-cap ui-back' href='/admin/users'>" in panel and "<span>All members</span>" in panel
+        )
         assert "<code>user-2</code>" in panel and "<code>claude-app</code>" in panel
         assert "<span class='nm'>Claude</span>" in panel and "bob_brews" in panel
         assert "class='btn btn-outline-danger' href='/admin/users?open=user-2&box=disable'" in panel
@@ -310,8 +312,9 @@ async def test_metrics_read_in_words_with_the_raw_name_only_in_a_rows_details(gw
         opened = await _get(b, "/admin/metrics?open=tool%3Asearch_decks")
         assert "<div class='more-body' id='m-0-more'>" in opened and "aria-expanded='true'" in opened
         none = await _get(b, "/admin/metrics?q=zzz")
-        everything = "<a class='ui-cap' href='/admin/metrics'>Show everything</a>"
-        assert f"Nothing counted matches these filters. {everything}" in none
+        # the empty state (ui.empty) stands in for the table, with the standard button
+        assert "<p class='t'>Nothing counted matches these filters</p>" in none
+        assert "<p class='go'><a class='btn btn-plain' href='/admin/metrics'>Show everything</a></p>" in none
     finally:
         await b.aclose()
 
@@ -380,7 +383,7 @@ async def test_settings_opens_with_the_heading_purpose_and_tab_bar_in_the_wide_c
         groups = text.index("<nav class='ui-chips set-nav'")
         assert h1 < purpose < nav < groups
         assert "<main class='wrap ui-wide'" in text
-        assert ".set-page{max-width:52rem;margin-left:auto;margin-right:auto}" in text
+        assert ".set-page{max-width:44rem;margin-left:auto;margin-right:auto}" in text
         assert ".adm-nav{max-width:52rem}" not in text
         assert (
             "Changed here by" not in text

@@ -19,14 +19,14 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
-from .waits import redrawn
+from .waits import redrawn, settled
 
 pytest.importorskip("playwright")
 
 SHOTS = os.environ.get("MTG_PARITY_SHOTS")
 PAGES = ("/history/archidekt?deck_id=42", "/users/bo", "/account/details/backups")
 TEXT = "main h1, main h2, main p, main li, main label, main button, main .btn, main a, .notice"
-TARGETS = "main button, main .btn, main input[type=text], .yback"
+TARGETS = "main button, main .btn, main input[type=text], .ui-back"
 
 
 @pytest.fixture
@@ -55,6 +55,7 @@ def server(tmp_path: Path):
 
 
 def _short(page) -> list[str]:
+    settled(page)  # a box's opening ends first: its .98 scale reads 44 px as 43.1
     return page.evaluate(
         "(sel) => [...document.querySelectorAll(sel)]"
         ".filter(e => e.getBoundingClientRect().width && getComputedStyle(e).visibility !== 'hidden')"
@@ -159,7 +160,9 @@ def test_follow_works_on_a_profile_with_no_public_decks(server: Server) -> None:
         btn.click()
         page.locator(".confirm button", has_text="Follow").click()
         page.wait_for_function("() => document.querySelector('[data-social=follow]').dataset.state === '1'")
-        assert btn.inner_text().strip() == "Following bo"
+        # the page's title names them: the button is one word, its name says whom
+        assert btn.inner_text().strip() == "Following"
+        assert btn.get_attribute("aria-label") == "Following bo"
         assert 79 in server.ark.follows["alice"]
         browser.close()
     assert errors == []

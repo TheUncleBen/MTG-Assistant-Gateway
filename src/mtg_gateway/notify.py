@@ -418,6 +418,12 @@ def save_prefs(db: Database, sub: str, **values: Any) -> None:
             "(SELECT 1 FROM users WHERE sub = ?) ON CONFLICT(sub) DO NOTHING",
             (sub, int(time.time()), sub),
         )
+        if "summary_every" in values:
+            # a new choice starts afresh: a weekly one waits for a Monday, not for an old day sent
+            c.execute(
+                "UPDATE notify_prefs SET summary_sent_day = NULL WHERE sub = ? AND summary_every != ?",
+                (sub, values["summary_every"]),
+            )
         for k, v in values.items():
             c.execute(
                 f"UPDATE notify_prefs SET {k} = ?, updated_at = ? WHERE sub = ?",

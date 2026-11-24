@@ -135,6 +135,14 @@ def status_label(status: str, *, title: str = "", cls: str = "") -> str:
 NO_RISK = "Risk not judged"
 
 
+def tag(text: str, *, icon_name: str = "", cls: str = "") -> str:
+    """One tag (a deck's or a card's tag, a list's word on a row): the grey pill, one line. A tag
+    longer than its row ends in "…", so its whole text is its title too (docs/UI-STANDARD.md)."""
+    ic = icon(icon_name) if icon_name else ""
+    extra = f" {esc(cls)}" if cls else ""
+    return f"<span class='ui-tag{extra}' title='{esc(text)}'>{ic}{esc(text)}</span>"
+
+
 def no_risk_label() -> str:
     """A closed proposal whose risk could not be judged: nothing shown (a bare dash read as a
     stray mark: polish C2), never High for want of evidence; a screen reader hears why."""
@@ -385,17 +393,36 @@ def notice(
     return f"<div class='{classes}'{i}{r}>{text if html else esc(text)}</div>"
 
 
+def empty(title: str, text: str, action: str | None = None) -> str:
+    """The empty state (docs/UI-STANDARD.md): what a list, a table or a result shows when it holds
+    nothing. A panel of its own with one bold line saying what is missing, one muted line saying
+    what to do about it, and at most one standard button (``action``: ``button_link`` or
+    ``box_opener`` markup). It stands in for the whole table: no column header is drawn over
+    nothing. Never put it inside another panel."""
+    go = f"<p class='go'>{action}</p>" if action else ""
+    return f"<div class='ui-empty panel'><p class='t'>{esc(title)}</p><p class='d'>{esc(text)}</p>{go}</div>"
+
+
 # --- page head, widgets, chips, toolbar --------------------------------------------------------
 
 
-def page_head(title: str, sub: str = "", *, actions_html: str = "") -> str:
+def page_head(
+    title: str, sub: str = "", *, actions_html: str = "", count_html: str = "", cls: str = ""
+) -> str:
     """The title with one line saying what the page holds (the purpose line), and the page's
     actions at the title's end (``actions_html``: buttons or button_links, the one orange button
-    among them). Render with heading=False."""
+    among them). ``count_html``: a count after the title, in it (a list's "12 cards"); ``cls``:
+    the page's own classes on the head. Render with heading=False."""
     line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
-    acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
-    cls = "ui-head phead" if actions_html else "ui-head"
-    return f"<div class='{cls}'><h1>{esc(title)}</h1>{acts}</div>{line}"
+    names = ["ui-head"] + (["phead"] if actions_html else [])
+    names += [c for c in cls.split() if c not in names]
+    h1 = f"<h1>{esc(title)}" + (f" <span class='cn'>{count_html}</span>" if count_html else "") + "</h1>"
+    if not actions_html:
+        return f"<div class='{' '.join(names)}'>{h1}</div>{line}"
+    # with actions the purpose line is in the head, right under the title: a phone shows it before
+    # the actions, a wider screen under the title and the actions beside it (theme .ui-head > .ui-sub)
+    acts = f"<span class='acts'>{actions_html}</span>"
+    return f"<div class='{' '.join(names)}'>{h1}{line}{acts}</div>"
 
 
 def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "") -> str:
@@ -443,9 +470,15 @@ def binder_head(
         name = {"Cards": "Archidekt collection", "Lists": "Archidekt lists"}.get(name, name)
         n = counts.get(current)
         cn = f" <span class='cn'>{n:,}</span>" if n else ""
+        if not acts:
+            return (
+                f"{back_link('Binder', '/binder')}"
+                f"<div class='ui-head phead bnhead'><h1>{esc(name)}{cn}</h1></div>{line}"
+            )
+        # the purpose line right under the title, before the actions (as ui.page_head)
         return (
-            f"<p class='bn-up'><a class='bn-back' href='/binder'>{icon('back')}Binder</a></p>"
-            f"<div class='ui-head phead bnhead'><h1>{esc(name)}{cn}</h1>{acts}</div>{line}"
+            f"{back_link('Binder', '/binder')}"
+            f"<div class='ui-head phead bnhead'><h1>{esc(name)}{cn}</h1>{line}{acts}</div>"
         )
     switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
     return (
@@ -513,7 +546,7 @@ def widget(
     det = detail_html or esc(detail)
     go = f"<span class='go'>{''.join(actions)}</span>" if actions else ""
     return (
-        f"<div class='{cls}'><span class='lab'>{icon(icon_name)}{esc(title)}</span>"
+        f"<div class='{cls}'><span class='lab'>{icon(icon_name)}<span class='t'>{esc(title)}</span></span>"
         f"<span class='big'>{number}</span>"
         + (f"<span class='det'>{det}</span>" if det else "")
         + f"{go}</div>"
@@ -589,6 +622,46 @@ def filter_select(name: str, label: str, options: Sequence[tuple[str, str]], sel
     return f"<span class='f'><select name='{esc(name)}' aria-label='{esc(label)}'>{opts}</select></span>"
 
 
+def search_field(
+    name: str,
+    *,
+    label: str = "",
+    value: str = "",
+    placeholder: str = "",
+    input_id: str = "",
+    submit_label: str = "",
+    attrs: str = "",
+    cls: str = "",
+) -> str:
+    """The one search field (docs/UI-STANDARD.md): a search box with the magnifier inside it at
+    its left. ``label`` names it for screen readers (not shown); leave it out where a visible
+    ``<label for=input_id>`` does. ``submit_label``: the field's form submits (a search page), so
+    the magnifier is that form's submit button, named this ("Search decks"); without it the
+    magnifier is plain (a list's filter: it filters as you type, and Enter submits its form).
+    ``placeholder`` as ``hint_attrs`` takes it; ``attrs``: more attributes for the box (with their
+    leading space); ``cls``: more classes for the field."""
+    classes = f"ui-search {esc(cls)}" if cls else "ui-search"
+    box_id = f" id='{esc(input_id)}'" if input_id else ""
+    box = (
+        f"<input{box_id} type='search' name='{esc(name)}' value='{esc(value)}'"
+        f"{hint_attrs(placeholder)}{attrs}>"
+    )
+    if submit_label:
+        # the box first, so the keyboard reaches it before its button; the button is drawn over
+        # the field's left end
+        named = (
+            f"<label class='sr-only' for='{esc(input_id)}'>{esc(label)}</label>" if label and input_id else ""
+        )
+        go = (
+            f"<button type='submit' class='go' aria-label='{esc(submit_label)}' "
+            f"title='{esc(submit_label)}'>{icon('search')}</button>"
+        )
+        return f"{named}<span class='{classes}'>{box}{go}</span>"
+    if not label:
+        return f"<span class='{classes}'>{icon('search')}{box}</span>"
+    return f"<label class='{classes}'><span class='sr-only'>{esc(label)}</span>{icon('search')}{box}</label>"
+
+
 def toolbar(
     action: str,
     *,
@@ -610,8 +683,7 @@ def toolbar(
     cls = f"ui-tools n{len(filters)}" if len(filters) >= 2 else "ui-tools"
     return (
         f"<form class='{cls}' role='search' method='get' action='{esc(action)}'>{hidden}"
-        f"<label class='search'><span class='sr-only'>{esc(search_label)}</span>{icon('search')}"
-        f"<input type='search' name='{esc(name)}' value='{esc(q)}'{hint_attrs(placeholder)}></label>"
+        f"{search_field(name, label=search_label, value=q, placeholder=placeholder, cls='search')}"
         f"{''.join(filters)}"
         "<noscript><button type='submit' class='btn-plain'>Search</button></noscript></form>"
     )
@@ -658,7 +730,7 @@ def check_cell(name: str, value: str, label: str, *, checked: bool = False, form
 def group_row(title_html: str, meta_html: str = "", *, check_html: str = "", action_html: str = "") -> str:
     """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta
     line. With ``action_html`` (a row list, ``.ui-rows``): the meta line sits under the title and
-    the action (Open deck, as a capsule) ends the row."""
+    the action (Open deck, a standard button: ui.button_link) ends the row."""
     chk = check_html or "<span></span>"
     if action_html:
         small = f"<small>{meta_html}</small>" if meta_html else ""
@@ -680,19 +752,23 @@ def row_menu(href: str, name: str) -> str:
     )
 
 
-def row_open(href: str, word: str) -> str:
-    """A row list's main action (Review, Details, Open): the word in a capsule from 600 px; on a
+def row_open(href: str, word: str, *, cls: str = "", attrs: str = "", label: str = "") -> str:
+    """A row list's main action (Review, Details, Open): the word in a standard button from 600 px; on a
     phone a 44 px chevron, so the title keeps its line at any text size (the word stays for
-    screen readers)."""
+    screen readers). ``label``: the action's name where the word alone does not say enough
+    ("Details of Sol Ring"); ``cls`` and ``attrs``: a page's hook for the button and its own
+    attributes (a row that opens in place: aria-expanded, aria-controls)."""
+    extra = f" {esc(cls)}" if cls else ""
+    more = f" {attrs}" if attrs else ""
     return (
-        f"<a class='ui-cap' href='{esc(href)}' aria-label='{esc(word)}'>"
+        f"<a class='btn{extra}' href='{esc(href)}' aria-label='{esc(label or word)}'{more}>"
         f"<span class='sm-hide'>{esc(word)}</span>"
         "<span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )
 
 
 def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str:
-    """A row list's action cell: the one main action as a capsule (cap_link), then the ⋮
+    """A row list's action cell: the one main action (row_open), then the ⋮
     (row_menu). ``hidden_html``: forms the menu submits (a snapshot's Restore) that the row no
     longer shows; the row's page has them in view."""
     hid = f"<span class='acts' hidden>{hidden_html}</span>" if hidden_html else ""
@@ -718,9 +794,9 @@ def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> s
 
 
 def open_link(href: str, text: str) -> str:
-    """The row's open action: the word in a capsule from 600 px, a 44 px chevron on phones."""
+    """The row's open action: the word in a standard button from 600 px, a 44 px chevron on phones."""
     return (
-        f"<a class='act ui-cap' href='{esc(href)}' aria-label='{esc(text)}'>"
+        f"<a class='act btn' href='{esc(href)}' aria-label='{esc(text)}'>"
         f"<span class='sm-hide'>{esc(text)}</span><span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )
 
@@ -878,6 +954,19 @@ def menu_opener(text: str, href: str, box_id: str, *, icon_name: str = "") -> st
     return f"<a href='{esc(href)}' {box_open_attr(box_id)}>{ic}{esc(text)}</a>"
 
 
+def back_link(text: str, href: str, *, cls: str = "", attrs: str = "", line: bool = True) -> str:
+    """The way back a level, one look on every page (docs/UI-STANDARD.md): the grey capsule with
+    the back arrow, in a line of its own at the page's top left, above the title. ``text`` names
+    where it goes ("Binder", "Back to Proposals"). ``cls``: more classes for the line.
+    ``line=False``: the capsule alone, for a row that has other ways to go beside it (a report's
+    Back to the deck, Deck history, All reports)."""
+    extra = f" {attrs}" if attrs else ""
+    link = f"<a class='ui-cap ui-back' href='{esc(href)}'{extra}>{icon('back')}<span>{esc(text)}</span></a>"
+    if not line:
+        return link
+    return f"<p class='{f'ui-back-line {cls}' if cls else 'ui-back-line'}'>{link}</p>"
+
+
 def side_panel(
     heading_html: str,
     body_html: str,
@@ -885,14 +974,21 @@ def side_panel(
     label: str,
     close_href: str,
     back_text: str,
+    page_title: str = "",
+    merge_title: bool = False,
 ) -> str:
     """One item opened from a list: from 1100 px a panel beside the list with a × that
     closes it (Esc too); narrower, the same markup is the item's own page with a back link. The
-    × and the back link both go to ``close_href`` (the list); put the result in ``split``."""
+    × and the back link both go to ``close_href`` (the list); put the result in ``split``.
+    ``page_title`` (plain text): the page title the item has as its own page; beside the list the
+    list's page has the title, so it is not shown there. ``merge_title``: the page title says what
+    the panel's heading says, so as its own page the heading is not drawn a second time."""
+    title = f"<h1 class='page-only'>{esc(page_title)}</h1>" if page_title else ""
+    dh = "dh panel-only" if page_title and merge_title else "dh"
     return (
         f"<aside class='ui-drawer' aria-label='{esc(label)}'>"
-        f"<p class='page-only'><a class='ui-cap' href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
-        f"<div class='dh'><h2>{heading_html}</h2><a class='close btn panel-only' href='{esc(close_href)}'"
+        f"{back_link(back_text, close_href, cls='page-only')}{title}"
+        f"<div class='{dh}'><h2>{heading_html}</h2><a class='close btn panel-only' href='{esc(close_href)}'"
         f" aria-label='Close' title='Close'>{icon('x')}</a></div>{body_html}</aside>"
     )
 

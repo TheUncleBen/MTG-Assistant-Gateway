@@ -132,6 +132,7 @@
   $$("[data-social=follow]").forEach(function (btn) {
     var user = btn.getAttribute("data-user");
     var name = btn.getAttribute("data-name") || "this user";
+    var short = btn.hasAttribute("data-short");
     var holder = btn.closest(".social") || btn.parentNode;
     // one live note, there and empty from the start, so a screen reader announces what is set in
     // it (a status note added already filled is often not read)
@@ -152,8 +153,10 @@
       btn.setAttribute("data-state", following ? "1" : "0");
       btn.classList.toggle("on", following);
       btn.setAttribute("aria-pressed", following ? "true" : "false");
-      var sp = btn.querySelector("span");
-      if (sp) sp.textContent = (following ? "Following " : "Follow ") + name;
+      var sp = btn.querySelector("span"), word = following ? "Following" : "Follow";
+      // a user's own page names them in its title: the button is one word, its name says whom
+      if (sp) sp.textContent = short ? word : word + " " + name;
+      if (short) btn.setAttribute("aria-label", word + " " + name);
     };
     var extra = null; // an Unfollow beside Follow while the state is not known
     var send = function (b, on) {
@@ -177,7 +180,8 @@
         extra = el("button", btn.className.replace(/\bon\b/, "").trim(), "");
         extra.type = "button";
         extra.setAttribute("data-social", "unfollow");
-        extra.appendChild(el("span", "", "Unfollow " + name));
+        extra.appendChild(el("span", "", short ? "Unfollow" : "Unfollow " + name));
+        if (short) extra.setAttribute("aria-label", "Unfollow " + name);
         if (btn.disabled) {
           // writes switched off: off like Follow, with the same reason (the server refuses it too)
           extra.disabled = true;

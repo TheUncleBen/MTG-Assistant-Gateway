@@ -268,7 +268,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert (
             tests
             and ">Test</span>" in tests[0]
-            and "<a class='ui-cap' href='/history/reports/rep_a' aria-label='Open report'>" in tests[0]
+            and "<a class='btn' href='/history/reports/rep_a' aria-label='Open report'>" in tests[0]
         )
         assert (
             "<span class='ui-when'><span class='sr-only'>Snapshots do not record who made them</span></span>"
@@ -285,7 +285,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
             "<optgroup label='No longer on Archidekt'><option value='43'>Reap the Tides</option></optgroup>"
             in body
         )
-        assert "<select name='when' aria-label='When (UTC days)'>" in body
+        assert "<select name='when' aria-label='When'>" in body
         assert "<option value='day' selected>Group by day</option>" in body
         # older page
         older = (await b.http.get("/history?deck_id=42&offset=25", headers=NAV)).text.split("<main")[1]
@@ -451,10 +451,10 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert page.status_code == 200
         body = page.text.split("<main")[1]
         for text in (
-            "<h1><a href='/decks/42'>Liesa Test Deck</a></h1>",
+            "<h1>Deck test report</h1><p class='ui-sub rv-deck'>Liesa Test Deck</p>",
             "<span class='k'>Commander</span> Liesa, Forgotten Archangel",
             "<span class='k'>Solo test games</span> 300, through turn 10 (seed 42)",
-            "<a class='ui-cap' href='/reports'>All reports</a>",
+            "<a class='ui-cap ui-back' href='/reports'>",
             "Played with their effect",
             "report is shown instead of testing it again",
             "class='tiles wide rv-stats'",

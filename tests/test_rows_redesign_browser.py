@@ -34,7 +34,7 @@ BOXES = """
   const title = tr.querySelector('.title .t, .title .t a');
   const tap = title.closest('a, label') || title.querySelector('a') || title;
   const kebab = tr.querySelector('.kebab');
-  const main = tr.querySelector('.act > .ui-cap');
+  const main = tr.querySelector('.act > .btn');
   return {title: r(title), tap: r(tap), kebab: r(kebab), main: r(main), row: r(tr),
           text: title.textContent.trim()};
 })

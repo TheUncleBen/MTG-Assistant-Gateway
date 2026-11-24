@@ -90,11 +90,16 @@ def name_row(
     )
     return (
         f"<div class='srow'><div class='sp-name'><label for='{esc(input_id)}'>{esc(label)}</label>"
-        f"<span class='search'><input id='{esc(input_id)}' type='search' name='{esc(name)}' "
-        f"value='{esc(value)}'{ui.hint_attrs(placeholder)} autocomplete='off' "
-        f"enterkeyhint='search'{attrs}>"
-        f"<button type='submit' aria-label='{esc(search_label)}' title='{esc(search_label)}'>{icon('search')}"
-        f"</button></span><div class='under'>{under_html}</div></div>{fbtn}{cross_html}</div>"
+        + ui.search_field(
+            name,
+            value=value,
+            placeholder=placeholder,
+            input_id=input_id,
+            submit_label=search_label,
+            attrs=f" autocomplete='off' enterkeyhint='search'{attrs}",
+            cls="search",
+        )
+        + f"<div class='under'>{under_html}</div></div>{fbtn}{cross_html}</div>"
     )
 
 

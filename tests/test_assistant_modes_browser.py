@@ -21,7 +21,7 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
-from .waits import redrawn
+from .waits import redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -37,12 +37,13 @@ PAGES = [
 ]
 TEXT = (
     ".ygrp h2, .ygrp .lbl, .ygrp .val, .ygrp .sb, .ygrp .yfoot, .ygrp .lbl small, .yme b, .yme .sub, "
-    ".ydisc .btn, .justin .t, .justin .btn, .mtgbox h2, .mtgbox p, .mtgbox .acts button, .yback, h1"
+    ".ydisc .btn, .justin .t, .justin .btn, .mtgbox h2, .mtgbox p, .mtgbox .acts button, .ui-back, h1"
 )
 # rows and buttons on these pages under 44 px tall (a box's buttons on a touch screen: with a mouse
 # they are the site's 39 px box buttons, as every other box)
 TAPS = """
-(touch) => [...document.querySelectorAll('.ygrp a.yrow, .ygrp button.yrow, .ydisc .btn, .justin .btn, .yback'
+(touch) => [...document.querySelectorAll(
+    '.ygrp a.yrow, .ygrp button.yrow, .ydisc .btn, .justin .btn, .ui-back'
     + (touch ? ', .mtgbox .acts button' : ''))]
   .filter(e => e.getBoundingClientRect().width && getComputedStyle(e).visibility !== 'hidden')
   .filter(e => e.getBoundingClientRect().height < 43.5)
@@ -102,6 +103,7 @@ def _shot(page, name: str) -> None:
 def _check(page, where: str, *, touch: bool = True) -> None:
     assert page.evaluate(MEASURE) == [], where
     assert page.evaluate(CONTRAST, TEXT) == [], where
+    settled(page)  # a box's opening ends first: its .98 scale reads 44 px as 43.1
     assert page.evaluate(TAPS, touch) == [], where
 
 
@@ -148,6 +150,7 @@ def test_the_assistant_pages_hold_at_200_percent_text(server: Server, zoom: str)
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
             redrawn(page)
             assert page.evaluate(MEASURE) == [], (path, zoom)
+            settled(page)
             assert page.evaluate(TAPS, True) == [], (path, zoom)
             _shot(page, f"{name}-375-200pct-{zoom}.png")
         browser.close()

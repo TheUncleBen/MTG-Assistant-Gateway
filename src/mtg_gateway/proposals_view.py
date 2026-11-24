@@ -794,7 +794,7 @@ def _waiting_table(
             f"<label class='chk'><input type='checkbox' class='all' data-all='{esc(key)}' "
             f"aria-label='{esc(aria)}'></label>"
         )
-        open_html = ui.cap_link("Open deck", open_deck) if open_deck else " "
+        open_html = ui.button_link("Open deck", open_deck) if open_deck else " "
         out.append(ui.group_row(title_html, meta, check_html=box, action_html=open_html))
         for x in lines:
             out.append(
@@ -1037,7 +1037,7 @@ PROPOSALS_CSS = """
   .pr-table .tr{grid-template-columns:32px minmax(0,1fr)}
   .pr-table .tr > .act{grid-column:2;justify-self:end} }
 .pr-table label.title{display:block}
-.pr-table .flag .ui-lbl{min-height:20px;font-size:.76rem;margin-right:.25rem}
+.pr-table .flag .ui-lbl{margin-right:.25rem}
 /* the waiting list's one header row: the check-every box and the word */
 .pr-table .tr.th{min-height:40px}
 .ui-drawer .apply{background:none;border:0;padding:0;margin-top:1rem}
@@ -1057,7 +1057,10 @@ PROPOSALS_CSS = """
      the words wrap inside the buttons rather than out of them */
   .ui-bar{padding:8px;gap:8px}
   .ui-bar .count{flex:1 1 40%;min-width:0}
-  .ui-bar button{height:auto;white-space:normal;line-height:1.2;padding:6px 8px}
+  /* the sides give way to the words at large text (14 px up to 100% text, 8 px from about 200%),
+     so Reject and Apply stay side by side on a 360 px phone at 200% */
+  .ui-bar button{height:auto;white-space:normal;line-height:1.2;
+    padding:6px min(14px, max(8px, calc(22px - .5em)))}
   .ui-bar button[name=action]{flex:1 1 40%;min-width:min-content}
 }
 /* one proposal: the panel (from 1100 px) or its own page */
@@ -1065,6 +1068,17 @@ PROPOSALS_CSS = """
 .ui-drawer .pr-why{margin:-.25rem 0 .5rem}
 .ui-drawer .summary-pills .ui-lbl{font-weight:700}
 .ui-drawer ul.changes li{background:transparent;border-left-color:transparent}
+/* a row's Add, Remove or Change is the standard status label (docs/UI-STANDARD.md): a pill, 24 px,
+   .82rem 700, the colour's tint */
+.ui-drawer ul.changes .act{display:inline-flex;align-items:center;justify-content:center;min-height:24px;
+  padding:.1em .3rem;border:0;border-radius:999px;background:var(--surface-2);font-size:.82rem;
+  font-weight:700;line-height:1.2}
+.ui-drawer ul.changes li.add .act{background:var(--green-tint)}
+.ui-drawer ul.changes li.del .act{background:var(--red-tint)}
+.ui-drawer ul.changes li.chg .act{background:var(--orange-tint)}
+/* the pill is a little wider than the old boxed label: the gap beside it gives that back, so the
+   change keeps half the row on a small phone (test_every_change_label_fits_its_box) */
+.ui-drawer ul.changes li{column-gap:.5rem}
 .ui-drawer .apply{margin-top:1rem}
 .ui-drawer .apply .choice{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 .25rem}
 .ui-drawer .apply .choice button,.ui-drawer .apply .choice .btn{margin:0}
@@ -1075,12 +1089,10 @@ PROPOSALS_CSS = """
 .ui-drawer .apply .choice > form > button{width:100%}
 .ui-drawer .pr-tech pre{max-height:22rem;overflow:auto;font-size:.82rem}
 .ui-drawer details > summary:not(.fold-btn){min-height:44px;display:flex;align-items:center;cursor:pointer}
-.ui-drawer .page-only{margin:0 0 .5rem}
-.ui-drawer .page-only a{display:inline-flex;align-items:center;min-height:44px}
 /* "Open as a full page": the panel alone, in the page's own column */
 .pr-full .ui-split.with-panel{display:block}
 .pr-full .ui-split.with-panel .ui-drawer{display:block;position:static;max-height:none;overflow:visible;
-  box-shadow:none;border:0;padding:0;max-width:52rem;margin:0 auto}
+  box-shadow:none;border:0;padding:0;max-width:44rem;margin:0 auto}
 .pr-full .ui-split.with-panel .page-only{display:block}
 .pr-full .panel-only{display:none}
 .pr-empty p{margin:0}

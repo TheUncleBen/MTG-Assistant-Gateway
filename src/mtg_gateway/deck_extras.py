@@ -913,16 +913,8 @@ def new_package_box_html(
 PACKAGE_FIELDS_CSS = """
 /* a package's Budget (one row of choices) and Intended formats (pills): the Package panel of Deck
    settings and the New package box */
-.budget{display:inline-flex;flex-wrap:wrap}
-.budget label{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;
-  padding:0 .6rem;border:1px solid var(--control-border);margin:0 0 0 -1px;font-weight:700;cursor:pointer;
-  background:var(--surface);position:relative}
-.budget label:first-child{margin-left:0;border-radius:var(--radius) 0 0 var(--radius)}
-.budget label:last-child{border-radius:0 var(--radius) var(--radius) 0}
+/* Budget is the site's compact segmented switch (theme.py, .ui-seg): only its radios are here */
 .budget input{position:absolute;opacity:0;width:0;height:0;margin:0}
-.budget label:has(input:checked){background:var(--orange-tint);color:var(--orange-text);
-  border-color:var(--orange-text);z-index:1}
-.budget label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .fmts{display:flex;flex-wrap:wrap;gap:.35rem}
 .fmts label{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;
   border:1px solid var(--control-border);border-radius:999px;padding:0 .7rem;cursor:pointer;
@@ -934,8 +926,8 @@ PACKAGE_FIELDS_CSS = """
 .mtgbox .body .field .budget input[type=radio],.ds .ui-row .ctl .budget input{width:0;height:0}
 .mtgbox .body .field .fmts label,.dx-box .body .field .fmts label{display:inline-flex;margin:0;
   font-weight:400}
-.mtgbox .body .field .budget label,.dx-box .body .field .budget label{display:inline-flex;margin:0 0 0 -1px}
-.mtgbox .body .field .budget label:first-child,.dx-box .body .field .budget label:first-child{margin-left:0}
+/* the only box with a Budget is the New package box (.dx-box) */
+.dx-box .body .field .budget label{display:inline-flex;margin:0;font-weight:700}
 .np-box .body .field .lbl{display:block;font-weight:700;margin:0 0 .25rem}
 .np-box .body .field + .field{margin-top:.75rem}
 .np-box .body .dx-switch{margin-top:.75rem;min-height:44px}

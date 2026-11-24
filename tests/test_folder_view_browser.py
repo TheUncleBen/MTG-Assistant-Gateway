@@ -69,12 +69,16 @@ def test_folders_open_the_breadcrumb_goes_back_and_the_filter_searches_everywher
         assert tiles == ["Archive", "Commander"], tiles  # A to Z, the backup folder never shows
         assert _names(page) == ["Sample Commander Deck"]
         page.locator("ul.folderlist .folder a", has_text="Commander").click()
-        page.wait_for_selector("nav.crumbs")
-        assert page.locator("nav.crumbs li").all_inner_texts()[-1].endswith("Commander")
+        # one level down: the folder is the section's heading, the way back the standard capsule
+        page.wait_for_selector("#fv-here >> text=Commander")
+        assert page.locator("#decks-list a.ui-back").inner_text().strip() == "Decks"
+        assert page.locator("nav.crumbs").count() == 0
         assert page.locator("ul.folderlist .folder .name").all_inner_texts() == [LONG, "Precons"]
         assert _names(page) == ["Brewing Zur the Enchanter"]
         page.locator("ul.folderlist .folder a", has_text="Precons").click()
-        page.wait_for_selector("nav.crumbs li[aria-current] >> text=Precons")
+        page.wait_for_selector("#fv-here >> text=Precons")
+        # deeper: the folders above as a trail of capsules
+        assert page.locator("nav.crumbs li").all_inner_texts() == ["Decks", "Commander"]
         assert _names(page) == ["Atraxa precon"]
         assert page.locator("ul.folderlist").count() == 0  # no subfolders: no Folders area
         # Sort by keeps the open folder (the list refreshes in place; the address follows)
@@ -85,10 +89,10 @@ def test_folders_open_the_breadcrumb_goes_back_and_the_filter_searches_everywher
         assert _names(page) == ["Atraxa precon"]
         # the breadcrumb goes back up, keeping the order
         page.locator("nav.crumbs a", has_text="Commander").click()
-        page.wait_for_selector("nav.crumbs li[aria-current] >> text=Commander")
+        page.wait_for_selector("#fv-here >> text=Commander")
         assert "order=name" in page.url
-        page.locator("nav.crumbs a", has_text="Decks").click()
-        page.wait_for_function("() => !document.querySelector('nav.crumbs')")
+        page.locator("#decks-list a.ui-back", has_text="Decks").click()
+        page.wait_for_function("() => !document.querySelector('#fv-here')")
         # the filter, from inside a folder, finds decks in every folder and names each one's folder
         page.goto(f"{server.base}/decks?folder=502", wait_until="networkidle")
         page.locator("#q").fill("a")

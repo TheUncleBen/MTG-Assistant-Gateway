@@ -54,17 +54,28 @@ def test_setup_columns_account_boxes_and_back(server: Server) -> None:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         errors: list[str] = []
 
-        # A computer: the app list stands left of the steps; the phone drop-down is not drawn.
+        # A computer (docs/UI-STANDARD.md: Install is the narrow column on every screen): with no
+        # app picked the apps are an inset grouped list under its group label; a row opens that
+        # app's steps, where the "Steps for:" drop-down holds the others.
         desk = browser.new_context(viewport={"width": 1280, "height": 800})
         desk.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = desk.new_page()
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{server.base}/install?for=claude", wait_until="networkidle")
+        page.goto(f"{server.base}/install", wait_until="networkidle")
+        expect(page.locator("nav.pick h2.ui-group").first).to_have_text("Which app will you use?")
+        expect(page.locator("details.drop")).to_have_count(0)
+        col = page.locator("main").bounding_box()
         nav = page.locator("nav.pick").bounding_box()
-        steps = page.locator(".inst .cols > div:nth-child(2)").bounding_box()
-        assert nav and steps and nav["x"] + nav["width"] <= steps["x"] and abs(nav["y"] - steps["y"]) < 4
-        expect(page.locator("details.drop")).to_be_hidden()
-        expect(page.locator("nav.pick a[aria-current='true']")).to_contain_text("Claude: web")
+        assert col and nav and col["width"] <= 44 * 14 + 2 * 16 + 1, col
+        # centred: the same margin on both sides of the window
+        assert abs(nav["x"] - (1280 - nav["x"] - nav["width"])) <= 16, nav
+        page.locator("nav.pick a.yrow", has_text="Claude: web").click()
+        page.wait_for_url("**/install?for=claude")
+        expect(page.locator("nav.pick")).to_have_count(0)
+        drop = page.locator("details.drop")
+        expect(drop.locator("summary .v")).to_have_text("Claude: web, desktop, iPhone and Android")
+        drop.locator("summary").click()
+        expect(drop.locator(".list a[aria-current='true']")).to_contain_text("Claude: web")
         assert page.evaluate("document.documentElement.scrollWidth") <= 1280
         desk.close()
 
@@ -73,7 +84,7 @@ def test_setup_columns_account_boxes_and_back(server: Server) -> None:
         page = phone.new_page()
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/install?for=claude", wait_until="networkidle")
-        expect(page.locator("nav.pick")).to_be_hidden()
+        expect(page.locator("nav.pick")).to_have_count(0)
         drop = page.locator("details.drop")
         expect(drop).to_be_visible()
         expect(drop.locator("summary .v")).to_have_text("Claude: web, desktop, iPhone and Android")

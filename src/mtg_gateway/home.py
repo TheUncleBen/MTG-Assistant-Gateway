@@ -46,10 +46,10 @@ DECKS_TIMEOUT = 6.0  # seconds; the home page must not hang on Archidekt
 HOME_CSS = """
 /* Needs you: one row a thing waiting for the member, the way to it at the row's end */
 .home .needs{margin:0 0 1rem}
-.home .needs h2{margin:0 0 .5rem}
+
 .home .needs ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.5rem}
-.home .needs li{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.6rem .9rem;
-  border-radius:var(--radius);background:var(--surface);border:1px solid var(--border)}
+.home .needs li{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:1rem;
+  border-radius:var(--radius-panel);background:var(--surface);border:1px solid var(--border)}
 .home .needs li.accent{border-left:4px solid var(--orange)}
 .home .needs li svg.i{width:20px;height:20px;flex:none;color:var(--orange-text)}
 .home .needs li .what{flex:1 1 14rem;min-width:0}
@@ -57,8 +57,18 @@ HOME_CSS = """
 .home .needs li .what small{display:block;color:var(--text-muted);overflow-wrap:anywhere}
 .home .needs li .go{margin:0;flex:none}
 .home .needs li[hidden]{display:none}
-.home .list-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:1.5rem 0 .75rem}
-.home .list-head h2{margin:0}
+/* a section's heading sits over its panel, as a list's (ui.list_head): the decks with their count
+   and All decks at the row's end, Needs you over its rows */
+.home .home-decks{margin:0 0 1rem}
+.home .home-decks > .list-head{align-items:center;margin:0 0 .5rem}
+.home .home-decks > .list-head .btn{margin:0}
+.home .home-decks > .panel{margin:0}
+.home .connect{margin:0 0 1rem}
+/* the connector address whole on its own line (it breaks anywhere, never runs out of the tile),
+   then the other ways in as the widget's links on theirs */
+.home .connect .det .tx,.home .connect .det .addr,.home .connect .det .ways{flex:0 0 100%;min-width:0}
+.home .connect .det .addr{overflow-wrap:anywhere;user-select:all;color:var(--text)}
+.home .connect .det .ways{display:flex;flex-wrap:wrap;gap:.3rem 1.25rem}
 /* desktop (1280 px up): the deck covers take the page's width, with what needs you and the
    connection details in a column beside them, so the page's lower half is not empty (0.7.46
    re-audit D28); the covers grow from 10rem to 17rem a column (three a row at 1280 px, four at 1440) */
@@ -68,8 +78,10 @@ HOME_CSS = """
 @media (min-width:1280px){ @container (min-width:60em){
   .home .home-grid.side{display:grid;grid-template-columns:minmax(0,1fr) 24rem;grid-template-rows:auto 1fr;
     gap:1rem;align-items:start}
-  .home .home-grid.side > .panel:not(.connect){grid-column:1;grid-row:1 / span 2;margin:0}
+  .home .home-grid.side > .home-decks{grid-column:1;grid-row:1 / span 2;margin:0}
   .home .home-grid.side > .needs,.home .home-grid.side > .connect{grid-column:2;margin:0}
+  /* Needs you's head is as tall as the decks' (which holds a button): the two panels start level */
+  .home .home-grid.side > .needs > .list-head{min-height:var(--ctl)}
   .home .home-grid .recent{grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))}
 }}
 /* phones: the covers as one row to swipe, each cover a screen's half */
@@ -229,7 +241,8 @@ def needs_you_html(
     # nothing to do shows no heading over nothing (bell.js shows the section with the row)
     wait = " data-bell-section hidden" if len(rows) == 1 else ""
     return (
-        f"<section class='needs' aria-labelledby='needs-h'{wait}><h2 id='needs-h'>Needs you</h2>"
+        f"<section class='needs' aria-labelledby='needs-h'{wait}>"
+        "<div class='list-head'><h2 id='needs-h'>Needs you</h2></div>"
         f"<ul>{''.join(rows)}</ul></section>"
     )
 
@@ -288,34 +301,35 @@ def recent_panel_inner(
         else ""
     ) + (deck_list_held_html(last_read) if last_read is not None else "")
     if decks:
-        return (
-            "<div class='panel-head'><h2>My decks</h2>"
-            f"<a class='btn' href='/decks'>All decks ({len(decks)})</a></div>"
-            + note
-            + recent_html(decks, covers)
-        )
+        return decks_head(len(decks)) + f"<div class='panel'>{note}{recent_html(decks, covers)}</div>"
     if note:  # nothing read: the notice, never "No decks yet"
-        return "<div class='panel-head'><h2>My decks</h2></div>" + note
+        return decks_head() + f"<div class='panel'>{note}</div>"
     if decks is None:
-        return (
-            f"<h2>My decks</h2><p class='muted'>{html.escape(why or outage('unavailable'))} "
-            "<a href='/decks'>Open the deck list</a> to try again.</p>"
+        return decks_head() + (
+            f"<div class='panel'><p class='muted'>{html.escape(why or outage('unavailable'))} "
+            "<a href='/decks'>Open the deck list</a> to try again.</p></div>"
         )
-    return (
-        "<h2>My decks</h2><p class='muted'>No decks yet. "
+    return decks_head() + (
+        "<div class='panel'><p class='muted'>No decks yet. "
         "<a href='/decks/new' data-box-open='newdeck'>Create one</a>, or <a href='/scan'>scan a pile of "
-        "cards</a>.</p>"
+        "cards</a>.</p></div>"
     )
 
 
+def decks_head(total: int | None = None) -> str:
+    """My decks' heading over its panel, as every list's (ui.list_head): the count beside the
+    word, and the way to the whole list at the row's end."""
+    return ui.list_head("My decks", total, note_html=ui.button_link("All decks", "/decks"))
+
+
 def recent_skeleton() -> str:
-    """The panel while the deck list is still being read: grey covers the script replaces."""
+    """The section while the deck list is still being read: grey covers the script replaces."""
     return (
-        "<div class='panel-head'><h2>My decks</h2><a class='btn' href='/decks'>All decks</a></div>"
+        decks_head() + "<div class='panel'>"
         "<div class='recent skeleton' aria-hidden='true'>" + "<span></span>" * RECENT + "</div>"
         "<p class='sr-only' role='status'>Loading your decks</p>"
         "<noscript><p class='muted'><a href='/'>Reload</a> to see your decks (this page fills itself "
-        "with scripts on).</p></noscript>"
+        "with scripts on).</p></noscript></div>"
     )
 
 
@@ -343,22 +357,31 @@ def home_grid(needs: str, recent: str, connect: str) -> str:
 
 
 def connect_html(mcp_url: str) -> str:
-    """Connect an AI assistant: the connector address and the ways in, shown only while no
-    assistant is connected (afterwards the Account page has it)."""
+    """Connect an AI assistant: a widget with the standard button to Guided setup, the connector
+    address to read with Copy address for a member who only needs that, and the two other ways
+    in (the assistant skill, the Android app) as the widget's links. Shown only while no assistant is
+    connected (afterwards the Account page has it)."""
+    copy = (
+        f"<button type='button' class='btn btn-plain' data-copy-text='{_esc(mcp_url)}' "
+        f"data-copy-said='Connector address copied.'>{icon('copy')}Copy address</button>"
+    )
+    detail = (
+        "<span class='tx'>Claude or ChatGPT can read your decks, research cards and propose edits you "
+        "approve here.</span>"
+        f"<code class='addr'>{_esc(mcp_url)}</code>"
+        "<span class='ways'><a href='/install?for=skill'>Assistant skill</a>"
+        "<a href='/install?for=android'>Android app</a></span>"
+    )
     return (
-        # the row says what it is for, not the connector address (0.7.46 audit QG-20); the
-        # address is inside, with Copy, for someone setting up a connector by hand
-        "<details class='connect panel'><summary>Connect an AI assistant "
-        "<span class='muted addr'>Claude or ChatGPT, with Guided setup</span></summary>"
-        "<p>Claude and ChatGPT talk to this gateway through its connector address. Guided setup walks "
-        "you through it; the assistant can then read your decks, research cards and propose edits "
-        "you approve here.</p>"
-        f"<p class='addrline'><code>{_esc(mcp_url)}</code> "
-        f"<button type='button' class='btn small' data-copy-text='{_esc(mcp_url)}' "
-        "data-copy-said='Connector address copied.'>Copy address</button></p>"
-        f"<div class='actions'><a class='btn' href='/install'>{icon('download')} Guided setup"
-        f"</a><a class='btn' href='/install?for=skill'>{icon('report')} Assistant skill</a>"
-        f"<a class='btn' href='/install?for=android'>{icon('download')} Android app</a></div></details>"
+        "<section class='connect' aria-label='Connect an AI assistant'>"
+        + ui.widget(
+            "AI assistant",
+            "link",
+            "Not connected",
+            detail_html=detail,
+            actions=[ui.button_link("Guided setup", "/install"), copy],
+        )
+        + "</section>"
     )
 
 
@@ -430,10 +453,10 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         hero = (
             f"<div class='hero'><div><h1>Hi {_esc(who)}</h1>"
             + (
-                "<p class='sub'>Archidekt account "
+                "<p class='ui-sub'>Archidekt account "
                 f"<strong>{_esc(link['archidekt_username'] or '')}</strong> is linked.</p>"
                 if link["linked"]
-                else "<p class='sub'>Link your Archidekt account to see and edit your decks here.</p>"
+                else "<p class='ui-sub'>Link your Archidekt account to see and edit your decks here.</p>"
             )
             + "</div>"
             + (
@@ -456,7 +479,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         if decks == PENDING:
             # Cold start: the page goes out now and decks.js fills the panel from the cache.
             recent = (
-                "<section class='panel' data-decks-src='/api/decks/mine?shape=recent' aria-busy='true'>"
+                "<section class='home-decks' data-decks-src='/api/decks/mine?shape=recent' aria-busy='true'>"
                 + recent_skeleton()
                 + "</section>"
             )
@@ -465,7 +488,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             shown = None if isinstance(decks, str) else decks
             unreadable = bool(getattr(shown, "unreadable", 0))  # the deck list couldn't be read, as on /decks
             recent = (
-                "<section class='panel'>"
+                "<section class='home-decks'>"
                 + recent_panel_inner(
                     shown, covers, unreadable=unreadable, last_read=getattr(shown, "last_read", None), why=why
                 )

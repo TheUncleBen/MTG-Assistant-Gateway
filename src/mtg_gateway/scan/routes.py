@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
-from .. import prefs
+from .. import prefs, ui
 from ..pages import NO_STORE, _csrf, browser_session, csrf_header_ok, login_redirect_here, read_limited
 from ..theme import ICONS, render
 from .service import ScanError, ScanService, parse_cards
@@ -188,7 +188,13 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             "icons": {k: ICONS[k] for k in SCAN_ICONS},
         }
         body_html = (
-            "<link rel='stylesheet' href='/scan/static/scan.css?v=" + version + "'>"
+            ui.page_head(
+                "Scan cards",
+                "Add cards with the camera, a photo or their names, then save them to your binder or a deck.",
+            )
+            + "<link rel='stylesheet' href='/scan/static/scan.css?v="
+            + version
+            + "'>"
             f"<script id='scan-config' type='application/json'>{_json_for_html(config)}</script>"
             + prefs.page_prefs(state.db, sub, prefs.SCAN_INTRO)
             + "<noscript><div class='notice error'>Scanning needs JavaScript.</div></noscript>"
@@ -207,6 +213,8 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             csrf=_csrf(s, sid),
             current="/scan",
             admin=user_admin,
+            heading=False,
+            main_class="ui-narrow",
             # the scanner is its own installable app: its manifest replaces the gateway's
             head_extra="<link rel='manifest' href='/scan/app.webmanifest'>",
             sub=sub,

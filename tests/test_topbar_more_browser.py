@@ -1,6 +1,6 @@
 """The top bar on a computer (navigation round 2, the owner 2026-10-25): the four places (Home, Decks,
 Binder, Assistant) at every width and text size, then "More ▾" with its three groups (Find: Search
-and Precons; Your cards: Scan and Card models; Community: Forum). History and Reports mark
+and Precons; Your cards: Scan; Community: Forum). History and Reports mark
 Assistant; a page under More marks More. Phones and the touch rail have no More ▾ in the bar."""
 
 from __future__ import annotations
@@ -46,7 +46,6 @@ def test_the_bar_marks_the_place_and_a_page_under_more(server: Server) -> None:
         "Search decks and cards",
         "Precons",
         "Scan",
-        "Card models",
         "Forum",
     ]
     nav = h.get("/scan").text.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
@@ -63,7 +62,7 @@ def test_the_four_places_and_more_at_every_width_and_large_text(server: Server) 
     bar = ["Home", "Decks", "Binder", "Assistant", "More▾"]
     # a bar wide enough lists the rail's pages instead of More ▾ (0.7.46 redesign, screen 1);
     # 200% text brings More ▾ back
-    full = ["Home", "Decks", "Binder", "Assistant", "Scan", "Precons", "Card models", "Forum"]
+    full = ["Home", "Decks", "Binder", "Assistant", "Scan", "Precons", "Forum"]
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         for width, zoom, touch, want in [

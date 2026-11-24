@@ -21,6 +21,8 @@ def test_no_alerts_action_wraps_inside_its_button(server: Server, width: int) ->
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid, _pending = _seed(server)
+    # an alert to mark and clear: with none kept, only Settings is drawn (0.7.48 loop round)
+    server.db.add_gateway_alert("user-1", "applied", "Applied · Deck", "2 changes applied.", "/history")
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         ctx = browser.new_context(viewport={"width": width, "height": 800})

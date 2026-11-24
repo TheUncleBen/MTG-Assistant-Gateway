@@ -205,7 +205,7 @@ async def test_home_my_decks_panel_says_the_list_could_not_be_read(stack: Stack)
         svc.deck_lists.drop(_sub(stack))
         page = await b.http.get("/", headers=NAV)
         assert "be read from Archidekt" not in page.text and ">Try again</a>" not in page.text
-        assert "All decks (1)" in page.text
+        assert "<h2>My decks <span class='ui-sub'>1</span></h2>" in page.text
     finally:
         ark._listing_row = real_row
         ark.decks.pop(44, None)

@@ -20,6 +20,11 @@ from .theme import icon
 VIEWS = ("grid", "list")
 
 CARDS_CSS = """
+/* the list's heading with its count is the site's section heading (docs/UI-STANDARD.md) */
+.ui-head + .cs-panel{margin-top:.5rem}
+/* Mana value: each box holds its hint (From, To) whole inside the field's padding at any text
+   size; the pair goes on two lines where one has no room for both */
+.cs-panel .fg.mv .range input{min-width:calc(2.6em + 4rem + 4px)}
 /* the panel is the shared search panel (theme.SEARCH_PANEL_CSS); the form inside it lays out as
    the panel's own rows */
 .cs-panel > form.cs{display:contents}
@@ -320,7 +325,7 @@ def _stat_row(stat: str, cmp: str, value: str) -> str:
         + _opts([(k, label) for k, _op, label in cq.COMPARE], cmp)
         + "</select>"
         f"<input type='text' inputmode='decimal' name='stv' value='{_esc(value)}' aria-label='Value' "
-        "placeholder='Value' maxlength='7'>"
+        "placeholder='Value' data-ph='' maxlength='7'>"
         f"<button type='button' class='rm' aria-label='Remove this line'>{icon('x')}</button></div>"
     )
 
@@ -333,7 +338,7 @@ def _price_row(cur: str, cmp: str, value: str) -> str:
         + _opts([(k, label) for k, _op, label in cq.PRICE_COMPARE], cmp)
         + "</select>"
         f"<input type='text' inputmode='decimal' name='pv' value='{_esc(value)}' aria-label='Amount' "
-        "placeholder='Amount' maxlength='7'>"
+        "placeholder='Amount' data-ph='' maxlength='7'>"
         f"<button type='button' class='rm' aria-label='Remove this line'>{icon('x')}</button></div>"
     )
 
@@ -436,7 +441,11 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
         + "><summary class='fold-btn'>More filters</summary><div class='cs-grid'>"
         "<h3 class='sub'>Card text</h3>"
         + _text_field(
-            "o", "Rules text", f.oracle, placeholder="destroy target", hint="Use ~ for the card's own name."
+            "o",
+            "Rules text",
+            f.oracle,
+            placeholder="destroy target|destroy",
+            hint="Use ~ for the card's own name.",
         )
         + _text_field(
             "m", "Mana cost", f.mana, placeholder="{2}{G}{G}", hint="Symbols like {W}, {2} or {R/G}."
@@ -450,7 +459,9 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
         + f"<fieldset><legend>Games</legend><input type='hidden' name='g' value='any'>"
         f"<div class='toggles'>{games}</div>"
         "<span class='hint'>Paper only unless you pick Arena or Magic Online too.</span></fieldset>"
-        + _picker("b", "Block or group", f.blocks, source="blocks", signed=False, placeholder="Block name")
+        + _picker(
+            "b", "Block or group", f.blocks, source="blocks", signed=False, placeholder="Block name|Block"
+        )
         + _text_field("a", "Artist", f.artist)
         + "<div class='field'><label for='f-lang'>Language</label>"
         f"<select id='f-lang' name='lang'>{_opts(cq.LANGUAGES, f.lang)}</select></div>"
@@ -500,7 +511,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
             label="Name",
             name="q",
             value=f.name,
-            placeholder="Name",
+            placeholder="Name|",
             input_id="c-q",
             search_label="Search cards",
             cross_html=sp.cross_link("Search decks instead", "/search", "decks"),
@@ -547,8 +558,9 @@ def results_bar_html(f: cq.Filters, *, view: str, total: int | None) -> str:
     """The results controls at the panel's foot: More filters, the count, Sort by with its
     direction, Grid or List, the card size (Grid only) and Clear filters."""
     more = (
-        "<button type='button' class='btn more' data-more-filters aria-controls='cs-more-filters' "
-        f"aria-expanded='false' hidden>{icon('chev')} More filters</button>"
+        # the disclosure capsule (docs/UI-STANDARD.md): its chevron turns when the fields are open
+        "<button type='button' class='disc more' data-more-filters aria-controls='cs-more-filters' "
+        "aria-expanded='false' hidden>More filters</button>"
     )
     return sp.results_bar(
         count_html=sp.count_html(count_text(total, shown=f.chosen()), count_id="cs-count"),

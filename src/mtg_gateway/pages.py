@@ -328,18 +328,23 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         if not sub:
             return RedirectResponse("/signed-out", status_code=303)
-        return page(
+        # one of the small pages (smallpage.panel), as Signed out and the sign-in pages are
+        return small(
             "Sign out",
-            "<div class='card'><p>Sign out of this gateway on this device?</p>"
-            f"<p class='muted small'>{account_hub.DRAFTS_CLEARED}</p>"
-            "<form method='post' action='/logout'>"
-            f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
-            "<div class='form-actions'>"
-            f"<button class='primary' data-busy-text='Signing out…'>{icon('x')}<span>Sign out</span></button>"
-            "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
-            f"{icon('x')}<span>Sign out on all my devices</span></button></div></form>"
-            "<p class='muted small'>All devices signs out every browser and the Android app. "
-            "Connected AI apps keep working; disconnect them under Account details.</p></div>",
+            smallpage.panel(
+                "Sign out",
+                "<p>Sign out of this gateway on this device?</p>"
+                f"<p class='muted small'>{account_hub.DRAFTS_CLEARED}</p>"
+                "<form method='post' action='/logout'>"
+                f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
+                "<div class='ui-actions'>"
+                "<button class='primary' data-busy-text='Signing out…'>"
+                f"{icon('x')}<span>Sign out</span></button>"
+                "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
+                f"{icon('x')}<span>Sign out on all my devices</span></button></div></form>"
+                "<p class='muted small'>All devices signs out every browser and the Android app. "
+                "Connected AI apps keep working; disconnect them under Account details.</p>",
+            ),
             sub=sub,
             sid=sid,
         )
@@ -509,6 +514,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sub=sub,
             sid=sid,
             current="/account",
+            heading=False,
+            main_class="ui-narrow",
             head_extra=f"<style>{account_hub.HUB_CSS}</style><script src='{smallpage.SCRIPT}' defer>"
             "</script>",
         )
@@ -750,6 +757,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sid=sid,
             current="/account/details",
             heading=False,
+            main_class="ui-narrow",
             head_extra=ACCOUNT_HEAD + f"<style>{account_hub.HUB_CSS}{assistants.CSS}</style>",
         )
 
@@ -838,9 +846,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         notice = _notice(ok, q.get("err") if q.get("err") == "mode_invalid" else None)
         csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
         body = (
-            f"<a class='yback' href='{assistants.PAGE}'>{icon('chev')}Assistants</a>"
-            f"<h1>Default for new assistants</h1>{notice}"
-            f"<div class='acc'>{_mode_card(state, sub, csrf_in)}</div>"
+            account_hub.back_head(assistants.PAGE, "Assistants", "Default for new assistants")
+            + notice
+            + f"<div class='acc'>{_mode_card(state, sub, csrf_in)}</div>"
         )
         return assistants_page("Default for new assistants", body, sub, sid)
 
@@ -1326,6 +1334,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             label=f"Proposal {no}for {where}",
             close_href=close,
             back_text="Back to Proposals",
+            # its own page (a phone, a Fold, "Open as a full page") has the page's title, which
+            # carries the number: the heading under it then says only what changes
+            page_title=f"Proposal {no}for {where}",
         )
         if full:
             body = f"<div class='pr-full'>{ui.split('', panel)}</div>"
@@ -1912,10 +1923,8 @@ def notice_section(ok: str | None, err: str | None) -> str | None:
 # The Account details pages: the list's folds and red row, a section's cards, the disclosure as
 # a tinted strip, buttons that wrap.
 ACCOUNT_CSS = (
-    ".yback{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;margin:0 0 -.25rem;"
-    "color:var(--orange-text);font-weight:700;text-decoration:none}"
-    ".yback svg.i{width:18px;height:18px;transform:rotate(90deg)}"
-    ".yhub.ydetails{max-width:62rem;margin:0 auto}"
+    # the way back a level is the shared ui.back_link (account_hub.back_head)
+    ".yhub.ydetails{max-width:none;margin:0 auto}"
     # a row that folds open on the list (Your Archidekt lists, What your sign-in shares): its
     # words start under the row's label
     ".ydetails .yfold{padding:0 1rem .9rem calc(1.8rem + 20px);font-size:.95rem;line-height:1.4}"
@@ -1944,7 +1953,7 @@ ACCOUNT_CSS = (
     ".ydetails .ygrp[data-g='3']{order:3}"
     # a section's page: one card, as wide as the list's column at most; the list itself as wide
     # as the Account page (two columns from 700 px)
-    ".acc{max-width:42rem;margin-left:auto;margin-right:auto}.acc.acc-list{max-width:42rem}"
+    ".acc{max-width:44rem;margin-left:auto;margin-right:auto}"
     ".acc .card{margin-bottom:1rem}"
     ".acc .notice.disclosure{background:var(--blue-tint);border-left-color:var(--blue)}"
     ".acc .ui-actions .btn,.acc .ui-actions button{white-space:normal;max-width:100%;text-align:center}"
@@ -2188,7 +2197,7 @@ def _yfold(label: str, ic: str, body: str, *, value: str = "", rid: str = "") ->
 def _ygroup(g: tuple[int, str, list[str], str]) -> str:
     gid = f" id='{g[3]}'" if g[3] else ""
     return (
-        f"<section class='ygrp' data-g='{g[0]}'{gid}><h2>{html.escape(g[1])}</h2>"
+        f"<section class='ygrp' data-g='{g[0]}'{gid}><h2 class='ui-group'>{html.escape(g[1])}</h2>"
         f"<div class='rows'>{''.join(g[2])}</div></section>"
     )
 
@@ -2250,13 +2259,10 @@ def account_response(
     if section:
         title = SECTIONS[section][0]
         # back to the list, as a phone's settings go back a level
-        head = (
-            f"<a class='yback' href='{DETAILS}'>{icon('chev')}Account details</a>"
-            f"<h1>{html.escape(title)}</h1>"
-        )
+        head = account_hub.back_head(DETAILS, "Account details", title)
     else:
         title = "Account details"
-        head = f"<a class='yback' href='/account'>{icon('chev')}Account</a><h1>Account details</h1>"
+        head = account_hub.back_head("/account", "Account", "Account details")
     resp = page(
         title,
         head + body,
@@ -2265,6 +2271,7 @@ def account_response(
         status=status,
         current=DETAILS,
         heading=False,
+        main_class="ui-narrow",
         head_extra=ACCOUNT_HEAD + f"<style>{PROFILE_CSS}{account_hub.HUB_CSS}{assistants.CSS}</style>"
         "<script src='/static/profile.js' defer></script>",
     )
@@ -3257,7 +3264,8 @@ def proposal_heading(p: dict[str, Any], no: int | None = None) -> str:
     lines = str(p.get("diff") or "").splitlines()
     text = ", ".join(lines[:4]) + (f" (+{len(lines) - 4} more)" if len(lines) > 4 else "")
     text = text[:300] or str(p.get("deck_name") or "Proposal")
-    return (f"<span class='no'>#{int(no)}</span> " if no else "") + html.escape(text)
+    # the number is the panel's (beside the list); as its own page the page title has it
+    return (f"<span class='no panel-only'>#{int(no)} </span>" if no else "") + html.escape(text)
 
 
 def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str:
@@ -3508,7 +3516,7 @@ def _proposal_body(
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
         summary = [
-            f"<span class='ui-lbl grey'>{total} deck detail{'s' if total != 1 else ''} changed; "
+            f"<span class='ui-tag'>{total} deck detail{'s' if total != 1 else ''} changed; "
             "no cards change</span>"
         ]
         heading, aria = "Deck details that will change", "Deck details"
@@ -3516,14 +3524,13 @@ def _proposal_body(
         # the deck's own categories (decks.category_line): said in words, no card count
         rows, total = _category_rows(p.get("rows"), p["diff"])
         summary = [
-            f"<span class='ui-lbl grey'>{total} category change{'s' if total != 1 else ''}; "
-            "no cards change</span>"
+            f"<span class='ui-tag'>{total} category change{'s' if total != 1 else ''}; no cards change</span>"
         ]
         heading, aria = "Categories that will change", "Category changes"
     else:
         rows, counts, net = _change_rows(p.get("rows"), p["diff"])
         total = sum(counts.values())
-        summary = [f"<span class='ui-lbl grey'>{total} change{'s' if total != 1 else ''}</span>"]
+        summary = [f"<span class='ui-tag'>{total} change{'s' if total != 1 else ''}</span>"]
         if counts["add"]:
             summary.append(f"<span class='ui-lbl green'>{counts['add']} added</span>")
         if counts["del"]:
@@ -3533,19 +3540,19 @@ def _proposal_body(
         if counts["cat"]:
             summary.append(f"<span class='ui-lbl orange'>{counts['cat']} recategorized</span>")
         summary.append(
-            f"<span class='ui-lbl grey'>Net {'+' if net > 0 else ''}{net} "
+            f"<span class='ui-tag'>Net {'+' if net > 0 else ''}{net} "
             f"card{'s' if abs(net) != 1 else ''}</span>"
         )
         heading, aria = "What will change", "Card changes"
         if p.get("kind") == "lists":  # the member's account-wide lists: no cards change
             summary = [
-                f"<span class='ui-lbl grey'>{total} change{'s' if total != 1 else ''} to your Archidekt "
+                f"<span class='ui-tag'>{total} change{'s' if total != 1 else ''} to your Archidekt "
                 "lists; no deck changes</span>"
             ]
             heading, aria = "What will change", "List changes"
         if p.get("kind") == "action":  # an Archidekt account action: no cards change
             summary = [
-                f"<span class='ui-lbl grey'>{total} Archidekt action{'s' if total != 1 else ''}; "
+                f"<span class='ui-tag'>{total} Archidekt action{'s' if total != 1 else ''}; "
                 "no cards change</span>"
             ]
             heading, aria = "What will happen", "Archidekt action"
@@ -4071,7 +4078,7 @@ def _confirm_body(
     out.append(
         guarded_form(
             hidden=hidden,
-            buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-primary btn-lg")],
+            buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-primary")],
             action="/proposals/apply",
             extra=f"<a class='btn btn-plain' href='{html.escape(back)}'>Not now</a>",
             tab_reachable=True,
@@ -4184,12 +4191,12 @@ def _result_body(run: dict[str, Any], csrf: str | None) -> str:
         return "<ul class='results'>" + "".join(lis) + "</ul>"
 
     if run["applied"]:
-        out.append(f"<h2 class='ui-section'>{ui.status_label('applied')}</h2>" + items(run["applied"], False))
+        out.append(f"<h2>{ui.status_label('applied')}</h2>" + items(run["applied"], False))
     if run["failed"]:
-        out.append(f"<h2 class='ui-section'>{ui.status_label('failed')}</h2>" + items(run["failed"], True))
+        out.append(f"<h2>{ui.status_label('failed')}</h2>" + items(run["failed"], True))
     if run["not_sent"]:
         out.append(
-            f"<h2 class='ui-section'>{ui.label('Not sent', 'grey', 'x')}</h2>"
+            f"<h2>{ui.label('Not sent', 'grey', 'x')}</h2>"
             "<p class='muted'>These are still waiting; open one to fix or reject it.</p>"
             + items(run["not_sent"], True)
         )

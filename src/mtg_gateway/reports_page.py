@@ -347,8 +347,10 @@ def latest_widget(latest: dict[str, Any] | None, *, now: float) -> str:
     href = f"/history/reports/{esc(latest['report_id'])}"
     det = (
         status_label(latest.get("status"), research=latest.get("research"))
-        + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Unnamed deck')}</a>, "
-        f"{ui.when(latest.get('taken_at'), now=now)}</span>"
+        # the name and the time are two items of the line: after a name that fills the tile's width
+        # the time starts the next line by itself, never as ", 14 min ago"
+        + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Unnamed deck')}</a></span>"
+        f"<span>{ui.when(latest.get('taken_at'), now=now)}</span>"
     )
     trend = "/history?" + urlencode({"deck_id": str(latest.get("deck_id") or ""), "type": "tests"})
     return ui.widget(
@@ -566,7 +568,7 @@ def paste_test_html(csrf: str) -> str:
     if not csrf:
         return ""
     return (
-        "<details class='fold rp-paste'><summary class='fold-btn'>Test a pasted list</summary>"
+        "<details class='fold rp-paste'><summary class='btn'>Test a pasted list</summary>"
         "<form method='post' action='/reports/test' class='rp-paste-f' data-draft='test-list'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<p class='ui-sub'>{PASTE_TEST_LINE}</p>"
@@ -582,6 +584,12 @@ def paste_test_html(csrf: str) -> str:
 # one a row when the text is so large that half the width cannot hold a word (the minimum is in
 # the widgets' own text size, so it grows with a phone's font scale or a text-only zoom). Shared
 # by the dashboard pages.
+# The UI standard's looks (docs/UI-STANDARD.md) where the shared sheet still has an older one: a
+# widget's button is the one button (1rem words, 1rem sides, on a phone too), a status label is
+# 24 px with .82rem words wherever it sits, a panel's heading is the section heading, a sub-heading
+# has the one bottom margin. The Assistant place's pages (Proposals, History, Reports, a report,
+# My activity) add this after the shared sheet.
+
 PHONE_WIDGETS_CSS = """
 @media (max-width:599.98px){
   .gb-dash .ui-widgets{--wdg-min:max(8.5em,calc(50% - .25rem))}

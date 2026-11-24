@@ -158,8 +158,13 @@ def test_one_column_one_row_bars_and_a_round_centred_capture_button(
             browser, page, errors, touch = _open(p, exe, server, server.sign_in(), width, app, scheme)
             problems: list[str] = []
             where = f"{width}px {'app' if app else 'browser'} {scheme}"
-            # the page keeps the standard's form column, not a width of its own
-            assert _style(page.locator("main.wrap"), "maxWidth") == "728px"
+            # the page keeps the standard's narrow column (44rem and the gutters), not a width of its own
+            assert "ui-narrow" in (page.locator("main.wrap").get_attribute("class") or "")
+            assert page.evaluate(
+                "() => { const m = document.querySelector('main.wrap'), c = getComputedStyle(m);"
+                " const pad = parseFloat(c.paddingLeft) + parseFloat(c.paddingRight);"
+                " return m.clientWidth - pad <= 44 * 14 + 1; }"
+            )
             assert _style(page.locator(".cam-panel"), "display") == "flex"
             # Auto closes the options row; in the app the shutter and the viewfinder are the phone camera
             assert page.locator(".scan-opts > :last-child").get_attribute("id") == "auto-switch"
@@ -527,9 +532,10 @@ def test_photo_always_chooses_a_picture(server: Server) -> None:  # noqa: F811
 
 
 def test_the_intro_folds_after_the_first_visit_and_how_it_works_is_a_button(server: Server) -> None:  # noqa: F811
-    """The intro is open on the first visit only; after that it is folded to its title, so the
-    camera starts on a phone's first screen. "How it works" is a button (not a blue link) that
-    opens it, and Got it still hides it for good."""
+    """The intro is a capsule on its own line, folded; the first visit has the steps in short as a
+    notice over it, so the camera starts on a phone's first screen on every visit (0.7.48 loop
+    round: it was an open panel the first time). "How it works" is a button (not a blue link)
+    that opens it, and Got it still hides it for good."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -555,15 +561,17 @@ def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> N
         page.wait_for_function("() => window.__scan && window.__scan.showTab")
 
     visit()
-    assert page.locator("#intro").evaluate("e => e.open") is True
+    assert page.locator("#intro").evaluate("e => e.open") is False
+    assert page.locator("#scan-first").count() == 1  # the first visit's notice
+    assert page.locator("#camera").bounding_box()["y"] < 500
     for _ in range(50):  # the save goes out after the page acts
         if server.db.get_pref("user-1", "scan.intro") == "seen":
             break
         page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
     assert server.db.get_pref("user-1", "scan.intro") == "seen"
-    # The second visit: folded to its title, and the camera view starts above 450 px.
+    # The second visit: folded to its title, no notice, and the camera view starts above 450 px.
     visit()
-    assert page.locator("#intro").count() == 1
+    assert page.locator("#intro").count() == 1 and page.locator("#scan-first").count() == 0
     assert page.locator("#intro").evaluate("e => e.open") is False
     top = page.locator("#camera").bounding_box()["y"]
     assert top < 450, top
@@ -592,7 +600,7 @@ def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> N
 
 @pytest.mark.parametrize("width", [344, 390, 840])
 def test_at_200_percent_text_the_hint_leaves_the_name_box_clear(server: Server, width: int) -> None:  # noqa: F811
-    """With text at twice its size the "Hold the phone about 15 cm…" hint stays readable and off the dashed
+    """With text at twice its size the "Hold the camera about 15 cm…" hint stays readable and off the dashed
     name box (it covered it, inside the viewfinder)."""
     from playwright.sync_api import sync_playwright
 
@@ -602,7 +610,7 @@ def test_at_200_percent_text_the_hint_leaves_the_name_box_clear(server: Server, 
         page.evaluate("() => { document.documentElement.style.fontSize = '32px'; }")
         page.evaluate("() => window.__scan.showTab('camera')")
         hint = page.get_by_text(
-            "Hold the phone about 15 cm (6 in) from the card, the card in the frame and its name in the "
+            "Hold the camera about 15 cm (6 in) from the card, the card in the frame and its name in the "
             "dashed box"
         )
         assert hint.is_visible()

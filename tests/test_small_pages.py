@@ -27,7 +27,9 @@ APP_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.30"}
 def panel(text: str, title: str) -> str:
     """The one panel of a small page, with its title inside it (the page's h1)."""
     assert text.count("<section class='card sio-p'>") == 1, text[:400]
-    assert f"<section class='card sio-p'><h1>{html.escape(title)}</h1>" in text, text[:600]
+    assert f"<section class='card sio-p'><div class='ui-head'><h1>{html.escape(title)}</h1></div>" in text, (
+        text[:600]
+    )
     return text.split("<section class='card sio-p'>", 1)[1].split("</section>", 1)[0]
 
 

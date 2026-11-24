@@ -156,34 +156,44 @@ def test_connect_doc_points_at_the_hub() -> None:
 # -- the approved layout (F11, F12): the app list beside the steps, one orange button a section --
 
 
-async def test_the_app_list_sits_beside_the_steps_and_marks_the_picked_app(harness: Harness) -> None:
+async def test_the_app_list_is_a_grouped_list_and_the_drop_down_marks_the_picked_app(
+    harness: Harness,
+) -> None:
     b = Browser(harness)
     try:
         await b.login("/install")
         hub = (await b.http.get("/install")).text
-        # the purpose line under the title; the page is a wide one
+        # the purpose line under the title; the page is the standard's narrow column
+        # (docs/UI-STANDARD.md: Install is a narrow page with an inset grouped list)
         assert "<div class='ui-head'><h1>Guided setup</h1></div><p class='ui-sub'>" in hub
-        assert setup_hub.PURPOSE in hub and "class='wrap ui-wide'" in hub
-        # the list (a computer) and the drop-down (narrow screens) are both there; CSS shows one
-        assert "<nav class='pick' aria-label='Which app'><h2>Which app will you use?</h2>" in hub
-        assert "<details class='drop'><summary><span class='v'>Which app will you use?</span>" in hub
-        assert hub.count("Which app will you use?") == 2  # the list's heading and the drop-down's label
+        assert setup_hub.PURPOSE in hub and "class='wrap ui-narrow'" in hub
+        # no app picked yet: the apps as one grouped list under the shared group label, each a
+        # row to its steps; no drop-down beside it (two ways to the same place)
+        assert (
+            "<nav class='pick' aria-labelledby='pick-h'><section class='ygrp'>"
+            "<h2 class='ui-group' id='pick-h'>Which app will you use?</h2><div class='rows'>" in hub
+        )
+        assert "<a class='yrow' href='/install?for=chatgpt'><span class='lbl'>ChatGPT</span>" in hub
+        assert "<a class='yrow' href='/install?for=android'>" in hub and "<details class='drop'>" not in hub
+        assert hub.count("Which app will you use?") == 1
         assert "Pick one to see only the steps that work there." not in hub
         assert "Other sections:" not in hub and "btn-primary' href='/install?for=" not in hub
-        assert ".inst .cols{grid-template-columns:17rem minmax(0,1fr)}" in hub
+        assert ".inst .cols" not in hub
         # the first screen: the intro, the phone note and the Connector URL; its address is a link
         assert (
             f"<a class='mdaddr' href='{GATEWAY}/install.md'><code>{GATEWAY}/<wbr>install.md</code></a>" in hub
         )
         assert f"<p>{setup_hub.INTRO}</p>" in hub.replace("&#x27;", "'")
         assert "data-copy='mcp-url'" in hub and "On a phone?" in hub
-        # a picked app: tinted in the list (aria-current), named in the drop-down, no orange button
+        # a picked app: named in the "Steps for:" drop-down and tinted in its list (aria-current),
+        # every other app one press away there; no orange button
         claude = (await b.http.get("/install?for=claude")).text
         assert (
             "<a href='/install?for=claude' aria-current='true'>Claude: web, desktop, iPhone and Android</a>"
             in claude
         )
-        assert claude.count("aria-current='true'") == 2  # the list and the drop-down
+        assert claude.count("aria-current='true'") == 1 and "<nav class='pick'" not in claude
+        assert "<a href='/install?for=android'>Android app</a>" in claude
         assert (
             "<span class='sfk'>Steps for:</span><span class='v'>Claude: web, desktop, iPhone and Android"
             "</span>" in claude
@@ -208,7 +218,8 @@ async def test_each_section_has_one_orange_button(harness: Harness) -> None:
         for key, orange in expected.items():
             page = (await b.http.get(f"/install?for={key}")).text
             found = re.findall(
-                r"<a class='btn btn-primary' href='[^']*'[^>]*>(?:<svg.*?</svg> )?([^<]*)</a>", page
+                r"<a class='btn btn-primary(?: step-main)?' href='[^']*'[^>]*>(?:<svg.*?</svg> )?([^<]*)</a>",
+                page,
             )
             assert found == orange, (key, found)
         claude = (await b.http.get("/install?for=claude")).text

@@ -133,6 +133,13 @@ def test_apply_from_the_bar_and_a_rows_menu_asks_in_a_guarded_box_and_applies_on
             assert "+1 Opt" in box.inner_text() and "Arcane Signet" not in box.inner_text()
             button = box.locator(".acts button[value=apply]")
             assert button.inner_text().strip() == "Apply"
+            # locked, it is still the one orange main button, as the review page's locked Apply is:
+            # not a dashed outline, which reads as a button that cannot be pressed at all
+            look = button.evaluate(
+                "b => { const c = getComputedStyle(b);"
+                " return [c.borderTopStyle, c.backgroundColor, c.opacity]; }"
+            )
+            assert look[0] == "solid" and look[1] != "rgba(0, 0, 0, 0)" and look[2] == "1", look
             _locked_press_sends_nothing(page, server, button, opt, url)
             _unlock_and_apply(page, button)
             assert _state(server, opt) == "applied" and _state(server, signet) == "pending"

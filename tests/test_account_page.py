@@ -52,7 +52,9 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         # the list: the four groups in the mockup's order, two columns balanced by their rows
         # (Archidekt over Your data, 8 rows; Assistant over This gateway, 7: review 2, L10), the
         # member's card at the top
-        groups = re.findall(r"<section class='ygrp' data-g='(\d)'(?: id='apps')?><h2>([^<]*)</h2>", page)
+        groups = re.findall(
+            r"<section class='ygrp' data-g='(\d)'(?: id='apps')?><h2 class='ui-group'>([^<]*)</h2>", page
+        )
         assert groups == [("0", "Archidekt"), ("3", "Your data"), ("1", "Assistant"), ("2", "This gateway")]
         # on a phone the style orders them by data-g: the mockup's order, Your data last
         assert page.count("<div class='ycol'>") == 2 and "<div class='yme'>" in page
@@ -91,7 +93,10 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         assert "<span class='lbl'>Archidekt account</span><span class='val'>Not linked</span>" in page
         assert "Archidekt profile" not in page and "Unlink Archidekt" not in page
         link = (await b.http.get("/account/details/archidekt")).text
-        assert "<h1>Archidekt account</h1>" in link and "<a class='yback' href='/account/details'>" in link
+        assert (
+            "<h1>Archidekt account</h1>" in link
+            and "<a class='ui-cap ui-back' href='/account/details'>" in link
+        )
         assert "<button class='primary'>Link account</button>" in link
         assert orange(link) == 1, re.findall(r"class='primary'[^>]*>[^<]*", link)
         # the tick hint under the link form is gone; the disclosure strip is still there
@@ -228,7 +233,7 @@ async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
         r = await b.http.post("/account/assistants", data={"csrf": csrf, "action": "disconnect_all"})
         after = (await b.http.get(r.headers["location"])).text
         assert "<div class='notice ok'>Every assistant was disconnected.</div>" in after
-        assert "No assistant is connected to your account yet." in after
+        assert "<p class='t'>No assistant is connected to your account yet</p>" in after
     finally:
         await b.aclose()
 
@@ -379,9 +384,15 @@ async def test_assistants_way_back_names_where_the_member_came_from(gw: Harness)
         hub = (await b.http.get("/account")).text
         assert "href='/account/assistants?from=account'" in hub
         page = (await b.http.get("/account/assistants?from=account")).text
-        assert "<a class='yback' href='/account'>" in page and "Account</a><h1>Assistants</h1>" in page
-        assert "Account details</a>" not in page
+        assert (
+            "<a class='ui-cap ui-back' href='/account'>" in page
+            and "Account</span></a></p><div class='ui-head'><h1>Assistants</h1>" in page
+        )
+        assert "Account details</span></a>" not in page
         page = (await b.http.get("/account/assistants")).text
-        assert "<a class='yback' href='/account/details'>" in page and "Account details</a>" in page
+        assert (
+            "<a class='ui-cap ui-back' href='/account/details'>" in page
+            and "Account details</span></a>" in page
+        )
     finally:
         await b.aclose()

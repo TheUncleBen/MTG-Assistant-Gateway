@@ -660,6 +660,10 @@ def details_panel(
         label=f"{word} details",
         close_href="/history" + query_string(query, open=""),
         back_text="Back to History",
+        # its own page (a phone, a Fold) has the page's title; beside the list the list's page has
+        # it. The title says what the panel's heading says, so the heading is not drawn twice
+        page_title=f"{word}: {e['deck_name']}",
+        merge_title=True,
     )
 
 
@@ -707,7 +711,7 @@ def deck_filter_groups(
 
 def toolbar_html(query: dict[str, Any], decks: dict[str, str], *, gone: dict[str, str] | None = None) -> str:
     """The search (deck names) and the drop-downs: deck (with its "No longer on Archidekt"
-    group), when (UTC days) and the grouping. They apply as they change; a Search button
+    group), when (the member's local days) and the grouping. They apply as they change; a Search button
     without scripts."""
 
     def by_name(group: dict[str, str]) -> list[tuple[str, str]]:
@@ -731,11 +735,11 @@ def toolbar_html(query: dict[str, Any], decks: dict[str, str], *, gone: dict[str
     return ui.toolbar(
         "/history",
         search_label="Search history",
-        placeholder="Deck name",
+        placeholder="Deck name|Deck",
         q=query["q"],
         filters=[
             deck_select,
-            ui.filter_select("when", "When (UTC days)", list(WHENS), query["when"]),
+            ui.filter_select("when", "When", list(WHENS), query["when"]),
             ui.filter_select("group", "Group by", list(GROUPS), query["group"]),
         ],
         keep={"type": query["type"] if query["type"] != "all" else ""},
@@ -976,12 +980,13 @@ HISTORY_CSS = (
    (final polish: no text cut short) */
 .hy-table .title .deck{overflow-wrap:break-word;min-width:0}
 .hy-table .title .sub{min-width:0}
-/* the Details' buttons: one row, each form inline */
-.ui-drawer .ui-actions form{display:contents}
-.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{margin:0}
+/* three filters share a phone's row: a choice two words long ("Group by day") takes two lines
+   inside the 44 px field instead of making its field taller than the two beside it */
+.ui-tools.n3 .msel-btn .msel-txt{line-height:1.15}
+/* the search box keeps its hint ("Deck name") whole on a 360 px phone at 200% text */
+.ui-tools .search input{padding-right:.4rem}
 .hy-copies .act .btn{display:inline-flex;align-items:center;gap:.35rem;margin:0}
 .hy-copies .act .chev svg.i{width:20px;height:20px}
-h2.hy-backups{font-size:1.2rem}
 /* a group row's meta wraps rather than push the page sideways at large text sizes */
 .ui-table .group > *{min-width:0}
 .ui-table .group .meta{white-space:normal}
@@ -991,13 +996,11 @@ h2.hy-backups{font-size:1.2rem}
 .wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
 .wdg .big small{margin-left:0}
 .ui-drawer pre.diff{max-height:16rem;overflow:auto}
-.ui-drawer .page-only a{display:inline-flex;align-items:center;min-height:44px}
 .hy-empty p{margin:0}
-.hy-back{margin:0 0 .5rem}
-.trend h2{font-size:1.2rem} .trend > p.muted{margin:.2rem 0 .75rem}
+.trend > p.muted{margin:.2rem 0 .75rem}
 .tmetrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;margin:0}
-.tmetric{border:1px solid var(--border);border-radius:3px;padding:.6rem .75rem;min-width:0}
-.tmetric h3{margin:0 0 .3rem;font-size:.95rem;overflow-wrap:anywhere}
+.tmetric{border:1px solid var(--border);border-radius:var(--radius-panel);padding:.6rem .75rem;min-width:0}
+.tmetric h3{margin-top:0}
 .tspark{display:block;width:100%;height:36px;color:var(--orange-text)}
 .tspark polyline{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .tmetric p{margin:.3rem 0 0;font-size:.88rem;overflow-wrap:anywhere}

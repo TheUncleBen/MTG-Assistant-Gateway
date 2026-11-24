@@ -227,7 +227,6 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
             "/proposals",
             "/scan",
             "/precons",
-            "/history/models",
             "/forum",
             "/notifications",
         ], got
@@ -239,7 +238,7 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     if where.startswith("phone"):  # the bar: the four places and More
         assert got["tabs"] == ["/", "/decks", "/binder", "/proposals"], got
         # Watchlist is in Binder and My lists under Account; Forum is in More's Community group (C8)
-        more = ["/search", "/precons", "/scan", "/history/models", "/forum"]
+        more = ["/search", "/precons", "/scan", "/forum"]
         assert got["moreShown"] and got["moreItems"] == more, got
 
 

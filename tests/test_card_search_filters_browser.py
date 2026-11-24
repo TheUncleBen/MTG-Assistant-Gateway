@@ -20,7 +20,7 @@ from .test_cardsearch_browser import SIZES, _chromium, _page
 from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
-from .waits import expect, frame, poll
+from .waits import expect, frame, poll, settled
 
 pytest.importorskip("playwright")
 
@@ -279,6 +279,7 @@ def test_the_filters_fit_every_width_and_the_phone_panel_opens_and_closes(
             page.locator(".sp-open").click()
             panel = page.locator("#sp-filters.open")
             panel.wait_for(timeout=3000)
+            settled(page)  # its opening (a slide, a fold) ends before anything is measured
             box = panel.bounding_box()
             assert box and box["width"] >= width - 1 and box["x"] <= 1, box
             assert page.evaluate(CONTROLS, "#sp-filters.open") == []
@@ -299,18 +300,21 @@ def test_the_filters_fit_every_width_and_the_phone_panel_opens_and_closes(
             assert not page.locator("#p-t").is_visible()
             page.locator(".sp-open").click()
             page.locator("#p-t").wait_for(state="visible", timeout=3000)
+            settled(page)
             assert page.evaluate(CONTROLS, "#cs-form") == []
         # the open More filters fits as well
         if width < 600:
             page.locator(".sp-open").click()
         page.locator(".cs-more summary:visible, [data-more-filters]:visible").first.click()
         page.locator("#f-o").wait_for(state="visible", timeout=3000)
+        settled(page)
         assert page.evaluate(MEASURE) == []
         texts = ".cs .chips li .nm, .cs label, .cs legend, .cs .hint, .cs summary"
         assert page.evaluate(CONTRAST, texts) == []
         # the type list's options are readable in both themes
         page.locator("#p-t").click()
         page.locator("#o-t li.opt").first.wait_for(timeout=5000)
+        settled(page)
         assert page.evaluate(CONTRAST, "#o-t li.opt span") == []
         assert page.evaluate(MEASURE) == []
         if SHOTS:
@@ -505,6 +509,7 @@ def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: 
         page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
         page.locator(".sp-open").click()
         page.locator("#sp-filters.open").wait_for(timeout=3000)
+        settled(page)
         colour = page.locator("#sp-filters input[name=c]").first
         colour.scroll_into_view_if_needed()
         box = colour.bounding_box()
@@ -512,6 +517,7 @@ def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: 
         page.locator("#sp-filters .msel-btn[aria-label='Format']").click()
         sheet = page.locator(".msel-list.sheet")
         sheet.wait_for(timeout=3000)
+        settled(page)
         top = sheet.bounding_box()
         assert top is not None and box["y"] + box["height"] < top["y"], (box, top)  # it's above the sheet
         page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
@@ -574,6 +580,7 @@ def test_on_a_fold_and_desktop_the_filters_wait_behind_a_filters_button_that_rem
         assert page.evaluate(MEASURE) == []
         btn.click()
         page.locator("#p-t").wait_for(state="visible", timeout=3000)
+        settled(page)
         assert btn.get_attribute("aria-expanded") == "true"
         assert page.locator(".sp-sheet-head").is_hidden()  # in place, not a sheet
         assert page.evaluate(CONTROLS, "#cs-form") == []

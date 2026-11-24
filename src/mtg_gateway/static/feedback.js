@@ -237,19 +237,32 @@
   };
   window.MtgText = MtgText;
   // The lists that group and filter by day ("Today", "Yesterday", the When filters) are worked out
-  // on the server, which knows only UTC: the page tells it how far this clock is from UTC (minutes
-  // east, no place name; localday.py). A page that shows days is loaded once more when the server
-  // did not know yet, so the first History of a new browser is right too.
+  // on the server, which knows only UTC: the page tells it how far this clock is from UTC (mtg_tzo,
+  // minutes east) and the time zone's name (mtg_tz, "America/New_York": a past entry from the other
+  // side of a clock change is then grouped by its own day's offset; localday.py). A page that shows
+  // days is loaded once more when the server's days were not these, so the first History of a new
+  // browser, and the first one after the clocks change, are right too.
   (function () {
     try {
       var east = String(-new Date().getTimezoneOffset());
+      var zone = "";
+      try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* none */ }
+      if (!/^[A-Za-z0-9_+\/-]{1,64}$/.test(zone)) zone = "";
       var had = (document.cookie.match(/(?:^|; )mtg_tzo=(-?\d+)/) || [])[1];
-      if (had === east) return;
-      document.cookie = "mtg_tzo=" + east + "; path=/; max-age=31536000; SameSite=Lax" +
-        (location.protocol === "https:" ? "; Secure" : "");
-      if (east !== "0" && document.querySelector("[data-local-days]") && window.sessionStorage &&
-          sessionStorage.getItem("mtg_tzo_reload") !== east && document.cookie.indexOf("mtg_tzo=" + east) >= 0) {
-        sessionStorage.setItem("mtg_tzo_reload", east);
+      var hadZone = (document.cookie.match(/(?:^|; )mtg_tz=([^;]*)/) || [])[1] || "";
+      if (had === east && hadZone === zone) return;
+      var tail = "; path=/; max-age=31536000; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
+      document.cookie = "mtg_tzo=" + east + tail;
+      if (zone) document.cookie = "mtg_tz=" + zone + tail;
+      else if (hadZone) document.cookie = "mtg_tz=; path=/; max-age=0";
+      // without either cookie the server used UTC: right for a zone at UTC+0 all year
+      var year = new Date().getFullYear();
+      var seasons = new Date(year, 0, 1).getTimezoneOffset() || new Date(year, 6, 1).getTimezoneOffset();
+      var key = east + " " + zone;
+      if ((east !== "0" || had || hadZone || seasons) && document.querySelector("[data-local-days]") &&
+          window.sessionStorage && sessionStorage.getItem("mtg_tzo_reload") !== key &&
+          document.cookie.indexOf("mtg_tzo=" + east) >= 0) {
+        sessionStorage.setItem("mtg_tzo_reload", key);
         location.reload();
       }
     } catch (e) { /* no cookies or storage: days stay UTC days */ }
@@ -499,6 +512,20 @@
     row.classList.add("even-rows");
     // an odd one over in the last line takes the whole line rather than half of it
     if (items.length % cols === 1) items[items.length - 1].classList.add("even-span");
+    // a button wider than its cell (a long word at a large text size, a page's min-content rule)
+    // would lie over its neighbour (0.7.48 CI: a report's Markdown over HTML page at 412 px): the
+    // row keeps its wrapped layout instead
+    var room = row.getBoundingClientRect().right + 1;
+    if (items.some(function (c) { var r = c.getBoundingClientRect(); return c.scrollWidth > c.clientWidth + 1 || r.right > room; }) ||
+        items.some(function (c, i) { return items.slice(i + 1).some(function (d) { return overlaps(c, d); }); })) {
+      row.classList.remove("even-rows");
+      row.style.removeProperty("--even-cols");
+      Array.prototype.forEach.call(row.querySelectorAll(".even-span"), function (c) { c.classList.remove("even-span"); });
+    }
+  }
+  function overlaps(a, b) {
+    var p = a.getBoundingClientRect(), q = b.getBoundingClientRect();
+    return p.left < q.right - 1 && q.left < p.right - 1 && p.top < q.bottom - 1 && q.top < p.bottom - 1;
   }
   if (window.ResizeObserver) {
     var evenRO = new ResizeObserver(function (entries) {

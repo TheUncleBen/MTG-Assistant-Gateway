@@ -60,7 +60,7 @@ def test_more_holds_forum_and_neither_watchlist_nor_lists(monkeypatch: pytest.Mo
     groups = theme.more_groups()
     assert [g for g, _links in groups] == ["Find", "Your cards", "Community"]
     hrefs = [h for _g, links in groups for h, _l, _i in links]
-    assert hrefs == ["/search", "/precons", "/scan", "/history/models", "/forum"]
+    assert hrefs == ["/search", "/precons", "/scan", "/forum"]
     assert [p[0] for p in theme.binder_pages()] == ["/collection", "/collection/lists", "/watchlist"]
     monkeypatch.setattr(theme, "WATCHLISTS", False)
     assert [p[0] for p in theme.binder_pages()] == ["/collection", "/collection/lists"]
@@ -79,7 +79,6 @@ def test_the_rail_has_forum_before_alerts_and_the_phone_bar_keeps_it_in_more(ser
         ("/proposals", ""),
         ("/scan", "railonly"),
         ("/precons", "railonly"),
-        ("/history/models", "railonly"),
         ("/forum", "railonly"),
         ("/notifications", "railonly bell foot"),
     ]
@@ -104,15 +103,17 @@ def test_watchlist_and_every_list_light_binder_and_account_lights_the_picture(se
 async def test_binder_pages_lead_back_to_the_binder(member: Browser) -> None:
     """One Binder (0.7.47): with watchlists on, the Binder page is the place, and the pages it opens
     have "‹ Binder" back and their own name instead of the old switch."""
-    back = "<a class='bn-back' href='/binder'>"
+    back = "<a class='ui-cap ui-back' href='/binder'>"
     cards = (await member.http.get("/collection")).text
     assert back in cards and "<h1>Archidekt collection" in cards
     assert "<nav class='hubseg' aria-label='Binder'>" not in cards
     hub = (await member.http.get("/collection/lists")).text
     assert back in hub and "<h1>Archidekt lists</h1>" in hub
-    assert "<h2>Your Archidekt lists</h2>" in hub and "<h2>Watchlist lists</h2>" not in hub
+    assert "<h2 class='ui-group'>Your Archidekt lists</h2>" in hub and "Watchlist lists</h2>" not in hub
     wants = (await member.http.get("/collection/wants")).text
-    assert back in wants and "<h1>Pinned cards</h1>" in wants
+    # a list's page is one level under the Lists page: its way back is there (0.7.48 loop round)
+    assert "<a class='ui-cap ui-back' href='/collection/lists'>" in wants and back not in wants
+    assert "<h1>Pinned cards <span class='cn'>" in wants
     assert "Sol Ring" in wants and "for Meren" in wants  # the pin seeded on Archidekt
     assert "href='/collection/wants?remove=31'" in wants  # the row's menu stays on this page
     watch = (await member.http.get("/watchlist")).text
@@ -147,9 +148,9 @@ async def test_the_lists_live_in_binder_with_the_pins_among_them(member: Browser
         "/lists/btags",
     ]
     assert "Pinned cards" in tabs
-    # the way back: the Lists crumb to the hub, not Account
-    crumbs = page.split("<nav class='crumbs lp-crumbs' aria-label='You are in'>")[1].split("</nav>")[0]
-    assert "href='/collection/lists'" in crumbs and "<span>Category templates</span>" in crumbs
+    # the way back: one capsule to the Lists page, not Account, and no trail beside it
+    assert "<a class='ui-cap ui-back' href='/collection/lists'>" in page and "class='crumbs" not in page
+    assert "<span>Lists</span></a></p>" in page and "<h1>Category templates <span class='cn'>" in page
     assert "<a class='ui-cap' href='/account'>Account</a>" not in page
     hub = (await member.http.get("/account")).text
     assert "<a class='yrow' href='/collection/lists'>" in hub and "<span class='lbl'>Lists</span>" in hub

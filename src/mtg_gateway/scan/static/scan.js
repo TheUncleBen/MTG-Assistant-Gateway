@@ -231,10 +231,11 @@
   const lineKey = (x) => (x && x.card ? x.card.scryfall_id + '|' + String(isFoil(x)) : null);
 
   // ----------------------------------------------------------------- layout
-  // An explanation of the three steps, open on the first visit and folded to its title after that
-  // ("seen"), so on a phone the camera is on the first screen; "Got it" hides it on every device
-  // (true; both kept on the account, prefs.js), and the "How it works" button under the tabs
-  // brings it back open.
+  // An explanation of the three steps: a capsule on a line of its own ("How scanning works") that
+  // opens them in place, never a panel. The first visit also shows the steps in short as a notice
+  // with its × (firstNote), so the camera stays on a phone's first screen; after that visit
+  // ("seen") only the capsule shows; "Got it" hides it on every device (true; both kept on the
+  // account, prefs.js), and the "How it works" button under the tabs brings it back open.
   const INTRO_KEY = 'scan.intro';
   const introPref = () => (window.MtgPrefs ? window.MtgPrefs.get(INTRO_KEY) : undefined);
   const introSeen = () => introPref() === true;
@@ -242,8 +243,8 @@
   const introFirstVisit = introPref() === undefined;
   function introCard(open) {
     const step = (n, title, text) => h('li', null, h('span', { class: 'num', text: String(n) }), h('div', null, h('strong', { text: title }), ' ', text));
-    const box = h('details', { class: 'card intro', id: 'intro', open: !!open },
-      h('summary', { class: 'fold-btn' }, h('h2', { text: 'How scanning works' })),
+    const box = h('details', { class: 'intro', id: 'intro', open: !!open },
+      h('summary', { class: 'fold-btn', text: 'How scanning works' }),
       h('ol', { class: 'steps' },
         step(1, 'Scan.', PICTURES
           ? 'Hold a card inside the frame and keep it still: it is found by its picture and added at once. If it is the wrong card or printing, tap Change. No camera handy? Use the Type tab.'
@@ -252,6 +253,14 @@
         step(3, 'Choose what to do with the cards.', 'Save them to your binder, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
       h('div', { class: 'list-actions' }, h('button', { onclick: () => { if (window.MtgPrefs) window.MtgPrefs.set(INTRO_KEY, true); box.remove(); } }, 'Got it')));
     return box;
+  }
+  // The first visit's notice: the three steps in a line each would push the camera off a phone's
+  // first screen, so they are said in one sentence; the capsule under it has them in full.
+  function firstNote() {
+    const note = h('div', { class: 'notice once', id: 'scan-first', role: 'status' },
+      h('span', null, h('strong', { text: 'New here? ' }), 'Scan a card, check the list, then choose what to do with the cards.'));
+    note.append(h('button', { type: 'button', class: 'close icon-only', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => note.remove() }));
+    return note;
   }
 
   function showIntro() {
@@ -265,8 +274,8 @@
   function render() {
     root.textContent = '';
     if (!introSeen() && !state.items.length) {
-      // With picture scanning the camera needs the room: the card starts folded to its title.
-      root.append(introCard(introFirstVisit && !PICTURES));
+      if (introFirstVisit) root.append(firstNote());
+      root.append(introCard(false));
       if (introFirstVisit && window.MtgPrefs && introPref() === undefined) window.MtgPrefs.set(INTRO_KEY, 'seen');
     }
     const tabs = h('div', { class: 'hubseg tabs', role: 'tablist' },
@@ -388,13 +397,13 @@
     input.addEventListener('input', () => { input.value = input.value.toUpperCase(); });
     input.addEventListener('change', applySet);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applySet(); input.blur(); } });
-    const sw = h('button', { type: 'button', id: 'foil-switch', class: 'switch', role: 'switch', 'aria-checked': scanOpts.foil() ? 'true' : 'false',
+    const sw = h('button', { type: 'button', id: 'foil-switch', class: 'switch ui-chip', role: 'switch', 'aria-checked': scanOpts.foil() ? 'true' : 'false',
       title: 'Count cards as foil unless the card says otherwise',
       onclick: () => { const on = sw.getAttribute('aria-checked') !== 'true'; sw.setAttribute('aria-checked', on ? 'true' : 'false'); scanOpts.setFoil(on); } },
       'Foil');
     bar.append(field, help, sw);
     if (!PICTURES) {
-      const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
+      const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto ui-chip', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
         title: phoneCamera() ? 'Scan with the phone camera, adding cards as they are read' : null,
         onclick: () => {
           if (phoneCamera()) openPhoneCamera(true);
@@ -453,7 +462,7 @@
     const guide = h('div', { class: 'guide', id: 'scan-guide' }, PICTURES ? null : h('div', { class: 'title' }),
       h('span', { class: 'grip', 'aria-hidden': 'true' }));
     const areaBtn = h('button', { type: 'button', class: 'area-btn', id: 'area-btn', 'aria-pressed': 'false', 'aria-label': 'Scan area', hidden: app,
-      title: 'Move or resize the scan area', onclick: () => editArea(true) }, icon('edit'), h('span', { class: 'lbl', text: 'Scan area' }));
+      title: 'Move or resize the scan area', onclick: () => editArea(true) }, icon('scan'), h('span', { class: 'lbl', text: 'Scan area' }));
     const zoom = h('div', { class: 'zoom-chips', id: 'zoom-chips', role: 'group', 'aria-label': 'Zoom', hidden: true });
     const settingsBtn = PICTURES ? h('button', { type: 'button', class: 'cam-settings-btn', id: 'settings-btn', 'aria-label': 'Camera settings',
       title: 'Camera settings', 'aria-haspopup': 'dialog', onclick: () => openSettings() }, icon('settings')) : null;
@@ -467,7 +476,7 @@
     }
     // Under the viewfinder, not over it: at large text sizes it would cover the scan area.
     const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: app ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
-      : 'Hold the phone about 15 cm (6 in) from the card, the card in the frame and its name in the dashed box.' });
+      : 'Hold the camera about 15 cm (6 in) from the card, the card in the frame and its name in the dashed box.' });
     const status = h('p', { class: 'muted', id: 'cam-status', role: 'status', text: '' });
     // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
     // open the camera with one, the app's file chooser never does); the camera is the camera.
@@ -533,17 +542,26 @@
     const tb = tabbar ? tabbar.getBoundingClientRect() : null;
     const below = tb && tb.height && tb.top > window.innerHeight / 2 ? window.innerHeight - tb.top : 0;
     const free = window.innerHeight - topH - (tabs ? tabs.offsetHeight + 8 : 0) - (bar ? bar.offsetHeight : 0) - below - 24;
+    // where the camera's top must be to show: under the site's bar, and under the tabs where they
+    // are sticky. A text size that grew after the page opened makes the page taller above it and
+    // the tabs taller over it, which left the camera's top out of view: the page scrolls again then
+    const sticky = !!tabs && getComputedStyle(tabs).position === 'sticky';
+    const lead = topH + (sticky ? tabs.offsetHeight + 16 : 0);
+    if (!scroll && cam.getBoundingClientRect().top < lead - 1) scroll = true;
     // never past the bottom of the screen from where it sits now
     const room = window.innerHeight - cam.getBoundingClientRect().top - (bar ? bar.offsetHeight + 8 : 0) - below - 12;
+    // nor left under it: what stands over the camera grew (the first visit's notice at a large
+    // text size) and its least height no longer fits where it sits, so the page scrolls to it
+    if (!scroll && room < 260) scroll = true;
     cam.style.height = Math.max(260, Math.round(scroll ? free : Math.min(free, room))) + 'px';
     if (scroll && tabs) {
       const r = cam.getBoundingClientRect();
       const end = r.bottom + (bar ? bar.offsetHeight + 8 : 0);
       // the tabs stay in view above it on a phone, where they are sticky
-      const target = getComputedStyle(tabs).position === 'sticky'
+      const target = sticky
         ? r.top + window.scrollY - topH - tabs.offsetHeight - 16
         : tabs.getBoundingClientRect().top + window.scrollY - topH - 8;
-      if (end > window.innerHeight - below) window.scrollTo(0, Math.max(0, target));
+      if (end > window.innerHeight - below || r.top < lead - 1) window.scrollTo(0, Math.max(0, target));
       // where the page could scroll to decides: the camera ends just above the added bar
       const now = cam.getBoundingClientRect().top;
       const fit = window.innerHeight - now - (bar ? bar.offsetHeight + 8 : 0) - below - 12;
@@ -1180,7 +1198,7 @@
       return 0;
     } catch (e) { return 255; }
   }
-  const BLUR_HINT = ' The picture is blurred: hold the phone still, a little further from the card, and let it focus before the shot.';
+  const BLUR_HINT = ' The picture is blurred: hold the camera still, a little further from the card, and let it focus before the shot.';
 
   /* source: the flattened card or the raw frame; region/info: title and info crops in its pixels;
      flat: the flattening result (corners, score, sideways) or null when the guide box was used as is.
@@ -2077,7 +2095,7 @@
     const grid = h('div', { class: 'tiles', role: 'listbox', 'aria-label': 'Printings of ' + (card.name || 'this card') });
     const status = h('p', { class: 'muted pick-status', text: 'Loading printings…' });
     const filter = h('input', { type: 'search', id: 'pick-filter', placeholder: 'Filter by set code or name', autocomplete: 'off', 'aria-label': 'Filter printings' });
-    const foilSw = h('button', { type: 'button', class: 'switch', role: 'switch', 'aria-checked': foil ? 'true' : 'false',
+    const foilSw = h('button', { type: 'button', class: 'switch ui-chip', role: 'switch', 'aria-checked': foil ? 'true' : 'false',
       onclick: () => { foil = !foil; foilSw.setAttribute('aria-checked', foil ? 'true' : 'false'); } },
       'Foil');
     const close = h('button', { type: 'button', class: 'close', 'aria-label': 'Close', title: 'Close', onclick: closePicker }, icon('x'));

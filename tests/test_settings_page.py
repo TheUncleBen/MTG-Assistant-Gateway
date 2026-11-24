@@ -78,9 +78,7 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
         forge = r.text.split("id='s-row-forge_games'", 1)[1].split("id='s-row-", 1)[0]
         assert "Set in your stack" not in forge and "disabled" not in forge
         # the scan thresholds start folded away; the others are open
-        assert (
-            "<details><summary><span class='sum'><span class='h2'>Card scanning (advanced)</span>" in r.text
-        )
+        assert "<details><summary><span class='sum'><h2>Card scanning (advanced)</h2>" in r.text
         assert "Allowed: 0 (off), or 30 to 1,440" in page
     finally:
         await b.aclose()
@@ -140,13 +138,13 @@ async def test_the_stack_box_is_gone_and_each_locked_row_and_group_says_so(
             # without scripts: the link shows the same, the folded group open, the chip pressed
             r = await b.http.get("/admin/settings?locked=1", headers=NAVIGATE)
             assert "class='set-page only-locked'" in r.text
-            assert "<details open><summary><span class='sum'><span class='h2'>Card scanning" in r.text
+            assert "<details open><summary><span class='sum'><h2>Card scanning" in r.text
             assert "href='/admin/settings' role='button' aria-pressed='true'" in r.text
             assert "class='ui-card set-group has-locked' id='g-simulation'" in r.text
             assert "class='ui-card set-group' id='g-approvals'" in r.text
             # the scan group starts folded, and opens for a link to one of its rows
             r = await b.http.get("/admin/settings?open=scan", headers=NAVIGATE)
-            assert "<details open><summary><span class='sum'><span class='h2'>Card scanning" in r.text
+            assert "<details open><summary><span class='sum'><h2>Card scanning" in r.text
             r = await b.http.get("/admin/settings?open=general", headers=NAVIGATE)
             assert r.status_code == 200 and "<details open>" not in r.text
         finally:

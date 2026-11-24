@@ -1683,9 +1683,9 @@ def head_to_head_html(a: dict[str, Any], b: dict[str, Any], *, csrf: str = "") -
         else ""
     )
     more = more_html(fa, csrf, str(a.get("report_id") or "")) if csrf else ""
-    back = ui.cap_link("← Back to the report", f"/history/reports/{_esc(b.get('report_id') or '')}")
+    back = ui.back_link("Back to the report", f"/history/reports/{b.get('report_id') or ''}")
     return (
-        f"<div class='h2h-page gb-dash'{marks}><p class='hy-back'>{back}</p>"
+        f"<div class='h2h-page gb-dash'{marks}>{back}"
         + ui.page_head("Head to head", HEAD_TO_HEAD_SUB)
         + f"<p class='rv-verdict' role='status'>{_esc(head_to_head_verdict(a, b))}</p>"
         + f"<div class='h2h-sides'>{_side_html(a)}{_side_html(b)}</div>"
@@ -1698,7 +1698,7 @@ def head_to_head_html(a: dict[str, Any], b: dict[str, Any], *, csrf: str = "") -
 HEAD_TO_HEAD_CSS = """
 .h2h-page .h2h-sides{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem;
   margin:0 0 1rem}
-.h2h-page .h2h-side h2{margin:0 0 .25rem;font-size:1.15rem;overflow-wrap:anywhere}
+.h2h-page .h2h-side h2{margin:0 0 .25rem;overflow-wrap:anywhere}
 .h2h-page .h2h-st{margin:0 0 .5rem;min-height:24px}
 .h2h-page .h2h-big{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .6rem}
 .h2h-page .h2h-rate{font-size:2.4rem;font-weight:900;font-variant-numeric:tabular-nums;line-height:1.1}
@@ -1828,20 +1828,17 @@ def report_page_html(
     ``tested`` the rows it played (the Tested list), ``pair_href`` its head-to-head view."""
     s = report_sections(r)
     g = s["goldfish"]
-    deck_id = _esc(r.get("deck_id"))
     name = _esc(r.get("deck_name") or r.get("deck_id") or "Unnamed deck")
     # a pasted list (or a new deck's proposal) has no deck to go back to
     on_deck = is_digits(str(r.get("deck_id") or ""))
-    crumbs = (
-        "<nav class='crumbs rv-crumbs' aria-label='Back'>"
-        # capsules, as History's way back (ui.cap_link): never bare blue text
-        + (
-            f"<a class='ui-cap' href='/decks/{deck_id}'>← Back to the deck</a>"
-            f"<a class='ui-cap' href='/history?deck_id={deck_id}'>Deck history</a>"
-            if on_deck
-            else ""
-        )
-        + "<a class='ui-cap' href='/reports'>All reports</a></nav>"
+    # one way back, a level up (docs/UI-STANDARD.md); the deck and its history are the page's
+    # own actions, standard buttons at the head's end (0.7.48 loop round: three capsules)
+    crumbs = ui.back_link("All reports", "/reports")
+    deck_acts = (
+        ui.button_link("Open the deck", f"/decks/{r.get('deck_id')}", icon_name="decks")
+        + ui.button_link("Deck history", f"/history?deck_id={r.get('deck_id')}", icon_name="history")
+        if on_deck
+        else ""
     )
     meta = [f"<span id='rep-status'>{status_label_html(r.get('status'), r.get('research'))}</span>"]
     src = r.get("source") if isinstance(r.get("source"), dict) else {}
@@ -1872,10 +1869,12 @@ def report_page_html(
     if by_html:
         meta.append(f"<span><span class='k'>By</span> {by_html}</span>")
     head = (
-        "<header class='rv-head'><div class='rv-title'>"
-        + (f"<h1><a href='/decks/{deck_id}'>{name}</a></h1>" if on_deck else f"<h1>{name}</h1>")
-        + f"<p class='rv-meta'>{''.join(meta)}</p></div>"
-        f"<div class='rv-acts'>{actions_html}</div></header>"
+        # the title says what the page is, the line under it which deck: a long deck name as the
+        # title took four lines of a phone's first screen (0.7.48 loop round). The way to the deck
+        # is the Open the deck button beside it, so the name is words, not a second link
+        "<header class='rv-head'><div class='rv-title'><h1>Deck test report</h1><p class='ui-sub rv-deck'>"
+        + f"{name}</p><p class='rv-meta'>{''.join(meta)}</p></div>"
+        f"<div class='rv-acts'>{deck_acts}{actions_html}</div></header>"
     )
     if reused:
         notice_html += (
@@ -1971,21 +1970,24 @@ REPORT_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
 /* one report */
-/* the way-back capsules sit 8 px apart like any chip row, never touching (polish B11): the
-   capsule's own -4px tap-area margin is dropped here, the gap gives the room */
-.rv-page .rv-crumbs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 .25rem;
-  font-size:.93rem}
-.rv-page .rv-crumbs a{display:inline-flex;align-items:center;min-height:44px;margin:0}
 .rv-page .rv-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 1rem}
 .rv-page .rv-title{min-width:0;flex:1 1 24rem}
-.rv-page .rv-title h1{margin:0 0 .3rem;overflow-wrap:anywhere}
-.rv-page .rv-title h1 a{color:inherit;text-decoration:none}
-.rv-page .rv-title h1 a:hover{color:var(--orange-text)}
-.rv-page .rv-meta{display:flex;flex-wrap:wrap;gap:.35rem 1.1rem;align-items:center;margin:0}
+.rv-page .rv-title h1{margin:0;overflow-wrap:anywhere}
+/* the deck, under the title: its name whole in the text colour (it is what the report is about),
+   wrapping between its words */
+.rv-page .rv-title .rv-deck{margin:.1rem 0 0;font-size:1rem;font-weight:600;color:var(--text);
+  overflow-wrap:anywhere}
+.rv-page .rv-meta{display:flex;flex-wrap:wrap;gap:.35rem 1.1rem;align-items:center;margin:.3rem 0 0}
 .rv-page .rv-meta .k{color:var(--text-muted);margin-right:.2rem}
 .rv-page .rv-acts{display:flex;flex-wrap:wrap;gap:.5rem}
 .rv-page .rv-acts .btn,.rv-page .rv-acts button{margin:0;display:inline-flex;align-items:center;gap:.35rem}
+/* on a phone the report's actions fill their rows evenly (two a row; a row's lone last one takes
+   the row), instead of four buttons of four widths ending raggedly */
+@media (max-width:599.98px){.rv-page .rv-acts{width:100%}
+  .rv-page .rv-acts > :not(.sr-only):not([hidden]){flex:1 1 calc(50% - .25rem);min-width:min-content}
+  .rv-page .rv-acts > form > button,.rv-page .rv-acts > span > .btn,
+  .rv-page .rv-acts > span > button{width:100%}}
 .rv-page .ci-w{position:relative;display:block;width:100%;height:8px;border-radius:4px;
   background:var(--surface-2)}
 .rv-page .ci-w i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--orange)}
@@ -1999,8 +2001,8 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-jump .ui-chips{margin:0}
 .rv-page .rv-sec{scroll-margin-top:4rem;margin:0 0 1rem}
 .rv-page .rv-sh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .25rem}
-.rv-page .rv-sh h2{margin:0;font-size:1.2rem}
-.rv-page .rv-sec h3{font-size:1rem;margin:.75rem 0 .35rem}
+.rv-page .rv-sh h2{margin:0}
+.rv-page .rv-sec h3{margin-top:.75rem}
 .rv-page .rv-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9.5rem),1fr));
   margin:0 0 1rem;
   border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft)}
@@ -2048,8 +2050,9 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-notes ul{margin:.2rem 0 0;padding-left:1.1rem;list-style:circle}
 .rv-page .rv-det{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
 /* what the quick solo test leaves out: inset grouped lists, as on the account settings pages */
+/* the standard's inset grouped list (docs/UI-STANDARD.md): --group-bg, --radius-lg */
 .rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--group-bg);
-  border:1px solid var(--border-soft);border-radius:12px;overflow:hidden}
+  border:1px solid var(--border-soft);border-radius:var(--radius-lg);overflow:hidden}
 .rv-page .ig-list{list-style:none;margin:0;padding:0}
 .rv-page .ig.ig-list{margin:.5rem 0 0}
 .rv-page .ig-list li{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;min-height:44px;
@@ -2076,9 +2079,10 @@ REPORT_PAGE_CSS = (
   gap:.1rem .6rem;padding:.35rem 16px;min-height:44px;align-content:center;box-sizing:border-box}
 .rv-page .ig-info > summary::-webkit-details-marker{display:none}
 .rv-page .ig-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
-.rv-page .ig-info h3{margin:0;font-size:1.05rem;font-weight:700;flex-basis:100%}
+.rv-page .ig-info h3{margin-top:0;flex-basis:100%}
 .rv-page .ig-info .n{color:var(--text-muted);font-size:.9rem}
-.rv-page .ig-blurb{margin:.25rem 0 .5rem;padding:10px 14px;border:1px solid var(--border);border-radius:12px;
+.rv-page .ig-blurb{margin:.25rem 0 .5rem;padding:10px 14px;border:1px solid var(--border);
+  border-radius:var(--radius-panel);
   font-size:.92rem;line-height:1.45}
 .rv-page .ig-blurb p{margin:0}
 .rv-page .ig-sub{margin:1rem 16px .35rem;font-size:.78rem;font-weight:600;letter-spacing:.05em;
@@ -2114,18 +2118,20 @@ REPORT_PAGE_CSS = (
 .rv-page .sc-why{margin:.3rem 0 .55rem;color:var(--text-muted);font-size:.92rem;line-height:1.45}
 .rv-page .sc-cards{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.4rem}
 .rv-page .ig-list .sc-cards li{display:block;min-height:0;padding:0;border:0}
-.rv-page .sc-cards .cardlink{display:inline-flex;align-items:center;min-height:44px;padding:0 .85rem;
-  border:1px solid var(--border-soft);border-radius:999px;background:var(--bg);color:var(--text);
-  font:inherit;font-size:.92rem;cursor:pointer;text-align:left;overflow-wrap:anywhere;max-width:100%}
-.rv-page .sc-cards .cardlink:hover{border-color:var(--border)}
+/* a shortcut's cards are chips (the standard's pressable pill): each opens its card */
+.rv-page .sc-cards .cardlink{display:inline-flex;align-items:center;min-height:44px;padding:0 .8rem;
+  border:1px solid var(--control-border);border-radius:999px;background:transparent;color:var(--text);
+  font:inherit;font-size:.9rem;font-weight:700;cursor:pointer;text-align:left;overflow-wrap:anywhere;
+  max-width:100%}
+.rv-page .sc-cards .cardlink:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
 .rv-page .ig-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:.75rem auto 0;
   max-width:46rem}
 .rv-page .ig-actions.two{grid-template-columns:repeat(2,minmax(0,1fr))}
 .rv-page .ig-actions .ask{position:relative;display:flex;margin:0}
 .rv-page .ig-actions .ask [role=status]{position:absolute;top:100%;left:0;right:0;text-align:center}
 .rv-page .ig-actions button,.rv-page .ig-actions .btn{display:flex;align-items:center;justify-content:center;
-  gap:.4rem;width:100%;min-height:48px;margin:0;padding:6px 10px;white-space:normal;text-align:center;
-  line-height:1.25;box-sizing:border-box}
+  gap:.4rem;width:100%;margin:0;white-space:normal;text-align:center;line-height:1.25;
+  box-sizing:border-box}
 .rv-page .ig-actions svg{flex:none}
 @media (max-width:480px){.rv-page .ig-actions.two{grid-template-columns:minmax(0,1fr)}}
 .rv-page .ig-cards li.fill{display:none}
@@ -2191,7 +2197,7 @@ REPORT_PAGE_CSS = (
      and below 39 em (three tiles of 12.5 em and the gaps) each tile takes the row */
   @container (max-width:39em){ .rv-page .rv-w > .wdg{flex-basis:100%} }}
 .rv-page .rv-chart{margin:0}
-.rv-page .rv-chart h3{margin:.5rem 0 .2rem}
+.rv-page .rv-chart h3{margin-top:.5rem}
 .rv-page .rv-chart .ui-hint{margin:0 0 .35rem}
 .rv-page .rv-chart svg{max-height:15rem}
 @media (max-width:599.98px){.rv-page .rv-chart svg{font-size:1.286rem;padding-left:1.25rem}}
@@ -2222,7 +2228,7 @@ REPORT_PAGE_CSS = (
   .rv-page .rv-dstats .tile{border-left:0;border-top:1px solid var(--border-soft);padding:.6rem .4rem}
   .rv-page .rv-dstats .tile:nth-child(even){border-left:0}
   .rv-page .rv-dstats .tile:first-child{border-top:0}}
-.rv-page .rv-raw{padding:.25rem 1rem .5rem}
+.rv-page .rv-raw{padding:.25rem 1rem .5rem;border-top-color:var(--card-border)}
 .rv-page .rv-raw pre,.rv-page .rv-ab{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}
 .rv-page .rv-np p{overflow-wrap:anywhere}
 .rv-page .rv-np h3 .n,.rv-page .rv-sec h3 .n{color:var(--text-muted);font-weight:400;font-size:.9rem;
@@ -2231,7 +2237,6 @@ REPORT_PAGE_CSS = (
    panels of their own) */
 .rv-page .rv-flat{border-top:2px solid var(--card-border);padding-top:.75rem;margin:0 0 1.25rem}
 .rv-page .rv-flat .ui-widgets{margin:.75rem 0 .5rem}
-.rv-page .rv-flat .rv-sh h2{font-size:1.25rem}
 .rv-page .rv-flat .ui-table{border:1px solid var(--card-border);border-radius:var(--radius-panel);
   background:var(--surface)}
 .rv-page .rv-flat .ui-table .th{background:var(--surface-2);border-bottom:0}
@@ -2257,17 +2262,18 @@ REPORT_PAGE_CSS = (
 .rv-page .cardlink:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:3px}
 /* owner decision C7: has the deck changed since, since the last test, the tested list, paired tests */
 .rv-page .rv-changed{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 1rem;
-  padding:.6rem .9rem;border-left:4px solid var(--orange);background:var(--orange-tint);border-radius:6px}
+  padding:.7rem .9rem;border-left:4px solid var(--orange);background:var(--orange-tint);
+  border-radius:0 var(--radius) var(--radius) 0;color:var(--orange-text);font-weight:700}
 .rv-page .rv-changed p{margin:0;flex:1 1 20rem;overflow-wrap:anywhere}
-.rv-page .rv-changed.same{border-left-color:var(--green);background:var(--green-tint)}
+.rv-page .rv-changed.same{border-left-color:var(--green);background:var(--green-tint);color:var(--green-text)}
 .rv-page .rv-changed.same p{display:flex;align-items:center;gap:.4rem}
-.rv-page .rv-changed.wait{border-left-color:var(--border);background:transparent}
+.rv-page .rv-changed.wait{border-left-color:var(--border);background:transparent;color:var(--text-muted);
+  font-weight:400}
 .rv-page .rv-changed form{margin:0}
 .rv-page .rv-changed button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
 .rv-page .mv.in{color:var(--green-text);font-weight:700}
 .rv-page .mv.out{color:var(--red-text);font-weight:700}
 .rv-page .rv-since{margin:0 0 1rem;padding:.75rem 0 .25rem;border-top:2px solid var(--card-border)}
-.rv-page .rv-since .rv-sh h2{font-size:1.1rem}
 .rv-page .rv-since .ui-cap{margin-left:auto}
 .rv-page .rv-since-l{list-style:none;margin:.5rem 0;padding:0;display:grid;
   grid-template-columns:repeat(auto-fill,minmax(min(100%,13rem),1fr));gap:0 1rem;

@@ -27,7 +27,7 @@ from starlette.responses import JSONResponse, Response
 
 from . import cardquery as cq
 from . import cardsearch_view as cv
-from . import prefs
+from . import prefs, ui
 from .busy import outage
 from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .scan.service import ScanError
@@ -53,6 +53,10 @@ SEARCH_PAGES = 200  # result pages a search can be read to; past it there is no 
 TEXT_TTL = 6 * 3600  # seconds a card's text is kept
 TEXT_MAX = 500  # cards kept at most (each a few hundred bytes)
 ABSENT_TTL = 1800  # seconds a name Scryfall does not know is remembered as unknown
+
+
+# the purpose line under the title, as Search decks has one (two lines at most on a phone)
+CARDS_PURPOSE = "Every Magic card. Open one for its text, rulings and printings, or add it to a deck."
 
 
 def _face(f: dict[str, Any]) -> dict[str, str]:
@@ -265,14 +269,10 @@ def clean_query(raw: str | None) -> str:
     return " ".join((raw or "").split())[:MAX_QUERY]
 
 
-START_HTML = (
-    "<section class='panel'><h2>Find a card</h2><p class='muted'>Type a card name or pick a filter. "
-    "Paper cards only, unless Games says otherwise.</p></section>"
+START_HTML = ui.empty(
+    "Find a card", "Type a card name or pick a filter. Paper cards only, unless Games says otherwise."
 )
-NO_MATCH_HTML = (
-    "<section class='panel'><p class='muted'>No card matches these filters. Check the spelling, or "
-    "take a filter away.</p></section>"
-)
+NO_MATCH_HTML = ui.empty("No card matches these filters", "Check the spelling, or take a filter away.")
 
 
 def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
@@ -365,7 +365,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
         resp = render(
             title,
-            body,
+            ui.page_head(title, CARDS_PURPOSE if title == "Cards" else "") + body,
             site=s.server_name,
             status=status,
             signed_in=True,
@@ -373,6 +373,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             sub=sub,
             wide=True,
+            heading=False,
             current="/search",
             head_extra=(
                 # deck.css carries the card viewer's own styles (the dialog, its bottom sheet on phones)

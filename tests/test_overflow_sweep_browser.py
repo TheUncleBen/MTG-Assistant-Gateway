@@ -235,6 +235,9 @@ MEASURE = """
     // Card search's Watch button sits on its picture's corner by design
     const pa = a.el.parentElement;
     if (pa === b.el.parentElement && pa.classList.contains('picwrap')) continue;
+    // the one search field's magnifier is its form's submit button, drawn inside the field
+    // (ui.search_field, docs/UI-STANDARD.md)
+    if (pa === b.el.parentElement && pa.classList.contains('ui-search')) continue;
     const ox = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
     const oy = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
     if (ox > 1 && oy > 1)

@@ -375,14 +375,14 @@ def test_the_apply_box_leaves_the_foot_of_a_phone_when_large_text_makes_it_tall(
 
 def test_the_decks_heading_buttons_never_leave_one_alone_at_half_width(server: Server) -> None:  # noqa: F811
     """New deck, New folder, New package on a phone: three in a row at the normal size; at 200%
-    text two fit a line, and the third then takes its whole line instead of half of it."""
+    text each takes a line of its own, never two and one."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid, _pending = _seed(server)
-    widths = """() => { const a = document.querySelector('.ui-head.hubhead .acts');
+    widths = """() => { const a = document.querySelector('.dkhead .acts');
       const row = a.getBoundingClientRect().width;
       return [...a.children].map(c => { const r = c.getBoundingClientRect();
         return [Math.round(r.top), Math.round(100 * r.width / row)]; }); }"""

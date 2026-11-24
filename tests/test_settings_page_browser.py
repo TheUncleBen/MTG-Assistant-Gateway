@@ -199,7 +199,7 @@ def test_review_round_1_settings_details(server: Server, width: int, zoom: str) 
         warn = page.locator(".notice.warn", has_text="Not saved yet")
         assert warn.inner_text() == (
             "Not saved yet: “Days of nightly backups kept”. What you typed is still in the form; "
-            "press “Save Backups” to keep it."
+            "press “Save backups” to keep it."
         )
         assert page.evaluate(CONTRAST, TEXT) == []
         browser.close()

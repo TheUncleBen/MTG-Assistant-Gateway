@@ -18,15 +18,15 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
-from .waits import expect, redrawn
+from .waits import expect, redrawn, settled
 
 TEXT = (
-    ".ygrp h2, .ygrp .lbl, .ygrp .val, .yme b, .yme .sub, .yback, h1, .yfold p, .yfold dt, .yfold dd, "
+    ".ygrp h2, .ygrp .lbl, .ygrp .val, .yme b, .yme .sub, .ui-back, h1, .yfold p, .yfold dt, .yfold dd, "
     ".acc h2, .acc p, .acc label, .acc .btn, .acc button, .acc .ui-row .lab, .acc .ui-row .help, "
     ".mtgbox h2, .mtgbox p, .mtgbox .acts button, .mtgbox label, .notice"
 )
 TARGETS = (
-    ".ygrp a.yrow, .ygrp button.yrow, .ygrp details.yrow > summary, .yback, .acc .btn, "
+    ".ygrp a.yrow, .ygrp button.yrow, .ygrp details.yrow > summary, .ui-back, .acc .btn, "
     ".acc button:not(.inline), .acc .switch, .acc .msel-btn, .yfold .ui-cap, .yfold .btn"
 )
 PAGES = (
@@ -79,6 +79,7 @@ def server(tmp_path):
 
 def _short(page, sel: str) -> list[str]:
     """The targets under 44 px, named."""
+    settled(page)  # a box's opening ends first: its .98 scale reads 44 px as 43.1
     return page.evaluate(
         "(sel) => [...document.querySelectorAll(sel)]"
         ".filter(e => e.getBoundingClientRect().width && getComputedStyle(e).visibility !== 'hidden')"
@@ -170,7 +171,7 @@ def test_the_list_and_every_page_fit_each_surface(
                 assert page.locator("#writes .yfold .ui-lbl").inner_text().strip() == "On"
             else:
                 # a section's page: the way back to the list, one heading, the form drawn
-                assert page.locator(".yback").get_attribute("href") == "/account/details"
+                assert page.locator(".ui-back").get_attribute("href") == "/account/details"
                 assert page.locator("main h1").count() == 1
                 assert page.locator(".acc .card > h2").count() <= 1, path  # no repeat of the h1
             assert page.evaluate(MEASURE) == [], path
@@ -199,7 +200,7 @@ def test_the_rows_open_their_pages_and_the_boxes_ask_first(server: Server) -> No
         page.locator(".yrow", has_text="Push notifications").click()
         page.wait_for_url("**/account/details/notifications")
         assert page.locator("main h1").inner_text() == "Push notifications"
-        page.locator(".yback").click()
+        page.locator(".ui-back").click()
         page.wait_for_url("**/account/details")
         # Sign out on all my devices: the box, then the one red button posts the logout form
         page.locator(".yrow", has_text="Sign out on all my devices").click()

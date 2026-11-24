@@ -140,7 +140,9 @@ def test_the_html_breadcrumb_tiles_and_empty_states() -> None:
     assert "<nav class='crumbs' aria-label='Folder path'>" in html
     assert "href='/decks?order=name'>Decks</a>" in html
     assert "href='/decks?folder=10&amp;order=name'>commander</a>" in html
-    assert "<li aria-current='page'><span>Brews</span></li>" in html
+    # the open folder is the section's heading, with what it holds, not the trail's last word
+    assert "aria-current='page'" not in html
+    assert "<h2 id='fv-here'>Brews <span class='ui-sub'>" in html
     assert "class='plain decklist list'" in html and "Folders <span" not in html  # no subfolders here
     top = fv.level_html(
         fv.arrange(ROWS, INFO, folder_id=None, q="", order="updated"),
@@ -151,7 +153,7 @@ def test_the_html_breadcrumb_tiles_and_empty_states() -> None:
     )
     assert "class='crumbs'" not in top  # nothing to go back to
     assert "<span class='sub'>1 deck · 2 folders</span>" in top and "<span class='sub'>Empty</span>" in top
-    assert "href='/decks?folder=20'" in top and "Folders <span class='n'>2</span>" in top
+    assert "href='/decks?folder=20'" in top and "Folders <span class='ui-sub'>2</span>" in top
     brews = fv.level_html(
         fv.arrange(ROWS, INFO, folder_id=10, q="", order="updated"),
         covers={},
@@ -203,7 +205,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
     b = await linked_browser(stack)
     try:
         top = (await b.http.get("/decks", headers=NAV)).text
-        assert "Folders <span class='n'>1</span>" in top and ">Commander</span>" in top
+        assert "Folders <span class='ui-sub'>1</span>" in top and ">Commander</span>" in top
         assert "MTG Gateway Backups" not in top and "folder-field" not in top
         assert "data-new-folder" in top and "Precon in a folder" not in top
         inside = (await b.http.get("/decks?folder=502", headers=NAV)).text
@@ -240,7 +242,7 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
     b = await linked_browser(stack)
     try:
         top = (await b.http.get("/decks", headers=NAV)).text
-        assert "Folders <span class='n'>1</span>" in top and ">Commander</span>" in top
+        assert "Folders <span class='ui-sub'>1</span>" in top and ">Commander</span>" in top
         assert "MTG Gateway Backups" not in top and "Copy in the backup folder" not in top
         assert "MTG Gateway Backups" not in (await b.http.get("/decks?folder=503", headers=NAV)).text
         tree = (await b.http.get("/decks/api/folders")).json()

@@ -508,12 +508,12 @@ async def test_account_page_in_the_app_has_a_this_app_group(stack: Stack) -> Non
         web = await b.http.get("/account", headers=NAV)
         assert web.status_code == 200
         assert "<a class='yrow' href='/install?for=android'>" in web.text
-        assert "<h2>This app</h2>" not in web.text and "data-native" not in web.text
+        assert "<h2 class='ui-group'>This app</h2>" not in web.text and "data-native" not in web.text
 
         app = await b.http.get("/account", headers={**NAV, **APP_UA})
         assert app.status_code == 200
         main = app.text[app.text.index("</header>") :]
-        assert "href='/install?for=android'" not in main and "<h2>This app</h2>" in main
+        assert "href='/install?for=android'" not in main and "<h2 class='ui-group'>This app</h2>" in main
         row = main[main.index("data-native='checkForUpdates'") :]
         assert "<span class='val'>0.6.4</span>" in row[: row.index("</button>")]
         # the details page no longer has an App card of its own

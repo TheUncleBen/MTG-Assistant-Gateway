@@ -60,7 +60,9 @@ def test_nothing_fades_in_from_the_browsers_own_colours(idp_server, scheme: str)
             assert page.evaluate(RUNNING) == []
             assert page.evaluate("() => window.__runs") == []  # none ran and ended before the look
             cancel = page.get_by_role("button", name="Cancel")
-            assert cancel.evaluate("e => getComputedStyle(e).backgroundColor") == "rgba(0, 0, 0, 0)"
+            # a plain button has the surface fill from its first paint (the UI standard's one button look)
+            surface = {"light": "rgb(250, 250, 250)", "dark": "rgb(35, 35, 35)"}[scheme]
+            assert cancel.evaluate("e => getComputedStyle(e).backgroundColor") == surface
             # once the page is in, a hover still fades
             poll(page, lambda: page.evaluate("() => !document.documentElement.classList.contains('preload')"))
             page.get_by_role("button", name="Continue").hover()

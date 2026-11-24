@@ -19,13 +19,13 @@ STATE = """
 () => ({
   url: location.pathname + location.search,
   stayed: window.__stayed === 1,
-  h1: document.querySelector('.hubhead h1').textContent,
+  h1: document.querySelector('.dkhead h1').textContent,
   title: document.title.split(' · ')[0].split(' - ')[0],
-  current: [...document.querySelectorAll('.hubhead .hubseg a[aria-current=page]')]
+  current: [...document.querySelectorAll('.dkhead .hubseg a[aria-current=page]')]
     .map(a => a.textContent.trim()),
   deck42: !document.querySelector("li.deck[data-deck-id='42']").classList.contains('sh-off'),
   pkg50: !document.querySelector("li.deck[data-deck-id='50']").classList.contains('sh-off'),
-  orange: [...document.querySelectorAll('.hubhead .acts a.btn-primary')].map(a => a.textContent.trim()),
+  orange: [...document.querySelectorAll('.dkhead .acts a.btn-primary')].map(a => a.textContent.trim()),
   placeholder: document.querySelector('#q').placeholder,
   label: document.querySelector("label[for=q]").textContent,
   show: (document.querySelector('#listform input[name=show]') || {}).value || '',

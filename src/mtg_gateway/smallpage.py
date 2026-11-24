@@ -56,8 +56,7 @@ SCRIPT = "/static/pages.js"
 # The panel: 34rem wide, centred; on phones the buttons share the row.
 CSS = (
     ".sio{max-width:34rem;margin:1.5rem auto 0}"
-    ".sio-p{padding:1.25rem 1.25rem 1rem}"
-    ".sio-p h1{font-size:1.6rem;margin:0 0 .6rem}"
+    ".sio-p .ui-head{margin:0 0 .5rem}"
     ".sio-p p{margin:.5rem 0}"
     ".sio-p .ui-actions{margin-top:1rem}"
     ".sio-p .notice{margin:.75rem 0}"
@@ -90,7 +89,8 @@ def panel(title: str, body_html: str, actions_html: str = "", extra_html: str = 
     and anything after them (small print). Render with ``heading=False``."""
     acts = f"<div class='ui-actions'>{actions_html}</div>" if actions_html else ""
     return (
-        f"<div class='sio'><section class='card sio-p'><h1>{html.escape(title)}</h1>"
+        "<div class='sio'><section class='card sio-p'>"
+        f"<div class='ui-head'><h1>{html.escape(title)}</h1></div>"
         f"{body_html}{acts}{extra_html}</section></div>"
     )
 

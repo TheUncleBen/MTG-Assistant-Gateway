@@ -1,5 +1,5 @@
 """The 0.7.46 redesign's shell screens. Screen 1: the open Fold's rail without More (the four
-places, a thin line, Scan, Precons, Card models and Forum, Alerts at the foot; it never scrolls at
+places, a thin line, Scan, Precons and Forum, Alerts at the foot; it never scrolls at
 840×700), the phone's tab bar and More sheet as they were, and a computer's top bar that lists
 the same pages instead of More ▾ when it is wide enough. Screen 9: pull to refresh in the Android
 app, whose page-side hook says at each touch whether that touch may start a pull, and whose
@@ -86,16 +86,11 @@ def _tabbar(page_html: str) -> str:
 # -- screen 1: the rail's places, from the navigation itself ---------------------------------------
 
 
-def test_the_rail_lists_every_more_page_but_search_in_order_of_use(monkeypatch: pytest.MonkeyPatch) -> None:
-    from mtg_gateway import card_models
-
-    monkeypatch.setattr(card_models, "SWITCHED_ON", True)
-    assert [h for h, _l, _i in theme.rail_extra()] == ["/scan", "/precons", "/history/models", "/forum"]
+def test_the_rail_lists_every_more_page_but_search_in_order_of_use() -> None:
+    # Card models are on the Account page (the owner, 2026-11-23), not on the rail or in More
+    assert [h for h, _l, _i in theme.rail_extra()] == ["/scan", "/precons", "/forum"]
     more = {h for _g, links in theme.more_groups() for h, _l, _i in links}
     assert more - {h for h, _l, _i in theme.rail_extra()} == {"/search"}  # the top bar's box
-    # a page switched off leaves More and the rail together: nothing is listed by hand
-    monkeypatch.setattr(card_models, "SWITCHED_ON", False)
-    assert [h for h, _l, _i in theme.rail_extra()] == ["/scan", "/precons", "/forum"]
     # the open decisions are one constant each
     assert theme.RAIL_ALERTS_AT_FOOT is True and theme.RAIL_GROUP_LINE is True
     assert theme.TOPBAR_FULL_FROM == "70em"
@@ -117,7 +112,6 @@ def test_the_rail_markup_is_four_places_a_line_the_rest_and_alerts_at_the_foot(s
         ("span", "", "rail-sep railonly", ""),
         ("a", "/scan", "", "railonly"),
         ("a", "/precons", "", "railonly"),
-        ("a", "/history/models", "", "railonly"),
         ("a", "/forum", "", "railonly"),
         ("a", "/notifications", "", "railonly bell foot"),
     ]
@@ -129,7 +123,6 @@ def test_the_rail_markup_is_four_places_a_line_the_rest_and_alerts_at_the_foot(s
         "/search",
         "/precons",
         "/scan",
-        "/history/models",
         "/forum",
     ]
     assert "Collection" not in sheet and "Binder" not in sheet  # the sheet never renames Binder
@@ -157,7 +150,6 @@ def test_the_computer_bar_carries_the_rails_pages_as_links_beside_more(server: S
     assert re.findall(r"<a class='xtra' href='([^']+)'", site) == [
         "/scan",
         "/precons",
-        "/history/models",
         "/forum",
     ]
     assert "<a class='xtra' href='/scan' aria-current='page'>Scan</a>" in site
@@ -173,7 +165,8 @@ def test_the_guide_describes_the_rail_without_more() -> None:
     from mtg_gateway import guide
 
     text = guide.nav_description(html_out=False)
-    assert "then Scan, Precons, Card models, Forum and Alerts, with no More." in text
+    assert "then Scan, Precons, Forum and Alerts, with no More." in text
+    assert "the look, your assistants and their Card models, the Guide" in text  # the Account page
     assert "shows them all in the top bar when it is wide enough" in text
 
 
@@ -236,7 +229,6 @@ def test_the_open_fold_rail_holds_every_page_without_scrolling(
         "rail-sep",
         "/scan",
         "/precons",
-        "/history/models",
         "/forum",
         "/notifications",
     ], got
@@ -285,7 +277,6 @@ def test_the_phone_keeps_its_tab_bar_and_more_sheet(chromium, server: Server, ap
             "/search",
             "/precons",
             "/scan",
-            "/history/models",
             "/forum",
         ], got
         assert got["sep"] is None and got["doc"] == got["win"], got
@@ -311,7 +302,7 @@ BAR = """() => {
     doc: document.documentElement.scrollWidth, win: innerWidth,
     search: Math.round(box(document.querySelector('.topbar .topsearch')).width)};
 }"""
-FULL = ["Home", "Decks", "Binder", "Assistant", "Scan", "Precons", "Card models", "Forum"]
+FULL = ["Home", "Decks", "Binder", "Assistant", "Scan", "Precons", "Forum"]
 WITH_MORE = ["Home", "Decks", "Binder", "Assistant", "More▾"]
 
 
@@ -348,7 +339,7 @@ def test_the_computer_bar_drops_more_where_the_links_fit(chromium, server: Serve
                 items = page.locator(".navmore .menu a").evaluate_all(
                     "els => els.map(a => a.getAttribute('href'))"
                 )
-                assert items == ["/search", "/precons", "/scan", "/history/models", "/forum"], (
+                assert items == ["/search", "/precons", "/scan", "/forum"], (
                     width,
                     zoom,
                     items,

@@ -20,7 +20,7 @@ from .test_history_page import seed_history, store_report
 stack_options = stack_with(COMPANION)
 # a row's main action: the word from 600 px, a 44 px chevron on a phone
 OPEN = (
-    "<a class='ui-cap' href='{href}' aria-label='{word}'><span class='sm-hide'>{word}</span>"
+    "<a class='btn' href='{href}' aria-label='{word}'><span class='sm-hide'>{word}</span>"
     "<span class='sm-only chev' aria-hidden='true'>›</span></a>"
 )
 
@@ -56,7 +56,7 @@ async def test_proposals_waiting_rows_are_one_line_with_review_and_the_menu(stac
         group = table.split("<div class='tr group'>")[1].split("<div class='tr'")[0]
         assert "data-all='43'" in group and "<a id='deck-43' href='/decks/43'>Reap the Tides</a>" in group
         assert "<span>15 waiting</span><span>oldest " in group
-        assert "<span class='act'><a class='ui-cap' href='/decks/43'>Open deck</a></span>" in group
+        assert "<span class='act'><a class='btn btn-plain' href='/decks/43'>Open deck</a></span>" in group
         # the header keeps the check-every box and nothing else
         assert "aria-label='Check every waiting change'" in table and ">Risk<" not in table
         assert ">Status<" not in table and ">From<" not in table and ">Made<" not in table

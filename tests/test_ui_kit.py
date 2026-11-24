@@ -218,7 +218,8 @@ def test_widget() -> None:
         wide_sm=True,
     )
     assert out.startswith("<div class='wdg accent wide-sm'><span class='lab'>")
-    assert "Waiting for you</span><span class='big'>1,234<small>waiting</small></span>" in out
+    # the label's words in a part of their own, so they wrap beside the icon, not under it
+    assert "<span class='t'>Waiting for you</span></span><span class='big'>1,234<small>waiting</small>" in out
     assert "<span class='det'>6 on 4 decks &lt;b&gt;</span>" in out
     assert "<span class='go'><a class='btn btn-plain' href='/p?f=w'>Show them</a></span>" in out
     assert "class='det'" not in ui.widget("Applied", "check", 0)
@@ -293,7 +294,7 @@ def test_table_pieces() -> None:
     )
     assert ui.day_row("Today") == "<div class='tr daygroup'>Today</div>"
     link = ui.open_link("/proposals/1", "Review")
-    assert "class='act ui-cap'" in link and "aria-label='Review'" in link and "sm-only chev" in link
+    assert "class='act btn'" in link and "aria-label='Review'" in link and "sm-only chev" in link
 
 
 def test_pager_says_where_you_are_and_never_caps_silently() -> None:
@@ -342,7 +343,8 @@ def test_selection_bar_and_side_panel() -> None:
         "#1 Sol Ring", "<p>body</p>", label="Proposal #1", close_href="/p", back_text="Back"
     )
     assert panel.startswith("<aside class='ui-drawer' aria-label='Proposal #1'>")
-    assert "<p class='page-only'><a class='ui-cap' href='/p'>← Back</a></p>" in panel
+    assert "<p class='ui-back-line page-only'><a class='ui-cap ui-back' href='/p'>" in panel
+    assert "<span>Back</span></a></p><div class='dh'>" in panel
     assert "class='close btn panel-only' href='/p' aria-label='Close' title='Close'>" in panel
     assert ui.split("L") == "<div class='ui-split'>L</div>"
     assert (

@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from . import modes, ui
+from . import account_hub, modes, ui
 from .theme import icon
 
 PAGE = "/account/assistants"
@@ -303,7 +303,7 @@ def _row(label: str, ic: str, value: str = "", href: str = "", *, chev: bool = T
 
 
 def _group(title: str, rows: list[str], foot: str = "", *, gid: str = "") -> str:
-    t = f"<h2>{html.escape(title)}</h2>" if title else ""
+    t = f"<h2 class='ui-group'>{html.escape(title)}</h2>" if title else ""
     f = f"<p class='yfoot'>{foot}</p>" if foot else ""
     i = f" id='{gid}'" if gid else ""
     return f"<section class='ygrp'{i}>{t}<div class='rows'>{''.join(rows)}</div>{f}</section>"
@@ -364,21 +364,26 @@ def list_html(
             + f"</div>{all_box}"
         )
     else:
-        g2 = _group(
-            "Connected",
-            [f"<div class='yrow yempty'><span class='lbl'>{NONE_YET}</span></div>"],
-            "Connect Claude, ChatGPT or another assistant with Guided setup. Each one starts with "
-            "your default.",
+        # nothing connected: the site's empty state under the group's label, not a row of a list
+        g2 = (
+            "<section class='ygrp'><h2 class='ui-group'>Connected</h2>"
+            + ui.empty(
+                NONE_YET.rstrip("."),
+                "Connect Claude, ChatGPT or another assistant with Guided setup. Each one starts with "
+                "your default.",
+                action=ui.button_link("Guided setup", "/install"),
+            )
+            + "</section>"
         )
-        foot = f"<div class='ydisc'>{ui.button_link('Guided setup', '/install', icon_name='download')}</div>"
+        foot = ""  # the empty state has the one button to Guided setup
     # the way back names where the member came from: Account's own Assistants row, or Account
     # details' (final audit F06)
     back_href, back_text = (
         ("/account", "Account") if back == "account" else ("/account/details", "Account details")
     )
     return (
-        f"<a class='yback' href='{back_href}'>{icon('chev')}{back_text}</a><h1>Assistants</h1>"
-        f"<div class='yhub ylone'><div class='ycols'><div class='ycol'>{g1}</div>"
+        account_hub.back_head(back_href, back_text, "Assistants")
+        + f"<div class='yhub ylone'><div class='ycols'><div class='ycol'>{g1}</div>"
         f"<div class='ycol'>{g2}{foot}</div></div></div>"
     )
 
@@ -531,8 +536,8 @@ def app_html(
         post = "default" if confirm_default else ""
         box = confirm_box(a, confirm, waiting, csrf_in, open=True, post=post)
     return (
-        f"<a class='yback' href='{PAGE}'>{icon('chev')}Assistants</a><h1>{name}</h1>"
-        f"<div class='yhub ylone'>{head}<div class='ycols'><div class='ycol'>{g1}</div>"
+        account_hub.back_head(PAGE, "Assistants", a.name)
+        + f"<div class='yhub ylone'>{head}<div class='ycols'><div class='ycol'>{g1}</div>"
         f"<div class='ycol'>{g2}{disc}</div></div></div>{box}"
     )
 
@@ -594,7 +599,6 @@ CSS = (
     + """
 .ygrp .yfoot{margin:.45rem .9rem 0;font-size:.86rem;color:var(--text-muted);line-height:1.4}
 .ygrp div.yrow{cursor:default}
-.ygrp .yrow.yempty .lbl{color:var(--text-muted);padding:.7rem 0}
 /* an assistant's row: its mark in the icon slot, two lines of words, its mode at the right */
 .ygrp .yrow.app{padding-top:.55rem;padding-bottom:.55rem;min-height:64px}
 .ygrp .yrow.app .lbl{display:flex;flex-direction:column;gap:.15rem;min-width:0}
@@ -622,11 +626,8 @@ CSS = (
    centred under the rows, a pattern no other page had) */
 .ydisc{display:flex;flex-direction:column;align-items:stretch;margin:.5rem 0 1rem}
 .ydisc form{display:flex;flex-direction:column;margin:0}
-.ydisc .btn{display:flex;align-items:center;justify-content:center;gap:.5rem;min-height:50px;width:100%;
-  margin:0;padding:0 1.5rem;border-radius:14px;white-space:normal;text-align:center}
-.ydisc .btn svg.i{width:18px;height:18px;flex:none}
-/* a short page: one column, as wide as a phone screen at most */
-.yhub.ylone{max-width:42rem;margin:0 auto}
+.ydisc .btn{display:flex;width:100%;margin:0;white-space:normal;text-align:center}
+/* a short page: one column */
 .yhub.ylone .ycols{grid-template-columns:minmax(0,1fr)}
 .mtgbox .body form.inbox p{margin:0 0 .6rem;line-height:1.45}
 """

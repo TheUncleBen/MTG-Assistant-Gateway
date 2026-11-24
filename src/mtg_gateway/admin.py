@@ -702,6 +702,9 @@ ADMIN_CSS = """
 .adm .miss-grid button{width:100%;min-height:var(--ctl);display:inline-flex;align-items:center;
   justify-content:center;gap:.4rem}
 .adm .adm-nav{margin:0 0 1rem;display:flex;width:100%}
+/* a card's heading is the site's section heading (docs/UI-STANDARD.md), not the smaller one
+   theme's .ui-card > h2 still sets */
+.adm .ui-card > h2{margin-bottom:.5rem}
 .adm .notice{margin:0 0 1rem}
 .adm .ui-widgets .wdg .det{overflow-wrap:anywhere;min-width:0}
 /* the number and its unit ("0.7.37 running") may part at 200% text: two flex items, not one word */
@@ -719,7 +722,6 @@ ADMIN_CSS = """
 .adm .wdg .go .btn,.adm .wdg .go a.btn-plain{white-space:normal;overflow-wrap:anywhere;height:auto;
   text-align:center}
 .adm .ui-table .title .labs{display:inline-flex;flex-wrap:wrap;gap:.3rem;align-items:center}
-.adm .ui-table .title .sub .ui-lbl,.adm .ui-table .title .sm-only .ui-lbl{min-height:22px;font-size:.78rem}
 .adm .ui-table .sm-only{display:none}
 .adm .ui-table .sub{font-weight:400;color:var(--text-muted);font-size:.86rem}
 .adm .ui-table .tr > span{min-width:0;overflow-wrap:anywhere}
@@ -738,7 +740,7 @@ ADMIN_CSS = """
 .ao .ao-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;align-items:start}
 .ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
 .ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}
-.ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;min-height:22px;padding-top:2px;padding-bottom:2px}
+.ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;padding-top:2px;padding-bottom:2px}
 /* break-word: a word breaks inside only when wider than the whole control, never because the
    label took its share ("Not configur/ed", "AUTHENTIK.md."; batch 10, AB7) */
 .ao .ui-row .ctl{overflow-wrap:break-word;font-size:.95rem}
@@ -821,11 +823,8 @@ ADMIN_CSS = """
   border-top:1px solid var(--border-soft)}
 .am .more-body[hidden]{display:none}
 .am .more-body .ui-meta{margin:0;font-size:.9rem}
-.am .ui-tools .f{flex:0 0 auto;width:10rem}
-@media (max-width:599.98px){.am .ui-tools .f{width:8.8rem}}
-/* Card models */
-.amo .ui-tools .f{flex:0 0 auto;width:13rem}
-@media (max-width:599.98px){.amo .ui-tools .f{width:9.5rem}}
+/* Card models (its filter row, as Metrics', is the shared flexible .ui-tools row: the search
+   and the pickers share the line, or each takes a whole line, with no fixed widths) */
 .amo .ui-table .tr.model .title .t{font-weight:700;overflow-wrap:break-word}
 /* a narrow table (a phone, or large text): the card's name takes the whole first line, the ⋮
    beside the line under it, so a long name never breaks inside a word */
@@ -1424,16 +1423,21 @@ def _status_labels(u: Mapping[str, Any], admin_sub: str, *, is_admin: bool) -> s
     return out
 
 
-def _arch_label(u: Mapping[str, Any], *, name: bool = True) -> str:
+def _arch_label(u: Mapping[str, Any], *, name: bool = True, caption: bool = False) -> str:
+    """Linked or Not linked, with the Archidekt name. ``caption``: the name says what it is
+    ("Archidekt alice"), for the row's second line, which has no column heading over it."""
     if u["archidekt_username"]:
-        who = f" <span class='u'>{html.escape(u['archidekt_username'])}</span>" if name else ""
+        cap = "<span class='k'>Archidekt</span> " if caption else ""
+        who = f" <span class='u'>{cap}{html.escape(u['archidekt_username'])}</span>" if name else ""
         return f"<span class='arch'>{ui.label('Linked', 'blue', 'link')}{who}</span>"
     return f"<span class='arch'>{ui.label('Not linked', 'grey', 'x')}</span>"
 
 
-def _apps_html(u: Mapping[str, Any]) -> str:
+def _apps_html(u: Mapping[str, Any], *, caption: bool = False) -> str:
+    """The member's connected apps as chips. ``caption``: with none, "No apps" (the row's second
+    line has no Apps heading over it to make sense of a bare "none")."""
     if not u["clients"]:
-        return "<span class='muted'>none</span>"
+        return f"<span class='muted'>{'No apps' if caption else 'none'}</span>"
     return "".join(ui.app_chip(c["name"], unnamed=True, client_id=c["client_id"]) for c in u["clients"])
 
 
@@ -1644,7 +1648,7 @@ def _users_body(
             f"data-activity='/admin/activity?sub={quote(sub, safe='')}'>"
             f"<span class='title'><a class='t' href='{html.escape(open_href(sub))}'>{_member_html(u)}</a>"
             f"{email}"
-            f"<span class='sub'>{status} {_arch_label(u)} {_apps_html(u)}</span>"
+            f"<span class='sub'>{status} {_arch_label(u, caption=True)} {_apps_html(u, caption=True)}</span>"
             f"<span class='sm-only'>{status} {_arch_label(u, name=False)} {when}</span></span>"
             f"<span class='md-hide labs'>{status}</span>"
             f"<span class='md-hide'>{_arch_label(u)}</span>"
@@ -1931,7 +1935,10 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
     ]
     head = _head("Admin: metrics", "Usage and errors, counted per UTC day.", path) + ui.widgets(widgets)
     if not totals:
-        none = f"<div class='ui-card'><p>No activity counted in the last {days} days.</p></div>"
+        none = ui.empty(
+            f"No activity counted in the last {days} days",
+            "Counts show here once members or their assistants use the gateway.",
+        )
         return f"<div class='adm am'>{head}{none}</div>"
     low = q.casefold()
     base = [
@@ -2024,10 +2031,10 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
             + "</div>"
         )
     else:
-        table = (
-            "<div class='ui-card'><p>Nothing counted matches these filters. "
-            + ui.cap_link("Show everything", path)
-            + "</p></div>"
+        table = ui.empty(
+            "Nothing counted matches these filters",
+            "Take a filter away, or look at a longer period.",
+            action=ui.button_link("Show everything", path),
         )
     newer = (
         _href(path, kind=kind, days=days if days != DAYS else "", q=q, offset=max(0, offset - PER_PAGE))

@@ -8,7 +8,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from . import modes, ui
+from . import card_models, modes, ui
 from .theme import app_version, current_layout, current_path, current_theme, display_name, icon, in_app
 
 # what a sign-out clears on the device (Clear-Site-Data "storage", pages.logout_post): said on
@@ -72,8 +72,6 @@ def _choices(action: str, name: str, csrf: str, options: tuple[tuple[str, str], 
 
 
 THEMES = (("light", "Light"), ("dark", "Dark"), ("system", "System"))
-# The app's answer to signInReturn (BrowserSignIn.returnStatus), in words
-SIGN_IN_RETURN = (("auto", "Comes back by itself"), ("tap", "May need a tap in the browser"))
 LAYOUTS = (("auto", "Fit the screen"), ("desktop", "Desktop layout"))
 
 
@@ -114,6 +112,9 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
                 # each assistant's own approval mode, three taps from any page (0.7.46 re-audit
                 # QG-14): avatar › Assistants › the assistant
                 _row("Assistants", "proposals", "/account/assistants?from=account"),
+                # the notes your assistant writes so the solo test plays a card it can't read; on
+                # this page since the owner's 2026-11-23 ask (they were on the rail and in More)
+                *([_row("Card models", "layers", "/history/models")] if card_models.SWITCHED_ON else []),
                 _row("Guide", "guide", "/guide"),
                 _row("Assistant skill", "report", "/install?for=skill"),
                 *([] if app else [_row("Android app", "download", "/install?for=android")]),
@@ -131,9 +132,9 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
                     _row("Reload", "refresh", native="reload"),
                     _row("Open a copied link", "link", native="openCopiedLink"),
                     _row("Change gateway", "swap", native="changeGateway"),
-                    # whether the browser sign-in comes back by itself (an Auth Tab browser on the
-                    # phone) or may wait for a tap on the gateway's page (a Custom Tab)
-                    _row("Sign-in", "login", native="signInReturn", states=SIGN_IN_RETURN),
+                    # No Sign-in line (the owner, 2026-11-23): whoever sees this page is signed in,
+                    # and a line that only said how the browser sign-in comes back did nothing.
+                    # The app's signInReturn method stays for older pages; nothing calls it.
                     # the installed version, from the app's user agent
                     _row("Check for app updates", "download", value=app_version(), native="checkForUpdates"),
                 ],
@@ -142,9 +143,16 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
     return out
 
 
+def back_head(back_href: str, back_text: str, title: str) -> str:
+    """The head of a page one level in (Account details, Assistants, a section's page): the way
+    back a level (ui.back_link, the one look every page uses), then the page title in the shared
+    page head (ui.page_head's .ui-head). ``title`` is plain text. Render with heading=False."""
+    return ui.back_link(back_text, back_href) + ui.page_head(title)
+
+
 def _group_html(g: tuple[int, str, list[Row]]) -> str:
     return (
-        f"<section class='ygrp'><h2>{html.escape(g[1])}</h2>"
+        f"<section class='ygrp'><h2 class='ui-group'>{html.escape(g[1])}</h2>"
         f"<div class='rows'>{''.join(_row_html(r) for r in g[2])}</div></section>"
     )
 
@@ -164,7 +172,7 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
     # side by side left a hole under the shorter one on a desktop (the owner, 0.7.46 checklist)
     gs = sorted(groups(csrf, admin=admin, app=app))
     return (
-        "<div class='yhub'>"
+        ui.page_head("Account") + "<div class='yhub'>"
         "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
         f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
         f"<span class='sub'>{sub_line}</span></span></div>"
@@ -181,9 +189,12 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
 
 
 HUB_CSS = """
-.yhub{max-width:42rem;margin:0 auto}
-.yhub .yme{display:flex;align-items:center;gap:1rem;padding:.9rem 1rem;margin:0 0 1.25rem;border-radius:14px;
-  background:var(--surface);border:1px solid var(--border-soft);color:var(--text);text-decoration:none}
+/* the title has no purpose line under it on these pages: the list starts a line lower */
+.ui-head + .yhub,.ui-head + .acc,.ui-head + .notice{margin-top:.75rem}
+.yhub{max-width:44rem;margin:0 auto}
+.yhub .yme{display:flex;align-items:center;gap:1rem;padding:.9rem 1rem;margin:0 0 1.25rem;
+  border-radius:var(--radius-lg);
+  background:var(--group-bg);border:1px solid var(--border-soft);color:var(--text);text-decoration:none}
 .yhub .yme img.av{width:56px;height:56px;border-radius:50%;object-fit:cover;flex:none}
 /* the words go under the picture when they have less than 12em beside it (200% text on a phone) */
 .yhub .yme{flex-wrap:wrap}
@@ -196,19 +207,22 @@ HUB_CSS = """
 /* a group with no row left (This app in an app without the bridge, or an older one) shows no
    heading over nothing (audit D16); feedback.js hides the rows an app can't answer */
 .ygrp:not(:has(.yrow:not([hidden]))){display:none}
-.ygrp h2{margin:0 0 .4rem .9rem;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
-  color:var(--menu-head)}
-.ygrp .rows{background:var(--surface);border:1px solid var(--border-soft);border-radius:14px;overflow:hidden}
+/* the group's label is the shared h2.ui-group (docs/UI-STANDARD.md); the rows are the inset
+   grouped list: --group-bg, --radius-lg, a divider between rows */
+.ygrp .rows{background:var(--group-bg);border:1px solid var(--border-soft);border-radius:var(--radius-lg);
+  overflow:hidden}
 .ygrp .yrow{display:flex;align-items:center;gap:.8rem;width:100%;min-height:50px;margin:0;padding:0 1rem;
   border:0;border-radius:0;background:transparent;color:var(--text);text-decoration:none;font:inherit;
   font-weight:400;text-align:left;cursor:pointer;justify-content:flex-start}
 .ygrp .rows > * + *{border-top:1px solid var(--border-soft)}
-.ygrp .yrow > svg.i,.ygrp summary > svg.i{width:20px;height:20px;color:var(--orange-text)}
+/* a row's icon and chevron grow with its words (200% text) */
+.ygrp .yrow > svg.i,.ygrp summary > svg.i{width:max(20px,1.4em);height:max(20px,1.4em);flex:none;
+  color:var(--orange-text)}
 /* the label and the value (“Fit the screen”) each wrap by word at large text, neither squeezed
    under its longest word, so one never runs over the other */
 .ygrp .yrow .lbl{flex:1 1 auto}
 .ygrp .yrow .val{flex:0 1 auto;text-align:right;color:var(--text-muted);font-size:.92rem}
-.ygrp .ch svg.i{width:16px;height:16px;color:var(--text-muted)}
+.ygrp .ch svg.i{width:max(16px,1.1em);height:max(16px,1.1em);color:var(--text-muted)}
 .ygrp div.yrow{cursor:default}
 .ygrp .yrow[hidden]{display:none}
 .ygrp details.yrow{display:block;padding:0;min-height:0}
@@ -238,6 +252,11 @@ HUB_CSS = """
     text-align:left;margin:0;max-width:none}
   .ygrp .rows .yrow .ch,.ygrp .rows .yrow > details.dd{grid-column:3;grid-row:1 / span 2}
   .ygrp .rows .yrow .ch{margin-right:-.2rem}
+  /* here the words need the room: the icon grows with them only as far as their own size, and
+     the chevron keeps its size, so no word of a label is broken */
+  .ygrp .rows > .yrow > svg.i,.ygrp .rows > details.yrow > summary > svg.i{
+    width:max(20px,1em);height:max(20px,1em)}
+  .ygrp .rows .ch svg.i{width:16px;height:16px}
 }
 @media (hover:hover) and (pointer:fine){
   .ygrp .yrow{min-height:44px} .ygrp details.yrow > summary{min-height:44px}
@@ -247,9 +266,5 @@ HUB_CSS = """
    it clears on its own line under it (beside the button, the note ran out of a 320 px window) */
 .ysignout{display:flex;flex-direction:column;align-items:stretch;gap:.5rem;margin:.5rem 0 1rem}
 .ysignout > p{margin:0 .9rem;max-width:100%}
-.ysignout .btn{display:flex;align-items:center;justify-content:center;gap:.5rem;min-height:50px;width:100%;
-  margin:0;padding:0 1.5rem;border-radius:14px;background:var(--surface);
-  border:1px solid var(--border);color:var(--danger-text);font-weight:700;line-height:1.2}
-.ysignout .btn svg.i{width:18px;height:18px}
-.ysignout .btn:hover{background:var(--surface-2);color:var(--danger-text)}
+.ysignout .btn{display:flex;width:100%;margin:0}
 """

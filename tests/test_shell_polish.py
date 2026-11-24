@@ -60,18 +60,30 @@ async def test_theme_and_layout_answer_a_script_without_a_redirect(member: Brows
 # -- More ------------------------------------------------------------------------------------------
 
 
-def test_more_lists_my_card_models_while_they_are_kept(monkeypatch: pytest.MonkeyPatch) -> None:
-    groups = dict(theme.more_groups())
-    assert ("/history/models", "Card models", "layers") in groups["Your cards"]
-    monkeypatch.setattr(card_models, "SWITCHED_ON", False)
+def test_card_models_are_a_row_on_the_account_page_not_in_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The owner (2026-11-23): Card models moved from the rail and More to the Account page."""
+    from mtg_gateway import account_hub
+
     assert "/history/models" not in [h for _g, links in theme.more_groups() for h, _l, _i in links]
+    assert "/history/models" not in [h for h, _l, _i in theme.rail_extra()]
+    rows = {r[2]: r[0] for _n, _t, group in account_hub.groups("x", admin=False, app=False) for r in group}
+    assert rows.get("/history/models") == "Card models"
+    monkeypatch.setattr(card_models, "SWITCHED_ON", False)  # not kept: no row
+    rows = {r[2] for _n, _t, group in account_hub.groups("x", admin=False, app=False) for r in group}
+    assert "/history/models" not in rows
 
 
-async def test_the_more_menu_opens_my_card_models(member: Browser) -> None:
+async def test_the_account_page_opens_card_models_and_they_lead_back(member: Browser) -> None:
     page = (await member.http.get("/decks")).text
     more = page.split("<details class='dd navmore'>", 1)[1].split("</details>", 1)[0]
-    assert "href='/history/models'" in more and "Card models" in more
-    assert (await member.http.get("/history/models")).status_code == 200
+    assert "href='/history/models'" not in more
+    account = (await member.http.get("/account")).text
+    assert "<a class='yrow' href='/history/models'>" in account and "Card models" in account
+    models = await member.http.get("/history/models")
+    assert models.status_code == 200
+    assert "<a class='ui-cap ui-back' href='/account'>" in models.text  # the way back a level
+    assert "href='/account' aria-label='Account' title='Account'" in models.text
+    assert "aria-current=page>" in models.text.split("class='icon-btn acct'", 1)[1].split("</a>", 1)[0]
 
 
 # -- the in-chat cards' links ------------------------------------------------------------------------
@@ -93,10 +105,12 @@ def test_the_forum_and_folder_crumbs_are_capsules() -> None:
     crumbs = forum_page.crumbs_html(("Archidekt", "/forum#g"), ("General", "/forum/s"))
     assert crumbs.count("class='ui-cap'") == 3, crumbs
     level = folderview.Level()
-    level.current = {"id": 5, "name": "Precons"}
-    level.crumbs = [(None, "Decks"), (5, "Precons")]
+    level.current = {"id": 6, "name": "Precons"}
+    level.crumbs = [(None, "Decks"), (5, "Commander"), (6, "Precons")]
     out = folderview.breadcrumb_html(level, order="-updatedAt")
-    assert "<a class='ui-cap' href=" in out and "<span>Precons</span>" in out, out
+    # the folders above, each a capsule; the open folder is the heading under the trail
+    assert out.count("<a class='ui-cap' href=") == 2 and "Precons" not in out, out
+    assert "<h2 id='fv-here'>Precons" in folderview.folder_head_html(level)
 
 
 def test_every_more_menu_link_has_its_own_icon() -> None:

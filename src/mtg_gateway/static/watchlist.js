@@ -128,7 +128,7 @@
     var head = box.querySelector(".wx-h h3");
     var label = (head && head.textContent) || "";
     if (!box.__heading) box.__heading = label;
-    box.querySelectorAll(".seg button").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+    box.querySelectorAll(".ui-seg button").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
     var cur = box.getAttribute("data-currency") || "usd";
     var what = box.getAttribute("data-card") || box.__heading;
     if (btn.getAttribute("data-range") !== "full") {
@@ -147,6 +147,11 @@
     });
   }
 
+  // the button's word (ui.row_open: the word from 600 px, a chevron on a phone); the chevron stays
+  function word(link, text) {
+    var w = link.querySelector(".sm-hide");
+    if (w) w.textContent = text; else link.textContent = text;
+  }
   function toggle(link) {
     var row = link.closest(".tr");
     var panel = document.getElementById(link.getAttribute("aria-controls"));
@@ -157,13 +162,13 @@
       var p = document.getElementById(other.getAttribute("aria-controls"));
       if (p) p.hidden = true;
       other.setAttribute("aria-expanded", "false");
-      other.textContent = "Details";
+      word(other, "Details");
       var r = other.closest(".tr");
       if (r) r.classList.remove("open");
     });
     panel.hidden = !opening;
     link.setAttribute("aria-expanded", opening ? "true" : "false");
-    link.textContent = opening ? "Close" : "Details";
+    word(link, opening ? "Close" : "Details");
     row.classList.toggle("open", opening);
     return true;
   }
@@ -329,7 +334,7 @@
       return;
     }
 
-    var range = e.target.closest(".watch-page .seg button[data-range]");
+    var range = e.target.closest(".watch-page .ui-seg button[data-range]");
     if (range) { setRange(range); return; }
     var name = e.target.closest(".watch-page a.wcard");
     if (name && window.MtgCardView) {

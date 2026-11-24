@@ -12,6 +12,7 @@ import pytest
 
 from .test_alerts_center_browser import _alerts, _exe
 from .test_suggest_browser import Server
+from .waits import settled
 
 APP_UA = (
     "Mozilla/5.0 (Linux; Android 15; SM-F966U; wv) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -90,6 +91,7 @@ def test_the_bell_box_reads_marks_and_clears_with_undo(
             _press(page.locator("[data-bell]:visible").first, touch)
             box = page.locator(".mtgbox.al-box")
             box.locator(".al-row").first.wait_for()
+            settled(page)  # the box's opening ends first: its .98 scale reads 44 px as 43.1
             # nothing in the box runs off its side (rows were cut at the left)
             over = page.evaluate(
                 "(() => { const b = document.querySelector('.mtgbox .body');"
@@ -182,11 +184,13 @@ def test_the_page_actions_keep_their_words_on_one_line(server: Server, width: in
                 page.evaluate(TEXT_200)
             lines = page.evaluate(
                 "[...document.querySelectorAll('.al-acts button, .al-acts a')].map(b => {"
-                " const t = [...b.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).pop();"
+                # the words: the shown one of a button's two (a phone's short one), or Settings' text
+                " const t = [...b.querySelectorAll('span')].filter(s => s.getClientRects().length).pop()"
+                " || [...b.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).pop();"
                 " const r = document.createRange(); r.selectNodeContents(t);"
                 " const tops = new Set([...r.getClientRects()].filter(x => x.width > 1)"
                 ".map(x => Math.round(x.top)));"
-                " return [b.textContent.trim(), tops.size]; })"
+                " return [b.innerText.trim(), tops.size]; })"
             )
             assert [t for t, n in lines if n != 1] == [], lines
             over = page.evaluate(

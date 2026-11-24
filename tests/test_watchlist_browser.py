@@ -169,9 +169,12 @@ def test_watchlist_rows_open_in_place_and_draw_the_full_history(server: Server, 
             page.goto(f"{server.base}/watchlist", wait_until="networkidle")
             page.evaluate("window.__same = true")
             sol = page.locator("#wr-w_one .more")
-            assert sol.inner_text() == "Details" and sol.bounding_box()["height"] >= 36
+            # a phone's row has the 44 px chevron (the word is the button's name, ui.row_open)
+            word = sol.locator(".sm-hide")
+            assert word.text_content() == "Details" and sol.bounding_box()["height"] >= 36
+            assert sol.inner_text().strip() == ("›" if width < 600 else "Details")
             sol.click()
-            assert page.locator("#wx-w_one").is_visible() and sol.inner_text() == "Close"
+            assert page.locator("#wx-w_one").is_visible() and word.text_content() == "Close"
             assert sol.get_attribute("aria-expanded") == "true"
             page.locator("#wr-w_two .more").click()
             assert page.locator("#wx-w_two").is_visible() and not page.locator("#wx-w_one").is_visible()

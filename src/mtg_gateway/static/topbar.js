@@ -158,7 +158,11 @@
   // at most): as many a row as fit whole, then spread evenly over the rows needed, so no part sits
   // alone under a full row ("Card models" at 412 px) and none is cut (confirmation NA4, P-9).
   // Where equal parts would need a second row but the parts fit one at their own widths, they keep
-  // to one row (NC1)
+  // to one row (NC1). A row shorter than the others (seven parts as four over three) sits in the
+  // middle, its parts as wide as every other. Where parts at their one-line widths would go one a
+  // row (seven admin tabs on a phone: seven rows), they are laid out by their longest word
+  // instead (seg-tight: a part's words may take two lines, no word is ever broken), as many a
+  // row as keep every word whole
   function balance(n) {
     if (!n.matches(".hubseg") || !n.getClientRects().length) return;
     var kids = Array.prototype.filter.call(n.children, function (k) {
@@ -171,11 +175,12 @@
       document.documentElement.clientWidth) - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) -
       parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth), w = 0;
     // each part measured on one line at its own width
-    n.classList.remove("seg-grid", "seg-row");
+    n.classList.remove("seg-grid", "seg-row", "seg-tight");
     // each part measured without the padding a wrapped label's centring gave it (below): New deck's
     // "Paste a list" kept 110 px of it, so the parts no longer fitted one row and went one a row,
     // then fitted again, by turns
     kids.forEach(function (k) {
+      k.style.removeProperty("grid-column-start");
       if (!k.hasAttribute("data-fit-pad")) return;
       k.style.removeProperty("padding-left");
       k.style.removeProperty("padding-right");
@@ -197,12 +202,30 @@
       n.classList.add("seg-row");
       return;
     }
-    var cols = Math.max(1, Math.min(len, Math.floor((room + gap) / (w + gap) + 0.001)));
-    cols = Math.ceil(len / Math.ceil(len / cols));
-    // a last row of one part under fuller rows is a part alone: fewer a row until none is
-    while (cols > 1 && len % cols === 1) cols--;
+    function even(width) {
+      var c = Math.max(1, Math.min(len, Math.floor((room + gap) / (width + gap) + 0.001)));
+      c = Math.ceil(len / Math.ceil(len / c));
+      // a last row of one part under fuller rows is a part alone: fewer a row until none is
+      while (c > 1 && len % c === 1) c--;
+      return c;
+    }
+    var cols = even(w);
+    if (cols === 1 && len > 2) {
+      // one a row: the same parts by their longest word, with the tight sides they then get
+      n.classList.add("seg-measure", "seg-tight", "seg-words");
+      var word = 0;
+      kids.forEach(function (k) { word = Math.max(word, k.getBoundingClientRect().width); });
+      n.classList.remove("seg-measure", "seg-words");
+      var tight = even(Math.ceil(word));
+      if (tight > 1) cols = tight;
+      else n.classList.remove("seg-tight");
+    }
     n.style.setProperty("--seg-cols", String(cols));
     n.classList.add("seg-grid");
+    // a shorter last row sits in the middle (the grid has two tracks a part, so a row may start
+    // half a part in)
+    var rest = len % cols;
+    if (cols > 1 && rest) kids[len - rest].style.setProperty("grid-column-start", String(cols - rest + 1));
   }
   function show(n) {
     balance(n);
@@ -291,7 +314,9 @@
     var cs = getComputedStyle(h);
     var room = h.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     var w = widestWord(h);
-    if (room > 0 && w > room + 0.5) h.style.zoom = String(Math.floor(room / w * 1000) / 1000);
+    // a word within a pixel of the room breaks all the same (its measured parts round down): it
+    // is fitted with a pixel to spare
+    if (room > 1 && w > room - 1) h.style.zoom = String(Math.floor((room - 1) / w * 1000) / 1000);
   }
   function lineRights(b) {
     var tops = {}, right = -Infinity, left = Infinity, lines = 0;

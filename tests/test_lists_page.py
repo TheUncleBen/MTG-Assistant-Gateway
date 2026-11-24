@@ -110,8 +110,9 @@ async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
     }
     for slug, (label, names, extra) in want.items():
         page = (await member.http.get(_page_of(slug))).text
-        # every list is one of Binder's Archidekt lists: "‹ Binder" back, the tab names the list
-        assert "<a class='bn-back' href='/binder'>" in page, slug
+        # every list is one of Binder's Archidekt lists: its way back is the Lists page, one level
+        # up, and the tab names the list
+        assert "<a class='ui-cap ui-back' href='/collection/lists'>" in page, slug
         assert f"<a href='{_page_of(slug)}' aria-current='page'>{label}" in page, slug
         assert f"<title>Binder: {label}" in page and extra in page, slug
         for n in names:
@@ -237,7 +238,7 @@ async def test_default_categories_set_and_clear(member: Browser, stack: Stack) -
     assert r.status_code == 303 and _where(r) == "/lists/defaults?ok=defaults_cleared"
     assert ark.account.defaults[WHO][9003] == []
     page = (await member.http.get("/lists/defaults")).text
-    assert "No cards with default categories yet." in page
+    assert "<p class='t'>No cards with default categories yet</p>" in page
 
 
 async def test_default_categories_load_more_answers_rows(member: Browser, stack: Stack) -> None:
@@ -315,7 +316,7 @@ async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> N
     assert _where(r) == "/collection/wants?ok=pin_removed"
     assert ark.account.pins[WHO] == []
     page = (await member.http.get("/collection/wants")).text
-    assert "No pinned cards yet." in page and "Remove all…" not in page
+    assert "<p class='t'>No pinned cards yet</p>" in page and "Remove all…" not in page
 
 
 async def test_remove_all_pins_asks_then_removes_every_pin(member: Browser, stack: Stack) -> None:
@@ -464,8 +465,9 @@ async def test_the_account_page_links_to_the_lists_and_more_does_not(member: Bro
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # the lists live in Binder (mockup screen 8): More's Your cards group has Scan and Card models
-    assert labels[-3:] == ["Scan", "Card models", "Forum"]
+    # the lists live in Binder (mockup screen 8): More's Your cards group has Scan (Card models are
+    # on the Account page)
+    assert labels[-2:] == ["Scan", "Forum"]
     assert "href='/lists'" not in page and "href='/collection/lists'" not in nav
     hub = (await member.http.get("/account")).text
     assert "<a class='yrow' href='/collection/lists'>" in hub and ">Lists</span>" in hub

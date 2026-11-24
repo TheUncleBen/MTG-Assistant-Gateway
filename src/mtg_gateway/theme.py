@@ -30,7 +30,7 @@ from urllib.parse import quote
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, card_models, localday, update_check
+from . import __version__, localday, update_check
 from .mana import SPRITE
 from .menus import MENUS_CSS
 
@@ -73,7 +73,7 @@ _path: ContextVar[str] = ContextVar("mtg_path", default="/")
 _app: ContextVar[bool] = ContextVar("mtg_app", default=False)
 APP_UA_MARK = "MTGAssistant/"
 
-# A computer's top bar lists the rail's pages (theme.rail_extra: Scan, Precons, Card models, Forum)
+# A computer's top bar lists the rail's pages (theme.rail_extra: Scan, Precons, Forum)
 # as links and drops More ▾ once the bar is this wide (0.7.46 redesign, screen 1; a container
 # query in the bar's own em, so a narrower window or 200% text brings More ▾ back, with every page
 # still in it). None: More ▾ at every width, as before. Open for the owner.
@@ -173,7 +173,7 @@ VIZ_CSS = """
 .sel{position:relative;display:block}
 .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
-.sel > svg ~ select,.sel > svg ~ .msel-btn{padding-left:calc(.75rem + 20px)}
+.sel > svg ~ select,.sel > svg ~ .msel-btn{padding-left:calc(.75rem + max(20px, 1.5em))}
 """
 
 CSS = (
@@ -400,10 +400,15 @@ main.wrap{flex:1;padding:var(--main-top,1rem) var(--gutter) 3rem;container-type:
    Never hyphens:auto: a browser's line breaker is greedy and hyphenates a word that would have
    fitted the next line whole ("snap-shots", "ad-mins" at 100% on a 320 px phone; sweep P-1), so
    the only break inside a word is the bare one of a word wider than its whole line */
-h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:min(1.5rem,7vw);font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
-h2:not(:first-child){margin-top:1.25rem}
-h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem;overflow-wrap:anywhere}
+/* The type roles (docs/UI-STANDARD.md): one page title, one section heading, one sub-heading, on
+   every page. A page never sizes these itself; tests/ui_cohesion.py counts the looks. */
+h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:0 0 .75rem;overflow-wrap:anywhere}
+h2{font-size:min(1.2rem,6vw);font-weight:700;line-height:1.3;margin:0 0 .5rem;overflow-wrap:anywhere}
+h2:not(:first-child){margin-top:1.5rem}
+h3{font-size:1.05rem;font-weight:700;margin:.5rem 0 .4rem;overflow-wrap:anywhere}
+/* a group label over an inset grouped list (Account, Binder, Install): small capitals */
+h2.ui-group,.ui-group{margin:0 0 .4rem .9rem;font-size:.8rem;font-weight:700;line-height:1.3;
+  text-transform:uppercase;letter-spacing:.04em;color:var(--menu-head)}
 h4{font-size:1rem;font-weight:700;margin:0}
 p{margin:.5rem 0}
 details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
@@ -411,11 +416,11 @@ details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
 ul.plain{list-style:none;margin:0;padding:0}
 
 /* panels (Archidekt: 3px radius, 1px border, light-background, no shadow) */
-.card,.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
+.card,.panel{background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-panel);
   padding:1rem var(--gutter);margin:0 0 1rem}  /* the sides as the page's gutters, see .wrap */
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
-.panel h2,.card h2{font-size:min(1.5rem,7vw)}
+.panel h2,.card h2{font-size:min(1.2rem,6vw)}
 /* the install page's QR code: dark on white in both themes; not on a phone, which is already there */
 .qr-code svg{display:block;background:#fff;border-radius:var(--radius)}
 @media (hover:none) and (pointer:coarse){.qr-desk{display:none}}
@@ -430,7 +435,9 @@ label{display:block;margin:.9rem 0 .3rem;font-weight:700}
 input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],
 /* height:auto from 44 px: the box grows with its text (at 200% a fixed 44 px box left the words
    touching its edges, confirmation AD3) */
-input[type=url],select{width:100%;height:auto;min-height:var(--ctl);padding:.3em 1rem;font:inherit;
+/* the sides give way on a very narrow box (320 px with the browser's text doubled), so a hint
+   fits: 1rem at every usual size */
+input[type=url],select{width:100%;height:auto;min-height:var(--ctl);padding:.3em min(1rem,4vw);font:inherit;
   border-radius:var(--radius);
   border:1px solid var(--control-border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
@@ -477,8 +484,14 @@ details.dd .menu .actions button.primary{background:var(--orange);border:1px sol
 details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.primary:focus-visible{
   background:var(--orange);color:var(--on-orange);filter:brightness(1.08)}
 .msel-btn:active:not(:disabled){transform:none;filter:none}
-.msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:normal;
+/* the chosen value keeps to one line and ends in "…" where the box is narrower (loop round #11:
+   "Group by / day" on two lines in a filter row); a row of them wraps whole controls instead */
+.msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   overflow-wrap:normal;line-height:1.25}
+/* the browser's own text at about twice its size on a phone (the window under 20 of its ems): a
+   box on a row of its own still cannot hold some values, so there the value wraps, whole, rather
+   than hide behind "…" */
+@media (max-width:19.99em){ .msel-btn .msel-txt{white-space:normal} }
 /* above every panel or dialog a list can open from (the card search Filters panel is 80, the add
    sheet 90): the sheet's dim background must cover the panel, or a tap above the sheet reaches it */
 .msel-list{position:fixed;z-index:200;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
@@ -611,8 +624,8 @@ ol,ul:not([class]){padding-left:1.4rem} ol li,ul:not([class]) li{margin:.25rem 0
 button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:var(--ctl);
   margin:0;padding:.35rem 1rem;font:inherit;font-size:1rem;font-weight:700;text-align:center;cursor:pointer;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;
-  border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--text);
-  text-decoration:none;transition:background-color .2s ease-in-out,filter .2s ease-in-out}
+  border-radius:var(--radius);border:1px solid var(--control-border);background:var(--surface);
+  color:var(--text);text-decoration:none;transition:background-color .2s ease-in-out,filter .2s ease-in-out}
 /* a button a script hides stays hidden (inline-flex above would beat the browser's own rule) */
 button[hidden],.btn[hidden]{display:none}
 /* a label that wraps beside an icon keeps its lines against the icon, so the icon reads as part
@@ -706,14 +719,16 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (sprite from mana.py) */
 .mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap;vertical-align:middle}
 .mana .sep{color:var(--text-muted);font-size:.8em;margin:0 .15em}
-.pip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+.pip{--pip:max(16px,1.15em);display:inline-flex;align-items:center;justify-content:center;
+  width:var(--pip);height:var(--pip);border-radius:50%;
   color:#111;background:#cbc2bf;box-shadow:-1px 1px 0 rgba(0,0,0,.55);flex:none;vertical-align:-.2em;
   font-style:normal;line-height:1}
 .pip svg{width:70%;height:70%;fill:currentColor;display:block}
-.pip b{font-size:10px;font-weight:900;line-height:1}
-.pip.big b{font-size:8px}
-.pip.sm{width:14px;height:14px;margin:0 1px}
-.pip.sm b{font-size:9px}
+/* the glyph is a share of its circle, so it grows with the text as the circle does */
+.pip b{font-size:calc(var(--pip) * .625);font-weight:900;line-height:1.25}
+.pip.big b{font-size:calc(var(--pip) * .5)}
+.pip.sm{--pip:max(14px,1em);margin:0 1px}
+.pip.sm b{font-size:calc(var(--pip) * .643)}
 .pip-W{background:#f8f6d8} .pip-U{background:#c1d7e9} .pip-B{background:#bab1ab} .pip-R{background:#e49977}
 .pip-G{background:#a3c095} .pip-C{background:#cbc2bf} .pip-g{background:#cbc2bf}
 .pip-T,.pip-Q,.pip-E,.pip-P{background:#cbc2bf} .pip-S{background:#dfe8ee}
@@ -759,10 +774,32 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .badge.warn{background:var(--orange);color:var(--on-orange)}
 .badge.danger{background:var(--danger-fill)}
 .badge.info{background:#2a66c9}
-.pill{display:inline-block;padding:.125rem .25rem;border-radius:3px;border:1px solid var(--border);
-  background:var(--toolbar-bg);color:var(--toolbar-text);font-weight:700;font-size:.86rem;line-height:1.3}
-.chip{display:inline-block;padding:.25rem .5rem;border-radius:3px;background:var(--surface-2);
-  font-size:.86rem}
+/* A tag (a deck's or a card's tag, a list's word on a row): one look on every page
+   (docs/UI-STANDARD.md). .pill is an older name for it. A component's own .chip (the card
+   viewer's Legal in formats, the scan printing picker's finishes) is not a tag: it has its own
+   look in its own sheet, and this rule does not reach it. */
+/* A tag is never cut where its title cannot be read: on a phone (touch, no pointer to hover
+   with) a tag longer than its row wraps at its spaces, whole words only, and stays a pill (the
+   12 px corner is the one-line pill's half height, so one line looks as before and two lines
+   are a rounded box, not a blob). From 600 px it is one line, always: a longer tag ends in "…"
+   with its whole text in its title (loop round #12: a wrapped tag made the tiles of a row
+   uneven). The line box is the pill's 24 px less its padding, so the words sit in its middle.
+   One word wider than the whole row is the only thing a phone cuts ("…"). */
+.ui-tag,.pill{display:inline-block;min-height:24px;
+  max-width:100%;padding:.15rem .55rem;border-radius:12px;border:0;background:var(--surface-2);
+  color:var(--text);font-size:.82rem;font-weight:600;line-height:max(1.25em,calc(24px - .3rem));
+  vertical-align:middle;white-space:normal;overflow-wrap:normal;overflow:hidden;text-overflow:ellipsis}
+@media (min-width:600px){
+  .ui-tag,.pill{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* the deck tiles' sheet (deckpage.py) lets a tile's tag wrap; the one-line rule holds there too */
+  ul.decklist .tags .pill.pill{white-space:nowrap;overflow-wrap:normal}
+}
+.ui-tag > svg.i,.pill > svg.i{vertical-align:-.15em;margin-right:.25rem}
+/* a review's summary is a sentence in a tag ("3 changes to your Archidekt account"): it wraps */
+.summary-pills :is(.ui-tag,.pill){white-space:normal;overflow-wrap:anywhere;line-height:1.25}
+/* ... and on a phone a deck tile's tag wraps at its spaces as every tag does (deckpage.py's own
+   sheet would break inside a word) */
+ul.decklist .tags .pill.pill{overflow-wrap:normal}
  /* a notice (F8): a tinted strip with a coloured left edge and no border of its own; info (blue),
    ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
 .notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
@@ -982,7 +1019,18 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 
 /* companion layout: wide pages */
 .wide .wrap{max-width:2300px}
-.wide main.wrap{padding-left:var(--gutter);padding-right:var(--gutter)}
+/* One page column (docs/UI-STANDARD.md, loop round #1): a wide page's content is the same centred
+   1200 px column as a list page's (main.wrap.ui-wide), so its title, toolbar and lists start
+   where every other page's do and nothing shifts sideways from page to page. */
+.wide main.wrap{max-width:1200px;padding-left:var(--gutter);padding-right:var(--gutter)}
+/* Only a grid of cards grows past the column, and only where that brings whole columns of cards
+   (a screen from 1600 px): it reaches out evenly to the screen's edges, up to 2300 px, while the
+   head and the toolbar over it stay in the column. --bleed is half of what the screen has beyond
+   the column, less room for a scroll bar. (The app's rail shifts the column: no reach there.) */
+@media (min-width:1600px){
+  body.wide:not(.app) main.wrap :is(ul.cardgrid,ul.decklist.grid,.deckview):not(:is(.mtgbox,.panel,.card) *){
+    --bleed:calc((min(100vw,2300px) - 1200px) / 2 - 10px);
+    margin-left:calc(-1 * var(--bleed));margin-right:calc(-1 * var(--bleed))} }
 
 /* below 1024 px the links sit closer and a little smaller, so the search box keeps room for its
    whole placeholder beside an admin's eight links, in wide fonts too */
@@ -997,9 +1045,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 @media (width >= 1024px){ @container topbar (58em <= width < 100em){
   body:not(.app) .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
   body:not(.app) .topbar .brand{margin-right:.25rem} } }
-/* The proposal review's three choices sit at one height, and the deck banner's
-   Comments link matches its Like and Bookmark buttons. */
-.choice button,.choice .btn{min-height:48px}
+/* The deck banner's Comments link matches its Like and Bookmark buttons. */
 .banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
 /* A control that carries text a member typed (a username in Follow, a folder's name) shrinks and
    ellipsises inside its row, with the whole text in its title, instead of widening the page (a
@@ -1108,11 +1154,14 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   @container topbar (width < 42.5em){ __NAVROW__ } }
 @media (width >= 900px){ @container topbar (width < 58em){ __NAVROW__ } }
 /* home dashboard: section tiles (Archidekt's landing cards) */
-.home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
+.home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:.5rem 1rem;
   margin:0 0 1rem}
 .home .hero > div{flex:1 1 14rem;min-width:0}
-.home .hero h1{margin:0;font-size:min(1.6rem,8vw)}
-.home .hero .sub{color:var(--text-muted);margin:.2rem 0 0}
+.home .hero h1{margin:0}
+.home .hero .ui-sub{margin:.1rem 0 0}
+/* a phone: the greeting takes the row at the title's own size, the button the line under its
+   purpose line (0.7.48 loop round: beside the button a long name was drawn two sizes down) */
+@media (max-width:599.98px){ .home .hero > div{flex-basis:100%} }
 .home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:1rem;
   margin:0 0 1rem}
 .home .tile{display:flex;flex-direction:column;gap:.35rem;padding:1rem;background:var(--surface);
@@ -1142,11 +1191,6 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   font-size:.9rem;line-height:1.25;
   overflow:hidden;overflow-wrap:break-word;display:-webkit-box;-webkit-box-orient:vertical;
   -webkit-line-clamp:2;line-clamp:2}
-.home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
-  align-items:baseline}
-.home details.connect summary .addr{font-weight:400;font-size:.9rem;overflow-wrap:anywhere}
-.home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
-.home details.connect .addrline code{word-break:break-all;font-size:.9rem}
 /* the keyboard shortcuts box (static/sitesearch.js) */
 /* one row a key (each dt and its dd in a div of their own: in one wrapping row for the whole
    list, a key followed the previous key's words where they left room, confirmation NA2) */
@@ -1160,9 +1204,6 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .mtgbox dl.keys kbd{font-family:inherit;font-size:.9rem;padding:.1rem .4rem;
   border:1px solid var(--border-soft);
   border-radius:4px;background:var(--surface-2);white-space:nowrap}
-.home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
-  gap:.5rem 1rem;margin:0 0 .75rem}
-.home .panel-head h2{margin:0}
 /* the deck list couldn't be read: the /decks notice inside the panel, over any covers read */
 .home .decks-unreadable p{margin:0}
 .home .decks-unreadable .actions{margin-top:.75rem}
@@ -1415,19 +1456,40 @@ CARD_SIZE_PAGES = (
     "deck", "editor", "goldfish", "decks", "search", "collection", "watchlist", "scan", "printings"
 )  # fmt: skip
 CSS += """
-/* the S / M / L switch, styled as card search's Grid / List switch */
-.sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
-  overflow:hidden;vertical-align:middle}
+/* The compact segmented switch (.ui-seg: Grid / List, S / M / L, a chart's range, a package's
+   budget): one look with the place switch (.hubseg, docs/UI-STANDARD.md): a grey track with the
+   chosen part as a raised pill, at the control height. A part is 44 px for a finger inside a 44 px
+   track: its pill is the part's padding box, inside a clear edge (3 px to the track's edge, as
+   .hubseg's padding; 1 px to a neighbour, so pills sit 2 px apart as .hubseg's do and no part
+   lies over another).
+   It keeps its own width wherever it sits: a toolbar row ends with it, nothing stretches it. */
+/* its parts keep their words whole; where they cannot share one row (a 320 px phone at 200% text)
+   they take a second inside the track, and a part longer than the whole track wraps by word */
+.ui-seg,.sizeseg,.spanel .segc,.budget{display:inline-flex;flex:none;flex-wrap:wrap;gap:0;padding:0;
+  border:0;border-radius:12px;background:var(--seg-track);vertical-align:middle;width:fit-content;
+  max-width:100%}
 /* .3em above and below, as a text box: at 200% text the letters grew to the box's edges (polish AL2) */
-.sizeseg button{margin:0;min-width:2.75rem;min-height:calc(var(--ctl) - 2px);height:auto;padding:.3em .75rem;
-  border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-weight:400;
-    box-shadow:none}
-.sizeseg button + button{border-left:1px solid var(--control-border)}
-.sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
-.sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-.sizeseg button{min-height:44px;min-width:44px}
-  /* the Grid / List switch: its own rule takes 2 px off --ctl for the border; a finger gets 44 */
-  .spanel .segc label{min-height:44px;min-width:44px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label){position:relative;display:inline-flex;
+  align-items:center;justify-content:center;flex:none;max-width:100%;
+  gap:.35rem;margin:0;min-width:44px;min-height:44px;height:auto;padding:.3em .7rem;
+  border:solid transparent;border-width:3px 1px;border-radius:10px / 12px;
+  background:transparent padding-box;color:var(--text);
+  font:inherit;font-weight:700;line-height:1.2;box-shadow:none;cursor:pointer;filter:none}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label):first-child{border-left-width:3px;
+  border-top-left-radius:12px;border-bottom-left-radius:12px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label):last-child{border-right-width:3px;
+  border-top-right-radius:12px;border-bottom-right-radius:12px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label):hover{
+  background:var(--surface-2) padding-box;color:var(--text);
+  border-color:transparent}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button[aria-pressed=true],label:has(input:checked)){
+  background:var(--seg-on) padding-box;
+  filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.18));z-index:1}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > button:focus-visible,
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > label:has(input:focus-visible){
+  outline:2px solid var(--focus);
+  outline-offset:-2px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label) svg.i{width:16px;height:16px;flex:none}
 .field.cardsize .sizeseg{display:flex;width:max-content}
 @media (min-width:1000.02px){
   .listbar .controls:has(.cardsize){
@@ -1511,12 +1573,12 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
 UI_CSS = """
 /* width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
-/* One Binder (0.7.47): "‹ Binder" back on the pages that open from the Binder page */
-.bn-up{margin:0}
-.bn-back{display:inline-flex;align-items:center;gap:.2rem;min-height:44px;color:var(--orange-text);font-weight:700;
-  text-decoration:none}
-.bn-back svg.i{width:18px;height:18px}
-.bn-up + .ui-head h1 .cn{font-size:.55em;font-weight:600;color:var(--text-muted);vertical-align:middle}
+/* forms, settings, grouped lists and reading pages: one narrow centred column (docs/UI-STANDARD.md) */
+main.wrap.ui-narrow{max-width:calc(44rem + 2 * var(--gutter))}
+/* The way back a level (ui.back_link): one look on every page, the grey capsule with the back
+   arrow in a line of its own at the page's top left, above the title (docs/UI-STANDARD.md) */
+.ui-back-line{margin:0 0 .25rem}
+.ui-back-line + .ui-head h1 .cn{font-size:.55em;font-weight:600;color:var(--text-muted);vertical-align:middle}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
 /* its parts never shrink under their words: when they are wider than the screen (large text on a
@@ -1534,7 +1596,8 @@ main.wrap.ui-wide{max-width:1200px}
   min-height:38px;height:auto;margin:0;padding:0 1.1rem;border:0;border-radius:9px;background:transparent;
   color:var(--text);font:inherit;font-weight:700;white-space:normal;cursor:pointer;line-height:1.2}
 .hubseg > button:hover{background:var(--surface-2);color:var(--text)}
-.hubseg > button[aria-selected=true]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.hubseg > button[aria-selected=true],.hubseg > button[aria-pressed=true]{background:var(--seg-on);
+  box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .hubseg > button:disabled{opacity:.5;cursor:default;background:transparent}
 .hubseg > button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .hubseg > button svg.i{width:16px;height:16px;flex:none}
@@ -1562,10 +1625,23 @@ main.wrap.ui-wide{max-width:1200px}
 /* static/topbar.js: the parts in equal columns, as many a row as fit whole, the rows evenly filled
    (confirmation NA4: parts of their own widths, and "Card models" alone on a second row). Without
    scripts the parts wrap as above. seg-measure is the one-row layout the script measures in */
-.hubseg.seg-grid{display:inline-grid;grid-template-columns:repeat(var(--seg-cols),minmax(0,1fr))}
+.hubseg.seg-grid{display:inline-grid;grid-template-columns:repeat(calc(2 * var(--seg-cols)),minmax(0,1fr))}
+/* two tracks a part: a row shorter than the others starts half a part in and sits in the middle
+   (seven parts as four over three), every part the same width */
+.hubseg.seg-grid > *{grid-column-end:span 2}
+/* parts that would go one a row at their one-line widths (seven tabs on a phone) are laid out by
+   their longest word: tight sides, a part's words on two lines where needed, no word broken */
+.hubseg.seg-tight > *{padding-left:.3rem;padding-right:.3rem;text-align:center;white-space:normal!important}
+.hubseg.seg-measure.seg-words > *{white-space:normal!important;width:min-content!important}
 /* one row of parts as wide as their words, the row's room shared out (NC1) */
 .hubseg.seg-row{flex-wrap:nowrap}
 .hubseg.seg-row > *{flex:1 1 auto!important;white-space:nowrap}
+/* on a phone that one row's parts are equal in width too: a part's words take two lines where the
+   share is narrower than they are, and no word is broken (loop round #22: the Export box's
+   "Archidekt text" was twice as wide as "Files") */
+@media (max-width:599.98px){
+  .hubseg.seg-row > *{flex:1 1 0!important;min-width:min-content;white-space:normal!important;
+    text-align:center} }
 .hubseg.seg-measure{display:flex!important;flex-wrap:nowrap!important}
 .hubseg.seg-measure > *{flex:none!important;white-space:nowrap!important;min-width:auto!important}
 .hubseg.adm-nav.seg-grid,.mtgbox .body .segc.seg-grid{display:grid}
@@ -1577,7 +1653,7 @@ main.wrap.ui-wide{max-width:1200px}
    column; its heading and switch line up with the column instead of the wider page (the owner, 0.7.46
    checklist: everything shifted to the left on a desktop) */
 main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
-.wide main.wrap:has(> .yhub, > .acc, > .lp-col){max-width:calc(42rem + 2rem)}
+.wide main.wrap:has(> .yhub, > .acc, > .lp-col){max-width:calc(44rem + 2 * var(--gutter))}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%} .hubseg.seg-grid{display:grid}
   .hubbar{display:block}
   /* large text on a narrow phone: a part keeps its name on one line and moves to the next row
@@ -1589,6 +1665,11 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
    (overflow-wrap still breaks a word too long for any screen) */
 @media (max-width:599.98px){.ui-head h1{font-size:min(2rem,10vw)}}
 .ui-sub{color:var(--text-muted);margin:.1rem 0 1rem;font-size:.93rem}
+/* a head with actions holds its purpose line (ui.page_head, ui.binder_head): right under the
+   title in the markup, so on a phone it comes before the actions (loop round #2); from 600 px the
+   actions sit beside the title and the line takes the row under both */
+.ui-head > .ui-sub{flex:0 0 100%;margin:0 0 .15rem}
+@media (min-width:600px){ .ui-head > .ui-sub{order:1;margin-top:.4rem} }
 
 /* labels: a word, a colour and an icon */
 .ui-lbl{display:inline-flex;align-items:center;gap:.3rem;min-height:24px;height:auto;
@@ -1653,6 +1734,11 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
   overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
 .ui-chips::-webkit-scrollbar{display:none}
+/* from 600 px (the Fold, a computer) the chips wrap onto as many rows as they need, every one
+   whole and in view; only a phone keeps the one row that scrolls, with the fade (loop round #10) */
+@media (min-width:600px){ .ui-chips{flex-wrap:wrap;overflow-x:visible}
+  /* a chip longer than the whole row (large text) wraps its words; it never pushes the page wide */
+  .ui-chips > .ui-chip{max-width:100%;white-space:normal} }
 /* more chips that way (static/topbar.js): the edge fades out instead of cutting a chip (N12) */
 .ui-chips.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
   mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
@@ -1675,31 +1761,56 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-chip .n{color:var(--text-muted);font-weight:700}
 .ui-chip[aria-pressed=true] .n,.ui-chip[aria-current] .n{color:inherit}
 .ui-chip svg.i{width:15px;height:15px}
-.list-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.25rem 1rem;
-  margin:0 0 .5rem}
+.list-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.25rem 1rem;
+  min-height:36px;margin:0 0 .5rem}
 .list-head h2{margin:0;font-size:1.2rem}
 .list-head h2 .ui-sub{font-size:1rem;margin:0}
-.list-head > .ui-sub{margin:0}
+/* the note at the row's end, with or without a capsule in it (Reports: "Newest first" and "Show
+   oldest first"), is level with the heading, and every list's head is the capsule's drawn height,
+   so a head with one is no taller than a head without (loop round #18) */
+.list-head > .ui-sub{margin:0;display:flex;align-items:center;gap:.5rem;min-width:0}
+.list-head > .ui-sub .ui-dots.balanced > *{vertical-align:middle}
+.list-head > .ui-sub .ui-cap{margin-block:-4px}
 
 /* toolbar: one search box, then the filters; every piece grows, so each row is filled edge to edge
    and a filter that wraps never sits alone beside empty space */
 .ui-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0 0 .75rem;
   container-type:inline-size}
 .ui-tools > *{min-width:0}
-.ui-tools .search{flex:2 1 20rem;position:relative;min-width:0;align-self:stretch;display:flex;
-  align-items:center}
-.ui-tools label.search{margin:0;font-weight:400}
-.ui-tools .search svg.i{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);width:16px;
-  height:16px;
-  color:var(--text-muted);pointer-events:none}
-.ui-tools .search input{width:100%;margin:0;padding-left:2.2rem;font-weight:400;
-  border-right:1px solid var(--control-border);border-radius:var(--radius)}
+.ui-tools .search{flex:2 1 20rem;min-width:0;align-self:stretch}
+/* The one search field (ui.search_field, docs/UI-STANDARD.md): the magnifier inside the field at
+   its left, on every page. Where the field's form submits, the magnifier is that form's submit
+   button (.go: a whole 44 px tap target over the field's left end) and Enter submits too; a list's
+   filter has the plain magnifier. The magnifier starts where a field's words would (its side
+   padding, which gives way on a very narrow box as every field's does). */
+.ui-search{--glass:min(1rem,4vw);position:relative;display:flex;align-items:center;min-width:0;margin:0;
+  font-weight:400}
+.ui-search > input,.ui-search > input[type=search]{flex:1 1 auto;width:100%;min-width:0;margin:0;
+  font-weight:400;padding-left:calc(var(--glass) + 16px + .55rem);
+  border:1px solid var(--control-border);border-radius:var(--radius)}
+.ui-search > svg.i,.ui-search > .go > svg.i{width:16px;height:16px;flex:none;color:var(--text-muted)}
+.ui-search > svg.i{position:absolute;left:var(--glass);top:50%;transform:translateY(-50%);
+  pointer-events:none}
+.ui-search > button.go{position:absolute;left:0;top:0;bottom:0;z-index:1;display:inline-flex;
+  align-items:center;justify-content:flex-start;width:var(--ctl);min-width:44px;height:auto;min-height:0;
+  margin:0;padding:0 0 0 var(--glass);border:0;border-radius:var(--radius) 0 0 var(--radius);
+  background:transparent;box-shadow:none;cursor:pointer}
+.ui-search > button.go:hover{background:transparent;filter:none}
+.ui-search > button.go:hover > svg.i,.ui-search > button.go:focus-visible > svg.i{color:var(--text)}
+.ui-search > button.go:focus-visible{outline:2px solid var(--focus);outline-offset:-3px}
 /* the filters share a row with level tops: a wrapped value makes its box taller, not lower */
-.ui-tools .f{flex:1 1 9.5rem;display:flex;align-items:center;align-self:stretch}
+/* a filter is as wide as its chosen value needs (9rem at least), so a row that runs out of room
+   wraps a whole control onto the next row before any value is cut (loop round #11) */
+.ui-tools .f{flex:1 1 auto;min-width:min(100%,9rem);display:flex;align-items:center;align-self:stretch}
 .ui-tools .f > :not(.msel-native){width:100%}  /* the hidden native select keeps its own size */
 .ui-tools select{margin:0}
+/* a phone: two a row. Three share one row (audit D31: never two and the third alone under them),
+   each as wide as its value needs, with tighter sides so three values fit a 360 px phone whole;
+   a value too long for that takes the next row whole, it is never cut or wrapped in its box */
 @media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)}
-  .ui-tools.n3 .f{flex:1 1 calc(33.333% - .34rem)} }
+  .ui-tools.n3 .f{flex:1 1 auto;min-width:0}
+  .ui-tools.n3 .f :is(.msel-btn,select){padding-left:.6rem;padding-right:calc(.45rem + 14px);
+    background-position:right .45rem center} }
 /* Balanced rows, by the toolbar's own width (an open side panel narrows it as a Fold does,
    polish R5; C-FINDINGS F13): while the search (20em) and all the filters (9.5em each, .5em
    between) do not share one row, the search takes a row of its own and the filters the next;
@@ -1718,6 +1829,14 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
    From 600 px only, since a phone keeps three a row at a third each (the media rule above) */
 @media (min-width:600px){ @container (max-width:29.5em){ .ui-tools.n3 .f{flex-basis:100%} } }
 .ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
+/* the empty state (ui.empty): a panel with a bold line, a muted line and at most one standard
+   button; it stands in for the whole list or table (loop round #17) */
+.ui-empty{padding:1rem;margin:0 0 1rem}
+.ui-empty > p{margin:0;overflow-wrap:anywhere}
+.ui-empty > .t{font-weight:700;font-size:1rem;color:var(--text)}
+.ui-empty > .d{margin-top:.25rem;color:var(--text-muted)}
+.ui-empty > .go{margin-top:.75rem}
+.ui-empty > .go .btn{margin:0}
 
 /* the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
    (.md-hide) fold into a second line (.sub) under the title (--cols-md); below 600 px two-line rows
@@ -1772,10 +1891,9 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .ui-table .group{grid-template-columns:32px 1fr}
   .ui-table .group .meta{grid-column:2;white-space:normal}
   .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%}
-  .ui-table .act .btn,.ui-table .act button{padding:0 .6rem;font-size:.86rem}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
-  .ui-table .act.ui-cap{padding:0;background:none}
+  .ui-table .act:is(.ui-cap,.btn){padding:0;border:0;background:none}
 }
 /* the same two folds by the table's own width in em (large text): a table narrower than 46em of
    its text folds its low-priority columns, one narrower than 38em takes the two-line rows. At 100%
@@ -1795,10 +1913,11 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .ui-table .group{grid-template-columns:32px 1fr}
   .ui-table .group .meta{grid-column:2;white-space:normal}
   .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%}
-  .ui-table .act .btn,.ui-table .act button{padding:0 .6rem;font-size:.86rem}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
-  .ui-table .act.ui-cap{padding:0;background:none}
+  .ui-table .act:is(.ui-cap,.btn){padding:0;border:0;background:none}
+  /* a row list's main action is its chevron here too, as on a phone */
+  .ui-table.ui-rows .tr:not(.group) .act > .btn{padding:0;border:0;background:none}
 }
 /* A row list (Proposals, History, Reports; the 0.7.46 redesign, screen 6): one line per entry at
    every width. A tick box where the list has one, the title with its facts line (.sub) under it,
@@ -1815,25 +1934,31 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-table.ui-rows .title .t{font-weight:600}
 .ui-table.ui-rows .title .t a{font-weight:600}
 .ui-table.ui-rows .sub{display:flex;margin-top:.25rem}
-.ui-table.ui-rows .sub .ui-lbl{min-height:20px;font-size:.76rem}
 .ui-table.ui-rows .flag{margin-top:.2rem}
 .ui-table.ui-rows .tr .act{display:flex;align-items:center;justify-content:flex-end;gap:.15rem;
   justify-self:end;margin-right:-8px}
 /* the actions sit on the title's line, whatever the lines under it (a History entry has three):
    their 44 px boxes centre on the first line, at any text size */
 .ui-table.ui-rows .tr:not(.group) .act{align-self:start;margin-top:calc(.675em - 22px)}
-.ui-table.ui-rows .act .ui-cap{margin:0;white-space:nowrap}
+/* from 600 px the main action is a standard button (docs/UI-STANDARD.md: an action that opens a page
+   or a panel), 44 px tall with an edge: it and the ⋮ start level with the title's line, inside the
+   row's padding */
+@media (min-width:600px){ .ui-table.ui-rows .tr:not(.group) .act{margin-top:0} }
+.ui-table.ui-rows .act :is(.ui-cap,.btn){margin:0;white-space:nowrap}
 .ui-table.ui-rows .act .kebab{flex:none}
 /* large text on a narrow phone (the list under about 20 em of its own text: 200% at 375 px): the
    main action's chevron goes, as the title opens the same and the ⋮ has it, so the title keeps
    room for whole words (independent review 2, M5 sweep) */
 .ui-table.ui-rows{container-type:inline-size}
-@container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > .ui-cap{display:none}
-  /* a group row's Open deck drops under the name, so the name keeps whole words */
-  .ui-table.ui-rows .tr.group{display:flex;flex-wrap:wrap;gap:.25rem 8px}
-  .ui-table.ui-rows .tr.group > :first-child{flex:none}
-  .ui-table.ui-rows .tr.group .m{flex:1 1 min(8em,calc(100% - 52px))}
-  .ui-table.ui-rows .tr.group .act{margin-left:auto} }
+@container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > :is(.ui-cap,.btn){display:none}
+  /* a group row's Open deck goes the same way: the deck's name beside it opens the deck, and keeps
+     the row's room for whole words. History's group row keeps its action (Only this deck, which
+     the name does not do): it wraps under the name instead */
+  .ui-table.ui-rows .tr.group:not(.hy-group) .act{display:none}
+  .ui-table.ui-rows .tr.hy-group{display:flex;flex-wrap:wrap;gap:.25rem 8px}
+  .ui-table.ui-rows .tr.hy-group > :first-child{flex:none}
+  .ui-table.ui-rows .tr.hy-group .m{flex:1 1 min(8em,calc(100% - 52px))}
+  .ui-table.ui-rows .tr.hy-group .act{margin-left:auto} }
 .ui-table.ui-rows .act .acts[hidden]{display:none}
 /* a deck's group row: the name with its count under it, Open deck at the end */
 .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto;min-height:52px}
@@ -1847,20 +1972,21 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 /* the group's Open deck has no ⋮ beside it: its drawn edge (inside the capsule's transparent
    border) sits at --row-edge, where the ⋮ icon and the tick box do, not pulled into the padding
    as the actions cell is for the ⋮ (polish R4) */
-.ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad) - 4px)}
+.ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad))}
 @media (max-width:599.98px){
   .ui-table.ui-rows .tr{--row-pad:8px}
   .ui-table.ui-rows .tr .act{margin-right:-6px}
   /* the main action is its chevron: the title keeps its line at any text size */
-  .ui-table.ui-rows .act > .ui-cap{padding:0;margin:0;border:0;background:none}
-  .ui-table.ui-rows .act > .ui-cap:hover{background:var(--surface-2)}
+  .ui-table.ui-rows .act > :is(.ui-cap,.btn){padding:0;margin:0;border:0;background:none}
+  .ui-table.ui-rows .act > :is(.ui-cap,.btn):hover{background:var(--surface-2)}
   .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto}
   .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
   /* the group's Open deck keeps its capsule inside the row (audit D10), its edge at --row-edge
      (the capsule has no transparent border here) */
   .ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad))}
-  .ui-table.ui-rows .tr.group .act > .ui-cap{display:inline-flex;align-items:center;padding:0 .6rem;
+  .ui-table.ui-rows .tr.group .act > :is(.ui-cap,.btn){display:inline-flex;align-items:center;padding:0 .6rem;
     min-height:44px;margin:0}
+  .ui-table.ui-rows .tr.group .act > .btn{border:1px solid var(--control-border);background:var(--surface)}
   /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
      grows above and below the words without moving the lines around it (F14) */
   .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
@@ -1870,15 +1996,17 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
    facts line, the Install page's address): on a touch screen its tap area grows above and below
    the words to 44 px without moving the lines around it (the padding makes the box, the negative
    margins keep the line box as it is) */
-  .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
+  .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap,.btn),.ui-meta dd a,
+  .wdg .det a,
   .rv-meta a,.inst a.mdaddr,a.tap{display:inline-block;padding:14px 0;margin:-14px 0;min-width:44px}
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
 .btn-outline-danger,button.btn-outline-danger{background:transparent;color:var(--danger-text);
   border:1px solid var(--danger-text);font-weight:700}
 .btn-outline-danger:hover,button.btn-outline-danger:hover{background:var(--red-tint);color:var(--danger-text)}
-.btn-plain,button.btn-plain{background:transparent;border:1px solid var(--control-border);color:var(--text);
-  font-weight:700}
+/* plain is the same look as every other button: one secondary look (docs/UI-STANDARD.md) */
+.btn-plain,button.btn-plain{background:var(--surface);border:1px solid var(--control-border);
+  color:var(--text);font-weight:700}
 .linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0 .4rem;font-weight:700}
 @media (pointer:fine){.linkbtn{min-height:32px}}
 /* No bare blue text for an action or a way to go (0.7.46). A small one inside a line or a row (Why,
@@ -1895,12 +2023,14 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   font-size:.86rem;line-height:1.2;text-decoration:none;vertical-align:middle;cursor:pointer}
 .ui-cap:hover{background:var(--surface-3) padding-box;color:var(--text)}
 .ui-cap:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-.ui-cap svg.i{width:16px;height:16px;flex:none}
+/* the icon grows with the words (200% text) */
+.ui-cap svg.i{width:max(16px,1.3em);height:max(16px,1.3em);flex:none}
 /* a row of capsules (Your Archidekt lists on Account details): they wrap, with room between */
 .ui-caps{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-left:4px}
 /* a title that opens its row or group, or a deck named in a panel or a widget: the text colour,
    bold, underlined on hover and focus, so the page carries no blue text */
-.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
+.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a:not(.ui-cap,.btn),.ui-meta dd a,
+.wdg .det a,
 .trend .tdata th a{color:var(--text);font-weight:700;text-decoration:none}
 .ui-table .title .t a:hover,.ui-table .title a.t:hover,.ui-table .tr.group > span a:hover,
 .ui-meta dd a:hover,.wdg .det a:hover,.trend .tdata th a:hover,
@@ -1982,8 +2112,9 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-split{position:relative}
 .ui-drawer{display:none}
 @media (min-width:1100px){
-  main.wrap.ui-wide:has(.ui-split.with-panel){max-width:1440px}
-  .ui-split.with-panel{display:grid;grid-template-columns:minmax(0,1fr) 440px;gap:1rem;align-items:start}
+  main.wrap.ui-wide:has(.ui-split.with-panel){max-width:1200px}
+  .ui-split.with-panel{display:grid;grid-template-columns:minmax(0,1fr) min(440px,36%);gap:1rem;
+    align-items:start}
   .ui-split.with-panel .ui-drawer{display:block;position:sticky;top:var(--bar-room,60px);
     max-height:calc(100vh - var(--bar-room,60px) - 12px);overflow:auto;background:var(--surface);
     border:1px solid var(--card-border);border-radius:var(--radius-panel);padding:1rem 1.25rem 1.5rem;
@@ -1992,19 +2123,42 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .with-panel .ui-table .tr{grid-template-columns:var(--cols-md)}
   .with-panel .ui-table .md-hide{display:none}
   .with-panel .ui-table .sub{display:flex}
-  .with-panel .ui-widgets{--wdg-min:11rem}
+  /* the tiles beside the open panel go two a row: four narrow columns wrapped every label
+     (loop round #19) */
+  .with-panel .ui-widgets{--wdg-min:calc(50% - .375rem)}
+  /* ... and the panel's answer (the .apply block: what applying does, its warnings, Apply and
+     Reject) stays at the panel's foot while the proposal scrolls above it, as the phone page's
+     bar does. The whole block sticks, in its own orange frame and tint (over the panel's
+     surface, so the proposal does not show through the tint; the Proposals sheet takes the
+     frame off a panel's block, proposals_view.py, and this puts it back where the block floats
+     over the proposal); it takes at most half the panel, and a longer one scrolls inside itself
+     with its buttons still at its foot */
+  .ui-split.with-panel .ui-drawer .apply{position:sticky;bottom:0;z-index:2;
+    max-height:calc((100vh - var(--bar-room,60px) - 12px) * .5);overflow:auto;padding:.75rem 1rem 0;
+    border:2px solid var(--orange);border-radius:var(--radius-panel);
+    background:linear-gradient(var(--orange-tint),var(--orange-tint)),var(--surface)}
+  .ui-split.with-panel .ui-drawer .apply > form.guarded{position:sticky;bottom:0;z-index:1;
+    margin:0 -1rem;padding:.1rem 1rem .75rem;
+    background:linear-gradient(var(--orange-tint),var(--orange-tint)),var(--surface)}
+  .ui-split.with-panel .ui-drawer .apply .choice{margin-top:.5rem}
 }
 @media (max-width:1099.98px){
   .ui-split.with-panel .list-only{display:none}
-  .ui-split.with-panel .ui-drawer{display:block}
+  .ui-split.with-panel .ui-drawer{display:block;max-width:44rem;margin:0 auto}
   .ui-split.with-panel .panel-only{display:none}
 }
+/* a panel's buttons fill their rows: when they wrap, no button is left alone at one side */
+.ui-drawer .ui-actions form{display:flex;flex:1 1 auto;margin:0}
+.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{flex:1 1 auto;margin:0}
 /* a drawer narrow in its own text (under 20em: 200% text on a phone) puts each fact under its
    key: "Proposed by" and "An assistant" do not fit side by side at 320 px (batch 10, AB6) */
 .ui-drawer{container-type:inline-size}
 @container (max-width:20em){ .ui-drawer .ui-meta{grid-template-columns:minmax(0,1fr)} }
 .ui-drawer .dh{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .5rem}
-.ui-drawer .dh h2{margin:0;flex:1;font-size:min(1.3rem,6.5vw);overflow-wrap:anywhere}
+.ui-drawer .dh h2{margin:0;flex:1;overflow-wrap:anywhere}
+/* the item as its own page: its page title (side_panel's page_title) under the way back */
+.ui-drawer h1.page-only{margin:0}
+.ui-drawer h1 + .dh{margin-top:.5rem}
 .ui-drawer .close{min-width:44px;min-height:44px;display:inline-grid;place-items:center;
   background:transparent;
   border:1px solid var(--control-border);padding:0;color:var(--text);text-decoration:none}
@@ -2037,7 +2191,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .ui-actions button,.ui-actions .btn,.ui-actions form > button{margin:0}
 .ui-actions form{display:contents}
 .ui-hint{color:var(--text-muted);font-size:.84rem;margin:.25rem 0 0}
-.ui-section{margin:1.25rem 0 .5rem;font-size:1.05rem}
+.ui-section{margin:1.25rem 0 .4rem;font-size:1.05rem}
 .ui-next{margin:0 0 .75rem;padding:.5rem .75rem;border-left:3px solid var(--blue-text);
   background:var(--surface-2)}
 
@@ -2046,7 +2200,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .ui-card{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
   padding:1rem;margin:0 0 1rem}
 /* 6vw: "Collaborators" whole at 200% text */
-.ui-card > h2{margin:0 0 .25rem;font-size:min(1.15rem,6vw)}
+.ui-card > h2{margin:0 0 .25rem}
 .ui-card > .ui-sub{margin:0 0 .75rem}
 .ui-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,min(16rem,100% - 9em));gap:.25rem 1rem;
   align-items:center;
@@ -2060,7 +2214,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .ui-row:has(> .ctl > .switch) .ctl{grid-column:2;grid-row:1 / span 2}}
 /* a card too narrow for the label's words beside the switch (320 px at 200% text): the switch
    goes under the label, at the row's end */
-.mtgbox .body,.ds .ui-card{container-type:inline-size}
+.mtgbox .body{container-type:inline-size}
 @container (max-width:13em){
   .ui-row:has(> .ctl > .switch){grid-template-columns:1fr}
   .ui-row:has(> .ctl > .switch) .ctl{grid-column:1;grid-row:auto;justify-self:end}}
@@ -2102,9 +2256,13 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   border:1px solid var(--card-border);border-radius:var(--radius-panel)}
 /* the label wraps at its spaces beside its icon, and a word too wide for the room beside the icon
    goes whole under it (audit 71911eba M1: "ASSISTAN/TS" on a 320 px phone at 200% text) */
-.wdg .lab{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;
-  font-weight:700;text-transform:uppercase;letter-spacing:.03em}
-.wdg .lab svg.i{width:16px;height:16px}
+.wdg .lab{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.4rem;color:var(--text-muted);
+  font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1.3}
+.wdg .lab svg.i{width:16px;height:16px;flex:none;margin-top:max(0px,calc(.65em - 8px))}
+/* the words (.t) take the room beside the icon and wrap there, so the icon is never left alone on
+   a line above them (loop round #13); they need their longest word's width, so only a word wider
+   than that room takes the next line whole */
+.wdg .lab > .t{flex:1 1 0;min-width:min-content}
 /* the big value: a row of flex items, the number and its unit beside it or, where the two do not
    share the line, the unit whole on the next. The words wrap at their spaces only, never inside
    a word: a number ("$310.00", "1,234", "0.7.46") has no space and so is never broken ("$310./00"
@@ -2126,10 +2284,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .det .tx.ui-dots{display:flex}
 .wdg .det .tx.ui-dots.balanced{display:block}
 .wdg .det a{font-weight:700}
-.wdg .det .ui-lbl{min-height:22px;font-size:.78rem}
 .wdg .go{margin-top:auto;padding-top:.35rem;display:flex;flex-wrap:wrap;gap:.4rem}
-.wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{min-height:var(--ctl);padding:0 .8rem;font-size:.92rem;
-  margin:0}
+.wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{min-height:var(--ctl);padding:0 1rem;margin:0}
 .wdg .go form{display:contents}
 .wdg.accent{border-top:3px solid var(--orange)}
 .wdg.alert{border-top:3px solid var(--red-text)}
@@ -2152,8 +2308,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .wdg{padding:.6rem min(.7rem,10px)}  /* the side padding stops at its 100% size, as the fold's */
   .wdg .big{font-size:1.5rem}
   .wdg .det{font-size:.82rem}
-  .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center;padding:0 .4rem;
-    font-size:.86rem}
+  .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center}
   .ui-widgets > .wdg.wide-sm{flex-basis:100%}
 }
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
@@ -2163,16 +2318,12 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 /* the Activity pages (admin Activity, My activity): a search on its own line on narrow screens,
    and each event as a short label then its name as plain text that wraps. Each page sets its own
    .act-tools and .act-table columns. */
-.act-tools .search{position:relative;display:block;margin:0}
-.act-tools .search svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);
-  color:var(--text-muted)}
-.act-tools .search input{padding-left:2.3rem;width:100%}
 .act-tools .f{min-width:0}
 .act-table .c-ev,.act-table .c-det{min-width:0}
 .act-table .none,.act-table .gone{color:var(--text-muted)}
 .act-table .gone{font-style:italic}
 .act-table .evt{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .45rem;min-width:0}
-.act-table .evt .ui-lbl{min-height:22px;font-size:.78rem;flex:none}
+.act-table .evt .ui-lbl{flex:none}
 /* break-word, not anywhere: the name's longest word is its column's least width (its min-content),
    so a layout never squeezes "Archidekt" into one letter a line (batch 10, AB1) */
 .act-table .evt .en{display:inline-flex;align-items:flex-start;gap:.35rem;font-weight:700;font-size:.92rem;
@@ -2362,6 +2513,8 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
     border-radius:0}
   .mtgbox .acts{justify-content:stretch}
   .mtgbox .acts button,.mtgbox .acts .btn{flex:1 1 auto}
+  /* a full-width button's focus ring is drawn inside it: outside, the sheet's edge cut it off */
+  .mtgbox .acts :is(button,.btn):focus-visible{outline-offset:-4px}
 }
 """
 CSS += BOX_CSS
@@ -2373,9 +2526,11 @@ CSS += BOX_CSS
 BELL_CSS = """
 /* While a box is open, a menu opened from it sits over it: a row's ⋮ in the bell's box opened its
    menu behind the box (0.7.48). Only then: the deck page layers its own toasts around the menu's
-   usual place (deckpage.py). The box says what was done, and its Undo, in its own note. */
-body:has(.mtgbox-scrim) .ctxmenu{z-index:97}
-body:has(.mtgbox-scrim) .cs-scrim{z-index:96}
+   usual place (deckpage.py). The box says what was done, and its Undo, in its own note. Only a
+   menu added after the box's scrim: a page's menu still open when one of its items asks a
+   question (the deck page's Remove from deck) stays under the box and never covers its buttons. */
+.mtgbox-scrim ~ .ctxmenu{z-index:97}
+.mtgbox-scrim ~ .cs-scrim{z-index:96}
 .al-list{list-style:none;margin:0;padding:0}
 .al-row{position:relative;display:flex;align-items:stretch;gap:.25rem;
   border-top:1px solid var(--border-soft);-webkit-touch-callout:none}
@@ -2417,16 +2572,27 @@ body:has(.mtgbox-scrim) .cs-scrim{z-index:96}
 .al-card{padding:0;overflow:hidden}
 .al-card > .notice{margin:.75rem}
 .al-head{flex-wrap:wrap;gap:.5rem 1rem}
-/* the three actions sit in one row or one above the other, never two and one alone (0.7.47
-   audit): the row needs --al-row (three equal shares, each wide enough for "Mark all read" with
-   its icon on one line: at 29em it wrapped inside its button on a desktop), so 200% text stacks
-   them sooner */
-.al-acts{--al-row:33em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
-  flex-wrap:wrap;gap:.5rem}
-.al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
+/* the actions sit in one row or one above the other, never two and one alone (0.7.47 audit).
+   Mark all read and Clear all are not drawn while they have nothing to act on (0.7.48 loop
+   round: two grey buttons under "1 unread"); Settings alone keeps its own width beside the
+   title. With one of them shown the row needs --al-row (three equal shares, each wide enough for
+   "Mark all read" with its icon on one line), so 200% text stacks them sooner. A phone says
+   "Read all" and leaves the icons out, so the three fit one row down to 320 px */
+.al-acts{flex:0 1 auto;margin-left:auto;min-width:0;display:flex;flex-wrap:wrap;gap:.5rem}
+.al-acts form:has(> button:disabled){display:none}
+.al-acts:has(button:not(:disabled)){--al-row:33em;width:min(100%,var(--al-row))}
+.al-acts:has(button:not(:disabled)) > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
 .al-acts form{margin:0;display:flex}
 .al-acts .btn,.al-acts button{margin:0;min-height:44px;display:inline-flex;align-items:center;gap:.4rem;
   width:100%;justify-content:center;text-align:center}
+.al-acts .al-short{display:none}
+@media (max-width:599.98px){
+  .al-acts:has(button:not(:disabled)){--al-row:19.5em;width:100%}
+  .al-acts:has(button:not(:disabled)) :is(.btn,button){white-space:nowrap}
+  .al-acts:has(button:not(:disabled)) svg.i{display:none}
+  .al-acts .al-long{display:none}
+  .al-acts .al-short{display:inline}
+}
 .al-linknote{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 .75rem}
 .al-linknote p{margin:0}
 .bell-badge{display:inline-grid;place-items:center;min-width:20px;min-height:20px;border-radius:10px;white-space:nowrap;
@@ -2480,9 +2646,12 @@ _TOPSEARCH_CSS = """
 /* the wrapper static/suggest.js puts around the input spans the box too: in the first column only,
    the input (and under 600 px its suggestion list) stopped 20rem in, short of the box's end */
 .topbar .topsearch .box > .suggest{grid-column:1 / -1}
-.topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
+.topbar .topsearch .box > svg.i{position:absolute;left:min(.75rem,11px);top:50%;transform:translateY(-50%);
+  z-index:1;
   color:var(--navbar-muted);pointer-events:none}
-.topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
+/* the sides stop at their 100% size: at large text they ate the room the hint needs ("Search" cut
+   at 717 px with the root at 200%) */
+.topbar .topsearch .box input{height:36px;padding:0 min(.9rem,13px) 0 min(2.3rem,33px);border-radius:18px;
   background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
 .topbar .topsearch .box input{height:auto;min-height:44px;padding-top:.3em;padding-bottom:.3em;
   border-radius:22px}
@@ -2549,11 +2718,10 @@ SEARCH_PANEL_CSS = """
 .spanel .srow{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
 .spanel .sp-name{flex:1 1 16rem;min-width:0}
 .spanel .sp-name > label{display:block;font-weight:700;margin:0 0 .35rem}
+/* the name box is the one search field (.ui-search): its magnifier, inside the field, submits */
 .spanel .sp-name .search{margin:0}
-.spanel .sp-name .search > input{flex:1 1 auto;min-width:0}
-/* the search button is as tall as its box at every text size (polish AG2: 44 px beside 64 px) */
-.spanel .sp-name .search button{height:auto;align-self:stretch;min-height:var(--ctl);width:var(--ctl);
-  padding:0;flex:none;display:inline-flex;align-items:center;justify-content:center}
+/* 320 px at the browser's largest text: the box's side room gives way to its hint; 1rem otherwise */
+.spanel .sp-name .search > input{padding-right:min(1rem,4vw)}
 .spanel .sp-name .under:empty{display:none}
 .spanel .openhint{display:flex;align-items:center;gap:.6rem;margin-top:.5rem;padding:.35rem .35rem
   .35rem .7rem;
@@ -2648,7 +2816,8 @@ SEARCH_PANEL_CSS = """
    group one piece; the bar breaks after Sort when it is narrow, so no group is ever alone on a row */
 .spanel .rbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px 12px;
   border-top:1px solid var(--border-soft);padding-top:12px}
-.spanel .rbar .cnt{font-size:1.15rem;font-weight:900;margin:0 auto 0 0;min-width:0}
+/* the count is the list's heading: the standard h2, level with the bar's controls */
+.spanel .rbar .cnt{margin:0 auto 0 0;min-width:0}
 .spanel .rbar .g{display:inline-flex;align-items:center;gap:8px;flex:none;margin:0}
 .spanel .rbar .cnt + .btn{margin:0}  /* Select beside the count, level with it (not a form's button) */
 .spanel .rbar .lbl{font-weight:400;color:var(--text-muted);margin:0;white-space:nowrap}
@@ -2671,31 +2840,36 @@ SEARCH_PANEL_CSS = """
   .spanel .rbar .sort > .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);
     white-space:nowrap} }
 @container sp (max-width:659.98px){ .spanel .rbar .brk{display:block} }
+/* a bar in two rows (an open Fold beside the rail): the row under the count is filled from edge
+   to edge, its controls sharing the width, so no corner of the panel is left empty (the owner's
+   filter panel rule). The count's row keeps its controls at the right, the count at the left */
+@media (min-width:600px){ @container sp (max-width:659.98px){
+  .spanel .rbar:not(.cards) > .g.sort{flex:1 1 auto}
+  .spanel .rbar:not(.cards) > .g.sort > span{flex:1 1 auto}
+  .spanel .rbar:not(.cards) > .g.sort .msel-btn,.spanel .rbar:not(.cards) > .g.sort select{width:100%} } }
+/* (loop round #6) the view and card size switches are never part of that sharing: they keep
+   their own width and end the row, on the Fold as on a computer */
+/* a bar with Select beside its count (My decks) has one piece more: on a wider open Fold the
+   card size would wrap alone under the row's end, so that bar breaks after Sort up to the width
+   where all of it fits one row, the second row filled the same way */
+@media (min-width:600px){ @container sp (min-width:660px) and (max-width:829.98px){
+  .spanel .rbar:has(> .cnt + .btn) .brk{display:block} } }
 @container sp (max-width:879.98px){ .spanel .rbar.cards .brk{display:block} }
 @container sp (max-width:499.98px){ .spanel .rbar.cards .brk{display:none} .spanel .rbar.cards
   .brka{display:block} }
 .spanel .rbar .sortcw{display:none}
-.spanel .rbar .more{margin:0 0 0 -.3rem;font-weight:700;padding:0 .6rem 0 .3rem;display:inline-flex;
-  align-items:center;gap:.3rem;border-color:transparent;background:transparent}
-.spanel .rbar .more:hover{background:var(--surface-2)}
-.spanel .rbar .more svg{transform:rotate(-90deg);transition:transform .15s}
-.spanel .rbar .more[aria-expanded=true] svg{transform:none}
+/* More filters is the disclosure capsule (button.disc): only its place in the row is set here,
+   its drawn edge on the panel's own (the capsule's clear 4 px edge hangs out) */
+.spanel .rbar .more{margin:0 0 0 -4px}
+.spanel .rbar .more[hidden]{display:none}
 .spanel .rbar .clr{margin:0;white-space:nowrap}
-.spanel .segc{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
-  overflow:hidden;flex:none}
-.spanel .segc label{position:relative;display:inline-flex;align-items:center;justify-content:center;
-  gap:.35rem;
-  margin:0;padding:0 .75rem;min-height:calc(var(--ctl) - 2px);cursor:pointer;font-weight:400;
-    color:var(--text)}
-.spanel .segc label + label{border-left:1px solid var(--control-border)}
+/* Grid / List: the compact segmented switch (.ui-seg's look, above), its radios under the parts */
 .spanel .segc input{position:absolute;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}
-.spanel .segc label:has(input:checked){background:var(--orange-tint);font-weight:700}
-.spanel .segc label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .spanel .rbar .cardsize{display:inline-flex;align-items:center;gap:.5rem}
 .spanel .rbar .cardsize .lbl{display:none}
 /* R-175: the size switch stays whatever the view; in a list it sizes the row pictures (--thumb-scale) */
 @media (max-width:1279.98px){ .spanel .rbar .view .tx{display:none}
-  .spanel .rbar .view label{width:calc(var(--ctl) - 2px);padding:0} }
+  .spanel .rbar .view label{width:var(--ctl);padding:0} }
 /* phones: the filter groups wait in a full-screen sheet behind the Filters button; the name row
    stays; the bar keeps the count, one Sort drop-down and the view */
 .spanel .sp-sheet-head,.spanel .sp-sheet-foot,.spanel .sheet-size{display:none}
@@ -2752,7 +2926,7 @@ SEARCH_PANEL_CSS = """
     position:sticky;
     top:0;z-index:2;background:var(--bg);padding:.75rem 0;border-bottom:1px solid var(--border);margin:0
       0 .75rem}
-  .spanel .sp-sheet-head h2{margin:0;font-size:1.2rem}
+  .spanel .sp-sheet-head h2{margin:0}
   .spanel .sp-sheet-head .close{margin:0;width:44px;min-height:44px;height:44px;padding:0;
     border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
   .spanel .sheet-size{display:block;margin:14px 0 0}
@@ -2798,8 +2972,12 @@ html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,
    "Preconstructed") stays whole at 200% text on a 320 px phone instead of breaking letter by
    letter (last, after the headings' own sizes above; the same bounds as the headings' own, so a
    412 px phone at 200% keeps "Preconstructed" whole too, batch 10 AB5) */
-@media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.5rem,7vw)}
-  .home .hero h1{font-size:min(1.6rem,8vw)} .mtgbox .bh{--th:min(1.25rem,9vw)}}
+@media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.2rem,6vw)}
+  /* a 31-letter card name in a box title (Price alert on the Watchlist) came within a pixel of the
+     box's width at 200% text on a 320 px and a 412 px phone with CI's fonts: 8vw, not 9, and the
+     header reaches across the box's side padding to its edge (the ×'s 44 px circle with it; its
+     drawn icon keeps 11 px from the edge) */
+  .mtgbox .bh{--th:min(1.25rem,8vw);margin-right:calc(-1 * min(1.25rem, 18px))}}
 """
 
 
@@ -3128,13 +3306,14 @@ NAV_PLACE = {
     "/watchlist": "/binder",
     "/binder/settings": "/binder",
 }
-# The pages that light the picture (the Account place)
-ACCOUNT_PAGES = ("/account", "/account/details")
+# The pages that light the picture (the Account place). Card models live on the Account page
+# (the owner, 2026-11-23: moved from the rail and More), so their page lights it too.
+ACCOUNT_PAGES = ("/account", "/account/details", "/history/models")
 # More, in groups: the phone's sheet. Account, Guide and Admin live on the Account page your
 # picture opens; the lists and the Watchlist live in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
-    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "layers")]),
+    ("Your cards", [("/scan", "Scan", "scan")]),
     ("Community", [("/forum", "Forum", "comment")]),
 ]
 # The rail without More (0.7.46 redesign, screen 1): an open Fold's rail has room for every page,
@@ -3144,7 +3323,7 @@ MORE_GROUPS = [
 # given homes (Binder's switch and the Account page): the rail follows the code. Forum was on the
 # rail but not in the mockup: it closes the second group, as Community closes More. The phone
 # keeps its tab bar and More sheet. Each choice still open for the owner is one constant here.
-RAIL_PAGES = ("/scan", "/precons", "/history/models", "/forum")
+RAIL_PAGES = ("/scan", "/precons", "/forum")
 RAIL_ALERTS_AT_FOOT = True  # No: Alerts sits inside the second group, under Forum
 RAIL_GROUP_LINE = True  # the thin line between the four places and the rest
 # A computer's top bar lists the rail's pages too, and drops More ▾, once the bar is wide enough:
@@ -3157,10 +3336,9 @@ def binder_pages() -> list[tuple[str, str, str]]:
 
 
 def more_groups() -> list[tuple[str, list[tuple[str, str, str]]]]:
-    """More's groups, without My card models while descriptions are not kept
-    (card_models.SWITCHED_ON)."""
-    off = set() if card_models.SWITCHED_ON else {"/history/models"}
-    return [(head, [x for x in links if x[0] not in off]) for head, links in MORE_GROUPS]
+    """More's groups. Card models are not among them: their row is on the Account page
+    (account_hub.groups)."""
+    return [(head, list(links)) for head, links in MORE_GROUPS]
 
 
 def rail_extra() -> list[tuple[str, str, str]]:
@@ -3584,6 +3762,7 @@ class ThemeMiddleware:
         value = None
         layout = None
         tz = None
+        zone = None
         app = False
         app_ver = ""
         for k, v in scope.get("headers", []):
@@ -3596,6 +3775,8 @@ class ThemeMiddleware:
                         layout = val.strip()
                     elif name == localday.TZ_COOKIE:
                         tz = val
+                    elif name == localday.ZONE_COOKIE:
+                        zone = val
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
                 m = _APP_VERSION_RE.search(v.decode("latin-1", "replace"))
@@ -3608,9 +3789,11 @@ class ThemeMiddleware:
         vtoken = _app_version.set(app_ver)
         ctoken = _card_size.set((card_size_page(path), {}))
         ztoken = localday.set_offset(localday.offset_from_cookie(tz))
+        nztoken = localday.set_zone(localday.zone_from_cookie(zone))
         try:
             await self.app(scope, receive, send)
         finally:
+            localday.reset_zone(nztoken)
             localday.reset_offset(ztoken)
             _card_size.reset(ctoken)
             _theme.reset(token)

@@ -67,9 +67,7 @@ def test_the_result_card_uses_labels_a_strip_and_updates_in_place() -> None:
     )
     assert "it updates by itself.</div>" in body and "refreshes" not in body
     for colour, word in (("green", "Applied"), ("red", "Failed"), ("grey", "Not sent")):
-        assert re.search(
-            rf"<h2 class='ui-section'><span class='ui-lbl {colour}'>(<svg.*?</svg>)?{word}</span></h2>", body
-        ), word
+        assert re.search(rf"<h2><span class='ui-lbl {colour}'>(<svg.*?</svg>)?{word}</span></h2>", body), word
     assert "<h2>Not sent</h2>" not in body
     assert "<form method='post' action='/proposals/undo' class='undo' data-undo-box>" in body
     done = pages._result_body(_run("done"), "csrf-1")
