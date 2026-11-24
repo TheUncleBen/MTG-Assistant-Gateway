@@ -1005,7 +1005,18 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 
 /* companion layout: wide pages */
 .wide .wrap{max-width:2300px}
-.wide main.wrap{padding-left:var(--gutter);padding-right:var(--gutter)}
+/* One page column (docs/UI-STANDARD.md, loop round #1): a wide page's content is the same centred
+   1200 px column as a list page's (main.wrap.ui-wide), so its title, toolbar and lists start
+   where every other page's do and nothing shifts sideways from page to page. */
+.wide main.wrap{max-width:1200px;padding-left:var(--gutter);padding-right:var(--gutter)}
+/* Only a grid of cards grows past the column, and only where that brings whole columns of cards
+   (a screen from 1600 px): it reaches out evenly to the screen's edges, up to 2300 px, while the
+   head and the toolbar over it stay in the column. --bleed is half of what the screen has beyond
+   the column, less room for a scroll bar. (The app's rail shifts the column: no reach there.) */
+@media (min-width:1600px){
+  body.wide:not(.app) main.wrap :is(ul.cardgrid,ul.decklist.grid,.deckview):not(:is(.mtgbox,.panel,.card) *){
+    --bleed:calc((min(100vw,2300px) - 1200px) / 2 - 10px);
+    margin-left:calc(-1 * var(--bleed));margin-right:calc(-1 * var(--bleed))} }
 
 /* below 1024 px the links sit closer and a little smaller, so the search box keeps room for its
    whole placeholder beside an admin's eight links, in wide fonts too */
@@ -1789,6 +1800,14 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
    From 600 px only, since a phone keeps three a row at a third each (the media rule above) */
 @media (min-width:600px){ @container (max-width:29.5em){ .ui-tools.n3 .f{flex-basis:100%} } }
 .ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
+/* the empty state (ui.empty): a panel with a bold line, a muted line and at most one standard
+   button; it stands in for the whole list or table (loop round #17) */
+.ui-empty{padding:1rem;margin:0 0 1rem}
+.ui-empty > p{margin:0;overflow-wrap:anywhere}
+.ui-empty > .t{font-weight:700;font-size:1rem;color:var(--text)}
+.ui-empty > .d{margin-top:.25rem;color:var(--text-muted)}
+.ui-empty > .go{margin-top:.75rem}
+.ui-empty > .go .btn{margin:0}
 
 /* the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
    (.md-hide) fold into a second line (.sub) under the title (--cols-md); below 600 px two-line rows
@@ -2075,7 +2094,17 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   .with-panel .ui-table .tr{grid-template-columns:var(--cols-md)}
   .with-panel .ui-table .md-hide{display:none}
   .with-panel .ui-table .sub{display:flex}
-  .with-panel .ui-widgets{--wdg-min:11rem}
+  /* the tiles beside the open panel go two a row: four narrow columns wrapped every label
+     (loop round #19) */
+  .with-panel .ui-widgets{--wdg-min:calc(50% - .375rem)}
+  /* ... and the panel's answer (an .apply block's form: Apply, Reject) stays at the panel's foot
+     while the proposal scrolls above it, as the phone page's bar does. The block itself is no box
+     here, so its form can stick to the panel, not to the block's own end */
+  .ui-split.with-panel .ui-drawer .apply{display:contents}
+  .ui-split.with-panel .ui-drawer .apply > :first-child{margin-top:1rem}
+  .ui-split.with-panel .ui-drawer .apply > form.guarded{position:sticky;bottom:0;z-index:2;
+    margin:.5rem -1.25rem -1.5rem;padding:.1rem 1.25rem .6rem;background:var(--surface);
+    border-top:1px solid var(--card-border)}
 }
 @media (max-width:1099.98px){
   .ui-split.with-panel .list-only{display:none}
@@ -2791,11 +2820,10 @@ SEARCH_PANEL_CSS = """
 @container sp (max-width:499.98px){ .spanel .rbar.cards .brk{display:none} .spanel .rbar.cards
   .brka{display:block} }
 .spanel .rbar .sortcw{display:none}
-.spanel .rbar .more{margin:0 0 0 -.3rem;font-weight:700;padding:0 .6rem 0 .3rem;display:inline-flex;
-  align-items:center;gap:.3rem;border-color:transparent;background:transparent}
-.spanel .rbar .more:hover{background:var(--surface-2)}
-.spanel .rbar .more svg{transform:rotate(-90deg);transition:transform .15s}
-.spanel .rbar .more[aria-expanded=true] svg{transform:none}
+/* More filters is the disclosure capsule (button.disc): only its place in the row is set here,
+   its drawn edge on the panel's own (the capsule's clear 4 px edge hangs out) */
+.spanel .rbar .more{margin:0 0 0 -4px}
+.spanel .rbar .more[hidden]{display:none}
 .spanel .rbar .clr{margin:0;white-space:nowrap}
 /* Grid / List: the compact segmented switch (.ui-seg's look, above), its radios under the parts */
 .spanel .segc input{position:absolute;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}

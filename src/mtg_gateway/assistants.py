@@ -364,11 +364,16 @@ def list_html(
             + f"</div>{all_box}"
         )
     else:
-        g2 = _group(
-            "Connected",
-            [f"<div class='yrow yempty'><span class='lbl'>{NONE_YET}</span></div>"],
-            "Connect Claude, ChatGPT or another assistant with Guided setup. Each one starts with "
-            "your default.",
+        # nothing connected: the site's empty state under the group's label, not a row of a list
+        g2 = (
+            "<section class='ygrp'><h2 class='ui-group'>Connected</h2>"
+            + ui.empty(
+                NONE_YET.rstrip("."),
+                "Connect Claude, ChatGPT or another assistant with Guided setup. Each one starts with "
+                "your default.",
+                action=ui.button_link("Guided setup", "/install"),
+            )
+            + "</section>"
         )
         foot = f"<div class='ydisc'>{ui.button_link('Guided setup', '/install', icon_name='download')}</div>"
     # the way back names where the member came from: Account's own Assistants row, or Account
@@ -594,7 +599,6 @@ CSS = (
     + """
 .ygrp .yfoot{margin:.45rem .9rem 0;font-size:.86rem;color:var(--text-muted);line-height:1.4}
 .ygrp div.yrow{cursor:default}
-.ygrp .yrow.yempty .lbl{color:var(--text-muted);padding:.7rem 0}
 /* an assistant's row: its mark in the icon slot, two lines of words, its mode at the right */
 .ygrp .yrow.app{padding-top:.55rem;padding-bottom:.55rem;min-height:64px}
 .ygrp .yrow.app .lbl{display:flex;flex-direction:column;gap:.15rem;min-width:0}

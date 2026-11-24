@@ -113,3 +113,43 @@ def test_a_one_row_switch_has_equal_parts_on_a_phone() -> None:
 def test_alerts_asks_for_the_narrow_column() -> None:
     src = (SRC / "alerts_page.py").read_text(encoding="utf-8")
     assert 'current="/notifications",\n            heading=False,\n            main_class="ui-narrow",' in src
+
+
+# --- #17 the empty state -------------------------------------------------------------------------
+
+
+def test_the_empty_state_is_a_panel_with_a_bold_line_a_muted_line_and_an_optional_button() -> None:
+    got = ui.empty("No pinned cards yet", "Pin one from any card's menu.")
+    assert got == (
+        "<div class='ui-empty panel'><p class='t'>No pinned cards yet</p>"
+        "<p class='d'>Pin one from any card&#x27;s menu.</p></div>"
+    )
+    go = ui.button_link("Guided setup", "/install")
+    with_go = ui.empty("No assistant yet", "Connect one.", action=go)
+    assert with_go.endswith(f"<p class='d'>Connect one.</p><p class='go'>{go}</p></div>")
+    assert "font-weight:700" in _rule(".ui-empty > .t") and "color:var(--text-muted)" in _rule(
+        ".ui-empty > .d"
+    )
+    assert "`ui.empty" in STANDARD and ".ui-empty" in STANDARD
+
+
+def test_the_pages_empty_lists_use_the_empty_state() -> None:
+    from mtg_gateway import assistants, cardsearch, lists_page
+
+    assert cardsearch.START_HTML.startswith("<div class='ui-empty panel'><p class='t'>Find a card</p>")
+    assert cardsearch.NO_MATCH_HTML.startswith("<div class='ui-empty panel'><p class='t'>No card matches")
+    # a list with nothing in it draws no table (so no column header over nothing)
+    for tab in (
+        lists_page.templates_tab({"items": []}, "c", {}),
+        lists_page.tags_tab({"items": []}, "c", {}, "tags"),
+        lists_page.tags_tab({"items": []}, "c", {}, "btags"),
+        lists_page.pins_tab({"items": [], "total": 0}, "c", {}),
+        lists_page.custom_tab({"items": [], "total": 0, "page": 1, "more": False}, "c", {}, ""),
+        lists_page.defaults_tab({"items": [], "total": 0, "page": 1, "more": False}, "c", {}, ""),
+    ):
+        assert "<div class='ui-empty panel'>" in tab and "ui-table" not in tab and "lp-empty" not in tab
+    # a search that finds nothing keeps its table: the rows come back into it as the name changes
+    miss = lists_page.custom_tab({"items": [], "total": 0, "page": 1, "more": False}, "c", {}, "zzz")
+    assert "ui-table" in miss and "No custom card matches that name." in miss
+    src = (SRC / "assistants.py").read_text(encoding="utf-8")
+    assert "ui.empty(" in src and "yempty" not in src and assistants.NONE_YET

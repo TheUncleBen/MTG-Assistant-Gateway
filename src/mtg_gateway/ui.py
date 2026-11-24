@@ -393,6 +393,16 @@ def notice(
     return f"<div class='{classes}'{i}{r}>{text if html else esc(text)}</div>"
 
 
+def empty(title: str, text: str, action: str | None = None) -> str:
+    """The empty state (docs/UI-STANDARD.md): what a list, a table or a result shows when it holds
+    nothing. A panel of its own with one bold line saying what is missing, one muted line saying
+    what to do about it, and at most one standard button (``action``: ``button_link`` or
+    ``box_opener`` markup). It stands in for the whole table: no column header is drawn over
+    nothing. Never put it inside another panel."""
+    go = f"<p class='go'>{action}</p>" if action else ""
+    return f"<div class='ui-empty panel'><p class='t'>{esc(title)}</p><p class='d'>{esc(text)}</p>{go}</div>"
+
+
 # --- page head, widgets, chips, toolbar --------------------------------------------------------
 
 

@@ -1935,7 +1935,10 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
     ]
     head = _head("Admin: metrics", "Usage and errors, counted per UTC day.", path) + ui.widgets(widgets)
     if not totals:
-        none = f"<div class='ui-card'><p>No activity counted in the last {days} days.</p></div>"
+        none = ui.empty(
+            f"No activity counted in the last {days} days",
+            "Counts show here once members or their assistants use the gateway.",
+        )
         return f"<div class='adm am'>{head}{none}</div>"
     low = q.casefold()
     base = [
@@ -2028,10 +2031,10 @@ def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
             + "</div>"
         )
     else:
-        table = (
-            "<div class='ui-card'><p>Nothing counted matches these filters. "
-            + ui.cap_link("Show everything", path)
-            + "</p></div>"
+        table = ui.empty(
+            "Nothing counted matches these filters",
+            "Take a filter away, or look at a longer period.",
+            action=ui.button_link("Show everything", path),
         )
     newer = (
         _href(path, kind=kind, days=days if days != DAYS else "", q=q, offset=max(0, offset - PER_PAGE))

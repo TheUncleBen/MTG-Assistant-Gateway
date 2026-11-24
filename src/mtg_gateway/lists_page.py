@@ -666,11 +666,10 @@ def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], after: st
             label="Category templates",
         )
         + ui.table_header([ui.Column("Template"), ui.Column("Flags", "sm-hide"), ui.Column("")])
-        + (
-            templates_rows(items)
-            or "<div class='tr lp-empty'><span class='muted'>No category templates yet.</span></div>"
-        )
+        + templates_rows(items)
         + "</div>"
+        if items
+        else ui.empty("No category templates yet", "Make one with New template, then add it to any deck.")
     )
     return (
         head
@@ -844,6 +843,11 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str, af
         + ui.table_header([ui.Column("Card"), ui.Column("Default categories", "sm-hide"), ui.Column("")])
         + rows
         + "</div>"
+        if items or q
+        else ui.empty(
+            "No cards with default categories yet",
+            "Give a card its default categories on Archidekt, and it shows here.",
+        )
     )
     seen = min(total, page * account_lists.DEFAULT_PAGE_SIZE)
     more = (
@@ -953,7 +957,7 @@ TAG_WORDS = {
     "tags": {
         "title": "Color tags",
         "one": "color tag",
-        "empty": "No color tags yet.",
+        "empty": ("No color tags yet", "Make one with New color tag, then tag cards with it in a deck."),
         "purpose": "Tags you can put on cards in any deck. A card keeps the name and color it was "
         "tagged with, so changes here don't reach cards already tagged.",
         "edit_warn": "Cards already tagged keep their old name and color. Archidekt doesn't link a card's "
@@ -965,7 +969,10 @@ TAG_WORDS = {
     "btags": {
         "title": "Binder tags",
         "one": "binder tag",
-        "empty": "No binder tags yet. Make one here, then tick it in a card's Details in your binder.",
+        "empty": (
+            "No binder tags yet",
+            "Make one here, then tick it in a card's Details in your binder.",
+        ),
         "purpose": "Tags on the cards in your binder, as Archidekt's collection has them: tick them in a "
         "card's Details, and filter your binder by one.",
         "edit_warn": "Every entry with this tag shows the new name and color.",
@@ -1025,11 +1032,10 @@ def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "t
             label=w["title"],
         )
         + ui.table_header([ui.Column("Tag"), ui.Column("Color", "sm-hide"), ui.Column("")])
-        + (
-            tags_rows(items, slug)
-            or f"<div class='tr lp-empty'><span class='muted'>{esc(w['empty'])}</span></div>"
-        )
+        + tags_rows(items, slug)
         + "</div>"
+        if items
+        else ui.empty(*w["empty"])
     )
     return (
         head
@@ -1212,12 +1218,10 @@ def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], after: str = "
         + ui.table_header(
             [ui.Column("Card"), ui.Column("Copies"), ui.Column("Notes", "lp-notes-h"), ui.Column("")]
         )
-        + (
-            "".join(pin_row(p, csrf) for p in items)
-            or "<div class='tr lp-empty'><span class='muted'>No pinned cards yet. Pin one from any card's "
-            "menu.</span></div>"
-        )
+        + "".join(pin_row(p, csrf) for p in items)
         + "</div>"
+        if items
+        else ui.empty("No pinned cards yet", "Pin one from any card's menu.")
     )
     return (
         head
@@ -1394,6 +1398,9 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str, afte
         )
         + rows
         + "</div>"
+        # (a name that matches nothing keeps the table: the rows come back into it as the name changes)
+        if items or q
+        else ui.empty("No custom cards yet", "Make one with New custom card. It is kept on Archidekt.")
     )
     shown = len(items) + (page - 1) * 50
     more = (

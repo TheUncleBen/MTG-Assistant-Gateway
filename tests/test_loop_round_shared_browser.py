@@ -140,8 +140,8 @@ def test_a_tiles_icon_stays_beside_its_wrapping_label(server: Server) -> None:  
     got = _each(server, (PHONE, LAPTOP), ("/history/reports/r1", "/proposals/PENDING", "/admin"), LABS)
     wrapped = 0
     for key, labs in got.items():
-        # a proposal on a phone is its own page, without the list's tiles
-        assert labs or key == (PHONE, "/proposals/PENDING"), key
+        # (a phone folds a list's tiles behind "At a glance"; the report's are always shown)
+        assert labs or (key[0] == PHONE and key[1] != "/history/reports/r1"), key
         for lab in labs:
             assert lab["span"], (key, lab)
             wrapped += lab["lines"] > 1
@@ -363,3 +363,197 @@ def test_enter_submits_a_search_form_and_the_magnifier_does_too(server: Server) 
         page.wait_for_url("**/forum?*q=rules*")
         browser.close()
         assert not errors, errors
+
+
+# --- #9 the disclosure capsule -------------------------------------------------------------------
+
+CAPSULE = """() => { const b = document.querySelector('main [data-more-filters]');
+  if (!b || !b.getClientRects().length) return null;
+  // the standard's capsule, drawn fresh beside it
+  const ref = document.createElement('button'); ref.type = 'button'; ref.className = 'disc'; ref.textContent = 'More';
+  b.parentElement.appendChild(ref);
+  const look = (e) => { const cs = getComputedStyle(e), af = getComputedStyle(e, '::after');
+    return [cs.backgroundColor, cs.borderTopLeftRadius, cs.borderTopWidth, cs.borderTopColor, cs.fontSize, cs.fontWeight,
+            cs.color, Math.round(e.getBoundingClientRect().height), af.content, af.borderBottomWidth].join(' | '); };
+  const got = {look: look(b), ref: look(ref), svg: !!b.querySelector('svg'), text: b.innerText.trim(),
+               left: Math.round(b.getBoundingClientRect().left - b.closest('.rbar').getBoundingClientRect().left)};
+  ref.remove(); return got; }"""
+
+
+def test_more_filters_is_the_disclosure_capsule(server: Server) -> None:  # noqa: F811
+    from playwright.sync_api import sync_playwright
+
+    sid, _pending, exe = _start(server)
+    with sync_playwright() as p:
+        for w in (FOLD, LAPTOP):
+            browser, page, errors = _page(p, server, sid, w, "light", exe)
+            page.goto(f"{server.base}/cards", wait_until="networkidle")
+            frame(page)
+            cap = page.evaluate(CAPSULE)
+            assert cap, w
+            # one look for "show more in place": the capsule, its chevron drawn by the capsule itself
+            assert cap["look"] == cap["ref"] and not cap["svg"] and cap["text"] == "More filters", (w, cap)
+            assert cap["left"] <= 16, (w, cap)  # it leads the controls' row
+            if w == FOLD:
+                browser.close()
+        btn = page.locator("main [data-more-filters]")
+        assert btn.get_attribute("aria-expanded") == "false"
+        closed = page.evaluate(
+            "getComputedStyle(document.querySelector('main [data-more-filters]'), '::after').transform"
+        )
+        btn.click()
+        page.locator("#cs-more-filters[open]").wait_for(timeout=3000)
+        assert btn.get_attribute("aria-expanded") == "true"
+        frame(page)
+        page.wait_for_timeout(250)  # the chevron's turn
+        opened = page.evaluate(
+            "getComputedStyle(document.querySelector('main [data-more-filters]'), '::after').transform"
+        )
+        assert opened != closed, (closed, opened)
+        browser.close()
+        assert not errors, errors
+
+
+# --- #17 the empty state -------------------------------------------------------------------------
+
+EMPTY = """() => { const es = [...document.querySelectorAll('main .ui-empty')].filter(e => e.getClientRects().length);
+  const shown = (e) => e && e.getClientRects().length > 0;
+  return {n: es.length, heads: [...document.querySelectorAll('main .ui-table .tr.th')].filter(shown).length,
+          old: [...document.querySelectorAll('main .lp-empty, main .yempty')].filter(shown).length,
+          looks: es.map(e => { const cs = getComputedStyle(e), t = e.querySelector('.t'), d = e.querySelector('.d'), b = e.querySelector('.btn');
+            const ts = t ? getComputedStyle(t) : null, ds = d ? getComputedStyle(d) : null;
+            return {look: [cs.backgroundColor, cs.borderTopWidth, cs.borderTopColor, cs.borderTopLeftRadius, cs.paddingTop, cs.paddingLeft,
+                           ts && ts.fontWeight, ts && ts.fontSize, ts && ts.color, ds && ds.color, ds && ds.fontSize].join(' | '),
+                    title: t ? t.innerText.trim() : '', text: d ? d.innerText.trim() : '',
+                    under: t && d ? d.getBoundingClientRect().top >= t.getBoundingClientRect().bottom - 1 : null,
+                    btn: b ? [getComputedStyle(b).borderTopWidth, Math.round(b.getBoundingClientRect().height)].join(' ') : null,
+                    inPanel: !!e.parentElement.closest('.panel, .card, .ui-card')}; })}; }"""
+
+
+def test_an_empty_list_is_the_one_empty_state_with_no_table_header_over_it(server: Server) -> None:  # noqa: F811
+    paths = ("/lists/custom", "/collection/wants", "/admin/metrics", "/cards")
+    got = _each(server, (PHONE, FOLD, LAPTOP), paths, EMPTY)
+    looks = set()
+    for key, e in got.items():
+        assert e["n"] == 1 and not e["heads"] and not e["old"], (key, e)
+        one = e["looks"][0]
+        # a bold line, then a muted line under it; a panel of its own, never inside another
+        assert one["title"] and one["text"] and one["under"] and not one["inPanel"], (key, one)
+        looks.add(one["look"])
+    assert len(looks) == 1, looks
+    titles = {path: got[(PHONE, path)]["looks"][0]["title"] for path in paths}
+    assert titles == {
+        "/lists/custom": "No custom cards yet",
+        "/collection/wants": "No pinned cards yet",
+        "/admin/metrics": "No activity counted in the last 30 days",
+        "/cards": "Find a card",
+    }, titles
+
+
+# --- #19 a proposal beside the list --------------------------------------------------------------
+
+DRAWER = """() => { const d = document.querySelector('.ui-split.with-panel .ui-drawer'), dr = d.getBoundingClientRect();
+  const inView = (e) => { const r = e.getBoundingClientRect(); return r.top >= dr.top - 1 && r.bottom <= Math.min(dr.bottom, innerHeight) + 1 && r.height > 0; };
+  const bs = [...d.querySelectorAll('.apply form.guarded button[name=action], .apply form.guarded button[data-guard]')].filter(b => b.getClientRects().length);
+  const tiles = [...document.querySelectorAll('.list-only .ui-widgets > .wdg')].filter(t => t.getClientRects().length);
+  const rows = {}; tiles.forEach(t => { const y = Math.round(t.getBoundingClientRect().top); rows[y] = (rows[y] || 0) + 1; });
+  return {scrolls: d.scrollHeight - d.clientHeight, top: d.scrollTop, n: bs.length, seen: bs.filter(inView).length,
+          words: bs.map(b => b.innerText.trim()), perRow: Object.values(rows),
+          cover: (() => { const b = bs[0].getBoundingClientRect(), e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!e && (bs[0].contains(e) || e.contains(bs[0])); })()}; }"""
+
+
+def test_a_proposal_beside_the_list_keeps_apply_and_reject_in_view(server: Server) -> None:  # noqa: F811
+    from playwright.sync_api import sync_playwright
+
+    sid, pending, exe = _start(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, LAPTOP, "light", exe)
+        # a laptop's window: the panel is shorter than the proposal it shows
+        page.set_viewport_size({"width": LAPTOP, "height": 640})
+        page.goto(f"{server.base}/proposals/{pending}", wait_until="networkidle")
+        frame(page)
+        got = page.evaluate(DRAWER)
+        assert got["scrolls"] > 40 and got["n"] >= 2, got
+        assert got["words"][0].startswith("Apply") and any(w.startswith("Reject") for w in got["words"]), got
+        # at the panel's top, half way and at its end: the buttons are whole, inside the panel
+        for at in (0, 0.5, 1):
+            page.evaluate(
+                "(f) => { const d = document.querySelector('.ui-drawer'); d.scrollTop = f * (d.scrollHeight - d.clientHeight); }",
+                at,
+            )
+            frame(page)
+            now = page.evaluate(DRAWER)
+            assert now["seen"] == now["n"] and now["cover"], (at, now)
+        # the tiles beside the open panel go two a row (four narrow columns wrapped their labels)
+        assert got["perRow"] and set(got["perRow"]) == {2}, got
+        browser.close()
+        # without the panel they keep their one row
+        browser, page, errors2 = _page(p, server, sid, LAPTOP, "light", exe)
+        page.goto(f"{server.base}/proposals", wait_until="networkidle")
+        frame(page)
+        tiles = page.evaluate(
+            "() => new Set([...document.querySelectorAll('main .ui-widgets > .wdg')].map(t => Math.round(t.getBoundingClientRect().top))).size"
+        )
+        assert tiles == 1, tiles
+        browser.close()
+        assert not errors and not errors2, errors + errors2
+
+
+# --- #1 one page column --------------------------------------------------------------------------
+
+COLUMN = """() => { const m = document.querySelector('main'), cs = getComputedStyle(m), r = m.getBoundingClientRect();
+  const left = r.left + parseFloat(cs.paddingLeft), right = r.right - parseFloat(cs.paddingRight);
+  const shown = (e) => e.getClientRects().length > 0 && getComputedStyle(e).position !== 'absolute';
+  const kids = [...m.children].filter(shown).map(e => { const b = e.getBoundingClientRect(); return {cls: e.tagName + '.' + e.className, l: Math.round(b.left - left), r: Math.round(b.right - right)}; });
+  const grids = [...m.querySelectorAll('ul.cardgrid, ul.decklist.grid')].filter(shown).filter(g => !g.closest('.mtgbox, .panel')).map(g => { const b = g.getBoundingClientRect();
+    return {w: Math.round(b.width), l: Math.round(b.left), gapR: Math.round(document.documentElement.clientWidth - b.right)}; });
+  const head = [...m.querySelectorAll('.ui-head, .dkhead, .hero, .hubbar, .spanel, .ui-tools')].filter(shown).map(e => { const b = e.getBoundingClientRect(); return {cls: e.className, l: Math.round(b.left - left), r: Math.round(b.right - right)}; });
+  return {left: Math.round(left), width: Math.round(right - left), kids: kids, grids: grids, head: head,
+          over: document.documentElement.scrollWidth - document.documentElement.clientWidth}; }"""
+
+WIDE_PAGES = (
+    "/", "/decks", "/decks?view=list", "/cards", "/search", "/precons", "/collection?view=grid",
+    "/collection?view=list", "/users/alice", "/decks/42/compare",
+    "/guide", "/forum", "/proposals", "/history", "/reports", "/watchlist", "/admin", "/activity",
+)  # fmt: skip
+
+
+def test_every_wide_page_is_the_one_centred_column_on_a_laptop(server: Server) -> None:  # noqa: F811
+    got = _each(server, (LAPTOP,), (*WIDE_PAGES, "/decks/42"), COLUMN)
+    for (_w, path), c in got.items():
+        # 1200 px with the gutters: the same left edge on every page, so nothing shifts sideways
+        assert (c["left"], c["width"]) == (54, 1172) and c["over"] <= 0, (path, c["left"], c["width"])
+        for part in c["head"]:
+            assert part["l"] >= 0 and part["r"] <= 0, (path, part)
+        if path != "/decks/42":  # (the deck's banner reaches out to the column's own edges)
+            for kid in c["kids"]:
+                assert kid["l"] >= -4 and kid["r"] <= 4, (path, kid)
+
+
+def test_on_a_wide_screen_only_a_card_grid_grows_past_the_column(server: Server) -> None:  # noqa: F811
+    pages = (
+        "/decks",
+        "/collection?view=grid",
+        "/precons",
+        "/users/alice",
+        "/search?q=sample",
+        "/collection?view=list",
+        "/proposals",
+    )
+    got = _each(server, (1920,), pages, COLUMN)
+    grown = 0
+    for (_w, path), c in got.items():
+        # the page's column, its head, its toolbar and its lists stay where they are on a laptop
+        assert c["width"] == 1172 and c["left"] == (1920 - 1172) // 2 and c["over"] <= 0, (
+            path,
+            c["left"],
+            c["width"],
+        )
+        for part in c["head"]:
+            assert part["l"] >= 0 and part["r"] <= 0, (path, part)
+        for g in c["grids"]:
+            grown += 1
+            # the grid alone reaches out, evenly, to the screen's gutters
+            assert g["w"] > 1700 and 8 <= g["l"] <= 32 and abs(g["l"] - g["gapR"]) <= 1, (path, g)
+    assert grown >= 5, got
+    assert not got[(1920, "/collection?view=list")]["grids"] and not got[(1920, "/proposals")]["grids"]
