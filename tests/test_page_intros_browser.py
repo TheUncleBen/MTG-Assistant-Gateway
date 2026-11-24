@@ -19,7 +19,7 @@ INTROS = [
     ("/proposals", "p.ui-sub, p.ui-note"),
     ("/reports", "p.ui-sub, p.ui-note"),
     ("/search", "main p.ui-sub"),
-    ("/cards", ".panel > p.muted"),
+    ("/cards", ".ui-empty > p.d"),  # the empty state's line (ui.empty) is its intro
     ("/notifications", "p.ui-sub, p.bell-foot"),
     ("/lists/custom", "p.ui-sub"),
 ]
