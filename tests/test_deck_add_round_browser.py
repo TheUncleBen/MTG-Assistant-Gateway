@@ -250,7 +250,10 @@ def test_the_phone_add_field_and_banner_buttons_say_what_they_are(server: Server
         browser, page, errors, edits = _open(p, server, sid, 390)
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
         # the label is for a screen reader on a phone; a + at the field's start says it adds
-        assert "svg" in page.eval_on_selector("#quick", "e => getComputedStyle(e).backgroundImage")
+        assert "/static/plus.svg" in page.eval_on_selector(
+            "#quick", "e => getComputedStyle(e).backgroundImage"
+        )
+        assert page.request.get(f"{server.base}/static/plus.svg").ok
         for word in ("Like", "Bookmark", "Comments", "Proposals"):
             assert (
                 page.locator(".banner .social .soc", has_text=word).first.locator("span").first.is_visible()
