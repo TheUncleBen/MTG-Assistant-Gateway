@@ -13,7 +13,7 @@ from .test_cardsearch_browser import _page
 from .test_overflow_sweep_browser import _seed, server  # noqa: F401
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
-from .waits import frame
+from .waits import frame, settled
 
 pytest.importorskip("playwright")
 
@@ -414,8 +414,7 @@ def test_more_filters_is_the_disclosure_capsule(server: Server) -> None:  # noqa
         btn.click()
         page.locator("#cs-more-filters[open]").wait_for(timeout=3000)
         assert btn.get_attribute("aria-expanded") == "true"
-        frame(page)
-        page.wait_for_timeout(250)  # the chevron's turn
+        settled(page)  # the chevron's turn has ended
         opened = page.evaluate(
             "getComputedStyle(document.querySelector('main [data-more-filters]'), '::after').transform"
         )
@@ -578,3 +577,23 @@ def test_on_a_wide_screen_only_a_card_grid_grows_past_the_column(server: Server)
             assert g["w"] > 1700 and 8 <= g["l"] <= 32 and abs(g["l"] - g["gapR"]) <= 1, (path, g)
     assert grown >= 5, got
     assert not got[(1920, "/collection?view=list")]["grids"] and not got[(1920, "/proposals")]["grids"]
+
+
+# --- a menu left open under a box ----------------------------------------------------------------
+
+LAYERS = """() => {
+  const before = document.createElement('div'); before.className = 'menu ctxmenu'; document.body.appendChild(before);
+  window.MtgBox.confirm({title: 'Remove the card?', text: 'Words.', ok: 'Remove', cancel: 'Keep it'});
+  const after = document.createElement('div'); after.className = 'menu ctxmenu'; document.body.appendChild(after);
+  const z = n => Number(getComputedStyle(n).zIndex) || 0;
+  const scrim = document.querySelector('.mtgbox-scrim');
+  return {before: z(before) < z(scrim), after: z(after) > z(scrim)};
+}"""
+
+
+def test_only_a_menu_opened_from_a_box_sits_over_it(server: Server) -> None:  # noqa: F811
+    """A menu opened from an open box (the bell's row menu) sits over the box; a page's menu left
+    open when one of its items asks a question (the deck page's Remove from deck) stays under the
+    box, so it never covers the box's buttons (0.7.48: it covered Keep it at 1366 px)."""
+    got = _each(server, (LAPTOP,), ("/decks",), LAYERS)
+    assert got[(LAPTOP, "/decks")] == {"before": True, "after": True}

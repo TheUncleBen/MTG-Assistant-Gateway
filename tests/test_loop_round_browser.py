@@ -78,7 +78,7 @@ def _days_page(p, exe: str | None, zone: str, cookies: dict[str, str]):  # noqa:
     page.route("https://mtg.test/**", lambda route: route.fulfill(content_type="text/html", body=html))
     page.goto("https://mtg.test/history")
     page.wait_for_load_state("load")
-    page.wait_for_timeout(300)  # a reload, if any, has happened
+    page.wait_for_timeout(300)  # fixed wait: a reload that may not come has no event to wait on
     page.wait_for_load_state("load")
     return browser, page
 

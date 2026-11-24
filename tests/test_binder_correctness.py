@@ -342,7 +342,7 @@ def _counts(text: str) -> dict[str, int]:
     return {
         "tab": one(r"<h1>Archidekt collection <span class='cn'>([\d,]+)</span></h1>"),
         "glance": one(r"<span>([\d,]+) entries</span><span>\d+ added this week</span>"),
-        "tile": one(r"Entries</span><span class='big'>([\d,]+)</span>"),
+        "tile": one(r"Entries</span></span><span class='big'>([\d,]+)</span>"),
         "bar": one(r"id='col-count' aria-live='polite'>([\d,]+) entries</h2>"),
         "more": one(r"<p class='muted'>\d+ of ([\d,]+)</p>|All ([\d,]+) entries shown"),
     }
@@ -352,7 +352,7 @@ def _week(text: str) -> tuple[int, int]:
     """Added this week: the tile and the At a glance line."""
     import re
 
-    tile = re.search(r"Added this week</span><span class='big'>(\d+)</span>", text)
+    tile = re.search(r"Added this week</span></span><span class='big'>(\d+)</span>", text)
     line = re.search(r"entries</span><span>(\d+) added this week</span>", text)
     assert tile and line
     return int(tile.group(1)), int(line.group(1))
@@ -473,10 +473,10 @@ async def test_a_held_binder_read_empty_counts_the_cards_added_since_in_every_ti
         assert _week(held.text) == (10, 10)
         assert "<span>10 entries</span><span>10 added this week</span>" in held.text
         copies = re.search(
-            r"Entries</span><span class='big'>10</span><span class='det'>([^<]*)</span>", held.text
+            r"Entries</span></span><span class='big'>10</span><span class='det'>([^<]*)</span>", held.text
         )
         assert copies and copies.group(1) == "10 copies", copies and copies.group(1)
-        foils = re.search(r"Foils</span><span class='big'>(\d+)</span>", held.text)
+        foils = re.search(r"Foils</span></span><span class='big'>(\d+)</span>", held.text)
         assert foils and foils.group(1) == "0"  # all ten added as Normal
     finally:
         stack.gw.decks.client.pacer._open_until = 0
@@ -525,7 +525,7 @@ def _week_text(text: str) -> tuple[str, str, str]:
     import re
 
     tile = re.search(
-        r"Added this week</span><span class='big'>([^<]*)</span><span class='det'>([^<]*)</span>", text
+        r"Added this week</span></span><span class='big'>([^<]*)</span><span class='det'>([^<]*)</span>", text
     )
     line = re.search(r"entries</span><span>([^ <]+) added this week</span>", text)
     assert tile and line, text[:400]

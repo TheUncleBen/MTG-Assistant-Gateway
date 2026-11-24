@@ -2526,9 +2526,11 @@ CSS += BOX_CSS
 BELL_CSS = """
 /* While a box is open, a menu opened from it sits over it: a row's ⋮ in the bell's box opened its
    menu behind the box (0.7.48). Only then: the deck page layers its own toasts around the menu's
-   usual place (deckpage.py). The box says what was done, and its Undo, in its own note. */
-body:has(.mtgbox-scrim) .ctxmenu{z-index:97}
-body:has(.mtgbox-scrim) .cs-scrim{z-index:96}
+   usual place (deckpage.py). The box says what was done, and its Undo, in its own note. Only a
+   menu added after the box's scrim: a page's menu still open when one of its items asks a
+   question (the deck page's Remove from deck) stays under the box and never covers its buttons. */
+.mtgbox-scrim ~ .ctxmenu{z-index:97}
+.mtgbox-scrim ~ .cs-scrim{z-index:96}
 .al-list{list-style:none;margin:0;padding:0}
 .al-row{position:relative;display:flex;align-items:stretch;gap:.25rem;
   border-top:1px solid var(--border-soft);-webkit-touch-callout:none}
