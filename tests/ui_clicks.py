@@ -240,7 +240,16 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                 lambda r: r.fulfill(status=200, content_type="image/png", body=PNG),
             )
             ctx.route(re.compile(r"/decks/[^/]+/check(\?|$)"), lambda r: r.abort())
-            state: dict = {"req": [], "bad": [], "err": [], "nav": [], "popup": 0, "download": 0, "dialog": 0}
+            state: dict = {
+                "req": [],
+                "sent": [],
+                "bad": [],
+                "err": [],
+                "nav": [],
+                "popup": 0,
+                "download": 0,
+                "dialog": 0,
+            }
 
             def on_req(r, state=state):  # noqa: ANN001
                 u = urlparse(r.url)
@@ -250,6 +259,8 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                     and r.resource_type in ("fetch", "xhr", "document", "eventsource")
                 ):
                     state["req"].append(r.method + " " + u.path)
+                    if r.method != "GET":
+                        state["sent"].append(r)
 
             def on_resp(r, state=state):  # noqa: ANN001
                 u = urlparse(r.url)
@@ -278,6 +289,15 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                 # the last press's page can still be leaving (a menu item navigates once its menu
                 # has closed): an empty page first ends it, and a load it still cuts short is asked
                 # for again
+                # a save the last press sent may still be running on the server: its answer comes
+                # first, so the seed put back next is not changed after it
+                for sent in state["sent"]:
+                    if sent.existing_response is None and sent.failure is None:
+                        try:
+                            sent.response()
+                        except Exception:  # noqa: BLE001  (the page is gone)
+                            pass
+                state["sent"] = []
                 for _ in range(3):
                     try:
                         page.goto("about:blank", timeout=5000)
@@ -289,10 +309,6 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         page.wait_for_load_state("load", timeout=10_000)
                     except Exception:  # noqa: BLE001
                         pass
-                # a save the last press sent may still be running on the server: let it finish, so
-                # the seed put back next is not changed after it
-                if any(not r.startswith("GET ") for r in state["req"]):
-                    page.wait_for_timeout(500)
                 fresh.restore()
                 server.db.delete_prefs("user-1", prefixes=("view.",))
                 for attempt in range(3):
