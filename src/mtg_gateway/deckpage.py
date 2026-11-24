@@ -384,7 +384,8 @@ def banner_html(
     brackets = banner_bracket_html(deck, stats)  # bracket_view.py
     salt = salt_text(stats)
     # the deck's tags; none: no "No deck tags" line (noise, as on the tiles)
-    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
+    # each tag's title has it whole: from 600 px a long tag is one line ending in "…"
+    pills = "".join(f"<span class='pill' title='{esc(t)}'>{esc(t)}</span>" for t in deck.tags)
     tags = f"<div class='tags'>{icon('tag')} {pills}</div>" if deck.tags else ""
     csrf_in = f"<input type='hidden' name='csrf' value='{esc(csrf)}'>" if csrf else ""
     did = esc(deck.id)

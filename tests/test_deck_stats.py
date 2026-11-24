@@ -1158,3 +1158,16 @@ def test_the_solo_test_only_run_is_offered_only_when_forge_is_on() -> None:
         deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
     )
     assert "Solo test only" not in signed_out and "Run test" not in signed_out
+
+
+def test_each_banner_tag_has_its_whole_text_as_a_title() -> None:
+    """From 600 px a long tag is one line ending in "…": its title holds it whole."""
+    from mtg_gateway.deckpage import banner_html
+
+    d = deck([card("Opt")])
+    d.tags = ["Spellslinger & <friends>"]
+    html = banner_html(d, {}, own=True, csrf="t", writes_enabled=True)
+    assert (
+        "<span class='pill' title='Spellslinger &amp; &lt;friends&gt;'>"
+        "Spellslinger &amp; &lt;friends&gt;</span>" in html
+    )
