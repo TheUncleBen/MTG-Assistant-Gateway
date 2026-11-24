@@ -406,17 +406,23 @@ def empty(title: str, text: str, action: str | None = None) -> str:
 # --- page head, widgets, chips, toolbar --------------------------------------------------------
 
 
-def page_head(title: str, sub: str = "", *, actions_html: str = "") -> str:
+def page_head(
+    title: str, sub: str = "", *, actions_html: str = "", count_html: str = "", cls: str = ""
+) -> str:
     """The title with one line saying what the page holds (the purpose line), and the page's
     actions at the title's end (``actions_html``: buttons or button_links, the one orange button
-    among them). Render with heading=False."""
+    among them). ``count_html``: a count after the title, in it (a list's "12 cards"); ``cls``:
+    the page's own classes on the head. Render with heading=False."""
     line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
+    names = ["ui-head"] + (["phead"] if actions_html else [])
+    names += [c for c in cls.split() if c not in names]
+    h1 = f"<h1>{esc(title)}" + (f" <span class='cn'>{count_html}</span>" if count_html else "") + "</h1>"
     if not actions_html:
-        return f"<div class='ui-head'><h1>{esc(title)}</h1></div>{line}"
+        return f"<div class='{' '.join(names)}'>{h1}</div>{line}"
     # with actions the purpose line is in the head, right under the title: a phone shows it before
     # the actions, a wider screen under the title and the actions beside it (theme .ui-head > .ui-sub)
     acts = f"<span class='acts'>{actions_html}</span>"
-    return f"<div class='ui-head phead'><h1>{esc(title)}</h1>{line}{acts}</div>"
+    return f"<div class='{' '.join(names)}'>{h1}{line}{acts}</div>"
 
 
 def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "") -> str:

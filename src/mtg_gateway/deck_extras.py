@@ -926,8 +926,8 @@ PACKAGE_FIELDS_CSS = """
 .mtgbox .body .field .budget input[type=radio],.ds .ui-row .ctl .budget input{width:0;height:0}
 .mtgbox .body .field .fmts label,.dx-box .body .field .fmts label{display:inline-flex;margin:0;
   font-weight:400}
-.mtgbox .body .field .budget label,.dx-box .body .field .budget label{display:inline-flex;margin:0;
-  font-weight:700}
+/* the only box with a Budget is the New package box (.dx-box) */
+.dx-box .body .field .budget label{display:inline-flex;margin:0;font-weight:700}
 .np-box .body .field .lbl{display:block;font-weight:700;margin:0 0 .25rem}
 .np-box .body .field + .field{margin-top:.75rem}
 .np-box .body .dx-switch{margin-top:.75rem;min-height:44px}

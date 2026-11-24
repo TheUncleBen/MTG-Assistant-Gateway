@@ -512,6 +512,20 @@
     row.classList.add("even-rows");
     // an odd one over in the last line takes the whole line rather than half of it
     if (items.length % cols === 1) items[items.length - 1].classList.add("even-span");
+    // a button wider than its cell (a long word at a large text size, a page's min-content rule)
+    // would lie over its neighbour (0.7.48 CI: a report's Markdown over HTML page at 412 px): the
+    // row keeps its wrapped layout instead
+    var room = row.getBoundingClientRect().right + 1;
+    if (items.some(function (c) { var r = c.getBoundingClientRect(); return c.scrollWidth > c.clientWidth + 1 || r.right > room; }) ||
+        items.some(function (c, i) { return items.slice(i + 1).some(function (d) { return overlaps(c, d); }); })) {
+      row.classList.remove("even-rows");
+      row.style.removeProperty("--even-cols");
+      Array.prototype.forEach.call(row.querySelectorAll(".even-span"), function (c) { c.classList.remove("even-span"); });
+    }
+  }
+  function overlaps(a, b) {
+    var p = a.getBoundingClientRect(), q = b.getBoundingClientRect();
+    return p.left < q.right - 1 && q.left < p.right - 1 && p.top < q.bottom - 1 && q.top < p.bottom - 1;
   }
   if (window.ResizeObserver) {
     var evenRO = new ResizeObserver(function (entries) {
