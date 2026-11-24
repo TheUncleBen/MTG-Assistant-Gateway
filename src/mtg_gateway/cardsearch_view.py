@@ -558,8 +558,9 @@ def results_bar_html(f: cq.Filters, *, view: str, total: int | None) -> str:
     """The results controls at the panel's foot: More filters, the count, Sort by with its
     direction, Grid or List, the card size (Grid only) and Clear filters."""
     more = (
-        "<button type='button' class='btn more' data-more-filters aria-controls='cs-more-filters' "
-        f"aria-expanded='false' hidden>{icon('chev')} More filters</button>"
+        # the disclosure capsule (docs/UI-STANDARD.md): its chevron turns when the fields are open
+        "<button type='button' class='disc more' data-more-filters aria-controls='cs-more-filters' "
+        "aria-expanded='false' hidden>More filters</button>"
     )
     return sp.results_bar(
         count_html=sp.count_html(count_text(total, shown=f.chosen()), count_id="cs-count"),

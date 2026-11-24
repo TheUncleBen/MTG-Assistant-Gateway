@@ -18,7 +18,7 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
-from .waits import expect, redrawn
+from .waits import expect, redrawn, settled
 
 TEXT = (
     ".ygrp h2, .ygrp .lbl, .ygrp .val, .yme b, .yme .sub, .ui-back, h1, .yfold p, .yfold dt, .yfold dd, "
@@ -79,6 +79,7 @@ def server(tmp_path):
 
 def _short(page, sel: str) -> list[str]:
     """The targets under 44 px, named."""
+    settled(page)  # a box's opening ends first: its .98 scale reads 44 px as 43.1
     return page.evaluate(
         "(sel) => [...document.querySelectorAll(sel)]"
         ".filter(e => e.getBoundingClientRect().width && getComputedStyle(e).visibility !== 'hidden')"

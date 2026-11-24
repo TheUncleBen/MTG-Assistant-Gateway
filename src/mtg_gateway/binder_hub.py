@@ -258,10 +258,15 @@ def library_html(
     return (
         "<div class='yhub bn-lib'>"
         f"<form class='bn-find' method='get' action='{PATH}' role='search'>"
-        f"<label class='sr-only' for='bn-q'>Search your binder</label>{icon('search')}"
-        f"<input id='bn-q' name='q' type='search' placeholder='Search your binder' data-ph='Search|' "
-        f"value='{esc(view.q)}' "
-        "autocomplete='off' enterkeyhint='search'></form>"
+        f"<label class='sr-only' for='bn-q'>Search your binder</label>"
+        + ui.search_field(
+            "q",
+            value=view.q,
+            placeholder="Search your binder|Search|",
+            input_id="bn-q",
+            attrs=" autocomplete='off' enterkeyhint='search'",
+        )
+        + "</form>"
         f"<section class='ygrp'><h2 class='ui-group'>Cards</h2><div class='rows'>{cards}</div></section>"
         f"<section class='ygrp'><h2 class='ui-group'>Lists</h2><div class='rows'>{''.join(mine)}</div>"
         "</section>"
@@ -303,9 +308,9 @@ def _chips(r: dict[str, Any]) -> str:
         if band:
             out.append(f"<span class='band'>Alert {esc(' · '.join(band))}</span>")
     if r["list"]:
-        out.append(f"<span class='ui-tag'>{esc(r['list'])}</span>")
+        out.append(ui.tag(r["list"]))
     for t in r["tags"][:3]:
-        out.append(f"<span class='ui-tag'>{icon('tag')}{esc(t)}</span>")
+        out.append(ui.tag(t, icon_name="tag"))
     return "".join(out)
 
 
@@ -712,11 +717,8 @@ CSS = """
 .bn{display:grid;gap:1.25rem;align-items:start}
 .bn .bn-lib{max-width:none;margin:0}
 .bn-top{margin-bottom:-.5rem;min-width:0}
-/* the search box is the shared field, its magnifier drawn inside its left padding */
-.bn-find{position:relative;display:block;margin:0 0 1rem;color:var(--text-muted)}
-.bn-find svg.i{position:absolute;left:.8rem;top:50%;width:18px;height:18px;transform:translateY(-50%);
-  pointer-events:none}
-.bn-find input{width:100%;margin:0;padding-left:2.5rem}
+/* the search box is the one search field (ui.search_field) */
+.bn-find{display:block;margin:0 0 1rem}
 .bn .ygrp .yrow small,.bn-set .ygrp .yrow small{display:block;
   color:var(--text-muted);font-size:.82rem;margin-top:.1rem}
 .bn .ygrp .yrow .lbl{padding:.5rem 0}
@@ -820,6 +822,8 @@ main form.bn-tools > button.bn-select:not(.mini):not(.inline){margin:0 0 0 auto;
 .bn-set .bn-fields{display:flex;flex-direction:column;gap:.75rem;padding:.9rem 1rem}
 .bn-set .bn-fields .ui-hint{margin:0}
 .bn-save{display:flex;justify-content:flex-end}
+/* a phone: the page's main action takes the row, as every form's does */
+@media (max-width:599.98px){ .bn-save .primary{flex:1 1 100%} }
 /* the split view needs room for the words, not only pixels: the queries are on the page's width
    in its own text size (.bn-wrap), so 200% text on an open Fold gets the phone's one column */
 .bn-wrap{container:bn / inline-size}
@@ -836,9 +840,12 @@ main form.bn-tools > button.bn-select:not(.mini):not(.inline){margin:0 0 0 auto;
   .bn-top .bn-up{display:none}
   /* "Binder" over both; a picked view's title over its list, the library beside them */
   .bn > .bn-top{grid-column:1 / -1}
+  /* the title's row is as tall as the title: the library beside it spans both rows, and its
+     height was shared into the first one (0.7.48: a 110 px hole under the title) */
+  .bn.picked{grid-template-rows:auto 1fr}
   .bn.picked > .bn-top{grid-column:2;grid-row:1;max-width:60rem}
   .bn.picked > .bn-lib{grid-column:1;grid-row:1 / span 2}
-  .bn.picked > .bn-main{grid-column:2;grid-row:2}
+  .bn.picked > .bn-main{grid-column:2;grid-row:2;align-self:start}
   .bn-main{max-width:60rem}
   .bn-row{grid-template-columns:minmax(0,1fr)}
   .bn-row .meta{padding-left:3.35rem}

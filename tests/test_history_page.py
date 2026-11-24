@@ -451,10 +451,10 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert page.status_code == 200
         body = page.text.split("<main")[1]
         for text in (
-            "<h1><a href='/decks/42'>Liesa Test Deck</a></h1>",
+            "<h1>Deck test report</h1><p class='ui-sub rv-deck'>Liesa Test Deck</p>",
             "<span class='k'>Commander</span> Liesa, Forgotten Archangel",
             "<span class='k'>Solo test games</span> 300, through turn 10 (seed 42)",
-            "<a class='ui-cap' href='/reports'>All reports</a>",
+            "<a class='ui-cap ui-back' href='/reports'>",
             "Played with their effect",
             "report is shown instead of testing it again",
             "class='tiles wide rv-stats'",

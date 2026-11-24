@@ -197,7 +197,14 @@
       // In the bell's box, what was done and its Undo show in the box: a toast sits outside the
       // box, where the box keeps the keyboard from reaching it.
       if (boxOpen()) {
-        shown.box.note(d.message || "Done.", false, extra);
+        var box = shown.box;
+        // older kept alerts move up into the rows a dismissal emptied (the box shows the newest 8)
+        if (action === "dismiss" && typeof shown.kept === "number" &&
+            shown.kept > box.panel.querySelectorAll(".al-row[data-alert]").length) {
+          fill(box).then(function () { box.note(d.message || "Done.", false, extra); });
+          return;
+        }
+        box.note(d.message || "Done.", false, extra);
         return;
       }
       if (Menu && Menu.toast) {

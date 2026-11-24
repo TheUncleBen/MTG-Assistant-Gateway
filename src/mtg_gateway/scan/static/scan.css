@@ -60,7 +60,8 @@
 /* the toggles (Foil, Auto, the picker's Foil): a pill, filled with the orange tint when on */
 .scan .switch{justify-content:center}  /* the look is the site's chip (.ui-chip) */
 .scan .switch[aria-checked=true]{background:var(--orange-tint);border-color:var(--orange-text);color:var(--orange-text)}
-.scan .scan-opts .switch{flex:1 1 auto;min-width:0}
+/* a toggle hugs its word, as every chip does */
+.scan .scan-opts .switch{flex:0 1 auto;min-width:0}
 .scan .shutter.live{animation:scan-live 1.2s ease-in-out infinite}
 @keyframes scan-live{0%,100%{outline:3px solid transparent;outline-offset:3px}50%{outline:3px solid var(--orange-select);outline-offset:9px}}
 
@@ -381,10 +382,11 @@ body.picker-open{overflow:hidden}
 .scan .install.show{display:inline-flex}
 @media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;outline:3px solid var(--orange-select);outline-offset:6px} }
 
-/* the intro (open on the first visit, folded to its title after) and the "what next" block of the list tab */
+/* the intro (a capsule on its own line that opens the steps in place; the first visit has a notice
+   over it) and the "what next" block of the list tab */
 .scan .next h2{margin:0 0 .5rem}
-.scan details.intro > summary h2{margin:0}
 .scan details.intro[open] > summary{margin-bottom:.6rem}
+.scan > .notice.once{margin:0}
 /* folded, the intro's steps and Got it have no boxes at all: Chromium only skips a closed
    details' content (content-visibility), keeping its last layout, so a folded intro's Got it still
    reported a rectangle near the page's foot (over "How it works" at 200% text, audit A5) */

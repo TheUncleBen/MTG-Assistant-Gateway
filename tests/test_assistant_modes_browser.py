@@ -21,7 +21,7 @@ from .test_notify_app import APP_UA
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
-from .waits import redrawn
+from .waits import redrawn, settled
 
 pytest.importorskip("playwright")
 
@@ -103,6 +103,7 @@ def _shot(page, name: str) -> None:
 def _check(page, where: str, *, touch: bool = True) -> None:
     assert page.evaluate(MEASURE) == [], where
     assert page.evaluate(CONTRAST, TEXT) == [], where
+    settled(page)  # a box's opening ends first: its .98 scale reads 44 px as 43.1
     assert page.evaluate(TAPS, touch) == [], where
 
 
@@ -149,6 +150,7 @@ def test_the_assistant_pages_hold_at_200_percent_text(server: Server, zoom: str)
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
             redrawn(page)
             assert page.evaluate(MEASURE) == [], (path, zoom)
+            settled(page)
             assert page.evaluate(TAPS, True) == [], (path, zoom)
             _shot(page, f"{name}-375-200pct-{zoom}.png")
         browser.close()

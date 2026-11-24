@@ -75,7 +75,7 @@ async def _get(b, path: str) -> str:
 
 def _widgets(text: str) -> list[str]:
     block = text.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
-    return re.findall(r"<span class='lab'>(?:<svg.*?</svg>)?([^<]+)</span>", block)
+    return re.findall(r"<span class='lab'>(?:<svg.*?</svg>)?<span class='t'>([^<]+)</span></span>", block)
 
 
 # -- Overview --------------------------------------------------------------------------------------
@@ -312,8 +312,9 @@ async def test_metrics_read_in_words_with_the_raw_name_only_in_a_rows_details(gw
         opened = await _get(b, "/admin/metrics?open=tool%3Asearch_decks")
         assert "<div class='more-body' id='m-0-more'>" in opened and "aria-expanded='true'" in opened
         none = await _get(b, "/admin/metrics?q=zzz")
-        everything = "<a class='ui-cap' href='/admin/metrics'>Show everything</a>"
-        assert f"Nothing counted matches these filters. {everything}" in none
+        # the empty state (ui.empty) stands in for the table, with the standard button
+        assert "<p class='t'>Nothing counted matches these filters</p>" in none
+        assert "<p class='go'><a class='btn btn-plain' href='/admin/metrics'>Show everything</a></p>" in none
     finally:
         await b.aclose()
 

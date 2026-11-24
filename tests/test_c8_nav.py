@@ -111,7 +111,9 @@ async def test_binder_pages_lead_back_to_the_binder(member: Browser) -> None:
     assert back in hub and "<h1>Archidekt lists</h1>" in hub
     assert "<h2 class='ui-group'>Your Archidekt lists</h2>" in hub and "Watchlist lists</h2>" not in hub
     wants = (await member.http.get("/collection/wants")).text
-    assert back in wants and "<h1>Pinned cards</h1>" in wants
+    # a list's page is one level under the Lists page: its way back is there (0.7.48 loop round)
+    assert "<a class='ui-cap ui-back' href='/collection/lists'>" in wants and back not in wants
+    assert "<h1>Pinned cards <span class='cn'>" in wants
     assert "Sol Ring" in wants and "for Meren" in wants  # the pin seeded on Archidekt
     assert "href='/collection/wants?remove=31'" in wants  # the row's menu stays on this page
     watch = (await member.http.get("/watchlist")).text
@@ -146,9 +148,9 @@ async def test_the_lists_live_in_binder_with_the_pins_among_them(member: Browser
         "/lists/btags",
     ]
     assert "Pinned cards" in tabs
-    # the way back: the Lists crumb to the hub, not Account
-    crumbs = page.split("<nav class='crumbs lp-crumbs' aria-label='You are in'>")[1].split("</nav>")[0]
-    assert "href='/collection/lists'" in crumbs and "<span>Category templates</span>" in crumbs
+    # the way back: one capsule to the Lists page, not Account, and no trail beside it
+    assert "<a class='ui-cap ui-back' href='/collection/lists'>" in page and "class='crumbs" not in page
+    assert "<span>Lists</span></a></p>" in page and "<h1>Category templates <span class='cn'>" in page
     assert "<a class='ui-cap' href='/account'>Account</a>" not in page
     hub = (await member.http.get("/account")).text
     assert "<a class='yrow' href='/collection/lists'>" in hub and "<span class='lbl'>Lists</span>" in hub

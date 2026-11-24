@@ -18,7 +18,7 @@ from .test_forum_page import _reply
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
-from .waits import redrawn
+from .waits import redrawn, settled
 
 TEXT = (
     ".fm h1, .fm .ui-sub, .fm .crumbs a, .fm .ui-chip, .fm .ui-table .t, .fm .ui-table .sub, "
@@ -64,6 +64,7 @@ def server(tmp_path):
 
 
 def _targets(page, sel: str) -> list[float]:
+    settled(page)  # a box's opening ends first: its .98 scale reads 44 px as 43.1
     return page.evaluate(
         "(sel) => [...document.querySelectorAll(sel)].filter(b => b.offsetParent !== null)"
         ".map(b => Math.min(b.getBoundingClientRect().width, b.getBoundingClientRect().height))",

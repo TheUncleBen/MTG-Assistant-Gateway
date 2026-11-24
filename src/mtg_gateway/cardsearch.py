@@ -269,14 +269,10 @@ def clean_query(raw: str | None) -> str:
     return " ".join((raw or "").split())[:MAX_QUERY]
 
 
-START_HTML = (
-    "<section class='panel'><h2>Find a card</h2><p class='muted'>Type a card name or pick a filter. "
-    "Paper cards only, unless Games says otherwise.</p></section>"
+START_HTML = ui.empty(
+    "Find a card", "Type a card name or pick a filter. Paper cards only, unless Games says otherwise."
 )
-NO_MATCH_HTML = (
-    "<section class='panel'><p class='muted'>No card matches these filters. Check the spelling, or "
-    "take a filter away.</p></section>"
-)
+NO_MATCH_HTML = ui.empty("No card matches these filters", "Check the spelling, or take a filter away.")
 
 
 def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:

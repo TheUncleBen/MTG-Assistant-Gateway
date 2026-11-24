@@ -218,7 +218,8 @@ def test_widget() -> None:
         wide_sm=True,
     )
     assert out.startswith("<div class='wdg accent wide-sm'><span class='lab'>")
-    assert "Waiting for you</span><span class='big'>1,234<small>waiting</small></span>" in out
+    # the label's words in a part of their own, so they wrap beside the icon, not under it
+    assert "<span class='t'>Waiting for you</span></span><span class='big'>1,234<small>waiting</small>" in out
     assert "<span class='det'>6 on 4 decks &lt;b&gt;</span>" in out
     assert "<span class='go'><a class='btn btn-plain' href='/p?f=w'>Show them</a></span>" in out
     assert "class='det'" not in ui.widget("Applied", "check", 0)

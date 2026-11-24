@@ -415,7 +415,7 @@ def _range_buttons(full_days: int) -> str:
         else ""
     )
     return (
-        "<span class='seg' role='group' aria-label='Range'>"
+        "<span class='ui-seg' role='group' aria-label='Range'>"
         f"<button type='button' data-range='30' aria-pressed='true'>30 days</button>{full}</span>"
     )
 
@@ -481,9 +481,18 @@ def _row(
         f"<span class='md-hide chgs'>{changes_html(view)}</span>"
         f"<span class='md-hide spark'>{spark_html(short, cur, what)}</span>"
         f"<span class='md-hide lbls'>{alert}</span>"
-        f"<span class='act'><a class='btn btn-plain more' href='{href}' role='button' "
-        f"aria-expanded='{'true' if is_open else 'false'}' aria-controls='wx-{esc(key)}' "
-        f"aria-label='{esc(more_label)}'>{'Close' if is_open else 'Details'}</a></span></div>"
+        # the row list's main action (ui.row_open): the word in a button from 600 px, a 44 px
+        # chevron on a phone, where "Details" squeezed the card's name onto four lines (0.7.48)
+        "<span class='act'>"
+        + ui.row_open(
+            href,
+            "Close" if is_open else "Details",
+            cls="btn-plain more",
+            label=more_label,
+            attrs=f"role='button' aria-expanded='{'true' if is_open else 'false'}' "
+            f"aria-controls='wx-{esc(key)}'",
+        )
+        + "</span></div>"
         f"<div class='wx' id='wx-{esc(key)}'{'' if is_open else ' hidden'}>{details}</div>"
     )
 
@@ -1196,7 +1205,9 @@ def watchlist_page_html(
     last = max(days) if days else ""
     # the list date every page uses, which the page draws in the member's own time zone: a clock
     # time in UTC told a member nothing about their own day
-    checked = ui.when(_check_moment(last, at), now=now) if last else ""
+    # a watch made before today's check stores today's day: never show a moment still to come
+    moment = _check_moment(last, at) if last else None
+    checked = ui.when(min(moment, int(now)), now=now) if moment is not None else ""
     cards = data["cards"]
     query, _shown, body, pager = card_rows_html(cards, ids, csrf_in, today, query, card_history, lists=lists)
     # the list the address shows: its own chips' counts and total (L4), every card without one
@@ -1222,10 +1233,10 @@ def watchlist_page_html(
     )
     tools = (
         f"<form class='ui-tools w-top' role='search' method='get' action='/watchlist'>{keep}"
-        "<label class='search'><span class='sr-only'>Search your watchlist</span>"
-        f"{icon('search')}<input type='search' name='q' value='{esc(query.q)}' "
-        "placeholder='Search' data-ph=''></label>"
-        f"<a class='btn btn-plain' href='{esc(query.href(box='add'))}' {ui.box_open_attr('w-add')}>"
+        + ui.search_field(
+            "q", label="Search your watchlist", value=query.q, placeholder="Search|", cls="search"
+        )
+        + f"<a class='btn btn-plain' href='{esc(query.href(box='add'))}' {ui.box_open_attr('w-add')}>"
         f"{icon('plus')}Watch a card</a>"
         "<button type='button' class='btn-plain w-select' aria-pressed='false' hidden>"
         f"{icon('check')}Select</button>"
@@ -1440,6 +1451,10 @@ WATCH_PAGE_CSS = (
   /* the row's end (Details, ⋮) may stack at 200% text on a narrow phone, never push sideways */
   .watch-page .w-t .act{flex-wrap:wrap;justify-content:flex-end;min-width:0;white-space:normal}
   .watch-page .w-t .act .more{white-space:nowrap}
+  /* the row's main action is its 44 px chevron, as a History row's; it points down while open */
+  .watch-page .w-t .act .more{padding:0;border:0;background:none;min-width:44px;justify-content:center}
+  .watch-page .w-t .act .more:hover{background:var(--surface-2)}
+  .watch-page .w-t .act .more[aria-expanded=true] .chev{transform:rotate(90deg)}
   .watch-page .w-t .sub .dl{white-space:normal}
 }
 /* Large text on a narrow phone (independent review 2, M5): the table, its section and the tools
@@ -1502,15 +1517,7 @@ WATCH_PAGE_CSS = (
 .watch-page .wx-h{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.4rem .75rem;
   margin:0 0 .5rem}
-.watch-page .seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--card-border);
-  border-radius:var(--radius);
-  overflow:hidden}
-.watch-page .seg button{margin:0;border:0;border-radius:0;background:transparent;color:var(--text);
-  min-height:36px;
-  padding:0 .75rem;font-weight:700}
-.watch-page .seg button + button{border-left:1px solid var(--card-border)}
-.watch-page .seg button[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text)}
-.watch-page .seg button{min-height:44px}
+/* the chart's range (30 days, Full history) is the site's compact segmented switch (.ui-seg) */
 .watch-page .pc{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:10rem auto;
   gap:.2rem .5rem}
 .watch-page .pc-y{display:flex;flex-direction:column;justify-content:space-between;font-size:.8rem;

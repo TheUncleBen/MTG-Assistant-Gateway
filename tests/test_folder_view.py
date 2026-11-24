@@ -140,7 +140,9 @@ def test_the_html_breadcrumb_tiles_and_empty_states() -> None:
     assert "<nav class='crumbs' aria-label='Folder path'>" in html
     assert "href='/decks?order=name'>Decks</a>" in html
     assert "href='/decks?folder=10&amp;order=name'>commander</a>" in html
-    assert "<li aria-current='page'><span>Brews</span></li>" in html
+    # the open folder is the section's heading, with what it holds, not the trail's last word
+    assert "aria-current='page'" not in html
+    assert "<h2 id='fv-here'>Brews <span class='ui-sub'>" in html
     assert "class='plain decklist list'" in html and "Folders <span" not in html  # no subfolders here
     top = fv.level_html(
         fv.arrange(ROWS, INFO, folder_id=None, q="", order="updated"),

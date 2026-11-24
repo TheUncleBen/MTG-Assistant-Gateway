@@ -92,7 +92,9 @@ async def test_clear_binder_sits_in_the_binders_more_menu(stack: Stack) -> None:
     b = await linked(stack)
     try:
         page = (await b.http.get("/collection", headers=NAV)).text
-        head = page.split("<div class='ui-head", 1)[1].split("<p class='ui-sub'", 1)[0]
+        # (the purpose line sits in the head, between the title and the actions)
+        head = page.split("<div class='ui-head", 1)[1].split("<form class='ui-tools", 1)[0]
+        assert head.index("<p class='ui-sub'") < head.index("<span class='acts'>")
         menu = re.search(r"<details class='dd colmore'>.*?</details>", head, re.S)
         assert menu is not None, head
         # the menu holds Export CSV and the destructive Clear binder… (a red item at the end)

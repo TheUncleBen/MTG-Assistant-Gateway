@@ -498,7 +498,7 @@
       } else if (d.total) {
         wrap.appendChild(el("p", "muted", d.done));
       }
-      var count = $(".list-head .ui-sub");
+      var count = $(".lp-head h1 .cn, .list-head .ui-sub");  // the title's count (lists_page.top_html)
       if (count && d.total != null) count.textContent = d.total.toLocaleString();
       if (!replace && first) { var k = $(".kebab", first); if (k) k.focus({ preventScroll: true }); }
     }).catch(function (err) {

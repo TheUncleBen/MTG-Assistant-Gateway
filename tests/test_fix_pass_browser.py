@@ -356,11 +356,13 @@ LAYOUT = """({touch, rail}) => {
   }
   const site = q('.topbar #site-q');
   if (site && site.getClientRects().length) out.siteSearchH = R(site).h;
-  const head = q('.dkhead, .ui-head.phead'), panel = q('.spanel'), crumbs = q('nav.crumbs');
+  // the way back from a folder: the standard capsule one level down, the trail deeper (0.7.48)
+  const head = q('.dkhead, .ui-head.phead'), panel = q('.spanel');
+  const crumbs = q('#decks-list nav.crumbs, #decks-list .ui-back-line a'), here = q('#fv-here');
   const areas = qa('section.fv-area');
   if (head && panel) out.headToPanel = R(panel).t - R(head).b;
   if (panel && crumbs) out.panelToCrumbs = R(crumbs).t - R(panel).b;
-  if (crumbs && areas.length) out.crumbsToArea = R(areas[0].querySelector('h2')).t - R(crumbs).b;
+  if (crumbs && here) out.crumbsToArea = R(here).t - R(crumbs).b;  // the folder's heading under it
   if (areas.length) out.areaBorders = areas.map(a => parseFloat(getComputedStyle(a).borderTopWidth));
   if (panel) {
     const grid = panel.querySelector('.fgrid'), rbar = panel.querySelector('.rbar');

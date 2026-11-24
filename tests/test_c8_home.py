@@ -146,14 +146,13 @@ def test_home_is_recent_decks_and_needs_you_not_the_navigation_again(server: Ser
     assert "In the same order as the navigation" not in page
     # not linked: Link Archidekt is the one orange button, no deck panel, nothing needs them yet
     assert page.count("btn-primary") == 1 and "Link Archidekt</a>" in page
-    assert "<h2>My decks</h2>" not in page
+    assert "<h2>My decks" not in page
     assert "<section class='needs' aria-labelledby='needs-h' data-bell-section hidden>" in page
-    # no assistant connected: the connection details are offered; the row says what it is for
-    # and the connector address sits inside with Copy, not as the row's text (0.7.46 audit QG-20)
-    assert "<details class='connect panel'>" in page and "Guided setup" in page
-    assert "<summary>Connect an AI assistant <span class='muted addr'>Claude or ChatGPT" in page
-    assert f"<code>{server.base}/mcp</code>" in page and f"data-copy-text='{server.base}/mcp'" in page
-    assert f"<span class='muted addr'>{server.base}/mcp" not in page
+    # no assistant connected: a widget says so, with the standard button to Guided setup (where
+    # the skill and the app are) and Copy address, not a row with no button (0.7.48 loop round)
+    assert "<section class='connect' aria-label='Connect an AI assistant'><div class='wdg'>" in page
+    assert "<a class='btn btn-plain' href='/install'>Guided setup</a>" in page
+    assert f"data-copy-text='{server.base}/mcp'" in page and ">Copy address</button>" in page
     assert "<script src='/static/bell.js" in page
 
 
@@ -171,7 +170,7 @@ def test_the_connection_panel_leaves_once_an_assistant_is_connected(server: Serv
         expires_at=2**31,
     )
     page = c.get("/").text
-    assert "<details class='connect panel'>" not in page and "Guided setup" not in page
+    assert "<section class='connect'" not in page and "Guided setup" not in page
 
 
 def test_proposals_waiting_take_the_orange_button(server: Server) -> None:

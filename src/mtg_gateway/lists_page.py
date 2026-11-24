@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_hub, account_lists, custom_pictures, modes, proposals_view, ui
+from . import account_hub, account_lists, custom_pictures, modes, proposals_view, theme, ui
 from .archidekt import no_retry
 from .archidekt_account import CUSTOM_CARD_FIELDS
 from .busy import busy_json_response, busy_response, held_html, same_url
@@ -51,7 +51,6 @@ from .theme import esc, icon
 PAGE = "/lists"
 HUB = "/collection/lists"  # Binder › Lists, the hub both blocks live on
 TITLE = "Archidekt lists"
-SUB_TEXT = "Your Archidekt lists that shape every deck. A copy from before each change is kept under History."
 # Pinned cards: the cards pinned on Archidekt, at Binder's old Wants address (the Watchlist is
 # the want list; the pins keep Archidekt's own name)
 WANTS = "/collection/wants"
@@ -61,6 +60,18 @@ WANTS_SUB = (
     "any card's menu."
 )
 HUB_SUB = "The lists that shape your decks on Archidekt."
+# under every list: what the generic purpose line said before each list had its own
+KEPT_NOTE = "<p class='ui-hint lp-kept'>A copy from before each change is kept under History.</p>"
+# each list's own purpose line, under its title (top_html); the tag lists' are TAG_WORDS'
+PURPOSE = {
+    "templates": "Categories you can add to any deck in one press. Once added, the deck's copy and the "
+    "template are not linked.",
+    "defaults": "When you add one of these cards to a deck, it goes into these categories; ★ is the main "
+    "one. Set them from a card's menu on a deck (Lock personal categories) or here. Choices come from "
+    "your category templates.",
+    "pins": WANTS_SUB,
+    "custom": "Cards you made on Archidekt. Deleting one blanks it in every deck that has it.",
+}
 # the page shows the chosen picture before it is sent (a blob: address), and a pin's printing
 LISTS_CSP = DECK_CSP.replace("img-src 'self'", "img-src 'self' blob:")
 PICTURE_BODY_LIMIT = account_lists.PICTURE_MAX_BYTES + 64_000  # the file plus the form's own fields
@@ -381,7 +392,8 @@ def tabs_html(current: str, counts: dict[str, int]) -> str:
 
 
 def crumbs_html(tab: Tab) -> str:
-    """Lists › Category templates: the way back to the hub, the theme's grey capsule."""
+    """Lists › Category templates: the way back to the hub where there is no Binder page
+    (watchlists off; top_html), the theme's grey capsule."""
     return (
         f"<nav class='crumbs lp-crumbs' aria-label='You are in'>{ui.cap_link('Lists', HUB, icon_name='list')}"
         f"<span aria-hidden='true'>›</span><span>{esc(tab.label)}</span></nav>"
@@ -522,6 +534,35 @@ def list_head(title: str, count_html: str, actions_html: str = "") -> str:
     )
 
 
+def top_html(tab: Tab, count_html: str = "", actions_html: str = "", after: str = "") -> str:
+    """A list's page head. One way back (the capsule to the Lists page, one level up), the list's
+    name once as the title with its count (as the Watchlist's), the list's main action at the
+    title's end, its own purpose line, then ``after`` (the tab bar between the six lists, a
+    notice). Without the Binder page (watchlists off) the head is Binder's switch, which names the
+    page for screen readers only: there the trail is the way back and the heading under it the
+    visible title."""
+    words = PURPOSE.get(tab.slug) or TAG_WORDS[tab.slug]["purpose"]
+    purpose = f"<p class='ui-sub'>{esc(words)}</p>"
+    if not theme.WATCHLISTS:
+        return (
+            ui.binder_head(HUB, f"Binder: {tab.label}")
+            + crumbs_html(tab)
+            + after
+            + list_head(tab.label, count_html, actions_html)
+            + purpose
+        )
+    count = f" <span class='cn'>{count_html}</span>" if count_html else ""
+    acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
+    return (
+        ui.back_link("Lists", HUB)
+        # with actions the purpose line is in the head, between the title and them, as
+        # ui.page_head writes it: a phone shows it before the actions (theme .ui-head > .ui-sub)
+        + f"<div class='ui-head phead bnhead lp-head'><h1>{esc(tab.label)}{count}</h1>"
+        + (f"{purpose}{acts}</div>" if acts else f"</div>{purpose}")
+        + after
+    )
+
+
 def thumb(uid: str, name: str) -> str:
     src = image_url(uid, "small") if uid else None
     if src:
@@ -608,14 +649,15 @@ def template_deck_box(csrf: str, st: dict[str, Any]) -> str:
     ).replace("<div class='ui-box", "<div data-t='Add “{name}” to a deck' class='ui-box", 1)
 
 
-def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
+def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], after: str = "") -> str:
     items = got["items"]
-    head = list_head(
-        "Category templates",
+    head = top_html(
+        BY_SLUG["templates"],
         f"{len(items)}",
         ui.box_opener(
             "New template", tab_href("templates", new=1), "tpl-box", kind="primary", icon_name="plus"
         ),
+        after,
     )
     table = (
         ui.table_open(
@@ -626,16 +668,13 @@ def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
             label="Category templates",
         )
         + ui.table_header([ui.Column("Template"), ui.Column("Flags", "sm-hide"), ui.Column("")])
-        + (
-            templates_rows(items)
-            or "<div class='tr lp-empty'><span class='muted'>No category templates yet.</span></div>"
-        )
+        + templates_rows(items)
         + "</div>"
+        if items
+        else ui.empty("No category templates yet", "Make one with New template, then add it to any deck.")
     )
     return (
         head
-        + "<p class='ui-sub'>Categories you can add to any deck in one press. Once added, the deck's copy "
-        "and the template are not linked.</p>"
         + ui.toolbar(tab_href("templates"), search_label="Search by name", placeholder="Name|")
         + FILTER_NOTE
         + table
@@ -778,12 +817,12 @@ def defaults_rows(items: list[dict[str, Any]]) -> str:
     return "".join(out)
 
 
-def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> str:
+def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str, after: str = "") -> str:
     items = got["items"]
     shown = [d for d in items if not q or q.casefold() in d["name"].casefold()]
     total = got["total"]
     page = got["page"]
-    head = list_head("Default categories", f"{total:,} card{'s' if total != 1 else ''}")
+    head = top_html(BY_SLUG["defaults"], f"{total:,} card{'s' if total != 1 else ''}", "", after)
     rows = defaults_rows(shown)
     if not rows:
         rows = (
@@ -806,6 +845,11 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) ->
         + ui.table_header([ui.Column("Card"), ui.Column("Default categories", "sm-hide"), ui.Column("")])
         + rows
         + "</div>"
+        if items or q
+        else ui.empty(
+            "No cards with default categories yet",
+            "Give a card its default categories on Archidekt, and it shows here.",
+        )
     )
     seen = min(total, page * account_lists.DEFAULT_PAGE_SIZE)
     more = (
@@ -817,9 +861,6 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) ->
     )
     return (
         head
-        + "<p class='ui-sub'>When you add one of these cards to a deck, it goes into these categories; ★ is "
-        "the main one. Set them from a card's menu on a deck (Lock personal categories) or here. Choices "
-        "come from your category templates.</p>"
         + ui.toolbar(f"{PAGE}/defaults", search_label="Search by name", placeholder="Name|", q=q)
         + FILTER_NOTE
         + table
@@ -918,7 +959,7 @@ TAG_WORDS = {
     "tags": {
         "title": "Color tags",
         "one": "color tag",
-        "empty": "No color tags yet.",
+        "empty": ("No color tags yet", "Make one with New color tag, then tag cards with it in a deck."),
         "purpose": "Tags you can put on cards in any deck. A card keeps the name and color it was "
         "tagged with, so changes here don't reach cards already tagged.",
         "edit_warn": "Cards already tagged keep their old name and color. Archidekt doesn't link a card's "
@@ -930,7 +971,10 @@ TAG_WORDS = {
     "btags": {
         "title": "Binder tags",
         "one": "binder tag",
-        "empty": "No binder tags yet. Make one here, then tick it in a card's Details in your binder.",
+        "empty": (
+            "No binder tags yet",
+            "Make one here, then tick it in a card's Details in your binder.",
+        ),
         "purpose": "Tags on the cards in your binder, as Archidekt's collection has them: tick them in a "
         "card's Details, and filter your binder by one.",
         "edit_warn": "Every entry with this tag shows the new name and color.",
@@ -972,13 +1016,14 @@ def tags_rows(items: list[dict[str, Any]], slug: str = "tags") -> str:
     return "".join(out)
 
 
-def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "tags") -> str:
+def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "tags", after: str = "") -> str:
     items = got["items"]
     w = TAG_WORDS[slug]
-    head = list_head(
-        w["title"],
+    head = top_html(
+        BY_SLUG[slug],
         f"{len(items)}",
         ui.box_opener(f"New {w['one']}", tab_href(slug, new=1), "tag-box", kind="primary", icon_name="plus"),
+        after,
     )
     table = (
         ui.table_open(
@@ -989,15 +1034,13 @@ def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "t
             label=w["title"],
         )
         + ui.table_header([ui.Column("Tag"), ui.Column("Color", "sm-hide"), ui.Column("")])
-        + (
-            tags_rows(items, slug)
-            or f"<div class='tr lp-empty'><span class='muted'>{esc(w['empty'])}</span></div>"
-        )
+        + tags_rows(items, slug)
         + "</div>"
+        if items
+        else ui.empty(*w["empty"])
     )
     return (
         head
-        + f"<p class='ui-sub'>{esc(w['purpose'])}</p>"
         + ui.toolbar(tab_href(slug), search_label="Search by name", placeholder="Name|")
         + FILTER_NOTE
         + table
@@ -1153,17 +1196,18 @@ def pin_row(p: dict[str, Any], csrf: str) -> str:
     )
 
 
-def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
+def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], after: str = "") -> str:
     items = got["items"]
     n = len(items)
-    head = list_head(
-        "Pinned cards",
+    head = top_html(
+        PINS,
         ui.counted(n, account_lists.MAX_PINS),
         ui.box_opener(
             "Remove all…", tab_href("pins", remove_all=1), "pin-all", kind="danger", icon_name="trash"
         )
         if items
         else "",
+        after,
     )
     table = (
         ui.table_open(
@@ -1176,16 +1220,14 @@ def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
         + ui.table_header(
             [ui.Column("Card"), ui.Column("Copies"), ui.Column("Notes", "lp-notes-h"), ui.Column("")]
         )
-        + (
-            "".join(pin_row(p, csrf) for p in items)
-            or "<div class='tr lp-empty'><span class='muted'>No pinned cards yet. Pin one from any card's "
-            "menu.</span></div>"
-        )
+        + "".join(pin_row(p, csrf) for p in items)
         + "</div>"
+        if items
+        else ui.empty("No pinned cards yet", "Pin one from any card's menu.")
     )
     return (
         head
-        + "<p class='ui-sub'>Notes save when you leave the box.</p>"
+        + "<p class='ui-hint lp-hint'>Notes save when you leave the box.</p>"
         + ui.toolbar(tab_href("pins"), search_label="Search by name", placeholder="Name|")
         + FILTER_NOTE
         + table
@@ -1323,16 +1365,17 @@ def custom_rows(items: list[dict[str, Any]]) -> str:
     return "".join(out)
 
 
-def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> str:
+def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str, after: str = "") -> str:
     items = got["items"]
     total = got["total"]
     page = got["page"]
-    head = list_head(
-        "Custom cards",
+    head = top_html(
+        BY_SLUG["custom"],
         f"{total:,}",
         ui.box_opener(
             "New custom card", tab_href("custom", new=1), "cc-box", kind="primary", icon_name="plus"
         ),
+        after,
     )
     rows = custom_rows(items) or (
         "<div class='tr lp-empty'><span class='muted'>"
@@ -1357,6 +1400,9 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
         )
         + rows
         + "</div>"
+        # (a name that matches nothing keeps the table: the rows come back into it as the name changes)
+        if items or q
+        else ui.empty("No custom cards yet", "Make one with New custom card. It is kept on Archidekt.")
     )
     shown = len(items) + (page - 1) * 50
     more = (
@@ -1365,8 +1411,7 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
         else (ui.load_more("", done=ui.all_shown(total, "")) if total else "")
     )
     return (
-        head + "<p class='ui-sub'>Cards you made on Archidekt. Deleting one blanks it in every deck that "
-        "has it.</p>"
+        head
         + ui.toolbar(f"{PAGE}/custom", search_label="Search by name", placeholder="Name|", q=q)
         + table
         + more
@@ -1595,6 +1640,11 @@ def custom_delete_box(csrf: str, st: dict[str, Any]) -> str:
 
 CSS = """
 .lp .list-head{margin-top:.25rem}
+/* the list's main action at its title's end (top_html); the hint under the toolbar's purpose */
+.lp .lp-head .acts{display:flex;gap:8px;flex-wrap:wrap}
+.lp .lp-head .acts .btn{margin:0}
+.lp .lp-hint{margin:0 0 .75rem}
+.lp .lp-kept{margin:.75rem 0 0}
 .lp .list-head .acts{display:flex;gap:8px;flex-wrap:wrap}
 .lp .list-head .acts .btn{margin:0}
 .lp-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;color:var(--text-muted)}
@@ -1954,36 +2004,38 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         return {}
 
     def tab_body(
-        tab: Tab, got: dict[str, Any], csrf: str, box: dict[str, Any], q: str, counts: dict[str, int]
+        tab: Tab,
+        got: dict[str, Any],
+        csrf: str,
+        box: dict[str, Any],
+        q: str,
+        counts: dict[str, int],
+        notice: str = "",
     ) -> str:
         counts = {**counts, tab.kind: int(got["total"])}
+        after = tabs_html(tab.slug, counts) + notice  # under the list's head (top_html)
         if tab.slug == "templates":
-            inner = templates_tab(got, csrf, box)
+            inner = templates_tab(got, csrf, box, after)
         elif tab.slug == "defaults":
-            inner = defaults_tab(got, csrf, box, q)
+            inner = defaults_tab(got, csrf, box, q, after)
         elif tab.slug in ("tags", "btags"):
-            inner = tags_tab(got, csrf, box, tab.slug)
+            inner = tags_tab(got, csrf, box, tab.slug, after)
         elif tab.slug == "pins":
-            inner = pins_tab(got, csrf, box)
+            inner = pins_tab(got, csrf, box, after)
         else:
-            inner = custom_tab(got, csrf, box, q)
-        return f"<div class='lp lp-{tab.slug}' data-tab='{tab.slug}'>{inner}</div>"
+            inner = custom_tab(got, csrf, box, q, after)
+        return f"<div class='lp lp-{tab.slug}' data-tab='{tab.slug}'>{inner}{KEPT_NOTE}</div>"
 
     def page_body(
         tab: Tab, got: dict[str, Any], csrf: str, box: dict[str, Any], q: str, sub: str, notice: str = ""
     ) -> str:
         counts = {**account_lists.counts(sub), tab.kind: int(got["total"])}
-        return head_of(tab, counts) + notice + tab_body(tab, got, csrf, box, q, counts)
+        return tab_body(tab, got, csrf, box, q, counts, notice)
 
     def head_of(tab: Tab, counts: dict[str, int] | None = None) -> str:
-        """A list's page head: Binder's switch (Lists lit), the way back to the hub with the
-        list's name, its purpose line and the tab bar between the six lists."""
-        sub_text = WANTS_SUB if tab is PINS else SUB_TEXT
-        return (
-            ui.binder_head(HUB, WANTS_TITLE if tab is PINS else f"Binder: {tab.label}", sub_text)
-            + crumbs_html(tab)
-            + tabs_html(tab.slug, counts or {})
-        )
+        """A list's page head where the list itself can't be shown (not linked, a refusal): the
+        way back, its name, its purpose line and the tab bar between the six lists."""
+        return top_html(tab, after=tabs_html(tab.slug, counts or {}))
 
     def problem(request: Request, exc: DeckError, sub: str, sid: str | None, tab: Tab) -> Response:
         if busy := busy_response(exc, request, page, sub=sub, sid=sid):

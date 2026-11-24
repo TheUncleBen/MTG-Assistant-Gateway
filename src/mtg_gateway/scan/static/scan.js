@@ -231,10 +231,11 @@
   const lineKey = (x) => (x && x.card ? x.card.scryfall_id + '|' + String(isFoil(x)) : null);
 
   // ----------------------------------------------------------------- layout
-  // An explanation of the three steps, open on the first visit and folded to its title after that
-  // ("seen"), so on a phone the camera is on the first screen; "Got it" hides it on every device
-  // (true; both kept on the account, prefs.js), and the "How it works" button under the tabs
-  // brings it back open.
+  // An explanation of the three steps: a capsule on a line of its own ("How scanning works") that
+  // opens them in place, never a panel. The first visit also shows the steps in short as a notice
+  // with its × (firstNote), so the camera stays on a phone's first screen; after that visit
+  // ("seen") only the capsule shows; "Got it" hides it on every device (true; both kept on the
+  // account, prefs.js), and the "How it works" button under the tabs brings it back open.
   const INTRO_KEY = 'scan.intro';
   const introPref = () => (window.MtgPrefs ? window.MtgPrefs.get(INTRO_KEY) : undefined);
   const introSeen = () => introPref() === true;
@@ -242,8 +243,8 @@
   const introFirstVisit = introPref() === undefined;
   function introCard(open) {
     const step = (n, title, text) => h('li', null, h('span', { class: 'num', text: String(n) }), h('div', null, h('strong', { text: title }), ' ', text));
-    const box = h('details', { class: 'card intro', id: 'intro', open: !!open },
-      h('summary', { class: 'fold-btn' }, h('h2', { text: 'How scanning works' })),
+    const box = h('details', { class: 'intro', id: 'intro', open: !!open },
+      h('summary', { class: 'fold-btn', text: 'How scanning works' }),
       h('ol', { class: 'steps' },
         step(1, 'Scan.', PICTURES
           ? 'Hold a card inside the frame and keep it still: it is found by its picture and added at once. If it is the wrong card or printing, tap Change. No camera handy? Use the Type tab.'
@@ -252,6 +253,14 @@
         step(3, 'Choose what to do with the cards.', 'Save them to your binder, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
       h('div', { class: 'list-actions' }, h('button', { onclick: () => { if (window.MtgPrefs) window.MtgPrefs.set(INTRO_KEY, true); box.remove(); } }, 'Got it')));
     return box;
+  }
+  // The first visit's notice: the three steps in a line each would push the camera off a phone's
+  // first screen, so they are said in one sentence; the capsule under it has them in full.
+  function firstNote() {
+    const note = h('div', { class: 'notice once', id: 'scan-first', role: 'status' },
+      h('span', null, h('strong', { text: 'New here? ' }), 'Scan a card, check the list, then choose what to do with the cards.'));
+    note.append(h('button', { type: 'button', class: 'close icon-only', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => note.remove() }));
+    return note;
   }
 
   function showIntro() {
@@ -265,8 +274,8 @@
   function render() {
     root.textContent = '';
     if (!introSeen() && !state.items.length) {
-      // With picture scanning the camera needs the room: the card starts folded to its title.
-      root.append(introCard(introFirstVisit && !PICTURES));
+      if (introFirstVisit) root.append(firstNote());
+      root.append(introCard(false));
       if (introFirstVisit && window.MtgPrefs && introPref() === undefined) window.MtgPrefs.set(INTRO_KEY, 'seen');
     }
     const tabs = h('div', { class: 'hubseg tabs', role: 'tablist' },
@@ -467,7 +476,7 @@
     }
     // Under the viewfinder, not over it: at large text sizes it would cover the scan area.
     const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: app ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
-      : 'Hold the phone about 15 cm (6 in) from the card, the card in the frame and its name in the dashed box.' });
+      : 'Hold the camera about 15 cm (6 in) from the card, the card in the frame and its name in the dashed box.' });
     const status = h('p', { class: 'muted', id: 'cam-status', role: 'status', text: '' });
     // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
     // open the camera with one, the app's file chooser never does); the camera is the camera.
@@ -541,6 +550,9 @@
     if (!scroll && cam.getBoundingClientRect().top < lead - 1) scroll = true;
     // never past the bottom of the screen from where it sits now
     const room = window.innerHeight - cam.getBoundingClientRect().top - (bar ? bar.offsetHeight + 8 : 0) - below - 12;
+    // nor left under it: what stands over the camera grew (the first visit's notice at a large
+    // text size) and its least height no longer fits where it sits, so the page scrolls to it
+    if (!scroll && room < 260) scroll = true;
     cam.style.height = Math.max(260, Math.round(scroll ? free : Math.min(free, room))) + 'px';
     if (scroll && tabs) {
       const r = cam.getBoundingClientRect();
@@ -1186,7 +1198,7 @@
       return 0;
     } catch (e) { return 255; }
   }
-  const BLUR_HINT = ' The picture is blurred: hold the phone still, a little further from the card, and let it focus before the shot.';
+  const BLUR_HINT = ' The picture is blurred: hold the camera still, a little further from the card, and let it focus before the shot.';
 
   /* source: the flattened card or the raw frame; region/info: title and info crops in its pixels;
      flat: the flattening result (corners, score, sideways) or null when the guide box was used as is.

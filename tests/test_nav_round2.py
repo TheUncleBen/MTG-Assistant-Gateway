@@ -357,7 +357,7 @@ def test_the_decks_heading_leaves_the_count_to_the_results_bar() -> None:
     from mtg_gateway import folderview
 
     src = Path(folderview.__file__).read_text(encoding="utf-8")
-    assert "f\"<h2 id='fv-decks'>{heading}</h2>{listing}</section>\"" in src
+    assert "f\"<{hx} id='fv-decks'{quiet}>{heading}</{hx}>{listing}</section>\"" in src
     js = (Path(theme.__file__).parent / "static" / "decks.js").read_text(encoding="utf-8")
     assert 'head.textContent = "Decks";' in js and 'head.textContent = "Packages";' in js
 

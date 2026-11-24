@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
+from . import ui
 from .archidekt import format_label
 from .deckpage import deck_list_html
 from .searchpanel import DECK_COLOUR_MODES, DIRECTIONS, colour_match
@@ -258,20 +259,34 @@ def _count_text(decks: int, subfolders: int) -> str:
 
 
 def breadcrumb_html(level: Level, *, order: str) -> str:
-    """Decks › Commander › Precons: every step a way back (the theme's grey capsule) but the last
-    (the open folder)."""
+    """The way back from the open folder, over its heading (folder_head_html). One level down it
+    is the standard way back ("Decks"); deeper, Decks › Commander: every folder above as a grey
+    capsule, the "›" drawn by the item of the name it leads to, so a wrapped trail never leaves
+    one alone at a line's end. The open folder is not in the trail: it is the heading."""
     if level.current is None:
         return ""
-    items = []
-    last = len(level.crumbs) - 1
-    for i, (fid, name) in enumerate(level.crumbs):
-        if i == last:
-            items.append(f"<li aria-current='page'><span>{esc(name)}</span></li>")
-        else:
-            items.append(
-                f"<li><a class='ui-cap' href='{esc(level_href(fid, order=order))}'>{esc(name)}</a></li>"
-            )
+    above = level.crumbs[:-1]
+    if len(above) == 1:
+        fid, name = above[0]
+        return ui.back_link(name, level_href(fid, order=order))
+    items = [
+        f"<li><a class='ui-cap' href='{esc(level_href(fid, order=order))}'>{esc(name)}</a></li>"
+        for fid, name in above
+    ]
     return f"<nav class='crumbs' aria-label='Folder path'><ol>{''.join(items)}</ol></nav>"
+
+
+def folder_head_html(level: Level) -> str:
+    """The open folder as its section's heading, with what it holds ("3 decks · 1 folder"). A
+    search looks in every folder, so its matches are not this folder's count: none is said."""
+    if level.current is None:
+        return ""
+    count = (
+        ""
+        if level.searching
+        else f" <span class='ui-sub'>{esc(_count_text(len(level.decks), len(level.folders)))}</span>"
+    )
+    return f"<div class='list-head fv-head'><h2 id='fv-here'>{esc(level.current['name'])}{count}</h2></div>"
 
 
 def folder_tile_html(t: dict[str, Any], *, order: str) -> str:
@@ -314,14 +329,16 @@ def level_html(
 ) -> str:
     """The breadcrumb, the Folders area (when there are folders to show) and the Decks area.
     ``tick``: Select's tick boxes on the deck tiles (deck_bulk.py)."""
-    out = breadcrumb_html(level, order=order)
+    out = breadcrumb_html(level, order=order) + folder_head_html(level)
+    # inside a folder its name is the section's heading, and the areas are its sub-headings
+    hx = "h3" if level.current is not None else "h2"
     if not level.tree:
         out += f"<p class='notice'>{esc(FOLDERS_UNREADABLE)}</p>"
     if level.folders:
         tiles = "".join(folder_tile_html(t, order=order) for t in level.folders)
         out += (
             "<section class='fv-area' aria-labelledby='fv-folders'>"
-            f"<h2 id='fv-folders'>Folders <span class='ui-sub'>{len(level.folders)}</span></h2>"
+            f"<{hx} id='fv-folders'>Folders <span class='ui-sub'>{len(level.folders)}</span></{hx}>"
             f"<ul class='plain folderlist {esc(view)}'>{tiles}</ul></section>"
         )
     if level.decks:
@@ -344,9 +361,14 @@ def level_html(
     heading = f"Decks matching “{esc(q)}”" if q else "Matching decks" if level.searching else "Decks"
     # no count beside it: the results bar above already says "4 decks" (the folders' count stays,
     # since that bar counts decks only)
+    # a folder with no folders in it holds only decks, as its heading's count says: "Decks" is
+    # for screen readers there (static/decks.js still names the area through it)
+    quiet = (
+        " class='sr-only'" if level.current is not None and not level.folders and heading == "Decks" else ""
+    )
     out += (
         "<section class='fv-area' aria-labelledby='fv-decks'>"
-        f"<h2 id='fv-decks'>{heading}</h2>{listing}</section>"
+        f"<{hx} id='fv-decks'{quiet}>{heading}</{hx}>{listing}</section>"
     )
     return out
 
@@ -399,13 +421,15 @@ ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
   font-size:1.05rem}
 .crumbs li{display:inline-flex;align-items:center;gap:.4rem;min-width:0;max-width:100%}
 .crumbs li + li::before{content:'›';color:var(--text-muted)}
-.crumbs a,.crumbs span{overflow-wrap:anywhere}
-.crumbs a.ui-cap{overflow-wrap:normal;white-space:nowrap;flex:none}
-.crumbs li[aria-current] span{font-weight:700}
+.crumbs a{overflow-wrap:anywhere}
+/* the open folder: its section's heading under the way back, its count beside its name */
+.fv-head{margin:4px 0 10px}
+.fv-head h2{min-width:0;overflow-wrap:anywhere}
 .fv-area{margin:0 0 14px}
 /* the areas' headings are the standard h2; the folders' count beside its word, as a list's
    heading has it (ui.list_head) */
-.fv-area > h2 .ui-sub{font-size:1rem;font-weight:400;margin:0}
+.fv-area > :is(h2,h3) .ui-sub{font-size:1rem;font-weight:400;margin:0}
+.fv-area > h3{margin:0 0 .5rem}
 .fv-area .empty{margin:0;color:var(--text-muted)}
 .fv-area ul.decklist{margin-bottom:0}
 ul.folderlist{display:grid;gap:10px;margin:0}

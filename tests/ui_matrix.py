@@ -1110,7 +1110,9 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("out", type=Path)
-    ap.add_argument("--pages", default="")
+    ap.add_argument(
+        "--pages", default="", help="paths, comma separated; PENDING is the waiting proposal's id"
+    )
     ap.add_argument("--displays", default="")
     ap.add_argument("--themes", default="light,dark")
     ap.add_argument("--text", default="1,2")
@@ -1136,7 +1138,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         sid, pending = OS._seed(s)
         s.app.state.gateway.decks.archidekt_budget.per_window = 100_000
-        paths = a.pages.split(",") if a.pages else pages(pending)
+        # PENDING in --pages stands for the seeded waiting proposal's id, which each run makes anew
+        paths = [p.replace("PENDING", pending) for p in a.pages.split(",")] if a.pages else pages(pending)
         only = None
         if a.recheck:
             ledger = json.loads(a.recheck.read_text())

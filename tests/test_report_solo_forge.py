@@ -105,7 +105,7 @@ def test_the_section_is_a_heading_over_a_divider_with_its_label_and_jump_chip() 
 def test_six_widgets_from_the_result() -> None:
     sec = _section(_page())
     widgets = sec.split("aria-label='Solo test by Forge'>")[1].split("</section>")[0]
-    titles = re.findall(r"</svg>([^<]+)</span><span class='big'>", widgets)
+    titles = re.findall(r"</svg><span class='t'>([^<]+)</span></span><span class='big'>", widgets)
     assert titles == [
         "Games played",
         "Wins",

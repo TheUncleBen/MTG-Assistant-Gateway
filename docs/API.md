@@ -185,8 +185,10 @@ Server-rendered pages behind the identity provider sign-in (and `MTG_REQUIRED_GR
 Archidekt lays out its own (top bar, bottom tab bar on phones, deck banner, toolbar, text / stacks /
 grid views). Light, Dark or System is a per-browser choice under Look on the Account page (the `mtg_theme`
 cookie, set by `POST /theme`); internal links never open a new tab. The pages also keep a `mtg_tzo` cookie:
-how many minutes the browser's clock is ahead of UTC (no place name), so "Today", "Yesterday" and the
-"When" filters on History and Reports are the member's own days. Without it they are UTC days.
+how many minutes the browser's clock is ahead of UTC, so "Today", "Yesterday" and the
+"When" filters on History and Reports are the member's own days, and a `mtg_tz` cookie with the browser's
+time zone name ("Europe/London"), so an entry from before a clock change is grouped by its own day's
+offset. A name the server's time zone database does not know is ignored. Without them they are UTC days.
 
 | Path | Page |
 |---|---|

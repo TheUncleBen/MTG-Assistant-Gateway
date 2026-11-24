@@ -39,10 +39,9 @@ def _page(forge: dict | None = None, **over) -> str:
 
 def test_head_meta_and_crumbs() -> None:
     html = _page()
-    assert (
-        "<a class='ui-cap' href='/reports'>All reports</a>" in html
-        and "<span>Back to the deck</span></a>" in html
-    )
+    # one way back; the deck is a button in the page's action row (0.7.48 loop round)
+    assert "<span>All reports</span></a></p>" in html and "Back to the deck" not in html
+    assert ">Open the deck</a>" in html and "<h1>Deck test report</h1>" in html
     assert "<span id='rep-status'><span class='ui-lbl green'>" in html and ">Complete</span>" in html
     assert "<span class='k'>Solo test games</span> 300, through turn 10" in html
     assert "<span class='k'>Commander</span> Liesa, Forgotten Archangel" in html
@@ -52,7 +51,7 @@ def test_head_meta_and_crumbs() -> None:
 def test_six_widgets_from_the_report() -> None:
     html = _page()
     widgets = html.split("aria-label='Key numbers'>")[1].split("</section>")[0]
-    titles = re.findall(r"</svg>([^<]+)</span><span class='big'>", widgets)
+    titles = re.findall(r"</svg><span class='t'>([^<]+)</span></span><span class='big'>", widgets)
     assert titles == [
         "Forge: your deck won",
         "Commander cast",
@@ -88,7 +87,7 @@ def test_a_few_forge_games_follow_the_solo_test_without_a_headline_rate() -> Non
     # owner decision C7 (e): 10 games, 17% to 69%, say little; the solo test leads the report
     html = _page(forge=json.loads(json.dumps(FORGE_DONE)))
     widgets = html.split("aria-label='Key numbers'>")[1].split("</section>")[0]
-    titles = re.findall(r"</svg>([^<]+)</span><span class='big'>", widgets)
+    titles = re.findall(r"</svg><span class='t'>([^<]+)</span></span><span class='big'>", widgets)
     assert titles[:3] == ["Commander cast", "40 damage dealt by turn 10", "Forge: your deck won"], titles
     assert "40%<small>of 10 games" not in widgets
     assert rp.TOO_FEW_TEXT in widgets and "10 games so far, 95% interval 17% to 69%" in widgets

@@ -218,7 +218,8 @@ async def test_each_section_has_one_orange_button(harness: Harness) -> None:
         for key, orange in expected.items():
             page = (await b.http.get(f"/install?for={key}")).text
             found = re.findall(
-                r"<a class='btn btn-primary' href='[^']*'[^>]*>(?:<svg.*?</svg> )?([^<]*)</a>", page
+                r"<a class='btn btn-primary(?: step-main)?' href='[^']*'[^>]*>(?:<svg.*?</svg> )?([^<]*)</a>",
+                page,
             )
             assert found == orange, (key, found)
         claude = (await b.http.get("/install?for=claude")).text

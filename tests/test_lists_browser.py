@@ -17,7 +17,7 @@ from .test_lists_page import _seed
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
-from .waits import LIFT_WATCH, expect, lifted, quiet
+from .waits import LIFT_WATCH, expect, lifted, quiet, settled
 
 TEXT = (
     ".lp .ui-table .t, .lp .ui-table .s, .lp .ui-table .sm-only, .lp .list-head, .lp .ui-sub, .lp .btn, "
@@ -42,6 +42,7 @@ def server(tmp_path):
 
 
 def _targets(page, sel: str) -> list[float]:
+    settled(page)  # a box's opening ends first: its .98 scale reads 44 px as 43.1
     return page.evaluate(
         "(sel) => [...document.querySelectorAll(sel)].filter(b => b.offsetParent !== null)"
         ".map(b => Math.min(b.getBoundingClientRect().width, b.getBoundingClientRect().height))",

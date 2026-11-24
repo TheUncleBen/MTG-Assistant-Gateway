@@ -851,7 +851,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         did = _esc(deck.id)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         items = "".join(
-            f"<li><span class='pill'>{_esc(r.get('name'))}</span>"
+            f"<li><span class='pill' title='{_esc(r.get('name'))}'>{_esc(r.get('name'))}</span>"
             f"<form method='post' action='/decks/{did}/tags#tags' class='inline'>{csrf_in}"
             "<input type='hidden' name='action' value='remove'>"
             f"<input type='hidden' name='relation_id' value='{int(r['id'])}'>"

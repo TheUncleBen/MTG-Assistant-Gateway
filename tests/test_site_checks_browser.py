@@ -533,6 +533,10 @@ CHECKS = r"""async ([o]) => {
       if (o.hostile.some(h => full.startsWith(h))) continue;  // a name seeded without a break
       if (full.length >= 24 && o.allowLong.some(s => e.matches(s))) continue;
       if (e.title && e.title.trim() === full) continue;  // the whole value in its tooltip
+      // a pick list's chosen value is one line (docs/UI-STANDARD.md, Fields); static/select.js
+      // keeps the whole of it in the button's tooltip
+      const pick = e.matches('.msel-txt') && e.closest('.msel-btn');
+      if (pick && pick.title.trim() === full) continue;
       const how = es.textOverflow === 'ellipsis' && moreX ? 'cut with an ellipsis' : 'clipped';
       add('cut', nm(e) + '|' + t, '"' + t + '" ' + how + ' in ' + nm(e) + ' (' + Math.round(e.scrollWidth) +
         'x' + Math.round(e.scrollHeight) + ' in ' + Math.round(e.clientWidth) + 'x' +
@@ -567,6 +571,8 @@ CHECKS = r"""async ([o]) => {
         if (a.e.tagName === 'A' && within(a.r, b.r) || b.e.tagName === 'A' && within(b.r, a.r)) continue;
         // cards fanned in a stack cover each other by design; a watch button sits on its picture
         if (a.e.closest('.stack') && a.e.closest('.stack') === b.e.closest('.stack')) continue;
+        // the one search field's magnifier is its form's submit button, drawn inside the field
+        if (a.e.parentElement === b.e.parentElement && a.e.parentElement.matches('.ui-search')) continue;
         if (o.allowOver.some(s => a.e.matches(s) || b.e.matches(s))) continue;
         // an inline link over two lines: its line boxes, not the rectangle around both
         const inl = (el) => cs(el).display === 'inline';

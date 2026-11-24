@@ -233,7 +233,7 @@ async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
         r = await b.http.post("/account/assistants", data={"csrf": csrf, "action": "disconnect_all"})
         after = (await b.http.get(r.headers["location"])).text
         assert "<div class='notice ok'>Every assistant was disconnected.</div>" in after
-        assert "No assistant is connected to your account yet." in after
+        assert "<p class='t'>No assistant is connected to your account yet</p>" in after
     finally:
         await b.aclose()
 

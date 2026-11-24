@@ -178,7 +178,8 @@ def test_rows_show_picture_finish_changes_and_alerts() -> None:
     assert "Above $45.00 · below $30.00" not in page
     assert "7 days <span class='dl down'>" in page and "<span class='kv'>in 7 days</span>" in page
     assert len(re.findall(r"<div class='wx' id='wx-[\w]+' hidden>", page)) == 5  # every panel closed
-    assert page.count(">Details</a>") == 5
+    # ui.row_open: the word in the button, a chevron on a phone (0.7.48 loop round)
+    assert page.count("<span class='sm-hide'>Details</span>") == 5
     # a list that fits one screen has no pager and no Load more (test_watchlist_rows)
     assert "1–4 of 4" not in page and "1–1 of 1" not in page and "data-load-more" not in page
 
@@ -220,7 +221,7 @@ def test_chips_search_finish_and_sort() -> None:
 def test_an_opened_row_has_its_chart_range_alert_and_remove() -> None:
     page = _page(open="w_b")
     panel = page.split("id='wx-w_b'>")[1].split("<div class='tr")[0]
-    assert "aria-expanded='true'" in page and ">Close</a>" in page
+    assert "aria-expanded='true'" in page and "<span class='sm-hide'>Close</span>" in page
     assert "<h3>Price, last 30 days</h3>" in panel
     assert ">30 days</button>" in panel and ">Full history (45 days)</button>" in panel
     assert "class='pcl'" in panel and "<div class='pc-x' aria-hidden='true'>" in panel
@@ -247,9 +248,11 @@ def test_details_keeps_the_chip_search_filters_and_page() -> None:
     """Without the script, Details is a link to the page with that row open; it carries the
     list's query state, so the filters and the page survive the open (as on History)."""
     page = _page(show="alert", q="a", finish="nonfoil", sort="price", upto=0)
-    assert "href='/watchlist?show=alert&q=a&finish=nonfoil&sort=price&open=w_b#wr-w_b'" in page
+    assert (
+        "href='/watchlist?show=alert&amp;q=a&amp;finish=nonfoil&amp;sort=price&amp;open=w_b#wr-w_b'" in page
+    )
     longer = _page(upto=50)  # after Load more
-    assert "href='/watchlist?upto=50&open=d42#wr-d42'" in longer
+    assert "href='/watchlist?upto=50&amp;open=d42#wr-d42'" in longer
     plain = _page()
     assert "href='/watchlist?open=w_a#wr-w_a'" in plain
 
