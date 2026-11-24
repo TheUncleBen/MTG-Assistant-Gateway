@@ -778,18 +778,28 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
    (docs/UI-STANDARD.md). .pill is an older name for it. A component's own .chip (the card
    viewer's Legal in formats, the scan printing picker's finishes) is not a tag: it has its own
    look in its own sheet, and this rule does not reach it. */
-/* One line, always: a tag longer than its row ends in "…" with its whole text in its title
-   (loop round #12: a wrapped tag was a three-line blob and made the tiles of a row uneven). The
-   line box is the pill's 24 px less its padding, so the words sit in its middle. */
+/* A tag is never cut where its title cannot be read: on a phone (touch, no pointer to hover
+   with) a tag longer than its row wraps at its spaces, whole words only, and stays a pill (the
+   12 px corner is the one-line pill's half height, so one line looks as before and two lines
+   are a rounded box, not a blob). From 600 px it is one line, always: a longer tag ends in "…"
+   with its whole text in its title (loop round #12: a wrapped tag made the tiles of a row
+   uneven). The line box is the pill's 24 px less its padding, so the words sit in its middle.
+   One word wider than the whole row is the only thing a phone cuts ("…"). */
 .ui-tag,.pill{display:inline-block;min-height:24px;
-  max-width:100%;padding:.15rem .55rem;border-radius:999px;border:0;background:var(--surface-2);
+  max-width:100%;padding:.15rem .55rem;border-radius:12px;border:0;background:var(--surface-2);
   color:var(--text);font-size:.82rem;font-weight:600;line-height:max(1.25em,calc(24px - .3rem));
-  vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  vertical-align:middle;white-space:normal;overflow-wrap:normal;overflow:hidden;text-overflow:ellipsis}
+@media (min-width:600px){
+  .ui-tag,.pill{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* the deck tiles' sheet (deckpage.py) lets a tile's tag wrap; the one-line rule holds there too */
+  ul.decklist .tags .pill.pill{white-space:nowrap;overflow-wrap:normal}
+}
 .ui-tag > svg.i,.pill > svg.i{vertical-align:-.15em;margin-right:.25rem}
 /* a review's summary is a sentence in a tag ("3 changes to your Archidekt account"): it wraps */
 .summary-pills :is(.ui-tag,.pill){white-space:normal;overflow-wrap:anywhere;line-height:1.25}
-/* the deck tiles' sheet (deckpage.py) still lets a tile's tag wrap; the one-line rule holds there too */
-ul.decklist .tags .pill.pill{white-space:nowrap;overflow-wrap:normal}
+/* ... and on a phone a deck tile's tag wraps at its spaces as every tag does (deckpage.py's own
+   sheet would break inside a word) */
+ul.decklist .tags .pill.pill{overflow-wrap:normal}
  /* a notice (F8): a tinted strip with a coloured left edge and no border of its own; info (blue),
    ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
 .notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
@@ -2116,14 +2126,21 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
   /* the tiles beside the open panel go two a row: four narrow columns wrapped every label
      (loop round #19) */
   .with-panel .ui-widgets{--wdg-min:calc(50% - .375rem)}
-  /* ... and the panel's answer (an .apply block's form: Apply, Reject) stays at the panel's foot
-     while the proposal scrolls above it, as the phone page's bar does. The block itself is no box
-     here, so its form can stick to the panel, not to the block's own end */
-  .ui-split.with-panel .ui-drawer .apply{display:contents}
-  .ui-split.with-panel .ui-drawer .apply > :first-child{margin-top:1rem}
-  .ui-split.with-panel .ui-drawer .apply > form.guarded{position:sticky;bottom:0;z-index:2;
-    margin:.5rem -1.25rem -1.5rem;padding:.1rem 1.25rem .6rem;background:var(--surface);
-    border-top:1px solid var(--card-border)}
+  /* ... and the panel's answer (the .apply block: what applying does, its warnings, Apply and
+     Reject) stays at the panel's foot while the proposal scrolls above it, as the phone page's
+     bar does. The whole block sticks, in its own orange frame and tint (over the panel's
+     surface, so the proposal does not show through the tint; the Proposals sheet takes the
+     frame off a panel's block, proposals_view.py, and this puts it back where the block floats
+     over the proposal); it takes at most half the panel, and a longer one scrolls inside itself
+     with its buttons still at its foot */
+  .ui-split.with-panel .ui-drawer .apply{position:sticky;bottom:0;z-index:2;
+    max-height:calc((100vh - var(--bar-room,60px) - 12px) * .5);overflow:auto;padding:.75rem 1rem 0;
+    border:2px solid var(--orange);border-radius:var(--radius-panel);
+    background:linear-gradient(var(--orange-tint),var(--orange-tint)),var(--surface)}
+  .ui-split.with-panel .ui-drawer .apply > form.guarded{position:sticky;bottom:0;z-index:1;
+    margin:0 -1rem;padding:.1rem 1rem .75rem;
+    background:linear-gradient(var(--orange-tint),var(--orange-tint)),var(--surface)}
+  .ui-split.with-panel .ui-drawer .apply .choice{margin-top:.5rem}
 }
 @media (max-width:1099.98px){
   .ui-split.with-panel .list-only{display:none}

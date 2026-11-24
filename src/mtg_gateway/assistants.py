@@ -375,7 +375,7 @@ def list_html(
             )
             + "</section>"
         )
-        foot = f"<div class='ydisc'>{ui.button_link('Guided setup', '/install', icon_name='download')}</div>"
+        foot = ""  # the empty state has the one button to Guided setup
     # the way back names where the member came from: Account's own Assistants row, or Account
     # details' (final audit F06)
     back_href, back_text = (

@@ -104,10 +104,11 @@ def test_a_selects_text_stays_on_one_line_and_the_filter_row_wraps_whole_control
 TAGS = """() => [...document.querySelectorAll('main .ui-tag, main .pill')].filter(t => t.getClientRects().length && !t.closest('.summary-pills')).map(t => {
   const r = t.getBoundingClientRect(), pr = t.parentElement.getBoundingClientRect(), cs = getComputedStyle(t);
   return {text: t.textContent.trim(), h: Math.round(r.height), ws: cs.whiteSpace, ell: cs.textOverflow,
-          out: Math.round(r.right - pr.right), cut: t.scrollWidth > t.clientWidth + 1, title: t.getAttribute('title') || ''}; })"""
+          out: Math.round(r.right - pr.right), cut: t.scrollWidth > t.clientWidth + 1, title: t.getAttribute('title') || '',
+          radius: parseFloat(cs.borderTopLeftRadius), words: t.textContent.trim().split(/\\s+/).length}; })"""
 
 
-def test_a_tag_is_one_line_with_its_whole_text_in_its_title(server: Server) -> None:  # noqa: F811
+def test_a_tag_wraps_on_a_phone_and_is_one_line_with_its_title_from_600px(server: Server) -> None:  # noqa: F811
     paths = (
         "/collection?view=grid",
         "/collection?view=list",
@@ -115,16 +116,23 @@ def test_a_tag_is_one_line_with_its_whole_text_in_its_title(server: Server) -> N
         "/users/alice",
         "/binder?show=all",
     )
-    got = _each(server, (PHONE, FOLD, LAPTOP), paths, TAGS)
-    seen = cut = 0
+    got = _each(server, (320, PHONE, FOLD, LAPTOP), paths, TAGS)
+    seen = cut = wrapped = 0
     for key, tags in got.items():
         for t in tags:
             seen += 1
-            cut += t["cut"]
-            assert t["h"] <= 26 and t["ws"] == "nowrap" and t["ell"] == "ellipsis", (key, t)
-            assert t["out"] <= 1, (key, t)
-            assert not t["cut"] or t["title"], (key, t)
-    assert seen > 20 and cut, (seen, cut)
+            assert t["out"] <= 1 and 10 <= t["radius"] <= 14, (key, t)
+            if key[0] < 600:
+                # a phone has no pointer to read a title with: the tag wraps at its spaces and
+                # shows every word (one word wider than the row is the only thing ever cut)
+                assert t["ws"] == "normal", (key, t)
+                assert not t["cut"] or t["words"] == 1, (key, t)
+                wrapped += t["h"] > 26
+            else:
+                cut += t["cut"]
+                assert t["h"] <= 26 and t["ws"] == "nowrap" and t["ell"] == "ellipsis", (key, t)
+                assert not t["cut"] or t["title"], (key, t)
+    assert seen > 20 and cut and wrapped, (seen, cut, wrapped)
 
 
 # --- #13 a tile's label --------------------------------------------------------------------------
@@ -461,6 +469,11 @@ DRAWER = """() => { const d = document.querySelector('.ui-split.with-panel .ui-d
   const rows = {}; tiles.forEach(t => { const y = Math.round(t.getBoundingClientRect().top); rows[y] = (rows[y] || 0) + 1; });
   return {scrolls: d.scrollHeight - d.clientHeight, top: d.scrollTop, n: bs.length, seen: bs.filter(inView).length,
           words: bs.map(b => b.innerText.trim()), perRow: Object.values(rows),
+          box: (() => { const a = d.querySelector('.apply'), cs = getComputedStyle(a), r = a.getBoundingClientRect();
+            return {display: cs.display, border: cs.borderTopWidth + ' ' + cs.borderTopStyle, tint: cs.backgroundColor + cs.backgroundImage,
+                    holds: bs.every(b => { const q = b.getBoundingClientRect(); return q.top >= r.top && q.bottom <= r.bottom && q.left >= r.left && q.right <= r.right; }),
+                    whole: r.top >= dr.top - 1 && r.bottom <= Math.min(dr.bottom, innerHeight) + 1,
+                    share: r.height / dr.height, text: a.innerText.length}; })(),
           cover: (() => { const b = bs[0].getBoundingClientRect(), e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!e && (bs[0].contains(e) || e.contains(bs[0])); })()}; }"""
 
 
@@ -486,6 +499,12 @@ def test_a_proposal_beside_the_list_keeps_apply_and_reject_in_view(server: Serve
             frame(page)
             now = page.evaluate(DRAWER)
             assert now["seen"] == now["n"] and now["cover"], (at, now)
+            # ... in the answer's own box: the orange frame and tint around its words and its
+            # buttons (not loose text in the panel), whole in the panel and not most of it
+            box = now["box"]
+            assert box["display"] != "contents" and box["border"] == "2px solid", (at, box)
+            assert box["tint"] not in ("rgba(0, 0, 0, 0)none", ""), (at, box)
+            assert box["holds"] and box["whole"] and box["share"] <= 0.6, (at, box)
         # the tiles beside the open panel go two a row (four narrow columns wrapped their labels)
         assert got["perRow"] and set(got["perRow"]) == {2}, got
         browser.close()

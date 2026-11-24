@@ -555,8 +555,10 @@ def top_html(tab: Tab, count_html: str = "", actions_html: str = "", after: str 
     acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
     return (
         ui.back_link("Lists", HUB)
-        + f"<div class='ui-head phead bnhead lp-head'><h1>{esc(tab.label)}{count}</h1>{acts}</div>"
-        + purpose
+        # with actions the purpose line is in the head, between the title and them, as
+        # ui.page_head writes it: a phone shows it before the actions (theme .ui-head > .ui-sub)
+        + f"<div class='ui-head phead bnhead lp-head'><h1>{esc(tab.label)}{count}</h1>"
+        + (f"{purpose}{acts}</div>" if acts else f"</div>{purpose}")
         + after
     )
 

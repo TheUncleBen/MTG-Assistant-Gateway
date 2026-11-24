@@ -41,18 +41,29 @@ def test_alerts_actions_are_one_row_on_a_phone(server: Server, width: int) -> No
     sid, _pending, exe = _start(server)
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, "light", exe)
-        # nothing kept: only Settings is drawn, beside the title, under an unread badge
+        # nothing kept: only Settings is drawn, at its own width, after the purpose line (a
+        # phone's order: the title, what the page holds, then its actions)
         page.goto(f"{server.base}/notifications", wait_until="networkidle")
         acts = page.evaluate(SHOWN, ".al-acts button, .al-acts a")
         (h1,) = page.evaluate(SHOWN, "main h1")
         assert [a["text"] for a in acts] == ["Settings"], acts
-        assert acts[0]["top"] < h1["bottom"] and acts[0]["width"] < width / 2, (acts, h1)
+        (sub,) = page.evaluate(SHOWN, "main .al-head > .ui-sub")
+        assert h1["bottom"] - 1 <= sub["top"] and sub["bottom"] <= acts[0]["top"] + 1, (h1, sub, acts)
+        assert acts[0]["width"] < width / 2 and acts[0]["right"] > width - 24, acts
         # with alerts to mark and clear: three whole buttons on one row, in a phone's short words
         for i in range(2):
             server.db.add_gateway_alert("user-1", "applied", f"Applied · Deck {i}", "Done.", "/history")
         page.goto(f"{server.base}/notifications", wait_until="networkidle")
         acts = page.evaluate(SHOWN, ".al-acts button, .al-acts a")
         assert [a["text"] for a in acts] == ["Read all", "Clear all", "Settings"], acts
+        # each button's name is the words on it (voice control: "press Read all")
+        for words in ("Read all", "Clear all"):
+            assert page.get_by_role("button", name=words, exact=True).count() == 1, words
+        assert page.get_by_role("button", name="Mark all read").count() == 0
+        # the purpose line comes right under the title, before the actions
+        (sub,) = page.evaluate(SHOWN, "main .al-head > .ui-sub")
+        (h1,) = page.evaluate(SHOWN, "main h1")
+        assert h1["bottom"] - 1 <= sub["top"] and sub["bottom"] <= acts[0]["top"] + 1, (h1, sub, acts)
         assert len({a["top"] for a in acts}) == 1 and all(a["height"] == 44 for a in acts), acts
         assert acts[0]["left"] >= 0 and acts[-1]["right"] <= width, acts
         assert page.evaluate("document.documentElement.scrollWidth") <= width
@@ -80,7 +91,12 @@ def test_alerts_actions_keep_their_words_on_a_computer(server: Server) -> None: 
         acts = page.evaluate(SHOWN, ".al-acts button, .al-acts a")
         assert [a["text"] for a in acts] == ["Mark all read", "Clear all", "Settings"], acts
         assert len({a["top"] for a in acts}) == 1
-        assert page.locator("[data-al-all=read_all]").get_attribute("aria-label") == "Mark all read"
+        assert page.get_by_role("button", name="Mark all read", exact=True).count() == 1
+        assert page.get_by_role("button", name="Read all", exact=True).count() == 0
+        # from 600 px the purpose line is under the title and the actions
+        (sub,) = page.evaluate(SHOWN, "main .al-head > .ui-sub")
+        (h1,) = page.evaluate(SHOWN, "main h1")
+        assert sub["top"] >= h1["bottom"] - 1 and sub["top"] >= acts[0]["bottom"] - 12, (h1, sub, acts)
         browser.close()
 
 

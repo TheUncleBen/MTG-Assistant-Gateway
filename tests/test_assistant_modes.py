@@ -224,6 +224,9 @@ async def test_a_member_with_no_assistant_yet(stack: Stack) -> None:
     # the empty state (ui.empty): one bold line, one muted line, the button to Guided setup
     assert "<p class='t'>No assistant is connected to your account yet</p>" in page
     assert "href='/install'" in page
+    # ... once: the empty state's own button, not a second one under it
+    main = page.split("<main", 1)[1].split("</main>", 1)[0]
+    assert main.count("Guided setup</a>") == 1 and main.count("href='/install'") == 1, main
     assert "Disconnect all" not in page
 
 

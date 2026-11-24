@@ -237,7 +237,7 @@
       ticks.forEach(function (c) { c.checked = low.indexOf(c.getAttribute("data-tag").toLowerCase()) !== -1; });
     } else if (tagbox && line) {
       line.textContent = "";
-      tags.forEach(function (t) { var s = document.createElement("span"); s.className = "pill"; s.textContent = t; line.appendChild(s); });
+      tags.forEach(function (t) { var s = document.createElement("span"); s.className = "pill"; s.title = t; s.textContent = t; line.appendChild(s); });
       tagbox.hidden = tags.length === 0;
     }
     if (window.MtgBox) window.MtgBox.openElement(detailsBox, { returnFocus: returnFocus });
@@ -270,7 +270,7 @@
     row.textContent = "";
     tags.slice(0, TAG_CHIPS).forEach(function (t) {
       var chip = document.createElement("span"), sw = document.createElement("i");
-      chip.className = "pill tag";
+      chip.className = "pill tag"; chip.title = t;
       var c = colorOf(t);
       if (c) chip.style.setProperty("--tagc", c);
       sw.className = "sw"; sw.setAttribute("aria-hidden", "true");

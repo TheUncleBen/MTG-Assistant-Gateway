@@ -61,10 +61,17 @@ def test_a_pick_lists_text_never_wraps() -> None:
 # --- #12 tags ------------------------------------------------------------------------------------
 
 
-def test_a_tag_is_one_line_and_the_helper_gives_it_its_title() -> None:
+def test_a_tag_wraps_whole_words_on_a_phone_and_is_one_line_from_600px() -> None:
+    # never cut where its title cannot be read (touch): under 600 px a long tag wraps at its
+    # spaces and stays a pill; from 600 px it is one line ending in "…" with its text in its title
     tag = _rule(".ui-tag,.pill")
-    for decl in ("max-width:100%", "white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis"):
+    for decl in ("max-width:100%", "white-space:normal", "overflow-wrap:normal", "border-radius:12px"):
         assert decl in tag, decl
+    assert "nowrap" not in tag
+    wide = CSS.split(tag, 1)[1].split("@media (min-width:600px){", 1)[1].split("}", 1)[0]
+    assert ".ui-tag,.pill{" in wide
+    for decl in ("white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis"):
+        assert decl in wide, decl
     got = ui.tag("landfall & ramp", icon_name="tag")
     assert got.startswith("<span class='ui-tag' title='landfall &amp; ramp'>") and "<svg" in got
     assert got.endswith("landfall &amp; ramp</span>")
@@ -77,6 +84,14 @@ def test_a_tag_is_one_line_and_the_helper_gives_it_its_title() -> None:
             r"<span class='(?:ui-tag|pill)[^']*'([^>]*)>\{", path.read_text(encoding="utf-8")
         ):
             assert "title=" in m.group(1), (path.name, m.group(0))
+    # ... and no script builds one without it (the binder's row tags and its details box)
+    js = (SRC / "static" / "collection.js").read_text(encoding="utf-8")
+    made = re.findall(r'className = "pill[^"]*";[^\n]*', js)
+    assert len(made) >= 2
+    for line in made:
+        var = re.search(r"(\w+)\.className = \"pill", js[js.index(line) - 40 : js.index(line) + 20]).group(1)
+        near = js[js.index(line) : js.index(line) + 700]
+        assert f"{var}.title = " in near, line
 
 
 # --- #13 a tile's label --------------------------------------------------------------------------

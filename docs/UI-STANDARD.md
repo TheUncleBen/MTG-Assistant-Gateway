@@ -65,7 +65,7 @@ control height (`--ctl`, 44 px). A narrow row wraps whole buttons onto the next 
 | Filter or choice chip (pressable) | `.ui-chip` | pill, 44 px tall, .9rem 700, `--control-border`; chosen: orange tint and orange edge |
 | A row of filter chips | `.ui-chips` (`ui.chips`) | from 600 px the chips wrap, every one whole; on a phone one row that scrolls sideways, its end faded |
 | Status label | `.ui-lbl.<colour>` (`ui.label`) | pill, 24 px, .82rem 700, a colour and an icon |
-| Tag (a deck's or a card's tag, a count) | `.ui-tag` (`ui.tag`) | pill, 24 px, .82rem 600, `--surface-2` fill, no edge; always one line: a tag longer than its row ends in "…" and carries its whole text in `title` |
+| Tag (a deck's or a card's tag, a count) | `.ui-tag` (`ui.tag`) | pill, 24 px, .82rem 600, `--surface-2` fill, no edge; never cut where its `title` cannot be read: under 600 px a tag longer than its row wraps at its spaces (whole words, still a pill, 12 px corners), from 600 px it is one line ending in "…"; it always carries its whole text in `title`, a script-built one too |
 
 ## Panels and lists
 

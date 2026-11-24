@@ -50,8 +50,11 @@ def test_alerts_actions_that_cannot_act_are_not_drawn() -> None:
     assert ".al-acts form:has(> button:disabled){display:none}" in theme.CSS
     both = alerts_page.tools_html("", any_unread=True, any_rows=True)
     assert " disabled" not in both
-    # a phone's short words; the button keeps its whole name for a screen reader
-    assert "aria-label='Mark all read'" in both
+    # a phone's short words are the button's name there too: no aria-label saying other words than
+    # the ones shown (voice control presses a button by the words on it), and the sheet takes the
+    # words not shown out of the name as well (display:none)
+    assert "aria-label" not in both
+    assert ".al-acts .al-short{display:none}" in theme.CSS and ".al-acts .al-long{display:none}" in theme.CSS
     assert "<span class='al-long'>Mark all read</span><span class='al-short'>Read all</span>" in both
 
 
@@ -62,7 +65,30 @@ def test_alerts_page_with_only_a_waiting_row_offers_no_bulk_action(server: Serve
     # kept can be marked or cleared: neither button can act
     assert "1 unread" in body and "al-row unread live" in body
     acts = body.split("<div class='al-acts'>", 1)[1].split("</div>", 1)[0]
-    assert len(re.findall(r"data-al-all='\w+' aria-label='[^']+' disabled>", acts)) == 2, acts
+    assert len(re.findall(r"data-al-all='\w+' disabled>", acts)) == 2, acts
+
+
+def test_alerts_purpose_line_is_in_the_head_between_the_title_and_the_actions(server: Server) -> None:  # noqa: F811
+    sid, _pending = _seed(server)
+    body = _main(server, sid, "/notifications")
+    # as ui.page_head writes it: a phone shows the line before the actions (.ui-head > .ui-sub)
+    assert re.search(
+        r"<div class='ui-head phead al-head'><h1>Alerts[^\n]*?</h1>"
+        r"<p class='ui-sub'>[^<]+</p><div class='al-acts'>",
+        body,
+    ), body[:900]
+    assert "</div><p class='ui-sub'>" not in body
+
+
+def test_no_hand_built_head_leaves_its_purpose_line_outside_beside_actions() -> None:
+    # a head with actions holds its line (ui.page_head); the files of other teams are not read
+    for path in sorted(SRC.glob("*.py")):
+        if path.name in ("deckpage.py", "companion_tools.py", "ui.py"):
+            continue
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"class='ui-head phead[^\n]*\n(?:[^\n]*\n){0,2}", text):
+            after = r"</div>[\"']?\s*(?:\+\s*)?(?:f?[\"']<p class='ui-sub'>|purpose\b)"
+            assert not re.search(after, m.group(0)), (path.name, m.group(0))
 
 
 # -- Binder (#4, #21) ---------------------------------------------------------------------------
@@ -98,8 +124,12 @@ def test_home_connect_is_a_widget_with_the_guided_setup_button() -> None:
     box = home.connect_html("https://gw.test/mcp")
     assert box.startswith("<section class='connect'") and "<div class='wdg'>" in box
     assert "<a class='btn btn-plain' href='/install'>Guided setup</a>" in box
-    # the connector address is one press away, for a member who needs only that
+    # the connector address is there to read, with Copy beside it, for a member who needs only that
+    assert "<code class='addr'>https://gw.test/mcp</code>" in box
     assert "data-copy-text='https://gw.test/mcp'" in box and ">Copy address</button>" in box
+    # ... and the two other ways in keep their own links (the review of the 0.7.48 round)
+    assert "<a href='/install?for=skill'>Assistant skill</a>" in box
+    assert "<a href='/install?for=android'>Android app</a>" in box
     assert "<details" not in box
 
 
@@ -206,8 +236,14 @@ def test_a_list_page_has_one_way_back_one_title_and_its_own_purpose(
     # the title once, with the list's count; no heading under it saying the same
     assert re.search(rf"<h1>{title} <span class='cn'>[^<]+</span></h1>", body), body[:600]
     assert f"<h2>{title}" not in body
-    sub = re.search(r"</div><p class='ui-sub'>([^<]+)</p>", body)
-    assert sub and sub.group(1).startswith(purpose), sub
+    # the purpose line is in the head, right after the title and before the actions (a phone
+    # shows it before them: theme .ui-head > .ui-sub)
+    # (a head with no action keeps the line under it, as ui.page_head does)
+    sub = re.search(
+        r"</h1>(?:<p class='ui-sub'>([^<]+)</p><span class='acts'>|</div><p class='ui-sub'>([^<]+)</p>)", body
+    )
+    assert sub and (sub.group(1) or sub.group(2)).startswith(purpose), sub
+    assert not re.search(r"</span></div><p class='ui-sub'>", body)
     assert "Your Archidekt lists that shape every deck" not in body
 
 

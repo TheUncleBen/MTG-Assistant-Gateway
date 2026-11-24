@@ -268,14 +268,16 @@ def tools_html(csrf_in: str, *, any_unread: bool, any_rows: bool) -> str:
     """Mark all read, Clear all and Settings: forms without scripts; static/bell.js acts in place
     and offers Undo. An action with nothing to act on stays in the page switched off, and the
     sheet does not draw it (.al-acts form:has(> button:disabled)): the script turns it back on
-    when an Undo gives it work. On a phone Mark all read says "Read all", so the three share a row."""
+    when an Undo gives it work. On a phone Mark all read says "Read all", so the three share a row.
+    The button has no aria-label: its name is the words it shows at that width (the sheet takes the
+    other words out with display:none), so voice control can press it by what is on it."""
 
     def form(action: str, words: str, short: str, ic: str, *, disabled: bool) -> str:
         dis = " disabled" if disabled else ""
         return (
             f"<form method='post' action='/notifications/act'>{csrf_in}"
             f"<input type='hidden' name='action' value='{action}'>"
-            f"<button type='submit' class='btn-plain' data-al-all='{action}' aria-label='{esc(words)}'{dis}>"
+            f"<button type='submit' class='btn-plain' data-al-all='{action}'{dis}>"
             f"{icon(ic)}<span class='al-long'>{esc(words)}</span><span class='al-short'>{esc(short)}</span>"
             "</button></form>"
         )
@@ -459,9 +461,11 @@ def add_alerts_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         return page(
             "Alerts",
             "<div class='bell-page'>"
+            # the purpose line in the head, between the title and the actions, as ui.page_head
+            # writes it: a phone shows it before the actions (theme .ui-head > .ui-sub)
             f"<div class='ui-head phead al-head'><h1>Alerts{badge}</h1>"
-            f"{tools_html(csrf_in, any_unread=any_unread, any_rows=kept_any) if not cross_site else ''}</div>"
             "<p class='ui-sub'>What needs you and what happened, from this gateway and from Archidekt.</p>"
+            f"{tools_html(csrf_in, any_unread=any_unread, any_rows=kept_any) if not cross_site else ''}</div>"
             f"{note}{tools}{link_note}<div class='card al-card' data-al-page>{body_list}</div>"
             # the button under it says where Archidekt's own alerts are chosen: not said twice
             f"<p class='muted small bell-foot'>{esc(FOOT)}</p><p class='al-ark'>{ARK_CHOICE}</p></div>",

@@ -65,6 +65,11 @@ HOME_CSS = """
 .home .home-decks > .panel{margin:0}
 .home .needs > h2{margin:0 0 .5rem}
 .home .connect{margin:0 0 1rem}
+/* the connector address whole on its own line (it breaks anywhere, never runs out of the tile),
+   then the other ways in as the widget's links on theirs */
+.home .connect .det .tx,.home .connect .det .addr,.home .connect .det .ways{flex:0 0 100%;min-width:0}
+.home .connect .det .addr{overflow-wrap:anywhere;user-select:all;color:var(--text)}
+.home .connect .det .ways{display:flex;flex-wrap:wrap;gap:.3rem 1.25rem}
 /* desktop (1280 px up): the deck covers take the page's width, with what needs you and the
    connection details in a column beside them, so the page's lower half is not empty (0.7.46
    re-audit D28); the covers grow from 10rem to 17rem a column (three a row at 1280 px, four at 1440) */
@@ -352,14 +357,20 @@ def home_grid(needs: str, recent: str, connect: str) -> str:
 
 
 def connect_html(mcp_url: str) -> str:
-    """Connect an AI assistant: a widget with the standard button to Guided setup (the steps, the
-    assistant skill and the Android app are there) and Copy address for a member who only needs
-    the connector address. Shown only while no assistant is connected (afterwards the Account
-    page has it)."""
+    """Connect an AI assistant: a widget with the standard button to Guided setup, the connector
+    address to read with Copy address for a member who only needs that, and the two other ways
+    in (the assistant skill, the Android app) as the widget's links. Shown only while no assistant is
+    connected (afterwards the Account page has it)."""
     copy = (
         f"<button type='button' class='btn btn-plain' data-copy-text='{_esc(mcp_url)}' "
-        f"data-copy-said='Connector address copied.' title='{_esc(mcp_url)}'>{icon('copy')}Copy address"
-        "</button>"
+        f"data-copy-said='Connector address copied.'>{icon('copy')}Copy address</button>"
+    )
+    detail = (
+        "<span class='tx'>Claude or ChatGPT can read your decks, research cards and propose edits you "
+        "approve here.</span>"
+        f"<code class='addr'>{_esc(mcp_url)}</code>"
+        "<span class='ways'><a href='/install?for=skill'>Assistant skill</a>"
+        "<a href='/install?for=android'>Android app</a></span>"
     )
     return (
         "<section class='connect' aria-label='Connect an AI assistant'>"
@@ -367,8 +378,7 @@ def connect_html(mcp_url: str) -> str:
             "AI assistant",
             "link",
             "Not connected",
-            detail="Claude or ChatGPT can read your decks, research cards and propose edits you approve "
-            "here.",
+            detail_html=detail,
             actions=[ui.button_link("Guided setup", "/install"), copy],
         )
         + "</section>"
