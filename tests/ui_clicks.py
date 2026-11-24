@@ -87,9 +87,29 @@ WATCH = r"""
     window.addEventListener(t, () => { w.ev++; w.what.push('event:' + t); }, true);
   w.sx = scrollX; w.sy = scrollY;
   w.focus = document.activeElement;
+  // the choice already made in a one-of-several group (a checked radio, or the one pressed chip of
+  // its row): pressing it again keeps it, on purpose
+  w.chosen = false;
+  if (el && el.matches('input[type=radio]')) w.chosen = el.checked;
+  else if (el && el.parentElement) {
+    for (const a of ['aria-pressed', 'aria-checked', 'aria-selected']) {
+      if (el.getAttribute(a) !== 'true') continue;
+      const sibs = [...el.parentElement.children].filter(x => x.hasAttribute(a));
+      if (sibs.length >= 2 && sibs.filter(x => x.getAttribute(a) === 'true').length === 1) w.chosen = true;
+    }
+  }
   w.url = location.href;
 }
 """
+
+# Requests the sweep's own data answers with an error, each for a reason that is not a fault: a
+# press that meets only these is "seed-gap", listed but not a problem.
+SEED_GAPS = {
+    "404 GET /decks/43": "the seed's proposals are on deck 43, which the Archidekt fake keeps private to "
+    "another member; the gateway answers with its own can't-open-this-deck page",
+    "404 GET /cards/api/text": "the Scryfall fake has no text for this card; the card view opens without it",
+    "404 GET /cards/api/rulings": "the Scryfall fake has no rulings for this card; the card view says so",
+}
 
 # A layer the press opened: the first open menu, sheet, box or dialog that was not open before.
 LAYER = r"""
@@ -347,7 +367,7 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         pass
                     try:
                         ck = page.evaluate(
-                            "() => window.__ck ? {mut: window.__ck.mut, ev: window.__ck.ev, what: window.__ck.what, scrolled: scrollX !== window.__ck.sx || scrollY !== window.__ck.sy, focus: document.activeElement !== window.__ck.focus && document.activeElement !== window.__ckEl && document.activeElement !== document.body, url: location.href} : null"
+                            "() => window.__ck ? {mut: window.__ck.mut, ev: window.__ck.ev, what: window.__ck.what, scrolled: scrollX !== window.__ck.sx || scrollY !== window.__ck.sy, focus: document.activeElement !== window.__ck.focus && document.activeElement !== window.__ckEl && document.activeElement !== document.body, chosen: window.__ck.chosen, url: location.href} : null"
                         )
                     except Exception:  # noqa: BLE001
                         ck = None
@@ -380,6 +400,8 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         effect = "scrolled"
                     elif ck and ck["focus"]:
                         effect = "moved focus"
+                    if not effect and ck and ck.get("chosen"):
+                        effect = "already chosen: pressing it again keeps it"
                     res = {"verdict": "ok" if effect else "dead", "effect": effect}
                     if state["err"]:
                         res["verdict"] = "js-error"
@@ -389,6 +411,11 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         if bad:
                             res["verdict"] = "failed-request"
                             res["detail"] = "; ".join(bad[:3])
+                            if all(b in SEED_GAPS for b in bad):
+                                res["verdict"] = "seed-gap"
+                                res["detail"] += (
+                                    " (" + "; ".join(SEED_GAPS[b] for b in dict.fromkeys(bad)) + ")"
+                                )
                     if res["verdict"] == "ok" and not navigated:
                         try:
                             res["layer"] = page.evaluate(LAYER)
@@ -467,7 +494,7 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                     for r in rows
                     if r["page"] == path
                     and r["display"] == d.key
-                    and r.get("verdict") not in ("ok", "external")
+                    and r.get("verdict") not in ("ok", "external", "seed-gap")
                 ]
                 log(f"  -> {len(bad)} not ok")
                 (out / "clicks.json").write_text(json.dumps(rows, indent=1))
@@ -485,7 +512,7 @@ def press_layer(press, path: str, first: dict, sub: dict) -> dict:  # noqa: ANN0
 
 def write_md(rows: list[dict], out: Path) -> None:
     lines = ["# Click sweep", ""]
-    bad = [r for r in rows if r.get("verdict") not in ("ok", "external")]
+    bad = [r for r in rows if r.get("verdict") not in ("ok", "external", "seed-gap")]
     lines.append(f"{len(rows)} presses, {len(bad)} not ok.")
     for verdict in (
         "dead",

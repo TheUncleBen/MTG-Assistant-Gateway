@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
             "clicks.log",
         )
         rows = json.loads((clicks / "clicks.json").read_text()) if (clicks / "clicks.json").exists() else []
-        bad = [r for r in rows if r.get("verdict") not in ("ok", "external")]
+        bad = [r for r in rows if r.get("verdict") not in ("ok", "external", "seed-gap")]
         # a problem the base already had is not this change's: press the same pages on the base and
         # fail only on what is new (the old ones are listed, for the release run to fix)
         t = time.time()
