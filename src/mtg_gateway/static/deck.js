@@ -1636,6 +1636,11 @@
         var n = left.reduce(function (t, ch) { return t + (ch.quantity || 1); }, 0);
         return i === 0 && !rest.length ? "" : (n === 1 ? "1 card of the list wasn't added" : n + " cards of the list weren't added") + (keepRest ? "; Paste a list holds them." : ".");
       };
+      var next = function (d) {
+        if (d && d.applied === false) { if (rest.length && keepRest) keepRest(rest); return; }  // kept for review: the page goes there
+        if (rest.length) send(i + PART);
+        else if (onAll) onAll();
+      };
       background({
         card: null, what: "Add",
         start: function () {
@@ -1665,11 +1670,8 @@
             note: "Added " + copies + (copies === 1 ? " card" : " cards") + ". Snapshot kept under History."
           };
         },
-        saved: function (d) {
-          if (d && d.applied === false) { if (rest.length && keepRest) keepRest(rest); return; }  // kept for review: the page goes there
-          if (rest.length) send(i + PART);
-          else if (onAll) onAll();
-        },
+        saved: next,
+        retried: next,
         // the part was not saved: its note says why, and which cards were not sent
         undo: stopped
       });
@@ -1702,8 +1704,9 @@
     bgQueue = bgQueue.then(idle).then(function () {
       bgCards.splice(bgCards.indexOf(job.card), 1);
       savingNote(plan.saying, true, job.card, job.what);
-      // a Try again that goes through counts as the job saved (a list's next part goes then)
-      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(function (d) { if (job.saved) job.saved(d); }, function (err) { notSaved(plan, job, err, true); });
+      // job.retried(d): a Try again went through (a list's next part goes then); job.saved is not
+      // called, as the job's undo already put its card back as it was
+      return saveEdit(plan.changes, plan.inverse, { note: plan.note, backup: plan.backup }).then(function (d) { if (job.retried) job.retried(d); }, function (err) { notSaved(plan, job, err, true); });
     }).then(done, done);
   }
   // Where a card sits and how it is filed, to put it back there when its save does not go through
@@ -1763,9 +1766,9 @@
     var title = el("span", out ? "title out" : "title", name);
     title.title = name;
     h2.appendChild(title);
-    if (out) h2.appendChild(el("span", "ui-tag outtag", "Not in deck"));
     head.appendChild(h2);
     head.appendChild(el("div", "meta", "0 cards"));
+    if (out) head.appendChild(el("span", "ui-tag outtag", "Not in deck"));
     st.appendChild(head);
     var rows = cards.classList.contains("text") || cards.classList.contains("table") || cards.classList.contains("brewer");
     var list = rows ? el("ul", "plain rows") : el("div", "cards");

@@ -1017,7 +1017,7 @@ def toolbar_html(
         f"data-backup-default='{1 if backup_default else 0}'>"
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
         # "3 sol ring" sets the count; the full name of the control is its label
-        "<input id='quick' type='text' name='q' placeholder='Name' data-suggest='cards' "
+        "<input id='quick' type='text' name='q' placeholder='Name to add' data-suggest='cards' "
         "data-suggest-rich data-suggest-qty data-suggest-submit enterkeyhint='search' "
         "autocomplete='off' aria-describedby='quick-help'>"
         "<span id='quick-help' class='sr-only'>Type a card name, or a count and a name such as 3 Sol "
@@ -1459,11 +1459,12 @@ def cards_html(
         )
         head = (
             f"<div class='stackhead'><h2><span class='title{strike}' title='{esc(name)}'>{esc(name)}</span>"
-            f"{out_tag}{menu}</h2>"
+            f"{menu}</h2>"
             # "4 cards · $12.30": the count and the price as words, not "Qty: 4 · Price: $12.30"
             f"<div class='meta'>{plural(qty, 'card')}"
             + (f" · {money(price)}" if price else "")
-            + "</div></div>"
+            # under the count, so a narrow stack's heading keeps its whole row for the name
+            + f"</div>{out_tag}</div>"
         )
         if view in ROW_VIEWS:
             body = (
@@ -3369,15 +3370,17 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
    hidden and the others share the row (a grid's columns did not: with the confirmation across them
    the buttons fell on top of each other) */
 @media (max-width:599.98px){
-  .banner .social{display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;align-items:center}
-  .banner .social .soc{flex:1 1 calc(50% - .2rem)}
-  .banner .info{container-type:inline-size}
-  @container (max-width:15em){ .banner .social .soc{flex-basis:100%} }
-  .banner .social .soc{justify-content:center;min-width:44px;min-height:40px;padding:0 .6rem;gap:.35rem}
+  .banner .social{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));gap:.4rem;
+    margin:0;flex:1 1 auto;order:5;align-items:stretch;min-width:0}
+  .banner .social .soc{justify-content:center;min-width:0;min-height:40px;padding:0 .6rem;gap:.35rem}
+  /* a long word (Follow and the owner's name) ends in "…" rather than breaking mid-word; the
+     button's title has it whole */
+  .banner .social .soc > span:not(.nb){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .banner .social .soc svg{flex:none}
   /* the count stands alone beside the heart here: its box is trimmed to the digit's cap height, so
      centring the box centres the ink (a digit's ink sits above its line box's centre: polish B1) */
   .banner .social .soc .n{text-box:trim-both cap alphabetic}
-  .banner .social .confirm{flex:1 1 100%} }
+  .banner .social .confirm{flex:1 1 100%;grid-column:1 / -1} }
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;min-height:34px;height:auto;
   padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
@@ -3393,7 +3396,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   color:#111;border-radius:17px;padding:.25rem .35rem .25rem .85rem;min-height:34px;max-width:100%;
   font-size:.9rem;font-weight:700;box-sizing:border-box}
 .banner .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
-.banner .social .note{flex-basis:100%;color:#ffd9b3;font-size:.9rem}
+.banner .social .note{flex-basis:100%;grid-column:1 / -1;color:#ffd9b3;font-size:.9rem}
 .banner .social .note a{color:#fff}
 .comments .panel-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;
   gap:0 1rem}
@@ -3546,13 +3549,14 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar .viewbtn,.toolbar .toolmore{display:none}
 @media (max-width:599.98px){
   .toolbar.compact{padding:.5rem .75rem}
-  /* the add field keeps its label ("Add to the deck") above it: View and ⋮ line up with the field */
-  .toolbar.compact .controls{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.5rem}
+  .toolbar.compact .controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
   /* the row's spare width goes to the text field (its placeholder reads whole), not to View,
      which keeps its own width; under 360 px the field has the first row to itself and View fills
      the next one beside ⋮ */
   .toolbar.compact form.quick{flex:1 1 9rem;min-width:0;margin:0}
-  .toolbar.compact form.quick > label{display:block;margin:0 0 .3rem}
+  /* the label is for a screen reader here; the field's placeholder says what it is for */
+  .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0)}
   .toolbar.compact .quickrow{flex-wrap:nowrap}
   /* Add a card here's chip on a phone: the form takes the row and the box wraps under the chip
      when both don't fit, so the box keeps room to type in */
@@ -3690,7 +3694,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* min-width 0: a long unbroken name shortens with … instead of widening the stack past the screen */
 .stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .stackhead .title.out{color:var(--text-muted)}
-.stackhead h2 .outtag{flex:none;margin-right:auto}
+.stackhead .outtag{margin-top:.3rem}
 .stackhead .meta{font-size:.857rem;color:var(--text-muted);display:block}
 .stackhead summary.icon-only{min-width:28px;min-height:28px;width:auto;height:auto;border:0;
   background:transparent;

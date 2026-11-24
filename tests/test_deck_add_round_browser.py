@@ -102,7 +102,7 @@ def test_a_list_over_40_stops_where_a_save_fails_and_keeps_the_rest(server: Serv
         page.route(re.compile(r".*/api/v1/decks/42/edit$"), refuse)
         box.locator("button", has_text="Add 4059 cards").click()
         page.locator(".toast", has_text="Add not saved").first.wait_for(timeout=8000)
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(1500)  # fixed wait: proves the second part is never sent
         assert len(failed) == 1, failed  # the second part was never sent
         toast = page.locator(".toast", has_text="Add not saved").first.inner_text()
         assert "4059 cards of the list weren't added; Paste a list holds them." in toast, toast
@@ -172,7 +172,7 @@ def test_more_ways_to_add_loads_no_package_list_for_its_menu(server: Server) -> 
         asked.clear()
         page.locator(".toolbar .addways").click()
         page.locator("[role=menu]:visible").wait_for(timeout=3000)
-        page.wait_for_timeout(800)
+        page.wait_for_timeout(800)  # fixed wait: proves no package request follows
         assert asked == [], asked
         assert errors == []
         browser.close()
@@ -235,7 +235,7 @@ def test_ctrl_z_does_nothing_behind_an_open_box(server: Server) -> None:  # noqa
         # the focus rests on the box's Add to deck (a button, where the page's keys otherwise work)
         page.wait_for_function("() => document.activeElement && document.activeElement.closest('.mtgbox')")
         page.keyboard.press("Control+z")
-        page.wait_for_timeout(800)
+        page.wait_for_timeout(800)  # fixed wait: proves no Undo is sent
         assert len(edits) == n, edits[n:]
         assert errors == []
         browser.close()
@@ -249,16 +249,12 @@ def test_the_phone_add_field_and_banner_buttons_say_what_they_are(server: Server
     with sync_playwright() as p:
         browser, page, errors, edits = _open(p, server, sid, 390)
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-        label = page.locator("label[for='quick']")
-        assert label.is_visible() and label.bounding_box()["width"] > 50
+        # the label is for a screen reader on a phone; the placeholder says what the field is for
+        assert page.locator("#quick").get_attribute("placeholder") == "Name to add"
         for word in ("Like", "Bookmark", "Comments", "Proposals"):
             assert (
                 page.locator(".banner .social .soc", has_text=word).first.locator("span").first.is_visible()
             ), word
-        # View and ⋮ line up with the field, not with its label
-        field = page.locator("#quick").bounding_box()
-        view = page.locator(".toolbar .viewbtn").bounding_box()
-        assert abs((field["y"] + field["height"]) - (view["y"] + view["height"])) <= 2, (field, view)
         assert errors == []
         browser.close()
 
