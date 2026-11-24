@@ -257,11 +257,33 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
             def load(path: str) -> bool:
                 fresh.restore()
                 server.db.delete_prefs("user-1", prefixes=("view.",))
-                try:
-                    r = page.goto(f"{base}{path}", wait_until="load", timeout=30_000)
-                except Exception as exc:  # noqa: BLE001
-                    log(f"  load failed {path}: {exc}")
-                    return False
+                # the last press's page can still be leaving (a menu item navigates once its menu
+                # has closed): an empty page first ends it, and a load it still cuts short is asked
+                # for again
+                for _ in range(3):
+                    try:
+                        page.goto("about:blank", timeout=5000)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if page.url == "about:blank":
+                        break
+                    try:
+                        page.wait_for_load_state("load", timeout=10_000)
+                    except Exception:  # noqa: BLE001
+                        pass
+                for attempt in range(3):
+                    try:
+                        r = page.goto(f"{base}{path}", wait_until="load", timeout=30_000)
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        cut = "interrupted by another navigation" in str(exc) or "ERR_ABORTED" in str(exc)
+                        if not cut or attempt == 2:
+                            log(f"  load failed {path}: {exc}")
+                            return False
+                        try:
+                            page.wait_for_load_state("load", timeout=10_000)
+                        except Exception:  # noqa: BLE001
+                            pass
                 if r is None or r.status != 200:
                     log(f"  load failed {path}: status {r and r.status}")
                     return False
