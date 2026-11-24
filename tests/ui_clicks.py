@@ -275,8 +275,6 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
             )
 
             def load(path: str) -> bool:
-                fresh.restore()
-                server.db.delete_prefs("user-1", prefixes=("view.",))
                 # the last press's page can still be leaving (a menu item navigates once its menu
                 # has closed): an empty page first ends it, and a load it still cuts short is asked
                 # for again
@@ -291,6 +289,12 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         page.wait_for_load_state("load", timeout=10_000)
                     except Exception:  # noqa: BLE001
                         pass
+                # a save the last press sent may still be running on the server: let it finish, so
+                # the seed put back next is not changed after it
+                if any(not r.startswith("GET ") for r in state["req"]):
+                    page.wait_for_timeout(500)
+                fresh.restore()
+                server.db.delete_prefs("user-1", prefixes=("view.",))
                 for attempt in range(3):
                     try:
                         r = page.goto(f"{base}{path}", wait_until="load", timeout=30_000)
