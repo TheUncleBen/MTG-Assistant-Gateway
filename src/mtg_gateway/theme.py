@@ -1119,11 +1119,14 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   @container topbar (width < 42.5em){ __NAVROW__ } }
 @media (width >= 900px){ @container topbar (width < 58em){ __NAVROW__ } }
 /* home dashboard: section tiles (Archidekt's landing cards) */
-.home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
+.home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:.5rem 1rem;
   margin:0 0 1rem}
 .home .hero > div{flex:1 1 14rem;min-width:0}
 .home .hero h1{margin:0}
 .home .hero .ui-sub{margin:.1rem 0 0}
+/* a phone: the greeting takes the row at the title's own size, the button the line under its
+   purpose line (0.7.48 loop round: beside the button a long name was drawn two sizes down) */
+@media (max-width:599.98px){ .home .hero > div{flex-basis:100%} }
 .home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:1rem;
   margin:0 0 1rem}
 .home .tile{display:flex;flex-direction:column;gap:.35rem;padding:1rem;background:var(--surface);
@@ -1153,11 +1156,6 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   font-size:.9rem;line-height:1.25;
   overflow:hidden;overflow-wrap:break-word;display:-webkit-box;-webkit-box-orient:vertical;
   -webkit-line-clamp:2;line-clamp:2}
-.home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
-  align-items:baseline}
-.home details.connect summary .addr{font-weight:400;font-size:.9rem;overflow-wrap:anywhere}
-.home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
-.home details.connect .addrline code{word-break:break-all;font-size:.9rem}
 /* the keyboard shortcuts box (static/sitesearch.js) */
 /* one row a key (each dt and its dd in a div of their own: in one wrapping row for the whole
    list, a key followed the previous key's words where they left room, confirmation NA2) */
@@ -1171,9 +1169,6 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .mtgbox dl.keys kbd{font-family:inherit;font-size:.9rem;padding:.1rem .4rem;
   border:1px solid var(--border-soft);
   border-radius:4px;background:var(--surface-2);white-space:nowrap}
-.home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
-  gap:.5rem 1rem;margin:0 0 .75rem}
-.home .panel-head h2{margin:0}
 /* the deck list couldn't be read: the /decks notice inside the panel, over any covers read */
 .home .decks-unreadable p{margin:0}
 .home .decks-unreadable .actions{margin-top:.75rem}
@@ -2453,16 +2448,27 @@ body:has(.mtgbox-scrim) .cs-scrim{z-index:96}
 .al-card{padding:0;overflow:hidden}
 .al-card > .notice{margin:.75rem}
 .al-head{flex-wrap:wrap;gap:.5rem 1rem}
-/* the three actions sit in one row or one above the other, never two and one alone (0.7.47
-   audit): the row needs --al-row (three equal shares, each wide enough for "Mark all read" with
-   its icon on one line: at 29em it wrapped inside its button on a desktop), so 200% text stacks
-   them sooner */
-.al-acts{--al-row:33em;flex:0 1 auto;width:min(100%,var(--al-row));margin-left:auto;min-width:0;display:flex;
-  flex-wrap:wrap;gap:.5rem}
-.al-acts > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
+/* the actions sit in one row or one above the other, never two and one alone (0.7.47 audit).
+   Mark all read and Clear all are not drawn while they have nothing to act on (0.7.48 loop
+   round: two grey buttons under "1 unread"); Settings alone keeps its own width beside the
+   title. With one of them shown the row needs --al-row (three equal shares, each wide enough for
+   "Mark all read" with its icon on one line), so 200% text stacks them sooner. A phone says
+   "Read all" and leaves the icons out, so the three fit one row down to 320 px */
+.al-acts{flex:0 1 auto;margin-left:auto;min-width:0;display:flex;flex-wrap:wrap;gap:.5rem}
+.al-acts form:has(> button:disabled){display:none}
+.al-acts:has(button:not(:disabled)){--al-row:33em;width:min(100%,var(--al-row))}
+.al-acts:has(button:not(:disabled)) > *{flex:1 1 calc((var(--al-row) - 100%) * 999)}
 .al-acts form{margin:0;display:flex}
 .al-acts .btn,.al-acts button{margin:0;min-height:44px;display:inline-flex;align-items:center;gap:.4rem;
   width:100%;justify-content:center;text-align:center}
+.al-acts .al-short{display:none}
+@media (max-width:599.98px){
+  .al-acts:has(button:not(:disabled)){--al-row:19.5em;width:100%}
+  .al-acts:has(button:not(:disabled)) :is(.btn,button){white-space:nowrap}
+  .al-acts:has(button:not(:disabled)) svg.i{display:none}
+  .al-acts .al-long{display:none}
+  .al-acts .al-short{display:inline}
+}
 .al-linknote{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 .75rem}
 .al-linknote p{margin:0}
 .bell-badge{display:inline-grid;place-items:center;min-width:20px;min-height:20px;border-radius:10px;white-space:nowrap;

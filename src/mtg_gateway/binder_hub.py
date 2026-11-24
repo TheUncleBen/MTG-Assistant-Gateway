@@ -820,6 +820,8 @@ main form.bn-tools > button.bn-select:not(.mini):not(.inline){margin:0 0 0 auto;
 .bn-set .bn-fields{display:flex;flex-direction:column;gap:.75rem;padding:.9rem 1rem}
 .bn-set .bn-fields .ui-hint{margin:0}
 .bn-save{display:flex;justify-content:flex-end}
+/* a phone: the page's main action takes the row, as every form's does */
+@media (max-width:599.98px){ .bn-save .primary{flex:1 1 100%} }
 /* the split view needs room for the words, not only pixels: the queries are on the page's width
    in its own text size (.bn-wrap), so 200% text on an open Fold gets the phone's one column */
 .bn-wrap{container:bn / inline-size}
@@ -836,9 +838,12 @@ main form.bn-tools > button.bn-select:not(.mini):not(.inline){margin:0 0 0 auto;
   .bn-top .bn-up{display:none}
   /* "Binder" over both; a picked view's title over its list, the library beside them */
   .bn > .bn-top{grid-column:1 / -1}
+  /* the title's row is as tall as the title: the library beside it spans both rows, and its
+     height was shared into the first one (0.7.48: a 110 px hole under the title) */
+  .bn.picked{grid-template-rows:auto 1fr}
   .bn.picked > .bn-top{grid-column:2;grid-row:1;max-width:60rem}
   .bn.picked > .bn-lib{grid-column:1;grid-row:1 / span 2}
-  .bn.picked > .bn-main{grid-column:2;grid-row:2}
+  .bn.picked > .bn-main{grid-column:2;grid-row:2;align-self:start}
   .bn-main{max-width:60rem}
   .bn-row{grid-template-columns:minmax(0,1fr)}
   .bn-row .meta{padding-left:3.35rem}

@@ -160,7 +160,9 @@ def test_follow_works_on_a_profile_with_no_public_decks(server: Server) -> None:
         btn.click()
         page.locator(".confirm button", has_text="Follow").click()
         page.wait_for_function("() => document.querySelector('[data-social=follow]').dataset.state === '1'")
-        assert btn.inner_text().strip() == "Following bo"
+        # the page's title names them: the button is one word, its name says whom
+        assert btn.inner_text().strip() == "Following"
+        assert btn.get_attribute("aria-label") == "Following bo"
         assert 79 in server.ark.follows["alice"]
         browser.close()
     assert errors == []

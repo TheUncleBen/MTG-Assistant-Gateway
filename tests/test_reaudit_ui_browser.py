@@ -215,8 +215,8 @@ def test_home_puts_what_needs_you_beside_the_decks_on_a_desktop(server: Server) 
             r = page.goto(f"{server.base}/", wait_until="networkidle")
             assert r is not None and r.status == 200
             (needs,) = page.evaluate(BOXES, ".home .needs")
-            (panel,) = page.evaluate(BOXES, ".home .home-grid > .panel:not(.connect)")
-            (connect,) = page.evaluate(BOXES, ".home details.connect")
+            (panel,) = page.evaluate(BOXES, ".home .home-grid > .home-decks")
+            (connect,) = page.evaluate(BOXES, ".home .home-grid > .connect")
             covers = page.evaluate(BOXES, ".home .recent a")
             assert page.evaluate("() => document.documentElement.scrollWidth") == w
             if w >= 1280:

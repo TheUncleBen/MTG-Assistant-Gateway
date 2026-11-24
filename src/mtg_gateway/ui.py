@@ -680,12 +680,16 @@ def row_menu(href: str, name: str) -> str:
     )
 
 
-def row_open(href: str, word: str) -> str:
+def row_open(href: str, word: str, *, cls: str = "", attrs: str = "", label: str = "") -> str:
     """A row list's main action (Review, Details, Open): the word in a standard button from 600 px; on a
     phone a 44 px chevron, so the title keeps its line at any text size (the word stays for
-    screen readers)."""
+    screen readers). ``label``: the action's name where the word alone does not say enough
+    ("Details of Sol Ring"); ``cls`` and ``attrs``: a page's hook for the button and its own
+    attributes (a row that opens in place: aria-expanded, aria-controls)."""
+    extra = f" {esc(cls)}" if cls else ""
+    more = f" {attrs}" if attrs else ""
     return (
-        f"<a class='btn' href='{esc(href)}' aria-label='{esc(word)}'>"
+        f"<a class='btn{extra}' href='{esc(href)}' aria-label='{esc(label or word)}'{more}>"
         f"<span class='sm-hide'>{esc(word)}</span>"
         "<span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )

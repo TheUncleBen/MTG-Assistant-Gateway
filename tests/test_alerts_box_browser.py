@@ -184,11 +184,13 @@ def test_the_page_actions_keep_their_words_on_one_line(server: Server, width: in
                 page.evaluate(TEXT_200)
             lines = page.evaluate(
                 "[...document.querySelectorAll('.al-acts button, .al-acts a')].map(b => {"
-                " const t = [...b.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).pop();"
+                # the words: the shown one of a button's two (a phone's short one), or Settings' text
+                " const t = [...b.querySelectorAll('span')].filter(s => s.getClientRects().length).pop()"
+                " || [...b.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).pop();"
                 " const r = document.createRange(); r.selectNodeContents(t);"
                 " const tops = new Set([...r.getClientRects()].filter(x => x.width > 1)"
                 ".map(x => Math.round(x.top)));"
-                " return [b.textContent.trim(), tops.size]; })"
+                " return [b.innerText.trim(), tops.size]; })"
             )
             assert [t for t, n in lines if n != 1] == [], lines
             over = page.evaluate(

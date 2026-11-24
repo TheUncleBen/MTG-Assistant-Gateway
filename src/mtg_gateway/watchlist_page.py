@@ -481,9 +481,18 @@ def _row(
         f"<span class='md-hide chgs'>{changes_html(view)}</span>"
         f"<span class='md-hide spark'>{spark_html(short, cur, what)}</span>"
         f"<span class='md-hide lbls'>{alert}</span>"
-        f"<span class='act'><a class='btn btn-plain more' href='{href}' role='button' "
-        f"aria-expanded='{'true' if is_open else 'false'}' aria-controls='wx-{esc(key)}' "
-        f"aria-label='{esc(more_label)}'>{'Close' if is_open else 'Details'}</a></span></div>"
+        # the row list's main action (ui.row_open): the word in a button from 600 px, a 44 px
+        # chevron on a phone, where "Details" squeezed the card's name onto four lines (0.7.48)
+        "<span class='act'>"
+        + ui.row_open(
+            href,
+            "Close" if is_open else "Details",
+            cls="btn-plain more",
+            label=more_label,
+            attrs=f"role='button' aria-expanded='{'true' if is_open else 'false'}' "
+            f"aria-controls='wx-{esc(key)}'",
+        )
+        + "</span></div>"
         f"<div class='wx' id='wx-{esc(key)}'{'' if is_open else ' hidden'}>{details}</div>"
     )
 
@@ -1442,6 +1451,10 @@ WATCH_PAGE_CSS = (
   /* the row's end (Details, ⋮) may stack at 200% text on a narrow phone, never push sideways */
   .watch-page .w-t .act{flex-wrap:wrap;justify-content:flex-end;min-width:0;white-space:normal}
   .watch-page .w-t .act .more{white-space:nowrap}
+  /* the row's main action is its 44 px chevron, as a History row's; it points down while open */
+  .watch-page .w-t .act .more{padding:0;border:0;background:none;min-width:44px;justify-content:center}
+  .watch-page .w-t .act .more:hover{background:var(--surface-2)}
+  .watch-page .w-t .act .more[aria-expanded=true] .chev{transform:rotate(90deg)}
   .watch-page .w-t .sub .dl{white-space:normal}
 }
 /* Large text on a narrow phone (independent review 2, M5): the table, its section and the tools

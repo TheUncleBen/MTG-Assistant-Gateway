@@ -210,7 +210,8 @@ async def test_cold_pages_render_a_placeholder_and_the_json_endpoint_fills_it(st
         assert "recent skeleton" in r.text and "Sample Commander Deck" not in r.text
         j = await b.http.get("/api/decks/mine?shape=recent")
         data = j.json()
-        assert data["ok"] and data["count"] == 1 and "All decks (1)" in data["html"]
+        assert data["ok"] and data["count"] == 1
+        assert "<h2>My decks <span class='ui-sub'>1</span></h2>" in data["html"]
         assert "Sample Commander Deck" in data["html"] and "class='recent'" in data["html"]
         assert _lists(stack) == 2
         # warm again: the page carries the list itself

@@ -96,7 +96,7 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
         svc.deck_lists.drop("user-1")
         _goto_held(page, f"{server.base}/", ".recent.skeleton")
         page.wait_for_selector(".recent a", timeout=10_000)
-        assert "All decks (1)" in page.locator("[data-decks-src]").inner_text()
+        assert "My decks 1" in page.locator("[data-decks-src]").inner_text()
         assert page.locator(".skeleton").count() == 0
         assert errors == [], errors
         browser.close()
@@ -193,7 +193,7 @@ def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> 
             again.click()
         page.wait_for_selector(".recent a", timeout=10_000)
         assert page.locator(".decks-unreadable").count() == 0
-        assert "All decks (1)" in page.content()
+        assert '<h2>My decks <span class="ui-sub">1</span></h2>' in page.content()
         assert errors == [], errors
         browser.close()
 

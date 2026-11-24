@@ -526,13 +526,24 @@ def _keep_unsaved(live: LiveSettings, data: Mapping[str, str], group: str, reset
             out.unsaved.append(key)
 
 
+def save_label(title: str) -> str:
+    """A group's Save button in sentence case ("Save approvals"); a name keeps its capital
+    ("Save Archidekt and Scryfall pacing")."""
+    first = title.split(" ", 1)[0]
+    keep = first in ("Archidekt", "Scryfall", "Forge")
+    return "Save " + (title if keep else title[:1].lower() + title[1:])
+
+
 def unsaved_notice(keys: list[str], group: str) -> str:
     """Said after Back to default when other fields of the section were changed but not saved."""
     if not keys:
         return ""
     title = next((t for g, t, _i in GROUPS if g == group), "")
     names = ", ".join(f"“{label(k)}”" for k in keys)
-    text = f"Not saved yet: {names}. What you typed is still in the form; press “Save {title}” to keep it."
+    text = (
+        f"Not saved yet: {names}. What you typed is still in the form; press “{save_label(title)}” to "
+        "keep it."
+    )
     return ui.notice(text, "warn", role="status")
 
 
@@ -580,7 +591,7 @@ def settings_body(
         n_locked = sum(1 for k in keys if live.locked(k))
         editable = n_locked < len(keys)
         save = (
-            f"<div class='set-save'><button type='submit' class='primary'>Save {html.escape(title)}"
+            f"<div class='set-save'><button type='submit' class='primary'>{html.escape(save_label(title))}"
             "</button><span class='ui-hint unsaved' aria-live='polite'></span></div>"
             if editable
             else "<p class='muted small set-save'>Every setting here is set in your stack.</p>"

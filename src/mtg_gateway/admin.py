@@ -1423,16 +1423,21 @@ def _status_labels(u: Mapping[str, Any], admin_sub: str, *, is_admin: bool) -> s
     return out
 
 
-def _arch_label(u: Mapping[str, Any], *, name: bool = True) -> str:
+def _arch_label(u: Mapping[str, Any], *, name: bool = True, caption: bool = False) -> str:
+    """Linked or Not linked, with the Archidekt name. ``caption``: the name says what it is
+    ("Archidekt alice"), for the row's second line, which has no column heading over it."""
     if u["archidekt_username"]:
-        who = f" <span class='u'>{html.escape(u['archidekt_username'])}</span>" if name else ""
+        cap = "<span class='k'>Archidekt</span> " if caption else ""
+        who = f" <span class='u'>{cap}{html.escape(u['archidekt_username'])}</span>" if name else ""
         return f"<span class='arch'>{ui.label('Linked', 'blue', 'link')}{who}</span>"
     return f"<span class='arch'>{ui.label('Not linked', 'grey', 'x')}</span>"
 
 
-def _apps_html(u: Mapping[str, Any]) -> str:
+def _apps_html(u: Mapping[str, Any], *, caption: bool = False) -> str:
+    """The member's connected apps as chips. ``caption``: with none, "No apps" (the row's second
+    line has no Apps heading over it to make sense of a bare "none")."""
     if not u["clients"]:
-        return "<span class='muted'>none</span>"
+        return f"<span class='muted'>{'No apps' if caption else 'none'}</span>"
     return "".join(ui.app_chip(c["name"], unnamed=True, client_id=c["client_id"]) for c in u["clients"])
 
 
@@ -1643,7 +1648,7 @@ def _users_body(
             f"data-activity='/admin/activity?sub={quote(sub, safe='')}'>"
             f"<span class='title'><a class='t' href='{html.escape(open_href(sub))}'>{_member_html(u)}</a>"
             f"{email}"
-            f"<span class='sub'>{status} {_arch_label(u)} {_apps_html(u)}</span>"
+            f"<span class='sub'>{status} {_arch_label(u, caption=True)} {_apps_html(u, caption=True)}</span>"
             f"<span class='sm-only'>{status} {_arch_label(u, name=False)} {when}</span></span>"
             f"<span class='md-hide labs'>{status}</span>"
             f"<span class='md-hide'>{_arch_label(u)}</span>"

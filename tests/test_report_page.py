@@ -39,10 +39,9 @@ def _page(forge: dict | None = None, **over) -> str:
 
 def test_head_meta_and_crumbs() -> None:
     html = _page()
-    assert (
-        "<a class='ui-cap' href='/reports'>All reports</a>" in html
-        and "<span>Back to the deck</span></a>" in html
-    )
+    # one way back; the deck is a button in the page's action row (0.7.48 loop round)
+    assert "<span>All reports</span></a></p>" in html and "Back to the deck" not in html
+    assert ">Open the deck</a>" in html and "<h1>Deck test report</h1>" in html
     assert "<span id='rep-status'><span class='ui-lbl green'>" in html and ">Complete</span>" in html
     assert "<span class='k'>Solo test games</span> 300, through turn 10" in html
     assert "<span class='k'>Commander</span> Liesa, Forgotten Archangel" in html

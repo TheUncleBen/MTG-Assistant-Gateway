@@ -188,7 +188,10 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             "icons": {k: ICONS[k] for k in SCAN_ICONS},
         }
         body_html = (
-            ui.page_head("Scan cards")
+            ui.page_head(
+                "Scan cards",
+                "Add cards with the camera, a photo or their names, then save them to your binder or a deck.",
+            )
             + "<link rel='stylesheet' href='/scan/static/scan.css?v="
             + version
             + "'>"

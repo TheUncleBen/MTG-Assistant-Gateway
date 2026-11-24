@@ -182,7 +182,7 @@ def copy_field(key: str, label: str, value: str, rows: int = 0) -> str:
 def _link_html(link: Link, public_url: str) -> str:
     e = html.escape
     href = link.href[len(public_url) :] if link.href.startswith(public_url + "/") else link.href
-    cls = "btn btn-primary" if link.primary else "btn"
+    cls = "btn btn-primary step-main" if link.primary else "btn"
     dl = f" download='{e(link.download)}'" if link.download else ""
     ic = f"{icon(link.icon)} " if link.icon else ""
     return f"<div class='actions'><a class='{cls}' href='{e(href)}'{dl}>{ic}{e(link.label)}</a></div>"
@@ -828,6 +828,8 @@ INSTALL_CSS = (
     # padding and "Download" fit a 360 px phone's step with the browser's font doubled
     ".inst .actions .btn{overflow-wrap:normal;max-width:100%;padding-left:min(1rem,14px);"
     "padding-right:min(1rem,14px)}"
+    # a phone: a step's main action (the orange download) takes the row, as every page's does
+    "@media (max-width:599.98px){.inst .actions .step-main{flex:1 1 100%;justify-content:center}}"
     # a link inside the steps' sentences: the text's colour, bold, underlined in orange (the guide's)
     ".inst :is(p,li) a:not([class]){color:var(--text);font-weight:700;text-decoration:underline;"
     "text-decoration-color:var(--orange);text-underline-offset:2px}"

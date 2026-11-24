@@ -1012,13 +1012,14 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         writes = bool(state.settings.writes_enabled)
         follow = (
             f"<button type='button' class='btn soc' data-social='follow' data-user='{_esc(owner_id)}' "
-            f"data-name='{_esc(shown)}' data-state='unknown' "
+            # the name is the page's title: the button says Follow, its name says whom
+            f"data-name='{_esc(shown)}' data-state='unknown' data-short aria-label='Follow {_esc(shown)}' "
             + (
                 f"title='Follow {_esc(shown)} on Archidekt'>"
                 if writes  # writes switched off: shown, disabled, and the reason is on the page
                 else f"disabled title='{WRITES_OFF_TITLE}' aria-describedby='social-off'>"
             )
-            + f"{icon('follow')}<span>Follow {_esc(shown)}</span></button>"
+            + f"{icon('follow')}<span>Follow</span></button>"
             if owner_id and str(link.get("archidekt_user_id") or "") != str(owner_id)
             else ""
         )

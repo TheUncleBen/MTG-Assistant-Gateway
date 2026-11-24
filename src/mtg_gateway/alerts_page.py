@@ -266,21 +266,24 @@ def list_html(rows: list[dict[str, Any]], *, filtered: bool, csrf_in: str = "") 
 
 def tools_html(csrf_in: str, *, any_unread: bool, any_rows: bool) -> str:
     """Mark all read, Clear all and Settings: forms without scripts; static/bell.js acts in place
-    and offers Undo."""
+    and offers Undo. An action with nothing to act on stays in the page switched off, and the
+    sheet does not draw it (.al-acts form:has(> button:disabled)): the script turns it back on
+    when an Undo gives it work. On a phone Mark all read says "Read all", so the three share a row."""
 
-    def form(action: str, words: str, ic: str, *, disabled: bool) -> str:
+    def form(action: str, words: str, short: str, ic: str, *, disabled: bool) -> str:
         dis = " disabled" if disabled else ""
         return (
             f"<form method='post' action='/notifications/act'>{csrf_in}"
             f"<input type='hidden' name='action' value='{action}'>"
-            f"<button type='submit' class='btn-plain' data-al-all='{action}'{dis}>{icon(ic)}{esc(words)}"
+            f"<button type='submit' class='btn-plain' data-al-all='{action}' aria-label='{esc(words)}'{dis}>"
+            f"{icon(ic)}<span class='al-long'>{esc(words)}</span><span class='al-short'>{esc(short)}</span>"
             "</button></form>"
         )
 
     return (
         "<div class='al-acts'>"
-        + form("read_all", "Mark all read", "check", disabled=not any_unread)
-        + form("clear_all", "Clear all", "x", disabled=not any_rows)
+        + form("read_all", "Mark all read", "Read all", "check", disabled=not any_unread)
+        + form("clear_all", "Clear all", "Clear all", "x", disabled=not any_rows)
         + f"<a class='btn btn-plain' href='{section_href('notifications')}'>{icon('settings')}Settings</a>"
         "</div>"
     )

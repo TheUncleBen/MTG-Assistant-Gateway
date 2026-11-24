@@ -278,12 +278,14 @@ def test_report_capsules_and_facts_admin_line_and_the_deck_count(server: Server)
         browser, page, errors = _open(p, exe, server, sid, 412)
         page.goto(f"{server.base}/history/reports/r1", wait_until="networkidle")
         assert page.evaluate(MEASURE) == []
-        # B11: the way-back capsules sit 8 px apart, like any chip row
-        caps = [a.evaluate(RECT) for a in page.locator(".rv-crumbs a").all()]
-        assert len(caps) == 3, caps
+        # B11, then the 0.7.48 loop round: one way back; the deck and its history are buttons in
+        # the action row, 8 px apart like any button row
+        assert page.locator("main a.ui-back").count() == 1
+        caps = [a.evaluate(RECT) for a in page.locator(".rv-acts > a.btn").all()]
+        assert len(caps) >= 4, caps  # Open the deck, Deck history, then the exports
         for a, b in zip(caps, caps[1:], strict=False):
             if a[1] == b[1]:
-                assert b[0] - a[2] == 8, (a, b)
+                assert b[0] - a[2] in (7, 8), (a, b)  # the row's .5rem gap
         # C1: the coverage widget's two facts carry their dot in the gap, each at a line's start
         _no_dangling_dot(page, ".wdg .det .tx.ui-dots")
         assert (
@@ -298,8 +300,9 @@ def test_report_capsules_and_facts_admin_line_and_the_deck_count(server: Server)
         # C5: the count says every deck as Home does, and how many sit in folders
         assert page.locator("#decks-total").inner_text() == "5 decks · 2 in folders"
         page.goto(f"{server.base}/", wait_until="networkidle")
-        page.wait_for_function("() => /All decks \\(\\d+\\)/.test(document.body.innerText)")
-        assert "All decks (5)" in page.inner_text("body")
+        # Home's count sits beside its heading (0.7.48 loop round: "My decks 5", as a list's)
+        page.wait_for_selector(".home-decks .list-head h2 .ui-sub")
+        assert page.locator(".home-decks .list-head h2").inner_text() == "My decks 5"
         # C3: Scan's empty list badge is grey
         page.goto(f"{server.base}/scan", wait_until="networkidle")
         badge = page.locator("#list-badge")

@@ -1828,20 +1828,17 @@ def report_page_html(
     ``tested`` the rows it played (the Tested list), ``pair_href`` its head-to-head view."""
     s = report_sections(r)
     g = s["goldfish"]
-    deck_id = _esc(r.get("deck_id"))
     name = _esc(r.get("deck_name") or r.get("deck_id") or "Unnamed deck")
     # a pasted list (or a new deck's proposal) has no deck to go back to
     on_deck = is_digits(str(r.get("deck_id") or ""))
-    crumbs = (
-        "<nav class='crumbs rv-crumbs' aria-label='Back'>"
-        # capsules, as History's way back (ui.cap_link): never bare blue text
-        + (
-            ui.back_link("Back to the deck", f"/decks/{r.get('deck_id')}", line=False)
-            + f"<a class='ui-cap' href='/history?deck_id={deck_id}'>Deck history</a>"
-            if on_deck
-            else ""
-        )
-        + "<a class='ui-cap' href='/reports'>All reports</a></nav>"
+    # one way back, a level up (docs/UI-STANDARD.md); the deck and its history are the page's
+    # own actions, standard buttons at the head's end (0.7.48 loop round: three capsules)
+    crumbs = ui.back_link("All reports", "/reports")
+    deck_acts = (
+        ui.button_link("Open the deck", f"/decks/{r.get('deck_id')}", icon_name="decks")
+        + ui.button_link("Deck history", f"/history?deck_id={r.get('deck_id')}", icon_name="history")
+        if on_deck
+        else ""
     )
     meta = [f"<span id='rep-status'>{status_label_html(r.get('status'), r.get('research'))}</span>"]
     src = r.get("source") if isinstance(r.get("source"), dict) else {}
@@ -1872,10 +1869,12 @@ def report_page_html(
     if by_html:
         meta.append(f"<span><span class='k'>By</span> {by_html}</span>")
     head = (
-        "<header class='rv-head'><div class='rv-title'>"
-        + (f"<h1><a href='/decks/{deck_id}'>{name}</a></h1>" if on_deck else f"<h1>{name}</h1>")
-        + f"<p class='rv-meta'>{''.join(meta)}</p></div>"
-        f"<div class='rv-acts'>{actions_html}</div></header>"
+        # the title says what the page is, the line under it which deck: a long deck name as the
+        # title took four lines of a phone's first screen (0.7.48 loop round). The way to the deck
+        # is the Open the deck button beside it, so the name is words, not a second link
+        "<header class='rv-head'><div class='rv-title'><h1>Deck test report</h1><p class='ui-sub rv-deck'>"
+        + f"{name}</p><p class='rv-meta'>{''.join(meta)}</p></div>"
+        f"<div class='rv-acts'>{deck_acts}{actions_html}</div></header>"
     )
     if reused:
         notice_html += (
@@ -1971,17 +1970,14 @@ REPORT_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
 /* one report */
-/* the way-back capsules sit 8 px apart like any chip row, never touching (polish B11): the
-   capsule's own -4px tap-area margin is dropped here, the gap gives the room */
-.rv-page .rv-crumbs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 .25rem;
-  font-size:.93rem}
-.rv-page .rv-crumbs a{display:inline-flex;align-items:center;min-height:44px;margin:0}
 .rv-page .rv-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 1rem}
 .rv-page .rv-title{min-width:0;flex:1 1 24rem}
 .rv-page .rv-title h1{margin:0;overflow-wrap:anywhere}
-.rv-page .rv-title h1 a{color:inherit;text-decoration:none}
-.rv-page .rv-title h1 a:hover{color:var(--orange-text)}
+/* the deck, under the title: its name whole in the text colour (it is what the report is about),
+   wrapping between its words */
+.rv-page .rv-title .rv-deck{margin:.1rem 0 0;font-size:1rem;font-weight:600;color:var(--text);
+  overflow-wrap:anywhere}
 .rv-page .rv-meta{display:flex;flex-wrap:wrap;gap:.35rem 1.1rem;align-items:center;margin:.3rem 0 0}
 .rv-page .rv-meta .k{color:var(--text-muted);margin-right:.2rem}
 .rv-page .rv-acts{display:flex;flex-wrap:wrap;gap:.5rem}

@@ -105,10 +105,12 @@ def test_the_forum_and_folder_crumbs_are_capsules() -> None:
     crumbs = forum_page.crumbs_html(("Archidekt", "/forum#g"), ("General", "/forum/s"))
     assert crumbs.count("class='ui-cap'") == 3, crumbs
     level = folderview.Level()
-    level.current = {"id": 5, "name": "Precons"}
-    level.crumbs = [(None, "Decks"), (5, "Precons")]
+    level.current = {"id": 6, "name": "Precons"}
+    level.crumbs = [(None, "Decks"), (5, "Commander"), (6, "Precons")]
     out = folderview.breadcrumb_html(level, order="-updatedAt")
-    assert "<a class='ui-cap' href=" in out and "<span>Precons</span>" in out, out
+    # the folders above, each a capsule; the open folder is the heading under the trail
+    assert out.count("<a class='ui-cap' href=") == 2 and "Precons" not in out, out
+    assert "<h2 id='fv-here'>Precons" in folderview.folder_head_html(level)
 
 
 def test_every_more_menu_link_has_its_own_icon() -> None:

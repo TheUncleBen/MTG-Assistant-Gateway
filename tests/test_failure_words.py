@@ -180,7 +180,7 @@ async def test_one_outage_reads_the_same_in_the_tools_and_on_the_home_page(
         svc.forget_member(sub)
         stack.ark.inject = [answer] * 40  # type: ignore[list-item]
         home = (await b.http.get("/", headers=NAV)).text
-        assert html.escape(first) in home, home.split("<h2>My decks</h2>", 1)[-1][:300]
+        assert html.escape(first) in home, home.split("<h2>My decks", 1)[-1][:300]
         assert "did not answer in time" not in home
         pacer._failures = pacer._open_until = pacer._retry_until = 0
         svc.forget_member(sub)
