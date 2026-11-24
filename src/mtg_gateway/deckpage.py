@@ -1039,11 +1039,11 @@ def toolbar_html(
         + (card_size_control() if view in PICTURE_VIEWS else "")
         + _select("group", GROUPS, group, "Group by", "grid")
         + _select("sort", SORTS, sort, "Sort by", "sort")
-        + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
-        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Find' "
-        "autocomplete='off'>"
-        f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
-        "</span></div><noscript><button type='submit' class='apply'>Apply</button></noscript>"
+        # the site's one search field (ui.search_field): it filters as you type (deck.js), and Enter
+        # submits the form, which the script keeps on the page; without scripts Apply sends it
+        + "<div class='field filter'><label for='q'>Local filter</label>"
+        + ui.search_field("q", value=q, placeholder="Find", input_id="q", attrs=" autocomplete='off'")
+        + "</div><noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></div></section>"
     )
 
