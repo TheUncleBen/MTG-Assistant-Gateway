@@ -63,7 +63,6 @@ HOME_CSS = """
 .home .home-decks > .list-head{align-items:center;margin:0 0 .5rem}
 .home .home-decks > .list-head .btn{margin:0}
 .home .home-decks > .panel{margin:0}
-.home .needs > h2{margin:0 0 .5rem}
 .home .connect{margin:0 0 1rem}
 /* the connector address whole on its own line (it breaks anywhere, never runs out of the tile),
    then the other ways in as the widget's links on theirs */
@@ -81,8 +80,8 @@ HOME_CSS = """
     gap:1rem;align-items:start}
   .home .home-grid.side > .home-decks{grid-column:1;grid-row:1 / span 2;margin:0}
   .home .home-grid.side > .needs,.home .home-grid.side > .connect{grid-column:2;margin:0}
-  /* Needs you's heading is as tall as the decks' (which holds a button): the two panels start level */
-  .home .home-grid.side > .needs > h2{min-height:var(--ctl);display:flex;align-items:center}
+  /* Needs you's head is as tall as the decks' (which holds a button): the two panels start level */
+  .home .home-grid.side > .needs > .list-head{min-height:var(--ctl)}
   .home .home-grid .recent{grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))}
 }}
 /* phones: the covers as one row to swipe, each cover a screen's half */
@@ -242,7 +241,8 @@ def needs_you_html(
     # nothing to do shows no heading over nothing (bell.js shows the section with the row)
     wait = " data-bell-section hidden" if len(rows) == 1 else ""
     return (
-        f"<section class='needs' aria-labelledby='needs-h'{wait}><h2 id='needs-h'>Needs you</h2>"
+        f"<section class='needs' aria-labelledby='needs-h'{wait}>"
+        "<div class='list-head'><h2 id='needs-h'>Needs you</h2></div>"
         f"<ul>{''.join(rows)}</ul></section>"
     )
 

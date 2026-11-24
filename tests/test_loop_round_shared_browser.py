@@ -597,3 +597,32 @@ def test_only_a_menu_opened_from_a_box_sits_over_it(server: Server) -> None:  # 
     box, so it never covers the box's buttons (0.7.48: it covered Keep it at 1366 px)."""
     got = _each(server, (LAPTOP,), ("/decks",), LAYERS)
     assert got[(LAPTOP, "/decks")] == {"before": True, "after": True}
+
+
+# --- an even grid only where its buttons fit -------------------------------------------------------
+
+EVEN_FIT = """async () => {
+  const row = document.createElement('div');
+  row.setAttribute('data-even-rows', '');
+  row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;width:300px';
+  for (const t of ['Supercalifragilisticexpialidocious', 'A', 'B', 'C']) {
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = t;
+    b.style.minWidth = 'min-content';  // a page's own rule, as the report's actions on a phone
+    row.appendChild(b);
+  }
+  document.querySelector('main').prepend(row);
+  window.dispatchEvent(new Event('load'));  // feedback.js watches the rows again on load
+  await new Promise(r => setTimeout(r, 400));
+  const rs = [...row.children].map(c => c.getBoundingClientRect());
+  const hits = [];
+  rs.forEach((a, i) => rs.forEach((b, j) => { if (i < j && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) hits.push([i, j]); }));
+  return hits;
+}"""
+
+
+def test_an_even_grid_is_never_laid_where_a_button_is_wider_than_its_cell(server: Server) -> None:  # noqa: F811
+    """0.7.48 CI: the report's six actions at 412 px with 200% text became a two-column grid,
+    "Markdown" was wider than its half and lay over "HTML page". A row whose buttons do not fit
+    the even grid keeps its wrapped layout."""
+    got = _each(server, (PHONE,), ("/history",), EVEN_FIT)
+    assert got[(PHONE, "/history")] == []
