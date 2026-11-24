@@ -123,7 +123,8 @@ async def test_read_and_dismissed_follow_the_member_to_every_device_and_leave_th
         assert "Mana Crypt" in (await b.http.get("/notifications", headers=JSON)).json()["html"]
         # Mark all read, then Clear all
         d = await _act(b, "read_all")
-        assert d["changed"] == [a1]  # a dismissed alert was read with it
+        # Undo brought the dismissed alert back unread, as it was (0.7.48 review), so both are read now
+        assert sorted(d["changed"]) == sorted([a1, a2])
         d = await _act(b, "clear_all")
         assert sorted(d["changed"]) == sorted([a1, a2])
         page = await b.http.get("/notifications")

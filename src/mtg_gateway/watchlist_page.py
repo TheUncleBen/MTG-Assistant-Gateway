@@ -1196,7 +1196,9 @@ def watchlist_page_html(
     last = max(days) if days else ""
     # the list date every page uses, which the page draws in the member's own time zone: a clock
     # time in UTC told a member nothing about their own day
-    checked = ui.when(_check_moment(last, at), now=now) if last else ""
+    # a watch made before today's check stores today's day: never show a moment still to come
+    moment = _check_moment(last, at) if last else None
+    checked = ui.when(min(moment, int(now)), now=now) if moment is not None else ""
     cards = data["cards"]
     query, _shown, body, pager = card_rows_html(cards, ids, csrf_in, today, query, card_history, lists=lists)
     # the list the address shows: its own chips' counts and total (L4), every card without one

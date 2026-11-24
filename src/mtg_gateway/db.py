@@ -4887,7 +4887,12 @@ class Database:
                     return []
                 changed = self._alert_ids(c, sub, ids, "dismissed_at IS NOT NULL AND title != ''")
                 for i in changed:
-                    c.execute("UPDATE gateway_alerts SET dismissed_at = NULL WHERE id = ?", (i,))
+                    # the read mark the dismissal itself set goes too (dismiss writes one moment to both)
+                    c.execute(
+                        "UPDATE gateway_alerts SET dismissed_at = NULL, "
+                        "read_at = CASE WHEN read_at = dismissed_at THEN NULL ELSE read_at END WHERE id = ?",
+                        (i,),
+                    )
             else:
                 changed = self._alert_ids(c, sub, ids, "dismissed_at IS NULL")
                 for i in changed:

@@ -3648,6 +3648,7 @@ class ThemeMiddleware:
         value = None
         layout = None
         tz = None
+        zone = None
         app = False
         app_ver = ""
         for k, v in scope.get("headers", []):
@@ -3660,6 +3661,8 @@ class ThemeMiddleware:
                         layout = val.strip()
                     elif name == localday.TZ_COOKIE:
                         tz = val
+                    elif name == localday.ZONE_COOKIE:
+                        zone = val
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
                 m = _APP_VERSION_RE.search(v.decode("latin-1", "replace"))
@@ -3672,9 +3675,11 @@ class ThemeMiddleware:
         vtoken = _app_version.set(app_ver)
         ctoken = _card_size.set((card_size_page(path), {}))
         ztoken = localday.set_offset(localday.offset_from_cookie(tz))
+        nztoken = localday.set_zone(localday.zone_from_cookie(zone))
         try:
             await self.app(scope, receive, send)
         finally:
+            localday.reset_zone(nztoken)
             localday.reset_offset(ztoken)
             _card_size.reset(ctoken)
             _theme.reset(token)

@@ -17,6 +17,8 @@ odd input gets a plain answer instead of an error page, and a connected app read
 - **Nothing to do.** No new settings and no database change.
 - **Days follow each member's browser.** The pages set a small cookie, `mtg_tzo`, that holds the
   browser's offset from UTC in minutes and nothing else. Without it the days are UTC days, as before.
+- **A second day cookie, `mtg_tz`,** holds the browser's time zone name ("Europe/London") and
+  nothing else, so entries from before a clock change land under their own day.
 - **A connected app sees less through the REST routes.** With an app's token, `/api/v1/me`
   answers with the member's name, account and how it signed in, and `/api/v1/activity` lists
   only that app's own entries. A member signed in with the browser sees what they saw before.
