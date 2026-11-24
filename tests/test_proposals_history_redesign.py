@@ -260,7 +260,7 @@ async def test_waiting_dashboard(stack: Stack) -> None:
         r = await b.http.get("/proposals", headers=NAV)
         body = r.text.split("<main")[1]
         for lab in ("Waiting for you", "Needs a look", "Only you can apply", "Last 7 days"):
-            assert re.search(rf"<span class='lab'>(<svg.*?</svg>)?{lab}</span>", body)
+            assert re.search(rf"<span class='lab'>(<svg.*?</svg>)?<span class='t'>{lab}</span></span>", body)
         # the apps the waiting ones came from are a line of the Waiting widget (the fifth widget,
         # Waiting by app, went in the 0.7.46 redesign)
         assert (

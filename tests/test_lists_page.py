@@ -238,7 +238,7 @@ async def test_default_categories_set_and_clear(member: Browser, stack: Stack) -
     assert r.status_code == 303 and _where(r) == "/lists/defaults?ok=defaults_cleared"
     assert ark.account.defaults[WHO][9003] == []
     page = (await member.http.get("/lists/defaults")).text
-    assert "No cards with default categories yet." in page
+    assert "<p class='t'>No cards with default categories yet</p>" in page
 
 
 async def test_default_categories_load_more_answers_rows(member: Browser, stack: Stack) -> None:
@@ -316,7 +316,7 @@ async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> N
     assert _where(r) == "/collection/wants?ok=pin_removed"
     assert ark.account.pins[WHO] == []
     page = (await member.http.get("/collection/wants")).text
-    assert "No pinned cards yet." in page and "Remove all…" not in page
+    assert "<p class='t'>No pinned cards yet</p>" in page and "Remove all…" not in page
 
 
 async def test_remove_all_pins_asks_then_removes_every_pin(member: Browser, stack: Stack) -> None:

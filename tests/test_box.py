@@ -297,8 +297,9 @@ def test_the_card_size_control_helper_is_shared_and_takes_the_toolbars_class() -
 def test_page_head_takes_the_pages_actions_and_load_more_is_a_real_link() -> None:
     head = ui.page_head("My decks", "Your decks on Archidekt.", actions_html="<button>New deck</button>")
     assert head == (
-        "<div class='ui-head phead'><h1>My decks</h1><span class='acts'><button>New deck</button></span>"
-        "</div><p class='ui-sub'>Your decks on Archidekt.</p>"
+        # the purpose line right under the title, before the actions (0.7.48 loop round)
+        "<div class='ui-head phead'><h1>My decks</h1><p class='ui-sub'>Your decks on Archidekt.</p>"
+        "<span class='acts'><button>New deck</button></span></div>"
     )
     assert ui.page_head("Admin") == "<div class='ui-head'><h1>Admin</h1></div>"
     more = ui.load_more("/collection?page=2", shown=25, total=112)

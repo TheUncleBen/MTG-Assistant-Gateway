@@ -488,6 +488,10 @@ details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.
    "Group by / day" on two lines in a filter row); a row of them wraps whole controls instead */
 .msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   overflow-wrap:normal;line-height:1.25}
+/* the browser's own text at about twice its size on a phone (the window under 20 of its ems): a
+   box on a row of its own still cannot hold some values, so there the value wraps, whole, rather
+   than hide behind "…" */
+@media (max-width:19.99em){ .msel-btn .msel-txt{white-space:normal} }
 /* above every panel or dialog a list can open from (the card search Filters panel is 80, the add
    sheet 90): the sheet's dim background must cover the panel, or a tap above the sheet reaches it */
 .msel-list{position:fixed;z-index:200;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
@@ -1445,18 +1449,26 @@ CSS += """
 /* The compact segmented switch (.ui-seg: Grid / List, S / M / L, a chart's range, a package's
    budget): one look with the place switch (.hubseg, docs/UI-STANDARD.md): a grey track with the
    chosen part as a raised pill, at the control height. A part is 44 px for a finger inside a 44 px
-   track: its pill is the part's padding box, inside a clear 3 px edge (the track's own padding on
-   .hubseg), and neighbours share 4 px of that edge, so pills sit 2 px apart as .hubseg's do.
+   track: its pill is the part's padding box, inside a clear edge (3 px to the track's edge, as
+   .hubseg's padding; 1 px to a neighbour, so pills sit 2 px apart as .hubseg's do and no part
+   lies over another).
    It keeps its own width wherever it sits: a toolbar row ends with it, nothing stretches it. */
-.ui-seg,.sizeseg,.spanel .segc,.budget{display:inline-flex;flex:none;gap:0;padding:0;border:0;
-  border-radius:12px;background:var(--seg-track);vertical-align:middle;width:fit-content;max-width:100%}
+/* its parts keep their words whole; where they cannot share one row (a 320 px phone at 200% text)
+   they take a second inside the track, and a part longer than the whole track wraps by word */
+.ui-seg,.sizeseg,.spanel .segc,.budget{display:inline-flex;flex:none;flex-wrap:wrap;gap:0;padding:0;
+  border:0;border-radius:12px;background:var(--seg-track);vertical-align:middle;width:fit-content;
+  max-width:100%}
 /* .3em above and below, as a text box: at 200% text the letters grew to the box's edges (polish AL2) */
 :is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label){position:relative;display:inline-flex;
-  align-items:center;justify-content:center;
+  align-items:center;justify-content:center;flex:none;max-width:100%;
   gap:.35rem;margin:0;min-width:44px;min-height:44px;height:auto;padding:.3em .7rem;
-  border:3px solid transparent;border-radius:12px;background:transparent padding-box;color:var(--text);
+  border:solid transparent;border-width:3px 1px;border-radius:10px / 12px;
+  background:transparent padding-box;color:var(--text);
   font:inherit;font-weight:700;line-height:1.2;box-shadow:none;cursor:pointer;filter:none}
-:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label) + :is(button,label){margin-left:-4px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label):first-child{border-left-width:3px;
+  border-top-left-radius:12px;border-bottom-left-radius:12px}
+:is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label):last-child{border-right-width:3px;
+  border-top-right-radius:12px;border-bottom-right-radius:12px}
 :is(.ui-seg,.sizeseg,.spanel .segc,.budget) > :is(button,label):hover{
   background:var(--surface-2) padding-box;color:var(--text);
   border-color:transparent}
@@ -1714,7 +1726,9 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-chips::-webkit-scrollbar{display:none}
 /* from 600 px (the Fold, a computer) the chips wrap onto as many rows as they need, every one
    whole and in view; only a phone keeps the one row that scrolls, with the fade (loop round #10) */
-@media (min-width:600px){ .ui-chips{flex-wrap:wrap;overflow-x:visible} }
+@media (min-width:600px){ .ui-chips{flex-wrap:wrap;overflow-x:visible}
+  /* a chip longer than the whole row (large text) wraps its words; it never pushes the page wide */
+  .ui-chips > .ui-chip{max-width:100%;white-space:normal} }
 /* more chips that way (static/topbar.js): the edge fades out instead of cutting a chip (N12) */
 .ui-chips.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
   mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
@@ -1780,8 +1794,13 @@ main.wrap:has(> .yhub, > .acc, > .lp-col, > .ui-split > .lp-col),
 .ui-tools .f{flex:1 1 auto;min-width:min(100%,9rem);display:flex;align-items:center;align-self:stretch}
 .ui-tools .f > :not(.msel-native){width:100%}  /* the hidden native select keeps its own size */
 .ui-tools select{margin:0}
-/* a phone: two a row, so a third takes a row of its own, whole (three a row cut "Group by day") */
-@media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)} }
+/* a phone: two a row. Three share one row (audit D31: never two and the third alone under them),
+   each as wide as its value needs, with tighter sides so three values fit a 360 px phone whole;
+   a value too long for that takes the next row whole, it is never cut or wrapped in its box */
+@media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)}
+  .ui-tools.n3 .f{flex:1 1 auto;min-width:0}
+  .ui-tools.n3 .f :is(.msel-btn,select){padding-left:.6rem;padding-right:calc(.45rem + 14px);
+    background-position:right .45rem center} }
 /* Balanced rows, by the toolbar's own width (an open side panel narrows it as a Fold does,
    polish R5; C-FINDINGS F13): while the search (20em) and all the filters (9.5em each, .5em
    between) do not share one row, the search takes a row of its own and the filters the next;

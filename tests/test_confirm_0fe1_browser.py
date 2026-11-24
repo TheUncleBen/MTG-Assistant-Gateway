@@ -899,6 +899,11 @@ CHIP_CUT = """() => {
   const sel = '.pill.tag > .t, .addbox button.tchip, ul.decklist .tags .pill, .cs .chips .nm, .lp-chip .nm';
   for (const e of document.querySelectorAll(sel)) {
     if (!e.getClientRects().length || !e.textContent.trim()) continue;
+    // a tag (.ui-tag, .pill) is one line: one longer than its row ends in "…" and carries its
+    // whole text in its title (docs/UI-STANDARD.md; the 0.7.48 loop round)
+    const tag = e.closest('.pill, .ui-tag');
+    if (tag && getComputedStyle(e).textOverflow === 'ellipsis' &&
+        (tag.title || '').trim() === tag.textContent.trim()) continue;
     if (e.scrollWidth > e.clientWidth + 1)
       out.push('"' + e.textContent.trim().slice(0, 40) + '" (' + e.tagName.toLowerCase() + '.' +
         e.className + ') shows ' + e.clientWidth + ' of ' + e.scrollWidth + 'px');
@@ -918,8 +923,9 @@ CHIP_CUT = """() => {
 )
 def test_a_chip_shows_its_whole_name(server: Server, site, width: int, root: bool, zoom, path: str) -> None:  # noqa: F811
     """At 320 px with 200% text a long tag's chip in the Binder list ended in an ellipsis
-    ("landfall-and-ra…"). A chip's name wraps onto more lines instead, here and on the decks list,
-    the card search's and the lists' chips."""
+    ("landfall-and-ra…") with nothing to say what it was. A chip's name wraps onto more lines
+    instead on the card search's and the lists' chips; a tag (the Binder list's, the decks list's)
+    is one line and a cut one carries its whole name in its title."""
     from playwright.sync_api import sync_playwright
 
     exe, sid, _ = site

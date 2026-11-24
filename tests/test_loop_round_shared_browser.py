@@ -85,16 +85,18 @@ SELECTS = """() => { const bs = [...document.querySelectorAll('main .ui-tools .m
 def test_a_selects_text_stays_on_one_line_and_the_filter_row_wraps_whole_controls(
     server: Server,  # noqa: F811
 ) -> None:
-    got = _each(server, (PHONE, FOLD), ("/history", "/admin/users", "/proposals"), SELECTS)
+    got = _each(server, (360, PHONE, FOLD), ("/history", "/admin/users", "/proposals"), SELECTS)
     for key, sels in got.items():
         assert sels, key
         for s in sels:
             assert s["lines"] == 1 and s["ws"] == "nowrap" and s["ell"] == "ellipsis", (key, s)
             # the row wraps a whole control before a choice is cut: every choice is whole
             assert s["cutBy"] <= 1, (key, s)
-    # History has three filters: on a phone the third takes a row of its own
-    tops = [s["top"] for s in got[(PHONE, "/history")]]
-    assert len(tops) == 3 and tops[0] == tops[1] < tops[2], tops
+    # History has three filters: on a phone they share one row, each as wide as its value needs
+    # (audit D31: never two and the third alone under them)
+    for width in (360, PHONE):
+        tops = [s["top"] for s in got[(width, "/history")]]
+        assert len(tops) == 3 and len(set(tops)) == 1, (width, tops)
 
 
 # --- #12 tags ------------------------------------------------------------------------------------

@@ -323,10 +323,11 @@ def test_the_admin_overview_facts_line_at_desktop_width(server: Server) -> None:
         browser, page, errors = _open(p, exe, server, sid, 1280)
         page.goto(f"{server.base}/admin", wait_until="networkidle")
         _no_dangling_dot(page, ".wdg .det .ui-dots")
-        # N13, then the no-cut-text rule (after c246456a): a long listing tag on the Decks list
-        # stays inside its row and shows its whole name on more lines. The seed's longest tag (56
-        # characters) fits its box with a narrower font (CI's), so one far too long for one line at
-        # any font is added: the test needs a tag that cannot fit.
+        # N13, then the tag rule (docs/UI-STANDARD.md; the 0.7.48 loop round): a long listing tag
+        # on the Decks list stays inside its row on one line, ends in "…" and carries its whole
+        # name in its title. The seed's longest tag (56 characters) fits its box with a narrower
+        # font (CI's), so one far too long for one line at any font is added: the test needs a tag
+        # that cannot fit.
         listing_row = server.ark._listing_row
 
         def row(d):
@@ -343,8 +344,9 @@ def test_the_admin_overview_facts_line_at_desktop_width(server: Server) -> None:
         for pill in pills.all():
             rect, row = pill.evaluate(RECT), pill.locator("xpath=ancestor::li[1]").evaluate(RECT)
             assert rect[0] >= row[0] and rect[2] <= row[2], (rect, row)
-            assert pill.evaluate("e => e.scrollWidth <= e.clientWidth"), rect
-            if rect[4] > 26:
+            assert rect[4] <= 26, rect  # one line
+            if pill.evaluate("e => e.scrollWidth > e.clientWidth + 1"):
+                assert pill.get_attribute("title").strip() == pill.evaluate("e => e.textContent.trim()")
                 wrapped += 1
         assert wrapped >= 1
         assert errors == []

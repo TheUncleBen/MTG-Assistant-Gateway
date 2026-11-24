@@ -928,7 +928,6 @@ PACKAGE_FIELDS_CSS = """
   font-weight:400}
 .mtgbox .body .field .budget label,.dx-box .body .field .budget label{display:inline-flex;margin:0;
   font-weight:700}
-.mtgbox .body .field .budget label + label,.dx-box .body .field .budget label + label{margin-left:-4px}
 .np-box .body .field .lbl{display:block;font-weight:700;margin:0 0 .25rem}
 .np-box .body .field + .field{margin-top:.75rem}
 .np-box .body .dx-switch{margin-top:.75rem;min-height:44px}

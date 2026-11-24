@@ -221,7 +221,9 @@ async def test_a_member_with_no_assistant_yet(stack: Stack) -> None:
     page = (await b.http.get("/account/assistants")).text
     await b.aclose()
     assert "Default for new assistants" in page and MANUAL in page
-    assert "No assistant is connected to your account yet." in page and "href='/install'" in page
+    # the empty state (ui.empty): one bold line, one muted line, the button to Guided setup
+    assert "<p class='t'>No assistant is connected to your account yet</p>" in page
+    assert "href='/install'" in page
     assert "Disconnect all" not in page
 
 

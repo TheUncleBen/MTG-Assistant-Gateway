@@ -41,7 +41,9 @@ def test_a_head_with_actions_writes_its_purpose_line_right_after_the_title() -> 
 
 def test_a_chip_row_scrolls_only_below_600px() -> None:
     assert "flex-wrap:nowrap" in _rule(".ui-chips")
-    assert "@media (min-width:600px){ .ui-chips{flex-wrap:wrap;overflow-x:visible} }" in CSS
+    assert "@media (min-width:600px){ .ui-chips{flex-wrap:wrap;overflow-x:visible}\n" in CSS
+    # a chip longer than the whole row wraps its words, it does not push the page wide
+    assert ".ui-chips > .ui-chip{max-width:100%;white-space:normal} }" in CSS
 
 
 # --- #11 selects ---------------------------------------------------------------------------------

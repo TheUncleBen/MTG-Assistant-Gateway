@@ -174,8 +174,10 @@ details.gnav > summary::-webkit-details-marker{display:none}
      the page's 1200 px together, so a wide window has the same margin on both sides */
   .guide{grid-template-columns:min(16rem,30%) minmax(0,44rem);gap:1.5rem;justify-content:center}
   .guide .gside{position:sticky;top:4rem;max-height:calc(100vh - 5rem);overflow:auto;padding-right:.25rem}
-  .gside .gsrow{flex-wrap:wrap}
-  .gside .gsrow input[type=search],.gside .gsrow .btn{flex:1 1 100%}
+  /* the contents column is narrow at large text: the field's sides give way so its hint
+     ("Search") stays whole beside the magnifier */
+  .gside .ui-search{--glass:.45rem}
+  .gside .ui-search > input{padding-right:.4rem}
   details.gnav > summary{display:none}
 }
 """
