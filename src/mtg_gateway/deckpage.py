@@ -1017,7 +1017,7 @@ def toolbar_html(
         f"data-backup-default='{1 if backup_default else 0}'>"
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
         # "3 sol ring" sets the count; the full name of the control is its label
-        "<input id='quick' type='text' name='q' placeholder='Name to add' data-suggest='cards' "
+        "<input id='quick' type='text' name='q' placeholder='Name' data-suggest='cards' "
         "data-suggest-rich data-suggest-qty data-suggest-submit enterkeyhint='search' "
         "autocomplete='off' aria-describedby='quick-help'>"
         "<span id='quick-help' class='sr-only'>Type a card name, or a count and a name such as 3 Sol "
@@ -3311,8 +3311,16 @@ def deck_list_controls_html(
     )
 
 
+# the phone add field's + (deckpage's toolbar rules): a mid grey stroke, 3:1 or more on both themes
+QUICK_PLUS = (
+    ":root{--quick-plus:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
+    "viewBox='0 0 24 24' fill='none' stroke='%23858585' stroke-width='2.5' stroke-linecap='round'%3E"
+    "%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E\")}"
+)
+
 DECK_CSS = (
-    """
+    QUICK_PLUS
+    + """
 /* deck banner (cardBanner / deckHeaderInfo) */
 .banner{position:relative;margin:0 calc(-1 * var(--gutter)) 1rem;color:#fff;isolation:isolate;z-index:2}
 /* the banner meets the top bar at every width (the 0.7.46 Fold mockup): it takes back the page's
@@ -3554,9 +3562,12 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
      which keeps its own width; under 360 px the field has the first row to itself and View fills
      the next one beside ⋮ */
   .toolbar.compact form.quick{flex:1 1 9rem;min-width:0;margin:0}
-  /* the label is for a screen reader here; the field's placeholder says what it is for */
+  /* the label is for a screen reader here (shown, it set the field's row apart from View and ⋮);
+     a + at the field's start says it adds (a mid grey: 3:1 or more on both themes' fields) */
   .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0)}
+  .toolbar.compact #quick{padding-left:32px;background-repeat:no-repeat;background-position:10px center;
+    background-size:16px 16px;background-image:var(--quick-plus)}
   .toolbar.compact .quickrow{flex-wrap:nowrap}
   /* Add a card here's chip on a phone: the form takes the row and the box wraps under the chip
      when both don't fit, so the box keeps room to type in */
