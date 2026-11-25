@@ -430,3 +430,27 @@ def test_the_category_sort_key_is_numeric_aware_and_ignores_case() -> None:
     names = ["Ramp 10", "ramp 2", "Draw", "Boardwipe", "ramp 1", "Zombies"]
     want = ["Boardwipe", "Draw", "ramp 1", "ramp 2", "Ramp 10", "Zombies"]
     assert sorted(names, key=views.category_sort_key) == want
+
+
+async def test_the_commander_bracket_is_off_unless_the_deck_is_commander(stack: Stack) -> None:
+    """0.7.48 loop round: on a deck with no format (or any but Commander) the bracket choice was
+    on, and a bracket picked there came back as "nothing would change" (the save drops a bracket
+    off Commander). The choice is drawn off, with its "Commander only" line, until it is."""
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        assert "<select id='edh_bracket' name='edh_bracket' disabled>" in page
+        assert "Commander only." in page
+        assert "<select id='deck_format' name='deck_format'>" in page  # the format stays on
+    finally:
+        await b.aclose()
+
+
+async def test_a_commander_decks_bracket_stays_on(stack: Stack) -> None:
+    stack.ark.decks[42]["deckFormat"] = 3
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        assert "<select id='edh_bracket' name='edh_bracket'>" in page
+    finally:
+        await b.aclose()

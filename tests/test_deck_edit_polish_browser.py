@@ -425,6 +425,45 @@ def test_leaving_deck_settings_while_a_save_runs_asks_first(server: Server) -> N
         browser.close()
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+def test_the_commander_bracket_turns_on_with_the_commander_format(server: Server, width: int) -> None:
+    """0.7.48 loop round: the bracket choice was on for a deck with no format, and a bracket
+    picked there came back refused ("nothing would change"). It is off until the Format choice
+    is Commander, turns on with it, saves, and goes off again with the format."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    server.ark.decks[42].pop("deckFormat", None)  # no format set, as the review's seed deck
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
+        bracket = page.locator("#edh_bracket")
+        shown = page.locator("#ds-main .ui-row:has(#edh_bracket) button.msel-btn")
+        assert bracket.is_disabled()
+        assert shown.first.is_disabled()  # the page's own choice button too, not only the select
+        page.locator("#deck_format").select_option("commander", force=True)
+        page.locator(".toast .msg", has_text="Saved to Archidekt").wait_for(timeout=8000)
+        assert server.ark.decks[42]["deckFormat"] == 3
+        assert bracket.is_enabled() and shown.first.is_enabled()
+        page.locator(".toast .close").click()
+        bracket.select_option("1", force=True)
+        page.wait_for_function(_WAS % ("edh_bracket", "1"), timeout=8000)
+        assert server.ark.decks[42]["edhBracket"] == 1
+        assert page.locator(".toast.error").count() == 0
+        page.locator(".toast .close").click()
+        page.locator("#deck_format").select_option("standard", force=True)
+        page.wait_for_function(_WAS % ("edh_bracket", ""), timeout=8000)
+        assert server.ark.decks[42]["edhBracket"] is None
+        assert bracket.is_disabled() and bracket.input_value() == ""
+        # Undo puts Commander back, and the bracket choice with it
+        page.locator(".toast button", has_text="Undo").click()
+        page.wait_for_function(_WAS % ("deck_format", "commander"), timeout=8000)
+        assert bracket.is_enabled()
+        assert errors == []
+        browser.close()
+
+
 # -- Quick add adds one copy in place (owner decision C4) ----------------------------------------
 SHOTS = Path(os.environ.get("MTG_SHOTS") or tempfile.gettempdir()) / "wp-deck-shots"
 SHOTS.mkdir(parents=True, exist_ok=True)
