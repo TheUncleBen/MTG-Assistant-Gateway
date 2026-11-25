@@ -322,6 +322,7 @@ def test_the_deck_pills_share_one_row_on_a_phone() -> None:
     """On a phone the deck's pills fit without crowding the banner. They went two by two; since the
     deck page's phone top (mockup screen 5) they share one row, each its icon and count at a 44 px
     tap width, the words kept for a screen reader, and a confirmation takes the row under them.
+    Since the 0.7.48 loop round each shows its word too, in a grid of as many as fit.
     Edit / Clone / Test / More are equal buttons in one row above them."""
     from mtg_gateway.deckpage import DECK_CSS
 
@@ -329,14 +330,15 @@ def test_the_deck_pills_share_one_row_on_a_phone() -> None:
     # the phone block runs to its last rule, the confirmation's row (a container rule inside it
     # closes with "} }" too)
     phone = css.split("@media (max-width:599.98px){ .banner .social{")[1]
-    phone = phone.split(".banner .social .confirm{flex:1 1 100%} }")[0]
-    # equal chips, two and two when the row is narrow (large text), never three and one (P-17)
-    assert phone.startswith("display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;")
-    assert ".banner .social .soc{flex:1 1 0}" in phone
-    assert "@container (max-width:20em){ .banner .social .soc{flex:0 1 calc(50% - .2rem)} }" in phone
-    assert ".banner .social .soc{justify-content:center;min-width:44px;height:36px;" in phone
-    assert ".banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;" in phone
-    assert ".banner .social .confirm{flex:1 1 100%} }" in css
+    phone = phone.split(".banner .social .confirm{flex:1 1 100%;grid-column:1 / -1} }")[0]
+    # each button with its icon and its word (0.7.48 loop round: icons alone did not say which was
+    # which), as many to a row as fit at 8.5rem, one to a row when large text needs it
+    assert phone.startswith(
+        "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));"
+    )
+    assert ".banner .social .soc{justify-content:center;min-width:0;min-height:40px;" in phone
+    assert "position:absolute;width:1px" not in phone
+    assert ".banner .social .confirm{flex:1 1 100%;grid-column:1 / -1} }" in css
     assert (
         ".banner .controls .primary{display:grid;width:100%;gap:.4rem; "
         "grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}"

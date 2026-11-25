@@ -26,8 +26,6 @@ def test_the_way_back_is_one_helper_with_one_look() -> None:
     assert "<a class='ui-cap ui-back' href='/p'>" in panel and "← " not in panel
     # no page draws a way back of its own: the old looks are gone from the code
     for path in list(SRC.glob("*.py")) + list((SRC / "static").glob("*.js")):
-        if path.name in ("deckpage.py", "companion_tools.py", "alerts_page.py"):  # the deck thread's
-            continue
         text = path.read_text()
         assert "bn-back" not in text and "yback" not in text, path.name
         assert "← Back" not in text, path.name

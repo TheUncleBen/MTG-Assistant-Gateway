@@ -92,6 +92,22 @@
 (function () {
   "use strict";
   var main = document.getElementById("ds-main");
+  // the Commander bracket: only a Commander deck has one (companion_settings.py draws the choice
+  // off for any other format), so it turns on and off with the Format choice, before that change
+  // is saved (capture: ahead of the save below) and whenever a script sets the format back
+  var fmtSel = main && main.querySelector("#deck_format"), bracketSel = main && main.querySelector("#edh_bracket");
+  function syncBracket() {
+    if (!fmtSel || !bracketSel) return;
+    var off = fmtSel.value !== "commander";
+    if (bracketSel.disabled === off) return;
+    bracketSel.disabled = off;
+    if (window.MtgSelect && window.MtgSelect.refresh) window.MtgSelect.refresh(bracketSel);
+  }
+  if (main) {
+    main.addEventListener("change", syncBracket, true);
+    main.addEventListener("input", syncBracket, true);  // a draft put back (static/draft.js)
+    syncBracket();
+  }
   if (!main || !window.fetch || !window.FormData || !window.URLSearchParams) return;
   var Menu = window.MtgMenu, Box = window.MtgBox;
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -131,6 +147,7 @@
     if (c.type === "checkbox") c.checked = v === true || v === "1";
     else c.value = v;
     if (window.MtgSelect && c.tagName === "SELECT" && window.MtgSelect.refresh) window.MtgSelect.refresh(c);
+    if (c === fmtSel) syncBracket();  // a refused change or an Undo puts the format back
   }
   function mainField(c) { return c && c.name && !/^(csrf|was_|json)/.test(c.name) && c.type !== "hidden"; }
   var mainSaved = {};  // field name -> the value saved last, for the Undo

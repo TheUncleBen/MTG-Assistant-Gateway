@@ -257,7 +257,7 @@ def test_report_trends_fit_and_read(server: Server, width: int, scheme: str) -> 
     in the section keeps 4.5:1 in both themes."""
     from playwright.sync_api import sync_playwright
 
-    from .test_editor_leave_browser import CONTRAST
+    from .page_checks import CONTRAST
     from .test_history_page import GOLDFISH_PRECON
 
     exe = _chromium_path()
@@ -392,7 +392,7 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
 
     from playwright.sync_api import sync_playwright
 
-    from .test_editor_leave_browser import CONTRAST
+    from .page_checks import CONTRAST
 
     exe = _chromium_path()
     if exe == "missing":
@@ -460,7 +460,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
 
     from playwright.sync_api import sync_playwright
 
-    from .test_editor_leave_browser import CONTRAST
+    from .page_checks import CONTRAST
 
     exe = _chromium_path()
     if exe == "missing":
@@ -579,8 +579,8 @@ def test_saved_descriptions_and_remove_fit_and_read(
     from mtg_gateway import card_models
     from mtg_gateway.card_models import KeptModels
 
+    from .page_checks import CONTRAST
     from .test_card_models import _Store
-    from .test_editor_leave_browser import CONTRAST
 
     exe = _chromium_path()
     if exe == "missing":
@@ -718,7 +718,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
     import httpx
     from playwright.sync_api import sync_playwright
 
-    from .test_editor_leave_browser import CONTRAST
+    from .page_checks import CONTRAST
     from .test_forge import DECK_TEXT, FakeForge
     from .test_text_zoom_browser import ROOT_200, TEXT_200
 

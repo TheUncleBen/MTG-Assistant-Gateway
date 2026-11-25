@@ -53,7 +53,6 @@ PAGES: dict[str, tuple[str, str, bool]] = {
     "decks": ("/decks", "alice", True),
     "deck": ("/decks/42", "alice", True),
     "deck_stacks": ("/decks/42?view=stacks", "alice", False),
-    "deck_editor": ("/decks/42/edit", "alice", False),
     "deck_settings": ("/decks/42/settings", "alice", False),
     "new_deck": ("/decks/new", "alice", False),
     "proposals_list": ("/proposals", "alice", False),

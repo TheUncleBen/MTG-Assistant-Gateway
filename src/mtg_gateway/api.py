@@ -282,14 +282,17 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/decks/{deck_id}/edit", "POST", write=True)
     async def edit_deck(request: Request, who: Caller) -> Response:
         """One edit made on the deck page itself (the card menu's quantity and category items,
-        the viewer's buttons, a drag between stacks). It runs the proposals path exactly: propose,
+        the viewer's buttons, a drag between stacks, the Add a card preview, a pasted list or a
+        scan added in one go). It runs the proposals path exactly: propose,
         the hand-edit confirmation rule, apply with its snapshot as the member's own press; then
         the deck is read again from Archidekt and the answer carries the touched rows, the
         freshly computed checks and the re-rendered Legality chip and Deck checks panel, so the
         page redraws in place. Body: ``{changes: [1..40]}`` (``confirmed: true`` after a
         needs_confirm answer) or ``{proposal_id, version}`` to apply the version of the proposal a
-        needs_confirm answer named; ``{refresh: true, names: [...]}`` only reads the deck again
-        (the page's follow-up when an answer was stale). Browser session only; apps propose
+        needs_confirm answer named; ``archidekt_backup: true`` with either asks for the backup copy
+        on Archidekt (the batch add's tick; every other save goes without one);
+        ``{refresh: true, names: [...]}`` only reads the deck again (the page's follow-up when an
+        answer was stale). Browser session only; apps propose
         through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
         from .deckpage import (
@@ -404,6 +407,9 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         kept: dict[str, Any] = {}
         one_click.set(kept)
         hand_save.set(True)  # the member's own click: its calls start from the page burst
+        # the page's batch add (a pasted list, a scan) with its "Back up on Archidekt first" tick:
+        # only an explicit true asks for the copy; every one-click change goes without it
+        want_backup = data.get("archidekt_backup") is True
         pid = data.get("proposal_id")
         answer = pid is not None
         if answer:
@@ -434,7 +440,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         else:
             # the deck page's Undo of a removal puts back the row's flags (row_flags; nobody else)
             p = await decks.propose(who.sub, deck_id, data.get("changes"), row_flags=True)
-            decks.keep_no_backup(who.sub, p["proposal_id"])  # also when it is applied later
+            if not want_backup:
+                decks.keep_no_backup(who.sub, p["proposal_id"])  # also when it is applied later
             why = modes.hand_edit_confirm("edit", p.get("rows"))
             if why and data.get("confirmed") is not True:
                 pid = p["proposal_id"]
@@ -454,13 +461,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             return ok({"applied": False, "proposal_id": pid, "review_url": f"/proposals/{pid}"}, 201)
         # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
         # gateway's snapshot but not the extra copy on Archidekt: one deck copy per click
-        # would fill the backup folder and slow each save by paced Archidekt writes.
+        # would fill the backup folder and slow each save by paced Archidekt writes. A batch add
+        # with its backup box ticked asks for the copy (made only where the admin turned them on).
         try:
             result = await decks.apply(
                 who.sub,
                 pid,
                 via="browser",
-                archidekt_backup=False,
+                archidekt_backup=want_backup,
                 version=data.get("version") if answer else None,
             )
         except DeckError as exc:

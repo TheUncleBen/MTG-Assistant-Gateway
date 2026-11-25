@@ -7,36 +7,33 @@ import json
 import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import card_models_view, deck_stats, prefs, ui
 from .archidekt import Deck, parse_deck
-from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
-from .cardsearch_view import watched_name_list, watched_names
+from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_text_response
 from .companion import (
     DECK_CSP,
     DECK_ERR_MESSAGES,
     DECKS_JSON_TIMEOUT,
-    EDITOR_CSP,
     TEXT_PLAIN,
     _filename,
-    _json_for_html,
 )
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     COMPARE_CSS,
     GOLDFISH_CSS,
     GOLDFISH_GUIDE_PREF,
-    card_image,
     compare_page_html,
     deck_check_html,
     deck_title,
     goldfish_page_html,
     precon_by_label,
 )
-from .decks import DeckError, current_client, is_busy, is_outside_category, split_label
+from .decks import DeckError, current_client, is_busy, split_label
 from .digits import is_digits
 from .history_view import DELETED_NOTICES
 from .pages import (
@@ -55,14 +52,11 @@ from .reports_page import Query as ReportsQuery
 from .reports_page import in_chip as reports_in_chip
 from .reports_page import matches as reports_matches
 from .theme import (
-    card_size_control,
-    icon,
-    time_text,
-)
-from .theme import (
     esc as _esc,
 )
-from .views import auto_category, cards_by_category
+from .theme import (
+    time_text,
+)
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -93,232 +87,22 @@ def add_deck_tool_routes(
     page = h.page
     s = h.s
 
-    # -- browser editor ---------------------------------------------------------
+    # -- the old deck editor's address ---------------------------------------------
     @server.custom_route("/decks/{deck_id}/edit", methods=["GET"], include_in_schema=False)
     async def edit_page(request: Request) -> Response:
-        """The deck editor: quantities, categories, finishes, printings and additions are saved to
-        Archidekt in one go (as one proposal applied at once, with its snapshot; a big removal asks
-        first). Own decks only; the script does the work, the
-        server hands it the deck, the categories and anything to prefill (a scan session or a
-        Quick add name)."""
-        from . import refusals  # here, so this file's import block stays as the other tracks have it
-
+        """The deck editor's old address. 0.7.48 folded the editor into the deck page itself (Add
+        a card with its preview, every card's menu, drags between categories, More ways to add),
+        so the address opens the deck page: ``add=`` opens the named card's preview there and
+        ``scan_session=`` that scan's review (static/deck.js). An old ``#card-…`` or ``#cat-…``
+        part is kept by the browser but names nothing on the deck page, which opens at its top."""
         deck_id = request.path_params["deck_id"]
-        sub, sid = browser_session(state, request)
-        if not sub:
-            return login_redirect_here(request, f"/decks/{deck_id}/edit")
-        try:
-            # the deck as its page last read it (decks.page_deck_live): a change the gateway sent
-            # to it forgets that read, and the save checks the deck on Archidekt itself
-            deck, how = await decks.page_own_deck(sub, deck_id)
-        except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Edit deck"):
-                return busy
-            return page(
-                "Cannot edit this deck",
-                f"<div class='panel'><p>{_esc(exc)}</p>"
-                f"<a class='btn' href='/decks/{_esc(deck_id)}'>Back to the deck</a></div>",
-                sub=sub,
-                sid=sid,
-                status={"not_found": 404, "forbidden": 403}.get(exc.kind, 400),
-            )
-
-        def card_json(c: Any) -> dict[str, Any]:
-            return {
-                "name": c.name,
-                "quantity": c.quantity,
-                "categories": c.categories,
-                "modifier": c.modifier or "Normal",
-                "set_code": c.set_code,
-                "collector_number": c.collector_number,
-                "image": card_image(c, "small"),
-                "mana_cost": c.mana_cost,
-                "price": c.price,
-                "type_line": c.type_line,
-                "oracle_text": c.oracle_text,
-                "pt": f"{c.power}/{c.toughness}" if c.power or c.toughness else "",
-                "loyalty": c.loyalty,
-                "faces": [
-                    {
-                        "name": f["name"],
-                        "mana": f["mana_cost"],
-                        "type": f["type_line"],
-                        "text": f["text"],
-                        "pt": f"{f['power']}/{f['toughness']}" if f["power"] or f["toughness"] else "",
-                        "loyalty": f["loyalty"],
-                    }
-                    for f in c.faces
-                ],
-                "in_deck": deck.in_deck(c),
-                "zone": "main" if deck.in_deck(c) else "side",
-                "auto_category": auto_category(c),
-            }
-
-        grouped = cards_by_category(deck)
-        groups = [
-            {"name": name, "total": sum(c.quantity for c in cards), "cards": [card_json(c) for c in cards]}
-            for name, cards in grouped
-        ]
-        categories = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
-        for name, _cards in grouped:
-            if name not in categories:
-                categories.append(name)
-        # categories a card added under them would sit outside the deck in (Maybeboard, Sideboard
-        # or another the deck does not count): such an add goes to the maybeboard or sideboard
-        # with that category, as decks.side_category_for writes it
-        outside = [c for c in categories if is_outside_category(deck, c)]
-        prefill: list[dict[str, Any]] = []
-        quick = (request.query_params.get("add") or "").strip()[:200]
-        if quick:
-            prefill.append({"action": "add", "card_name": quick, "quantity": 1})
-        picker = ""
-        scan_ref = (request.query_params.get("scan_session") or "").strip()[:80]
-        if state.scan is not None:
-            from .scan.service import ScanError
-
-            if scan_ref:
-                try:
-                    prefill += list(state.scan.find_session(sub, scan_ref).get("changes") or [])
-                except ScanError:
-                    pass
-            sessions = state.scan.list_sessions(sub)[:12]
-            if sessions:
-                opts = "".join(
-                    f"<option value='{_esc(r['id'])}'" + (" selected" if r["id"] == scan_ref else "") + ">"
-                    f"{_esc(r['name'])}</option>"
-                    for r in sessions
-                )
-                picker = (
-                    "<form method='get' class='scanpick field'>"
-                    "<label for='scan_session'>Add cards from a scan</label>"
-                    "<span class='sel'><select id='scan_session' name='scan_session'>"
-                    f"<option value=''>none</option>{opts}</select></span>"
-                    "<button>Load</button></form>"
-                )
-        config = {
-            "deckId": deck.id,
-            "deckName": deck.name,
-            "csrf": _csrf(s, sid),
-            "cards": [card_json(c) for c in deck.cards],
-            "groups": groups,
-            "categories": categories,
-            "prefill": prefill,
-            "canCategorise": True,
-            "writesEnabled": s.writes_enabled,
-            "maxChanges": 40,
-            "sideCategory": deck.side_category(),
-            "outsideCategories": outside,
+        keep = {
+            k: (request.query_params.get(k) or "").strip()[:200]
+            for k in ("add", "scan_session")
+            if (request.query_params.get(k) or "").strip()
         }
-        side_name = _esc(deck.side_category())
-        # Each suggestion in the add box has the card menu (static/cardmenu.js); with
-        # watchlists on also a Watch button, "On your watchlist" for the names the member watches already
-        watch_attr = " data-suggest-menu"
-        if state.prices is not None:
-            watched = watched_name_list(watched_names(state.prices.watched_cards(sub)))[:200]
-            watch_attr = f" data-suggest-watch='{_esc(json.dumps(watched))}'"
-        body = (
-            _checking(deck, how)
-            + f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
-            "<div id='editor' class='editor'>"
-            "<section class='panel edithead'><div class='row'><div class='info'>"
-            f"<div class='kicker'>Editing</div><h1 class='deckname'>{_esc(deck.name)}</h1></div>"
-            f"<a class='btn' href='/decks/{_esc(deck.id)}'>{icon('x')} Close editor</a></div>"
-            + (
-                ""
-                if s.writes_enabled
-                # The writes-off line reads as everywhere else
-                else f"<p class='notice warn'>{refusals.WRITES_OFF_STATE}; "
-                "what you save stays waiting and can be applied once writes are switched on.</p>"
-            )
-            + "</section>"
-            "<div class='editbar' role='region' aria-label='Pending changes'>"
-            "<button type='button' class='btn-primary review' disabled>"
-            f"{icon('check')} <span class='label'>Save changes</span></button>"
-            f"<button type='button' class='undo' disabled title='Undo (Ctrl+Z)'>{icon('undo')} "
-            "<span class='bl'>Undo</span></button>"
-            "<button type='button' class='redo' disabled title='Redo (Ctrl+Shift+Z)'>"
-            f"{icon('redo')} <span class='bl'>Redo</span></button>"
-            "<span class='count muted'>No changes yet</span>"
-            + (
-                # The extra copy on Archidekt is the member's choice per save; the gateway's own
-                # snapshot (Restore under History) is always kept. Unticked unless the admin Settings
-                # page says otherwise ("Backup box ticked by default", off by default).
-                "<label class='backup'><input type='checkbox' name='archidekt_backup'"
-                + (" checked" if state.live.get("archidekt_backup_box_default") else "")
-                + ">Also keep a backup copy on Archidekt</label>"
-                if state.live.get("archidekt_backups")
-                else ""
-            )
-            # the card size every view with card pictures shares (R-175): the rows' thumbnails
-            + card_size_control(cls="field cardsize")
-            + "<p class='status' role='status'></p></div>"
-            "<details class='panel pendingbox'><summary>Pending changes <b class='n zero'>0</b></summary>"
-            "<div class='pending'></div><p class='muted small limit'></p></details>"
-            # One search bar that adds (the "Search bar" option): chips pick where a card goes,
-            # Enter adds it, "3 sol ring" adds three, and the printings of the highlighted card show
-            # beside the list on wide screens (static/companion.js).
-            "<section class='panel addbox'><h2>Add a card</h2>"
-            + picker
-            + f"<form class='addcard' data-draft='editor-add:{_esc(deck.id)}'>"
-            "<div class='targets' role='group' aria-label='Add to'>"
-            "<button type='button' class='tchip on' data-cat='' data-zone='main' aria-pressed='true'>"
-            "Auto</button>"
-            + "".join(
-                f"<button type='button' class='tchip' data-cat='{_esc(c)}' "
-                f"data-zone='{'side' if c in outside else 'main'}' "
-                f"aria-pressed='false' title='The {_esc(c)} category'>{_esc(c)}</button>"
-                # the side zone's own category has the zone chip below, not a second chip of the
-                # same name
-                for c in categories
-                if c.casefold() != deck.side_category().casefold()
-            )
-            + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false' "
-            f"aria-label='{side_name} zone' title='The {side_name} zone: kept outside the deck'>"
-            f"{side_name}</button></div>"
-            "<div class='field grow'><label for='addname'>Name</label>"
-            "<input id='addname' type='text' name='name' data-suggest='cards' data-suggest-submit "
-            f"data-suggest-rich data-suggest-qty{watch_attr}{ui.hint_attrs('Type a name|Name')} "
-            "autocomplete='off' "
-            "required aria-describedby='addname-help'>"
-            "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
-            f"<div class='field go'><button>{icon('plus')} Add</button>"
-            "<label class='foil'><input type='checkbox' name='foil'> Foil</label></div>"
-            "<input type='hidden' id='addcat' name='addcat' value=''>"
-            "<input type='hidden' id='addzone' name='addzone' value='main'>"
-            "<p class='muted small addhelp' id='addname-help'>Enter adds one; “3 sol ring” adds three.</p>"
-            "<p class='addstatus muted small' role='status' aria-live='polite'></p></form>"
-            "<details class='pastebox'><summary class='fold-btn'>Paste a list</summary>"
-            f"<form class='pastelist' data-draft='editor-paste:{_esc(deck.id)}'>"
-            "<label for='pastetext'>One card per line, with a count in front "
-            "(“2 Lightning Bolt”)</label>"
-            "<textarea id='pastetext' name='text' rows='6' maxlength='20000' "
-            "placeholder='4 Lightning Bolt&#10;1 Sol Ring'></textarea>"
-            f"<div class='actions'><button>{icon('plus')} Add these cards</button>"
-            "<span class='pastestatus muted small' role='status'></span></div></form></details>"
-            "<ul class='erows added'></ul></section>"
-            "<div class='cats existing'></div>"
-            "</div>"
-            + "".join(
-                f"<template id='icon-{n}'>{icon(n)}</template>"
-                for n in ("minus", "plus", "more", "x", "swap")
-            )
-            + "<script src='/static/cardview.js' defer></script>"
-            # the printing picker the deck page's card menu shares (Change printing, the add
-            # box's printings)
-            + "<script src='/static/printpick.js' defer></script>"
-            + "<script src='/static/companion.js' defer></script>"
-        )
-        return page(
-            f"Edit {deck.name}",
-            body,
-            sub=sub,
-            sid=sid,
-            csp=EDITOR_CSP,
-            heading=False,
-            deck_css=True,
-            two_pane=True,
-            current="/decks",
-        )
+        target = f"/decks/{quote(str(deck_id), safe='')}" + (f"?{urlencode(keep)}" if keep else "")
+        return RedirectResponse(target, status_code=303)
 
     @server.custom_route("/decks/{deck_id}/export", methods=["GET"], include_in_schema=False)
     async def export_page(request: Request) -> Response:

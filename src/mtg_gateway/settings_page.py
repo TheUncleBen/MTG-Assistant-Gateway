@@ -107,9 +107,9 @@ TEXT: dict[str, tuple[str, str]] = {
     "archidekt_backups": (
         "Keep a backup copy on Archidekt",
         "Before an edit is applied, the deck is copied into the member's private backup folder on Archidekt "
-        "(not for the deck page's own saves, Card search's Add to deck, or the deck editor's save with its "
-        "box unticked). An edit within 15 minutes of the deck's last copy, or with the deck unchanged "
-        "since, shares that copy instead of making another.",
+        "(not for the deck page's own saves, Card search's Add to deck, or a pasted list or scan added on "
+        "the deck page with its box unticked). An edit within 15 minutes of the deck's last copy, or "
+        "with the deck unchanged since, shares that copy instead of making another.",
     ),
     "archidekt_backup_folder": (
         "Backup folder on Archidekt",
@@ -125,7 +125,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "archidekt_backup_box_default": (
         "Backup box ticked by default",
-        "Whether the deck editor's “Also keep a backup copy on Archidekt” box starts ticked.",
+        "Whether the “Also keep a backup copy on Archidekt” box of the deck page's Paste a list and Add "
+        "from a scan starts ticked.",
     ),
     "snapshots_per_deck": (
         "Restore points kept per deck",

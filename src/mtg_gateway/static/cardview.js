@@ -6,7 +6,7 @@
    when the Rulings button is pressed, the rulings (/cards/api/rulings). Mana and rules symbols are the gateway's own
    glyphs (mana.py puts the SVG sprite on every page; this draws the same discs). A dialog with
    a focus trap, Escape, a click on the backdrop and the phone's Back button all close it.
-   Loaded after static/mana.js (on every page) and before deck.js, companion.js, compare.js and
+   Loaded after static/mana.js (on every page) and before deck.js, compare.js and
    collection.js, which call window.MtgCardView. */
 (function () {
   "use strict";

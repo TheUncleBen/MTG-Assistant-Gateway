@@ -214,7 +214,7 @@ def test_no_page_renders_a_datalist(server: Server) -> None:
             "accept_risk": "1",
         },
     )
-    for path in ("/", "/search", "/decks/42", "/decks/42/edit", "/decks/42/compare", "/collection"):
+    for path in ("/", "/search", "/decks/42", "/decks/42/compare", "/collection"):
         text = h.get(path).text
         assert "<datalist" not in text, path
         assert "data-suggest=" in text, path

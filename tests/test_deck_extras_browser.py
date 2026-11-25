@@ -136,14 +136,14 @@ def _close_box(page) -> None:
 
 def _open_from_deck_menu(page, text: str, box_id: str):
     """Opens a deck box the way the page offers it (mockup screen 2): Add a package… from the
-    toolbar's ⋮, the Registration PDF from the Export box's Files pane, a contest entry or
-    withdrawal from the Contests… box, the rest from the banner's ⋮."""
+    toolbar's More ways to add (the ⋮ on a phone), the Registration PDF from the Export box's
+    Files pane, a contest entry or withdrawal from the Contests… box, the rest from the banner's ⋮."""
     if text == "Add a package…":
-        if page.locator(".toolbar .addpkg").is_visible():  # wider than a phone: the button
-            page.locator(".toolbar .addpkg").click()
+        if page.locator(".toolbar .addways").is_visible():  # wider than a phone: More ways to add
+            page.locator(".toolbar .addways").click()
         else:
             page.locator(".toolbar .toolmore").click()
-            page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
+        page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
     elif text == "Registration PDF…":
         page.locator(".banner .deckmenu").click()
         page.locator(".ctxmenu [role=menuitem]", has_text="Export…").click()

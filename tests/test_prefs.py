@@ -286,7 +286,6 @@ async def test_each_page_keeps_its_own_card_size(stack: Stack) -> None:
             page
         )
         assert "data-card-size=s data-card-size-page=deck" in (await b.http.get("/decks/42")).text
-        assert "data-card-size-page=editor" in (await b.http.get("/decks/42/edit")).text
         assert "data-card-size-page=collection" in (await b.http.get("/collection")).text
         assert "data-card-size-page=decks" in (await b.http.get("/decks")).text
         # Forget my view choices forgets each page's

@@ -147,8 +147,8 @@ What's on it:
   **Copy decklist**, then **What next?** with the three places the cards
   can go: **Save to binder** (your binder, see
   [USING.md](USING.md#binder); the scan is removed once saved), **Add to deck** (pick one of your decks;
-  the deck editor opens with the cards filled in and you review the change
-  before it is applied) and **New deck from these cards** (the new-deck form
+  the deck page opens with the cards ready to review: pick their
+  categories, then add them) and **New deck from these cards** (the new-deck form
   opens with the list as its decklist). The first two save the scan on the
   way if it isn't yet.
 - **Sessions.** Your earlier scans. Open one to keep going, or delete it.

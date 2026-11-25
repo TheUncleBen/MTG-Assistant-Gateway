@@ -36,6 +36,8 @@ AS_OF = "2026-11-03T22:06:49+00:00"  # DAY_A as the answers carry it: ISO 8601, 
 AS_OF_B = "2026-11-04T10:06:49+00:00"
 DAY_B = "2026-11-04T10:06:49.499+00:00"
 LOOP_PRINTINGS = 20000  # the event-loop test's file: about a sixth of Scryfall's
+LOOP_STALL = 0.25  # the longest the loop may go without turning while the copy builds...
+LOOP_STALL_SHARE = 0.2  # ...or this share of the build's time, when a busy runner slows both
 FILE = "/default-cards/default-cards-20261103220649.jsonl.gz"
 
 
@@ -299,7 +301,12 @@ async def test_the_event_loop_keeps_turning_while_the_copy_builds(tmp_path: Path
         took = time.monotonic() - started
         longest = await ticker.done()
     assert took > 0.5, f"the build took {took:.2f} s: too short to say anything about the loop"
-    assert longest < 0.25, f"the event loop stalled {longest:.2f} s while the copy was built ({took:.1f} s)"
+    # On a busy runner a thread holding the interpreter stalls the loop longer, and the build
+    # takes longer with it (0.47 s of 3.4 s once on CI, 0.7.48): the stall is held to its share
+    # of the build's time there. The build on the loop itself stalls it for most of that time.
+    budget = max(LOOP_STALL, took * LOOP_STALL_SHARE)
+    print(f"loop stall {longest:.2f} s of a {took:.2f} s build (budget {budget:.2f} s)")
+    assert longest < budget, f"the event loop stalled {longest:.2f} s while the copy was built ({took:.1f} s)"
     assert service.copy.meta()["count"] == str(LOOP_PRINTINGS)
 
 

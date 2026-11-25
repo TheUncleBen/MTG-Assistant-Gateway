@@ -20,8 +20,8 @@ import pytest
 
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 
+from .page_checks import HOSTILE
 from .test_editor_browser import PNG, _link
-from .test_editor_leave_browser import HOSTILE
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .waits import redrawn

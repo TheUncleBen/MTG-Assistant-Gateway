@@ -41,58 +41,6 @@ def _note(page, cls: str):
     return note
 
 
-@pytest.mark.parametrize("width", [412, 1280])
-def test_the_editor_save_signed_out_offers_sign_in_and_offline_says_no_connection(
-    server: Server, width: int
-) -> None:
-    from playwright.sync_api import sync_playwright
-
-    _chromium()
-    sid = server.sign_in_and_link()
-    with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, width)
-        try:
-            url = f"{server.base}/decks/42/edit?from=deck"
-            page.goto(url, wait_until="networkidle")
-            page.locator("details.pastebox summary").click()
-            page.locator("#pastetext").fill("1 Cultivate")
-            page.locator("form.pastelist button").click()
-            page.wait_for_function(
-                "() => /added|not recognized|could not/"
-                ".test(document.querySelector('.pastestatus').textContent)"
-            )
-            added = page.locator(".pastestatus").inner_text()
-            assert added.startswith("1 card added"), added
-            # the session ends while the editor is open, then Save is pressed
-            page.context.clear_cookies()
-            page.locator(".editbar button.review").click()
-            status = page.locator(".editbar .status.notice.error")
-            status.wait_for(timeout=8000)
-            text = status.inner_text()
-            assert "You're signed out, so nothing was changed." in text, text
-            assert not RAW.search(text), text
-            sign_in = status.locator("a", has_text="Sign in")
-            assert sign_in.count() == 1, text
-            assert sign_in.get_attribute("href") == _sign_in_href("/decks/42/edit?from=deck")
-            # said once: the page-wide note stays away from MtgFetch's own requests
-            assert page.locator(".session-toast").count() == 0
-            assert page.locator(".editbar button.review").is_enabled()  # the edit is kept to save again
-
-            # signed in again, then the network goes
-            page.context.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
-            page.context.set_offline(True)
-            page.locator(".editbar button.review").click()
-            page.locator(".editbar .status", has_text="No connection").wait_for(timeout=8000)
-            text = page.locator(".editbar .status").inner_text()
-            assert "No connection; nothing was changed." in text, text
-            assert not RAW.search(text), text
-            assert page.locator(".editbar .status a", has_text="Sign in").count() == 0
-            page.context.set_offline(False)
-            assert errors == [], errors
-        finally:
-            browser.close()
-
-
 @pytest.mark.parametrize("width", [840, 1280])
 def test_a_scripts_own_save_signed_out_or_offline_gets_the_one_note(server: Server, width: int) -> None:
     """prefs.js saves the card size with its own fetch and says nothing when it fails: the page's

@@ -257,7 +257,8 @@ class Settings:
     # Archidekt backup copies kept per deck and local snapshots kept per deck (25 is
     # db.SNAPSHOTS_KEEP_PER_DECK). Read through LiveSettings.
     archidekt_backup_copies: int = 10
-    # the deck editor's "Also keep a backup copy on Archidekt" box starts ticked (off)
+    # the deck page's Paste a list / Add from a scan "Also keep a backup copy on Archidekt" box
+    # starts ticked (off)
     archidekt_backup_box_default: bool = False
     snapshots_per_deck: int = 25
     # A second folder every database backup is also copied to (another disk or a network share).

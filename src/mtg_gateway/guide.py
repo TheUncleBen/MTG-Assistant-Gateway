@@ -232,7 +232,7 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
             ("ref-pages", "layers", "Pages and addresses"),
             ("ref-approval", "proposals", "Approval modes and risk levels"),
             ("ref-keys", "menu", "Keyboard shortcuts"),
-            ("ref-syntax", "edit", "The editor's search bar and list syntax"),
+            ("ref-syntax", "edit", "Add a card and list syntax"),
             ("ref-formats", "download", "Export formats"),
             ("ref-tools", "list", ADVANCED_TITLE),
         ],
@@ -453,11 +453,11 @@ def build(
     box_ticked = bool(live.get("archidekt_backup_box_default")) if live is not None else False
     backup_box = (
         (
-            "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, ticked "
-            "by default on this gateway: untick it to skip that extra copy for that one save."
+            "Paste a list and Add from a scan have a tick box, <strong>Also keep a backup copy on "
+            "Archidekt</strong>, ticked by default on this gateway: untick it to skip that extra copy."
             if box_ticked
-            else "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, "
-            "unticked by default on this gateway: tick it to also keep that extra copy for that one save."
+            else "Paste a list and Add from a scan have a tick box, <strong>Also keep a backup copy on "
+            "Archidekt</strong>, unticked by default on this gateway: tick it to also keep that extra copy."
         )
         if archidekt_backups
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
@@ -540,26 +540,22 @@ def build(
         "again.</p>"
     )
     tut_first_edit = (
-        "<p>Add one card to a deck of your own and save it, the way every edit works.</p>"
+        "<p>Add one card to a deck of your own, the way every edit works: right on the deck page.</p>"
         "<ol class='steps'>"
-        "<li><span>Open <a href='/decks'>Decks</a> and tap a deck, then <strong>Edit deck</strong> in its "
-        "banner.</span></li>"
-        "<li><span>In <strong>Add a card</strong>, the chips above the box say where the card goes: "
-        "<strong>Auto</strong> (the gateway picks the category from the card's type), one of the deck's "
-        "categories, or the maybeboard. Leave Auto on.</span></li>"
-        "<li><span>Type a name. Suggestions appear as you type, with the card's picture, mana cost and "
-        "type line; Down and Up move, <kbd>Enter</kbd> adds the highlighted card and keeps the cursor in "
-        "the box for the next one. “3 sol ring” adds three. On a wide screen the printings of the "
-        "highlighted card show as pictures beside the list, with the set used last on this deck "
-        f"pre-selected: {tap} adds that printing.</span></li>"
-        "<li><span>The new row shows under <strong>Pending changes</strong>, with Undo. Nothing has gone "
-        "to Archidekt yet.</span></li>"
-        f"<li><span>Press <strong>Save changes</strong>. {backup_box} The whole session goes to Archidekt "
-        "in one go, after a snapshot of the deck as it was; only a big removal (many cards at once) asks "
-        "you to confirm first.</span></li>"
-        "<li><span>Back on the deck page the card is there. Under <a href='/history'>History</a> the "
-        "snapshot taken just before the change is filed, with <strong>Restore (review first)</strong> if "
-        "you ever want the deck back as it was.</span></li></ol>"
+        "<li><span>Open <a href='/decks'>Decks</a> and tap one of your decks.</span></li>"
+        "<li><span>Type a name in <strong>Add a card</strong> above the cards. Suggestions appear as you "
+        "type, with the card's picture, mana cost and type line; Down and Up move, <kbd>Enter</kbd> picks. "
+        "“3 sol ring” asks for three.</span></li>"
+        "<li><span>The card opens in a preview: its picture and rules text, how many copies are already in "
+        "the deck, and what to add. Pick the <strong>Copies</strong>, the <strong>Category</strong> "
+        "(<strong>Auto</strong> files it by its type, as Archidekt does; <strong>New category…</strong> "
+        "makes one), the <strong>Printing</strong> (the set used last on this deck comes first) and the "
+        "<strong>Finish</strong>.</span></li>"
+        "<li><span>Press <strong>Add to deck</strong>. The card is saved to Archidekt at once, after a "
+        "snapshot of the deck as it was, and shows in its category with <strong>Undo</strong>.</span></li>"
+        "<li><span>Under <a href='/history'>History</a> the snapshot taken just before the change is "
+        "filed, with <strong>Restore (review first)</strong> if you ever want the deck back as it was."
+        "</span></li></ol>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     tut_first_sim = (
@@ -617,24 +613,26 @@ def build(
         "<li>Ask your assistant: “build a new deck from this list” comes back as a proposal.</li></ul>"
     )
     how_add_cards = (
-        f"{_sec('how-add-editor', 'In the editor')}"
-        "<p>Change quantities, categories (type a new one to create it), foil or printing, add cards with "
-        "autocompletion (to the deck or the maybeboard), edit maybeboard and sideboard rows, paste a whole "
-        "list, remove cards, and undo. The <strong>Add a card</strong> bar is one search box: chips pick "
-        "where a card goes (Auto, a category, the maybeboard), <kbd>Enter</kbd> adds the highlighted card "
-        "and keeps the cursor in the box, “3 sol ring” adds three, and on wide screens the printings of "
-        "the highlighted card show as pictures beside the list, the set used last on this deck "
-        "pre-selected. Enter pressed while the list is still catching up takes the first answer when it "
-        "arrives. <strong>Save changes</strong> sends the whole session to Archidekt in one go, after a "
-        f"snapshot of the deck as it was; only a big removal (many cards at once) asks you to confirm "
-        f"first. {backup_box}</p>"
+        f"{_sec('how-add-editor', 'Add a card')}"
+        "<p>Your own deck is edited on its page; there is no separate editor. <strong>Add a card</strong> "
+        "above the cards suggests names as you type; a pick or <kbd>Enter</kbd> opens the card's preview "
+        "(picture, rules text, the copies already in the deck), where you choose the copies, the category "
+        "(Auto by type, any of the deck's, the maybeboard, or a new one), the printing (the set used last "
+        "on this deck first) and the finish, then <strong>Add to deck</strong>. “3 sol ring” asks for three. "
+        "A category's own menu has <strong>Add a card here</strong>, which files the next cards there until "
+        "you clear its chip.</p>"
+        "<p><strong>More ways to add</strong> beside the box (in the ⋮ menu on a phone): "
+        "<strong>Paste a list</strong> (one card per line), <strong>Add from a scan</strong> and "
+        "<strong>Add a package</strong>. A list or a scan is checked first: every card found, each with "
+        "its category (or one for them all), and the lines that match no card (in a pasted list, each with "
+        f"the closest name to use instead). Then one press adds them all, with Undo. {backup_box}</p>"
         f"{_sec('how-add-page', 'Straight from the deck page')}"
         "<ul>"
         f"<li>On your own deck {card_menu_way} opens the site's own card menu: open the card, "
-        "one more or one fewer copy, move it to a category or the maybeboard, remove it, or jump to the "
-        "editor. The card viewer has the same quantity buttons and Remove. Each change is saved at once as "
-        "one proposal (the same path as the editor, with the same “are you sure” for a "
-        "big removal), and the page redraws in place with a toast offering <strong>Undo</strong>. Edits "
+        "one more or one fewer copy, move it to a category (a new one too) or the maybeboard, change its "
+        "printing or finish, or remove it. The card viewer has the same quantity buttons and Remove. Each "
+        "change is saved at once as one proposal (with an “are you sure” for a big removal or a "
+        "commander change), and the page redraws in place with a toast offering <strong>Undo</strong>. Edits "
         "each within 10 minutes of the last share the snapshot taken before the first and are one entry "
         "in History. These quick edits keep the gateway snapshot only, without the backup copy on "
         "Archidekt. On someone "
@@ -643,12 +641,11 @@ def build(
         "touch screen and slide. The move is saved to Archidekt when you let go, like a change from the "
         "menu.</li>"
         "<li><strong>Undo</strong> and <strong>Redo</strong> (beside Select cards, and the toast's Undo) "
-        "take back or redo any change saved on the page, with the editor's keys: Ctrl+Z, and Ctrl+Shift+Z "
+        "take back or redo any change saved on the page, also with the keys: Ctrl+Z, and Ctrl+Shift+Z "
         "or Ctrl+Y. Removing a card that has notes asks first: Archidekt gives the gateway no way to "
         "write notes, so they do not come back. Stacks come in the order Archidekt's own deck page "
         "shows them.</li>"
-        "<li><strong>Quick add</strong> adds one copy of the card you type, saved at once with Undo. A "
-        "name it doesn't know is refused, and nothing is sent.</li></ul>"
+        "</ul>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     how_organise = (
@@ -985,17 +982,13 @@ def build(
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
             "Redo, "
-            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run test, statistics with Probability "
+            "Add to the deck (a preview with copies, category, printing and finish), More ways to add "
+            "(Paste a list, Add from a scan, Add a package), "
+            "Playtest, Goldfish, Play on EDHPlay, Run test, statistics with Probability "
             "of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
             "Open on Archidekt, Delete deck",
-        ),
-        (
-            "Editor",
-            "<code>/decks/&lt;id&gt;/edit</code>",
-            "quantities, categories, finish, printing, add cards, maybeboard and sideboard rows, paste a "
-            "list, remove, undo, Save changes with the backup tick box",
         ),
         (
             "Deck settings",
@@ -1129,7 +1122,7 @@ def build(
         (
             "Deck page",
             "<kbd>Shift</kbd>+<kbd>F10</kbd> or the Menu key",
-            "opens the card menu for the focused card (your own deck: quantity, move, remove, editor; "
+            "opens the card menu for the focused card (your own deck: quantity, move, printing, remove; "
             "another's: Open card, Open on Scryfall)",
         ),
         ("Card menu", "<kbd>↑</kbd> <kbd>↓</kbd>, <kbd>Enter</kbd>, <kbd>Esc</kbd>", "move, choose, close"),
@@ -1144,10 +1137,10 @@ def build(
             "move through the suggestions, pick one, close the list, leave the box",
         ),
         (
-            "Editor, Add a card",
+            "Deck page, Add a card",
             "<kbd>Enter</kbd>",
-            "adds the highlighted card (or the first answer when the list is still catching up) and keeps "
-            "the cursor in the box",
+            "opens the preview of the highlighted card (or of the name typed); <kbd>Enter</kbd> again "
+            "adds it",
         ),
         (
             "Any dropdown",
@@ -1171,18 +1164,19 @@ def build(
         )
     )
     ref_syntax = (
-        f"{_sec('ref-syntax-bar', 'The search bar')}"
+        f"{_sec('ref-syntax-bar', 'Add a card')}"
         "<ul>"
-        "<li><code>sol ring</code>: suggestions as you type; <kbd>Enter</kbd> adds the highlighted one.</li>"
-        "<li><code>3 sol ring</code> or <code>3x sol ring</code>: adds three copies (up to 99).</li>"
-        "<li>The <strong>chips</strong> above the box choose where the card goes: <strong>Auto</strong> "
-        "(the category follows the card's type), one of the deck's categories, or the maybeboard. The "
-        "chosen chip stays on for the next card.</li>"
-        "<li>On a wide screen the <strong>printings</strong> of the highlighted card show as pictures "
-        f"beside the list, the set used last on this deck pre-selected; {tap} adds that printing.</li>"
+        "<li><code>sol ring</code>: suggestions as you type; <kbd>Enter</kbd> or "
+        f"{tap} opens the highlighted card's preview.</li>"
+        "<li><code>3 sol ring</code> or <code>3x sol ring</code>: the preview starts at three copies (up to "
+        "99).</li>"
+        "<li>In the preview, <strong>Category</strong> chooses where the card goes: <strong>Auto</strong> "
+        "(the category follows the card's type), one of the deck's categories, the maybeboard, or "
+        "<strong>New category…</strong>. <strong>Printing</strong> starts on the set used last on this "
+        "deck when the card was printed in it.</li>"
         "</ul>"
         f"{_sec('ref-syntax-list', 'A pasted list')}"
-        "<p>The editor's paste box, New deck and the assistant read the shapes people paste from "
+        "<p>New deck and the assistant read the shapes people paste from "
         "Archidekt, Moxfield, MTGO and Arena: one card per line as <code>1 Sol Ring</code> or "
         "<code>1x Sol Ring</code>; a printing as the set code in parentheses and the collector number, as "
         "<code>1 Sol Ring (cmr) 436</code>; <code>*F*</code> for foil and <code>*E*</code> for etched; a "
@@ -1192,6 +1186,9 @@ def build(
         "rows under it; <code>SB:</code> in front of a row is MTGO's sideboard mark. Lines starting with "
         "<code>#</code> and blank lines are ignored, and a name without a count adds one copy. A CSV export "
         "from Archidekt and the gateway's own .json are read as they are.</p>"
+        "<p>The deck page's <strong>Paste a list</strong> reads the card lines the same way (counts, "
+        "printings, <code>*F*</code> and <code>*E*</code>) and skips the section lines; you pick the "
+        "categories in its review before anything is added.</p>"
     )
     ref_formats = (
         "<div class='tbl'><table><thead><tr><th>What</th><th>Formats</th><th>Comes back in?</th></tr></thead>"

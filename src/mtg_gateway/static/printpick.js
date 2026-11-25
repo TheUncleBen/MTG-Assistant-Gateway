@@ -11,7 +11,7 @@
    (Art variants…, from Card search and the deck page's card menu): opts.onWatch(printing, finish)
    adds "Watch this printing" beside the pick, or alone when there is no onPick.
    A dialog with a focus trap; Escape, the close button and a click on the backdrop close it.
-   Loaded before deck.js and companion.js, which call window.MtgPrintPick. */
+   Loaded before deck.js, which calls window.MtgPrintPick. */
 (function () {
   "use strict";
   var FINISH_NAMES = { nonfoil: "Normal", foil: "Foil", etched: "Etched" };

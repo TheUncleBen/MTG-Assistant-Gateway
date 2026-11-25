@@ -199,7 +199,7 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
         menu.wait_for(timeout=3000)
         labels = menu.locator("[role=menuitem]").all_inner_texts()
         assert any("Open card" in x for x in labels) and any("Remove from deck" in x for x in labels), labels
-        assert any("Edit in deck editor" in x for x in labels) and any("Move to" in x for x in labels), labels
+        assert any("Move to" in x for x in labels) and not any("editor" in x for x in labels), labels
         assert menu.locator(".qtyrow .n").inner_text() == "1"
         assert menu.locator(".head").inner_text() == "Cultivate"
         box = menu.bounding_box()

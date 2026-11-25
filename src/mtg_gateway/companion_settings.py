@@ -440,6 +440,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<option value='{k}'{' selected' if bracket_current == k else ''}>{_esc(label)}</option>"
             for k, label in brackets.items()
         )
+        # only a Commander deck has a bracket (the save drops one for any other format), so the
+        # choice is off until the format is Commander; static/decksettings.js turns it on when
+        # the Format choice moves to Commander
+        bracket_off = "" if FORMAT_IDS.get(str(fmt_current or "")) == FORMAT_IDS["commander"] else " disabled"
         # a submitted form carries no key for an unchecked box, so with values a missing key is off
         private = v.get("private", "") if values else ("1" if deck.private else "")
         unlisted = v.get("unlisted", "") if values else ("1" if deck.unlisted else "")
@@ -523,7 +527,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 "<label for='edh_bracket'>Commander bracket</label>",
                 "Commander only. Changing the format clears it. It does not influence the estimated "
                 "bracket on the deck page.",
-                f"<select id='edh_bracket' name='edh_bracket'>{bracket_opts}</select>",
+                f"<select id='edh_bracket' name='edh_bracket'{bracket_off}>{bracket_opts}</select>",
             )
             + "<div class='ui-row full'><p class='lab'><label for='description'>Description</label></p>"
             f"<div class='ctl'><textarea id='description' name='description' rows='8'>{_esc(description)}"
@@ -806,8 +810,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<span class='ds-sw' role='group' aria-label='Switches of the new category'>"
             f"{new_switches}</span>"
             f"<button class='btn'>{icon('plus')} Create category</button></div></form>"
-            + "<p class='muted small foot'>Moving single cards between categories is in the deck editor "
-            "and on the deck page.</p></section>"
+            + "<p class='muted small foot'>Move single cards between categories on the deck page: from a "
+            "card's menu, or by dragging it.</p></section>"
         )
 
     def cover_section(deck: Deck, csrf: str | None, note: str = "") -> str:

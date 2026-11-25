@@ -1158,3 +1158,31 @@ def test_the_solo_test_only_run_is_offered_only_when_forge_is_on() -> None:
         deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
     )
     assert "Solo test only" not in signed_out and "Run test" not in signed_out
+
+
+def test_each_banner_tag_has_its_whole_text_as_a_title() -> None:
+    """From 600 px a long tag is one line ending in "…": its title holds it whole."""
+    from mtg_gateway.deckpage import banner_html
+
+    d = deck([card("Opt")])
+    d.tags = ["Spellslinger & <friends>"]
+    html = banner_html(d, {}, own=True, csrf="t", writes_enabled=True)
+    assert (
+        "<span class='pill' title='Spellslinger &amp; &lt;friends&gt;'>"
+        "Spellslinger &amp; &lt;friends&gt;</span>" in html
+    )
+
+
+def test_the_local_filter_is_the_sites_one_search_field() -> None:
+    """UI-STANDARD.md: one search look on every page (the deck's filter had the old attached
+    button); Enter still submits its form, which deck.js keeps on the page."""
+    from mtg_gateway.deckpage import toolbar_html
+
+    html = toolbar_html(deck([card("Opt")]), own=True, view="text", group="category", sort="name", q="x")
+    filt = html.split("<div class='field filter'>")[1].split("</div>")[0]
+    assert "<label for='q'>Local filter</label><span class='ui-search'>" in filt
+    assert "<input id='q' type='search' name='q' value='x' placeholder='Find' autocomplete='off'>" in filt
+    assert (
+        "Apply filter" not in html
+        and "<form method='get' action='/decks/1' class='views' id='viewform'>" in html
+    )

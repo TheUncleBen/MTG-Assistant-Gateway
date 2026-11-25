@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from .deck_add import add_card
 from .test_deck_being_made_browser import _making
 from .test_deck_menu_browser import Server, _chromium, _file_under, _page
 
@@ -51,7 +52,7 @@ def test_the_deck_menu_offers_no_edits_while_the_deck_is_made(server: Server, wi
         page.keyboard.press("Escape")
         # once the deck is done the page reloads by itself, and the menu has them back
         server.app.state.gateway.decks._being_made.pop("42", None)
-        page.locator("a.btn-primary[href='/decks/42/edit']").wait_for(timeout=15_000)
+        page.locator("#quick:not([disabled])").wait_for(timeout=15_000)
         page.locator(".banner button.deckmenu").click()
         items = _items(page)
         assert "Rename…" in items and "Delete deck…" in items and "Deck settings" in items
@@ -59,7 +60,7 @@ def test_the_deck_menu_offers_no_edits_while_the_deck_is_made(server: Server, wi
         browser.close()
 
 
-def test_the_editors_row_menu_names_the_category_a_side_row_leaves(server: Server) -> None:
+def test_the_card_menu_names_the_category_a_side_row_leaves(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
     _file_under(server, "Rampant Growth", ["Sideboard"])
@@ -69,14 +70,13 @@ def test_the_editors_row_menu_names_the_category_a_side_row_leaves(server: Serve
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1280)
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-        side = page.locator("li.erow.side", has_text="Rampant Growth").first
-        assert side.locator("button.remove").get_attribute("title") == "Remove from “Sideboard”"
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        side = page.locator(".deckview .row.side[data-card='Rampant Growth']").first
         side.click(button="right")
         items = _items(page)
         assert "Remove from “Sideboard”" in items and "Remove from deck" not in items, items
         page.keyboard.press("Escape")
-        main = page.locator("li.erow:not(.side)", has_text="Cultivate").first
+        main = page.locator(".deckview .row:not(.side)[data-card='Cultivate']").first
         main.click(button="right")
         assert "Remove from deck" in _items(page)
         assert errors == []
@@ -425,63 +425,105 @@ def test_leaving_deck_settings_while_a_save_runs_asks_first(server: Server) -> N
         browser.close()
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+def test_the_commander_bracket_turns_on_with_the_commander_format(server: Server, width: int) -> None:
+    """0.7.48 loop round: the bracket choice was on for a deck with no format, and a bracket
+    picked there came back refused ("nothing would change"). It is off until the Format choice
+    is Commander, turns on with it, saves, and goes off again with the format."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    server.ark.decks[42].pop("deckFormat", None)  # no format set, as the review's seed deck
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
+        bracket = page.locator("#edh_bracket")
+        shown = page.locator("#ds-main .ui-row:has(#edh_bracket) button.msel-btn")
+        assert bracket.is_disabled()
+        assert shown.first.is_disabled()  # the page's own choice button too, not only the select
+        page.locator("#deck_format").select_option("commander", force=True)
+        page.locator(".toast .msg", has_text="Saved to Archidekt").wait_for(timeout=8000)
+        assert server.ark.decks[42]["deckFormat"] == 3
+        assert bracket.is_enabled() and shown.first.is_enabled()
+        page.locator(".toast .close").click()
+        bracket.select_option("1", force=True)
+        page.wait_for_function(_WAS % ("edh_bracket", "1"), timeout=8000)
+        assert server.ark.decks[42]["edhBracket"] == 1
+        assert page.locator(".toast.error").count() == 0
+        page.locator(".toast .close").click()
+        page.locator("#deck_format").select_option("standard", force=True)
+        page.wait_for_function(_WAS % ("edh_bracket", ""), timeout=8000)
+        assert server.ark.decks[42]["edhBracket"] is None
+        assert bracket.is_disabled() and bracket.input_value() == ""
+        # Undo puts Commander back, and the bracket choice with it
+        page.locator(".toast button", has_text="Undo").click()
+        page.wait_for_function(_WAS % ("deck_format", "commander"), timeout=8000)
+        assert bracket.is_enabled()
+        assert errors == []
+        browser.close()
+
+
 # -- Quick add adds one copy in place (owner decision C4) ----------------------------------------
 SHOTS = Path(os.environ.get("MTG_SHOTS") or tempfile.gettempdir()) / "wp-deck-shots"
 SHOTS.mkdir(parents=True, exist_ok=True)
 
 
 @pytest.mark.parametrize(("width", "height", "scheme"), [(390, 844, "dark"), (1280, 800, "light")])
-def test_quick_add_puts_one_copy_in_place_with_undo(
+def test_add_a_card_puts_the_copy_in_place_with_undo(
     server: Server, width: int, height: int, scheme: str
 ) -> None:
-    """Quick add's button says Add; Enter in the box adds one copy, saved at once and drawn in
-    its stack with Added and Undo, the page never leaving; Undo takes it out again. A name that
-    is no card is refused in the red note, on the same page."""
+    """Add a card (0.7.48): Enter opens the card's preview, and its Add to deck saves the copy at
+    once, drawn in its stack with Added and Undo, the page never leaving; Undo takes it out again.
+    A name that is no card is refused before anything is sent, with a card search, on the same
+    page."""
     from playwright.sync_api import sync_playwright
 
-    server.app.state.gateway.scan.names.set_names(["Arcane Signet", "Cultivate"])
+    server.app.state.gateway.scan.names.set_names(["Swamp", "Cultivate"])
     _chromium()
     with sync_playwright() as p:
         browser, page, errors = _menu_page(p, server, width, height, scheme)
         url = page.url
-        add = page.locator("form.quick button[type=submit]")
-        assert add.get_attribute("aria-label") == "Add"
-        assert page.locator(".deckview .row[data-card='Arcane Signet']").count() == 0
+        assert page.locator(".deckview .row[data-card='Swamp']").count() == 0
         box = page.locator("#quick")
-        box.fill("Arcane Signet")
-        box.press("Enter")
-        page.locator(".deck-toast .msg", has_text="Added Arcane Signet").wait_for(timeout=8000)
+        add_card(page, "Swamp")
+        page.locator(".deck-toast .msg", has_text="Added Swamp").wait_for(timeout=8000)
         assert page.url == url
-        row = page.locator(".deckview .row[data-card='Arcane Signet']")
+        row = page.locator(".deckview .row[data-card='Swamp']")
         assert row.count() == 1 and row.get_attribute("data-qty") == "1"
         assert row.locator("xpath=ancestor::section[@class='stack']").count() == 1
-        # first in its stack: the alphabet is the sort
-        assert row.locator("xpath=preceding-sibling::li[contains(@class,'row')]").count() == 0
-        assert server.quantity("Arcane Signet") == 1
+        # in its place in its stack (the Land stack, by type): the alphabet is the sort
+        before = row.locator("xpath=preceding-sibling::li[contains(@class,'row')]").evaluate_all(
+            "rs => rs.map(r => r.getAttribute('data-card'))"
+        )
+        assert all(n < "Swamp" for n in before), before
+        assert server.quantity("Swamp") == 1
         assert box.input_value() == ""
         page.screenshot(path=str(SHOTS / f"quick-add-{width}-{scheme}.png"))
         page.locator(".deck-toast button", has_text="Undo").click()
         page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
-        assert page.locator(".deckview .row[data-card='Arcane Signet']").count() == 0
-        assert server.quantity("Arcane Signet") == 0
-        # a copy more of a card the deck has: its row counts it
+        assert page.locator(".deckview .row[data-card='Swamp']").count() == 0
+        assert server.quantity("Swamp") == 0
+        # a copy more of a card the deck has: the preview says so, and its row counts it
         n = server.quantity("Cultivate")
         box.fill("Cultivate")
         box.press("Enter")
+        page.locator(".mtgbox.addbox-preview .aphave", has_text="Already here").wait_for(timeout=8000)
+        page.locator(".mtgbox.addbox-preview button", has_text="Add to deck").click()
         page.locator(".deck-toast .msg", has_text="Added Cultivate").wait_for(timeout=8000)
         cult = page.locator(".deckview .row[data-card='Cultivate']").first
         assert cult.get_attribute("data-qty") == str(n + 1)
         assert server.quantity("Cultivate") == n + 1
-        # no such card (and no suggestion for it): the red note, the page stays (the words are
-        # the gateway's refusal; here, with no Scryfall to ask, Archidekt's own "not found")
+        # no such card: the red note before anything is sent, with a card search; the page stays
+        updates = len(server.ark.updates)
         box.fill("Zzyzx")
         box.press("Enter")
         text = _error(page)
-        assert text.startswith("Add not saved:") and "Zzyzx" in text, text
-        # a refusal of the name would only repeat: a card search, not Try again
+        assert "No card is named" in text and "Zzyzx" in text, text
         assert page.locator(".deck-toast.error button", has_text="Try again").count() == 0
         assert page.locator(".deck-toast.error a.btn", has_text="Search cards").count() == 1
         assert page.url == url and box.input_value() == "Zzyzx"
+        assert len(server.ark.updates) == updates
         assert errors == []
         browser.close()
 
@@ -493,27 +535,24 @@ _BANNER_FACTS = "() => document.querySelector('.banner .rows').innerText.replace
 def test_an_edit_in_place_leaves_the_banner_as_a_reload_draws_it(
     server: Server, width: int, height: int, scheme: str
 ) -> None:
-    """0.7.46 polish A2: after a quick add (and its Undo) the banner's card count, its date and
+    """0.7.46 polish A2: after an add (and its Undo) the banner's card count, its date and
     its Salt read as the page draws them on a reload, in the same number format."""
     from playwright.sync_api import sync_playwright
 
-    server.app.state.gateway.scan.names.set_names(["Arcane Signet"])
+    server.app.state.gateway.scan.names.set_names(["Swamp"])
     _chromium()
     with sync_playwright() as p:
         browser, page, errors = _menu_page(p, server, width, height, scheme)
         before = page.evaluate(_BANNER_FACTS)
-        box = page.locator("#quick")
-        box.fill("Arcane Signet")
-        box.press("Enter")
-        page.locator(".deck-toast .msg", has_text="Added Arcane Signet").wait_for(timeout=8000)
+        add_card(page, "Swamp")
+        page.locator(".deck-toast .msg", has_text="Added Swamp").wait_for(timeout=8000)
         added = page.evaluate(_BANNER_FACTS)
         assert added != before, added
         page.reload(wait_until="networkidle")
         assert page.evaluate(_BANNER_FACTS) == added
         # and Undo of a second add (the fake stamps each card write with a later date)
-        page.locator("#quick").fill("Arcane Signet")
-        page.locator("#quick").press("Enter")
-        page.locator(".deck-toast .msg", has_text="Added Arcane Signet").wait_for(timeout=8000)
+        add_card(page, "Swamp")
+        page.locator(".deck-toast .msg", has_text="Added Swamp").wait_for(timeout=8000)
         page.locator(".deck-toast button", has_text="Undo").click()
         page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
         undone = page.evaluate(_BANNER_FACTS)
@@ -524,11 +563,12 @@ def test_an_edit_in_place_leaves_the_banner_as_a_reload_draws_it(
 
 
 @pytest.mark.parametrize(("width", "height", "scheme"), [(390, 844, "dark"), (1280, 800, "light")])
-def test_quick_add_with_no_name_says_so_at_the_field_and_keeps_focus_there(
+def test_add_a_card_with_no_name_says_so_at_the_field_and_keeps_focus_there(
     server: Server, width: int, height: int, scheme: str
 ) -> None:
-    """0.7.46 polish A5: Add (or Enter) with the box empty sends nothing; the box takes the focus
-    and says "Type a card name." as a required field does, until something is typed."""
+    """0.7.46 polish A5: Enter with the box empty (or only spaces) sends nothing and opens no
+    preview; the box keeps the focus and says "Type a card name." as a required field does,
+    until something is typed."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -537,19 +577,16 @@ def test_quick_add_with_no_name_says_so_at_the_field_and_keeps_focus_there(
         sent = []
         page.on("request", lambda r: sent.append(r.url) if r.method == "POST" else None)
         box = page.locator("#quick")
-        for press in ("button", "enter", "spaces"):
-            if press == "button":
-                page.locator("form.quick button[type=submit]").click()
-            elif press == "enter":
-                box.focus()
-                box.press("Enter")
-            else:
+        for press in ("enter", "spaces"):
+            box.focus()
+            if press == "spaces":
                 box.fill("   ")
-                page.locator("form.quick button[type=submit]").click()
+            box.press("Enter")
             focused = page.evaluate("() => document.activeElement && document.activeElement.id")
             assert focused == "quick", press
             assert box.evaluate("e => e.validationMessage") == "Type a card name.", press
             assert box.get_attribute("aria-invalid") == "true", press
+            assert page.locator(".mtgbox.addbox-preview").count() == 0
             box.fill("")
         box.type("C")
         assert box.evaluate("e => e.validationMessage") == ""

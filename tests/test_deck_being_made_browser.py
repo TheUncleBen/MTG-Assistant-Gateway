@@ -1,6 +1,6 @@
 """A new deck whose cards are still going in (decks.being_made), on its deck page in headless
-Chromium: the notice has the theme's progress ring and says changes wait; Edit deck, Quick add,
-Add a package and the rows' edits are off meanwhile; and the page asks now and then whether the
+Chromium: the notice has the theme's progress ring and says changes wait; Add a card,
+More ways to add and the rows' edits are off meanwhile; and the page asks now and then whether the
 deck is done, reloading itself once it is. Skipped without a Chromium build."""
 
 from __future__ import annotations
@@ -50,17 +50,15 @@ def test_the_page_waits_for_the_deck_with_its_edits_off_then_reloads(server: Ser
                     "This deck is still being made: 50 of 125 cards added so far. "
                     "Changes wait until it is done."
                 )
-                edit = page.locator("button.btn-primary", has_text="Edit deck")
-                assert edit.is_disabled()
                 assert page.locator("a[href='/decks/42/edit']").count() == 0
                 assert page.locator("#quick").is_disabled()
-                assert page.locator("a.addpkg[aria-disabled=true]").count() == 1
+                assert page.locator("a.addways[aria-disabled=true]").count() == 1
                 # the rows' menus offer no edits while it is made
                 assert page.locator("#cards[data-own]").count() == 0
                 assert errors == []
                 # once the deck is done the page reloads by itself, with its edits back
                 server.app.state.gateway.decks._being_made.pop("42", None)
-                page.locator("a.btn-primary[href='/decks/42/edit']").wait_for(timeout=15_000)
+                page.locator("#quick:not([disabled])").wait_for(timeout=15_000)
                 assert page.locator("p.notice.making").count() == 0
                 assert errors == []
             finally:

@@ -451,8 +451,8 @@
   scan(document);
   // A card-name box sent with nothing typed: it keeps the focus and says so, as a required field
   // does (the browser's own note at the field, in the gateway's words), until something is typed.
-  // The deck page's quick add (static/deck.js, owner decision A5) and the editor's Add
-  // (static/companion.js) share it, so both say "Type a card name." (polish batch 3 N4).
+  // The deck page's Add a card (static/deck.js, owner decision A5) uses it, so it says "Type a
+  // card name." as every name box does (polish batch 3 N4).
   var NEED_NAME = "Type a card name.";
   function needName(input, need) {
     input.setCustomValidity(need ? NEED_NAME : "");

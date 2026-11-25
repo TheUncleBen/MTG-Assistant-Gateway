@@ -116,7 +116,6 @@ def test_no_white_text_on_orange_anywhere() -> None:
     for src in (theme.CSS, deckpage.DECK_CSS):  # white text never sits on a light surface token
         assert not re.search(r"background:var\(--surface(-[23])?\);color:#fff", src)
     assert "color:var(--on-orange)" in deckpage.DECK_CSS.split(".soc.on{")[1].split("}")[0]
-    assert "color:var(--on-orange)" in deckpage.DECK_CSS.split(".pendingbox summary b{")[1].split("}")[0]
 
 
 def test_card_default_text_colours_pass_on_every_card_background() -> None:

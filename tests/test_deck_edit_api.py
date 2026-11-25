@@ -1095,3 +1095,42 @@ def test_deck_after_has_no_price_total_when_nothing_is_priced() -> None:
         {"price_total": 1.0, "priced_cards": 1}, {"price_total": 0.0, "priced_cards": 0}, after
     )
     assert out["price_total"] is None and out["price_change"] == -1.0
+
+
+async def test_a_batch_add_with_its_backup_box_ticked_gets_the_backup_copy(stack: Stack) -> None:  # noqa: F811
+    """The deck page's Paste a list and Add from a scan send ``archidekt_backup: true`` when their
+    box is ticked: that save gets the backup copy on Archidekt. Without it (every other save of the
+    page, or the box unticked) the save keeps the snapshot only."""
+    b = await linked(stack)
+    try:
+        add = {"action": "add", "card_name": "Sol Ring", "quantity": 1, "category": "Ramp"}
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [add], "archidekt_backup": True})
+        assert r.status_code == 201, r.text
+        result = r.json()["result"]["result"]
+        assert result.get("backup_url") and "archidekt_backup" not in result, result
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [add], "archidekt_backup": False})
+        assert r.status_code == 201, r.text
+        assert r.json()["result"]["result"]["archidekt_backup"] == "skipped"
+        # only a real true asks: a string is not a tick
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [add], "archidekt_backup": "yes"})
+        assert r.json()["result"]["result"]["archidekt_backup"] == "skipped"
+    finally:
+        await b.aclose()
+
+
+async def test_the_old_editor_address_opens_the_deck_page(stack: Stack) -> None:  # noqa: F811
+    """0.7.48 folded the deck editor into the deck page: its address answers with the deck page,
+    keeping a card to add (``add``) and a scan to add from (``scan_session``) and nothing else."""
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/decks/42/edit", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42", r.headers
+        r = await b.http.get("/decks/42/edit?add=Sol%20Ring&scan_session=s1&x=1", follow_redirects=False)
+        assert r.status_code == 303, r.text
+        assert r.headers["location"] == "/decks/42?add=Sol+Ring&scan_session=s1", r.headers
+        r = await b.http.get("/decks/42", follow_redirects=False)
+        assert r.status_code == 200
+        assert "data-suggest-rich" in r.text and "class='btn addways'" in r.text
+        assert "/decks/42/edit" not in r.text  # no way left into the old editor
+    finally:
+        await b.aclose()

@@ -270,7 +270,7 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         )
         assert "No prices from Archidekt yet" in deck or "$" in deck
         assert "<span data-plural='k'>card</span>" in deck and "card(s)" not in deck
-        assert "/edit#cat-Commander'" in deck or "/edit#cat-" in deck
+        assert "/decks/42/edit" not in deck  # 0.7.48: no way left into the old editor
         assert "distinct cards" in deck or "1 distinct card" in deck
     finally:
         await b.aclose()

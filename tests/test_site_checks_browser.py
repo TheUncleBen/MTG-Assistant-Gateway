@@ -112,7 +112,7 @@ GUIDES = (
 ).split()
 DECK_42 = (
     "?view=grid ?view=list ?view=text ?view=table ?view=brewer ?view=stacks ?view=scroll /help /delist "
-    "/registration /package /contest /withdraw /lock /report-to-archidekt /settings /delete /edit /export "
+    "/registration /package /contest /withdraw /lock /report-to-archidekt /settings /delete /export "
     "/goldfish /compare /made"
 ).split()
 PUBLIC = [
@@ -139,7 +139,6 @@ ADMIN = [
     "/decks/44/goldfish",
     "/decks/44/export",
     "/decks/45?view=grid",
-    "/decks/45/edit",
     "/decks/45/goldfish",
     "/decks/46",
     "/decks/46?view=text",
@@ -148,7 +147,6 @@ ADMIN = [
     "/decks/49?view=scroll",
     "/decks/50",
     "/decks/50?view=stacks",
-    "/decks/50/edit",
     "/collection",
     "/collection?view=grid",
     "/collection?view=list",

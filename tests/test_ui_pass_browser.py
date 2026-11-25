@@ -43,7 +43,7 @@ def _context(
 # Pages that ran over the window's edge at 200% text on a 344 px phone or a Fold's inner screen
 # before the pass: the editor's quantity boxes, the Cards page's search row and filter grid, the
 # Scan page's tabs and camera controls, and a long unbroken badge on the admin's activity page.
-ZOOM_PAGES = ["/decks/42/edit", "/cards", "/cards?q=Sol", "/scan", "/admin/activity", "/decks/42"]
+ZOOM_PAGES = ["/cards", "/cards?q=Sol", "/scan", "/admin/activity", "/decks/42"]
 
 
 @pytest.mark.parametrize("width", [344, 673])
@@ -134,8 +134,8 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
 
 
 def test_thumbnail_buttons_show_a_focus_ring(server: Server) -> None:  # noqa: F811
-    """A card thumbnail's button (the editor and the collection list) named a colour that does not
-    exist for its focus ring, so a keyboard user saw no focus on it at all."""
+    """A card thumbnail's button (the Binder's list) named a colour that does not exist for its
+    focus ring, so a keyboard user saw no focus on it at all."""
     from playwright.sync_api import sync_playwright
 
     exe, (sid, _pending) = _exe(), _seed(server)
@@ -143,7 +143,7 @@ def test_thumbnail_buttons_show_a_focus_ring(server: Server) -> None:  # noqa: F
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         ctx = _context(browser, server, sid, 1366, touch=False)
         page = ctx.new_page()
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
         page.focus("button.thumbbtn")
         page.keyboard.press("Shift+Tab")
         page.keyboard.press("Tab")  # a keyboard focus, so :focus-visible applies
@@ -202,7 +202,6 @@ TOUCH_TARGETS = {
     "/guide/how-export": ".guide h2 .anchor",
     "/decks/42": ".curveaxis .mv, .rowbtn, .banner .social .soc",
     "/decks/42?view=table": "ul.rows .row",
-    "/decks/42/edit": ".addbox form.addcard .go .foil",
     "/history?deck_id=42": ".hrow a.kind, .hrow a.name, .hrow details > summary, main .msel-btn,"
     " main input#h-q",
     "/history/reports/rep_touch": ".report .crumbs a, .report details summary",

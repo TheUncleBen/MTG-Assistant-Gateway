@@ -653,48 +653,6 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
         s.stop()
 
 
-def test_adding_with_no_match_from_scryfall_says_it_once_on_screen(tmp_path: Path) -> None:
-    """Adding a card (no printing of its own) with more printings than one page: filters that
-    Scryfall finds nothing for leave no tile. The box says "No printing matches these filters.";
-    the count line, which has no count to give, says the same for screen readers only."""
-    from playwright.sync_api import sync_playwright
-
-    s = _server(tmp_path, fillers=19, page_size=10)
-    try:
-        _chromium()
-        sid = s.sign_in_and_link()
-        s.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in s.sf.cards}))
-        with sync_playwright() as p:
-            browser, page, errors = _page(p, s, sid, 1366)
-            page.goto(f"{s.base}/decks/42/edit", wait_until="networkidle")
-            box = page.locator("#addname")
-            box.click()
-            box.press_sequentially("sol r", delay=30)
-            page.locator(".addprints:visible .pptile").first.wait_for(timeout=5000)
-            page.locator(".addprints .allprints").click()
-            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
-            status = page.locator(".ppstatus")
-            assert status.inner_text().startswith("Showing 10 of 30 printings."), status.inner_text()
-            _choose(page, "Frame", "1993 frame")
-            page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 2")
-            _choose(page, "Border", "Borderless")
-            page.wait_for_function("() => !document.querySelector('.printpick .pptile')")
-            assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
-            assert status.text_content() == "No printing matches these filters."
-            assert "sr-only" in (status.get_attribute("class") or "")
-            assert status.bounding_box()["height"] <= 1
-            _choose(page, "Border", "Any border")
-            _choose(page, "Frame", "Any frame")
-            page.wait_for_function(
-                "() => document.querySelector('.ppstatus').innerText.startsWith('Showing 10 of 30')"
-            )
-            assert "sr-only" not in (status.get_attribute("class") or "")
-            assert errors == []
-            browser.close()
-    finally:
-        s.stop()
-
-
 def test_writes_off_keeps_the_printing_change_as_a_proposal(tmp_path: Path) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -758,7 +716,8 @@ def test_card_menu_near_the_bottom_keeps_move_to_usable(server: Server) -> None:
         )
         assert found == [], found
         # the list's own focus went to its first category; a click moves the card there
-        target = sub.locator("button:not([disabled])").last
+        # (the last category, not New category…, which asks for a name first)
+        target = sub.locator("button:not([disabled])").filter(has_not_text="New category").last
         target.scroll_into_view_if_needed()
         to = target.inner_text().strip()
         with page.expect_request(EDIT_URL) as req:
@@ -794,77 +753,6 @@ def test_card_menu_near_the_bottom_keeps_move_to_usable(server: Server) -> None:
         assert page.evaluate(
             "() => { const m = document.querySelector('.ctxmenu'); return m.scrollHeight > m.clientHeight; }"
         )
-        assert errors == []
-        browser.close()
-
-
-def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server) -> None:
-    from playwright.sync_api import sync_playwright
-
-    _chromium()
-    sid = server.sign_in_and_link()
-    server.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in server.sf.cards}))
-    with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, 1366)
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-        assert page.locator(".picker").count() == 0  # the old picker is gone
-        row = page.locator(".erow[id='card-Sol Ring']")
-        row.locator("details.rowmenu summary").click()
-        row.locator(".menu button", has_text="Printings…").click()
-        dlg = page.locator(".printpick.open[role=dialog]")
-        dlg.wait_for(timeout=3000)
-        page.locator(".printpick .pptile").first.wait_for(timeout=5000)
-        assert "CMR #472" in page.locator(".printpick .pptile.current").inner_text()
-        page.locator(".printpick .pptile", has_text="SLD #1074").click()
-        page.locator(".pppreview .ppuse").click()
-        # queued, not saved: the row says what changes and the pending list has it
-        assert dlg.count() == 0
-        note = row.locator(".note").inner_text()
-        assert note == "printing → SLD #1074 · finish → etched", note
-        assert page.locator(".pendingbox .n").inner_text() == "1"
-        assert "→ SLD #1074 etched" in page.locator(".pending").text_content()
-        assert server.sol_ring() == [("cmr", "472", "Normal")]
-        # the picker opened again marks the pick waiting; picking the deck's own takes it back
-        row.locator("details.rowmenu summary").click()
-        row.locator(".menu button", has_text="Printings…").click()
-        page.locator(".printpick .pptile.picked").wait_for(timeout=5000)
-        assert "Picked" in page.locator(".printpick .pptile.picked").inner_text()
-        page.locator(".printpick .pptile.current").click()
-        page.locator(".pppreview .ppuse").click()
-        assert row.locator(".note").inner_text() == ""
-        assert page.locator(".pendingbox .n").inner_text() == "0"
-        # the add box's printings are the picker's tiles, and All printings opens the picker to add one
-        box = page.locator("#addname")
-        box.click()
-        box.press_sequentially("sol r", delay=30)
-        page.locator(".addprints:visible .pptile").first.wait_for(timeout=5000)
-        page.locator(".addprints .allprints").click()
-        dlg.wait_for(timeout=3000)
-        page.locator(".printpick .pptile", has_text="SLD #1075").click()
-        use = page.locator(".pppreview .ppuse")
-        assert use.inner_text() == "Add this printing"
-        use.click()
-        # Sol Ring already has a row in the deck: only its count grows, and the status line says the
-        # copies keep their own printing (it once named SLD #1075 while the add dropped it)
-        status = page.locator(".addstatus").inner_text()
-        assert status == (
-            "Added 1 × Sol Ring to the copies already listed for the deck; they keep their own printing "
-            "and finish. Type the next card, or save."
-        ), status
-        assert "SLD #1075" not in page.locator(".pending").text_content()
-        # the same in the maybeboard, where Sol Ring has a row too
-        page.locator(".targets .tchip[data-zone='side']").first.click()
-        box.click()
-        box.press_sequentially("sol r", delay=30)
-        page.locator(".addprints:visible .pptile").first.wait_for(timeout=5000)
-        page.locator(".addprints .allprints").click()
-        dlg.wait_for(timeout=3000)
-        page.locator(".printpick .pptile", has_text="SLD #1075").click()
-        page.locator(".pppreview .ppuse").click()
-        status = page.locator(".addstatus").inner_text()
-        assert status.startswith(
-            "Added 1 × Sol Ring to the copies already listed for the maybeboard or sideboard;"
-        ), status
         assert errors == []
         browser.close()
 
@@ -943,147 +831,6 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
 TOAST = ".deck-toast .msg, .deck-toast button"
 
 
-@pytest.mark.parametrize(("width", "theme"), SIZES)
-def test_saving_messages_and_picked_states_read_at_every_size(server: Server, width: int, theme: str) -> None:
-    """The deck page's messages for a printing change (saving, saved, saved with the finish
-    changed, after Undo, and refused, which puts the card back to the printing Archidekt has),
-    the picker on the deck's own printing, and the editor's add strip and a queued pick: nothing
-    scrolls sideways or is covered, and text keeps 4.5:1."""
-    from playwright.sync_api import sync_playwright
-
-    _chromium()
-    sid = server.sign_in_and_link()
-    server.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in server.sf.cards}))
-    touch = width < 900
-    tag = f"{width}-{theme}"
-
-    def press(loc) -> None:
-        if touch:
-            loc.tap()
-        else:
-            loc.click()
-
-    def check(name: str, texts: str) -> None:
-        settled(page)
-        _shot(page, f"{name}-{tag}")
-        assert page.evaluate(MEASURE) == [], name
-        assert page.evaluate(CONTRAST, texts) == [], name
-        _shot(page, f"{name}-{tag}")
-
-    def close() -> None:
-        # Escape steps back: on a phone it first leaves the whole-card view, then closes
-        for _ in range(3):
-            if not page.locator(".printpick.open").count():
-                return
-            page.keyboard.press("Escape")
-            quiet(page)
-        assert page.locator(".printpick.open").count() == 0
-
-    def pick(code: str) -> None:
-        _open_picker(page, card)
-        press(page.locator(".printpick .pptile", has_text=code))
-        press(page.locator(".pppreview .ppuse"))
-
-    with sync_playwright() as p:
-        browser, page, errors = _page(
-            p, server, sid, width, theme=theme, touch=touch, height=800 if touch else 900
-        )
-        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
-        card = page.locator(".deckview .c[data-card='Sol Ring'][data-zone='main']")
-        # the deck's own printing: In the deck now, and the button greyed out
-        _open_picker(page, card)
-        press(page.locator(".printpick .pptile.current"))
-        use = page.locator(".pppreview .ppuse")
-        assert use.inner_text() == "Already in the deck" and use.is_disabled()
-        assert "In the deck now" in page.locator(".pppreview").inner_text()
-        check("deck-current", TEXT)
-        close()
-        # saving, held until the screenshot is taken
-        held: list = []
-        page.route(EDIT_URL, lambda route: held.append(route))
-        pick("SLD #1074")
-        msg = page.locator(".deck-toast .msg")
-        msg.filter(has_text="Changing").wait_for(timeout=5000)
-        assert msg.inner_text() == "Changing Sol Ring to SLD #1074…"
-        check("toast-saving", TOAST)
-        for _ in range(50):
-            if held:
-                break
-            page.wait_for_timeout(100)  # fixed wait: poll interval of a loop with a deadline
-        held[0].continue_()
-        page.unroute(EDIT_URL)
-        msg.filter(has_text="Saved").wait_for(timeout=8000)
-        assert msg.inner_text() == (
-            "Saved. Sol Ring is now SLD #1074, etched: that printing is not made in non-foil. "
-            "Snapshot kept under History."
-        )
-        check("toast-saved-finish", TOAST)
-        press(page.locator(".deck-toast button", has_text="Undo"))
-        msg.filter(has_text="Undone").wait_for(timeout=8000)
-        assert msg.inner_text() == "Undone. Snapshots are under History."
-        assert server.sol_ring() == [("cmr", "472", "Normal")]
-        check("toast-undo", TOAST)
-        pick("SLD #1075")
-        msg.filter(has_text="Saved").wait_for(timeout=8000)
-        assert msg.inner_text() == "Saved. Sol Ring is now SLD #1075. Snapshot kept under History."
-        check("toast-saved", TOAST)
-        server.ark.fail_card_writes = True
-        pick("SLD #1074")
-        err = page.locator(".deck-toast.error .msg")
-        err.wait_for(timeout=8000)
-        assert err.inner_text().startswith("Printing not saved:"), err.inner_text()
-        assert err.inner_text().endswith("Sol Ring is back to SLD #1075."), err.inner_text()
-        check("toast-error", TOAST)
-        server.ark.fail_card_writes = False
-        # the editor: the add strip and the full picker to add (wide screens: phones have no strip),
-        # and a queued pick
-        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
-        if not touch:
-            box = page.locator("#addname")
-            box.click()
-            box.press_sequentially("sol r", delay=30)
-            strip = page.locator(".addprints:visible")
-            strip.locator(".pptile").first.wait_for(timeout=5000)
-            first = strip.locator(".pptile").first
-            assert (
-                first.get_attribute("title")
-                == "Reality Fracture Commander FRC #21 · 2026: click to add this printing"
-            )
-            assert first.locator(".ppcode").evaluate("e => e.scrollWidth <= e.clientWidth")  # never cut off
-            allp = strip.locator(".allprints")
-            assert allp.is_visible() and allp.evaluate(
-                "b => { const r = b.getBoundingClientRect(), s = b.parentElement.getBoundingClientRect();"
-                " return r.bottom <= s.bottom + 1; }"
-            )  # in reach without scrolling the list
-            _shot(page, f"editor-strip-{tag}")  # a pop-over: it covers the page below by design
-            assert (
-                page.evaluate(CONTRAST, ".addprints .ppcode, .addprints .head, .addprints .allprints") == []
-            )
-            press(page.locator(".addprints .allprints"))
-            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
-            press(page.locator(".printpick .pptile", has_text="SLD #1074"))
-            assert page.locator(".pppreview .ppuse").inner_text() == "Add this printing"
-            check("editor-add", TEXT)
-            page.keyboard.press("Escape")
-            page.locator(".printpick.open").wait_for(state="detached", timeout=3000)
-        row = page.locator(".erow[id='card-Sol Ring']")
-        for _ in range(2):  # queue a pick, then open the picker again on it
-            press(row.locator("details.rowmenu summary"))
-            press(row.locator(".menu button", has_text="Printings…"))
-            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
-            if not page.locator(".printpick .pptile.picked").count():
-                press(page.locator(".printpick .pptile", has_text="SLD #1074"))
-                press(page.locator(".pppreview .ppuse"))
-                page.locator(".printpick.open").wait_for(state="detached", timeout=3000)
-        press(page.locator(".printpick .pptile.picked"))
-        use = page.locator(".pppreview .ppuse")
-        assert use.inner_text() == "Already picked" and use.is_disabled()
-        assert "Picked, not saved yet" in page.locator(".pppreview").inner_text()
-        check("editor-picked", TEXT)
-        assert errors == []
-        browser.close()
-
-
 # CI on 1ea9289: the Frame list closed 13 ms after it opened, on a scroll of the picker box. The
 # scroll had happened before the list opened (the box scrolled the filter button into view as it
 # took focus); its event only arrives on the next frame. Here the box scrolls and the button is
@@ -1118,46 +865,6 @@ SCROLL_THE_BOX = """
   return [before, box.scrollTop];
 }
 """
-
-
-def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: Path) -> None:
-    """A scroll event that arrives after the list opened, for a scroll that moved nothing since,
-    leaves the list open; a scroll that moves the button after the list opened still closes it."""
-    from playwright.sync_api import sync_playwright
-
-    s = _server(tmp_path, fillers=19, page_size=10)
-    try:
-        _chromium()
-        sid = s.sign_in_and_link()
-        s.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in s.sf.cards}))
-        with sync_playwright() as p:
-            browser, page, errors = _page(p, s, sid, 1366)
-            page.goto(f"{s.base}/decks/42/edit", wait_until="networkidle")
-            box = page.locator("#addname")
-            box.click()
-            box.press_sequentially("sol r", delay=30)
-            page.locator(".addprints:visible .pptile").first.wait_for(timeout=5000)
-            page.locator(".addprints .allprints").click()
-            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
-            if not page.locator(".printpick .msel-btn[aria-label='Frame']").is_visible():
-                page.locator(".printpick .ppfiltbtn").click()
-            assert page.evaluate(STALE_SCROLL_THEN_OPEN) > 0, "the picker box didn't scroll"
-            # the scroll event comes a frame or more later (later still on a busy machine)
-            page.wait_for_function("() => window.__boxScrolled")
-            assert page.locator(".msel-list").count() == 1, page.evaluate("() => window.__mselLog")
-            page.locator(".msel-list [role=option]", has_text="1993 frame").first.click()
-            assert page.locator(".msel-list").count() == 0
-            # a scroll after the list opened moves the button away from it: the list closes
-            page.locator(".printpick .msel-btn[aria-label='Frame']").click()
-            assert page.locator(".msel-list").count() == 1
-            moved = page.evaluate(SCROLL_THE_BOX)
-            assert moved[0] != moved[1], moved
-            page.wait_for_function("() => window.__boxScrolled")
-            assert page.locator(".msel-list").count() == 0
-            browser.close()
-            assert errors == []
-    finally:
-        s.stop()
 
 
 def test_a_resting_pointer_never_takes_the_keyboards_place_in_the_preview(server: Server) -> None:
