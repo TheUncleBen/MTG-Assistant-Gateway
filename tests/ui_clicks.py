@@ -213,6 +213,8 @@ class Fresh:
                 c.execute("PRAGMA foreign_keys=ON")
         for k, v in self.ark.items():
             setattr(self.s.ark, k, copy.deepcopy(v))
+        # the gateway's cached Archidekt reads were of the deck before the seed came back
+        self.s.app.state.gateway.decks.client.forget_deck_reads()
 
 
 def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) -> list[dict]:  # noqa: ANN001, C901
