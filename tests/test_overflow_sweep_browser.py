@@ -263,8 +263,10 @@ async () => {
     if (sm.getBoundingClientRect().width === 0) continue;
     sm.click();
     await new Promise(r => setTimeout(r, 0));
-    if (!d.open) { out.push(name(d) + ' did not open'); continue; }
-    const m = d.querySelector(':scope > .menu');
+    // a row's menu (details.rowmenu) opens as the shared menu (cardmenu.js) instead of the details
+    const shared = !d.open && window.MtgMenu && MtgMenu.isOpen() ? document.querySelector('.ctxmenu') : null;
+    if (!d.open && !shared) { out.push(name(d) + ' did not open'); continue; }
+    const m = shared || d.querySelector(':scope > .menu');
     if (m) {
       const r = m.getBoundingClientRect();
       if (r.left < -1 || r.right > vw + 1 || r.width > vw + 1)
@@ -273,6 +275,10 @@ async () => {
       if (document.documentElement.scrollWidth > vw)
         out.push(name(d) + ' open: document scrolls sideways by ' +
           (document.documentElement.scrollWidth - vw) + 'px');
+    }
+    if (shared) {
+      MtgMenu.close();
+      continue;
     }
     sm.click();
     await new Promise(r => setTimeout(r, 0));
@@ -332,9 +338,15 @@ def _seed(server: Server) -> tuple[str, str]:
         json={"items": [{"name": n, "quantity": 1 + i % 3} for i, n in enumerate(CARDS)], "source": "scan"},
     )
     assert r.status_code == 200, r.text
+    tags = [{"id": 21, "name": LONG_TAGS[0]}, {"id": 22, "name": "trade binder page 12"}]
     for i, row in enumerate(server.ark.collections.get("alice", {}).values()):  # long collection tags
         if i % 2 == 0:
-            row["tags"] = [{"id": 21, "name": LONG_TAGS[0]}, {"id": 22, "name": "trade binder page 12"}]
+            row["tags"] = [dict(t) for t in tags]
+    # the member's own tag list holds them too, as on Archidekt, so a write of such a record is accepted
+    server.ark.collection_tag_lists.setdefault("alice", {}).update(
+        {t["id"]: {**t, "color": "#6b7280"} for t in tags}
+    )
+    server.ark.next_collection_tag_id = max(server.ark.next_collection_tag_id, 22)
     import time
 
     seed_history(server.db, "user-1", now=int(time.time()))

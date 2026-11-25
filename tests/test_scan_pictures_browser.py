@@ -26,6 +26,7 @@ import re
 import pytest
 
 from .test_scan_browser import Server, _chromium_path, server  # noqa: F401
+from .waits import settled
 
 pytest.importorskip("playwright")
 
@@ -377,8 +378,12 @@ def test_the_scan_area_moves_resizes_and_is_kept_on_the_device(server: Server) -
         assert 0.25 <= kept["w"] <= 0.9 and kept["y"] < 0.5
         page.reload()
         page.wait_for_function("() => window.__scan && window.__scan.ownCamera")
+        settled(page)
+        # kept as shares of the viewfinder: the same place in it, wherever the page put the viewfinder
         again = page.locator("#scan-guide").bounding_box()
-        assert abs(again["width"] - big["width"]) < 2 and abs(again["y"] - big["y"]) < 2, (again, big)
+        cam2 = page.locator("#camera").bounding_box()
+        assert abs(again["width"] - big["width"]) < 2, (again, big)
+        assert abs((again["y"] - cam2["y"]) - (big["y"] - cam["y"])) < 2, (again, cam2, big, cam)
         assert errors == []
         browser.close()
 

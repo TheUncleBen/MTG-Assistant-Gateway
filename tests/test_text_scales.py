@@ -54,6 +54,27 @@ def test_no_stylesheet_hyphenates() -> None:
     assert bad == [], "\n".join(bad)
 
 
+# addresses and raw scanner text, never words a member reads as words: these may break anywhere
+BREAK_ALL_OK = (
+    ("forum_page.py", ".post-preview a{"),
+    ("scan.css", ".scan .ocr{"),
+    ("theme.py", ".addrline code{"),
+)
+
+
+def test_no_stylesheet_breaks_every_word() -> None:
+    """word-break:break-all breaks any word anywhere, even one that fits (a name, a heading split
+    mid-word); overflow-wrap:anywhere is the way: it breaks only a word too long for its line."""
+    bad = []
+    for p in _sources():
+        for line in _rules(p.read_text(encoding="utf-8")).splitlines():
+            if re.search(r"word-break\s*:\s*break-all", line) and not any(
+                p.name == name and sel in line for name, sel in BREAK_ALL_OK
+            ):
+                bad.append(f"{p.name}: {line.strip()[:100]}")
+    assert bad == [], "\n".join(bad)
+
+
 def test_every_font_size_grows_with_the_text() -> None:
     found = []
     for p in _sources():

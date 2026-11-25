@@ -853,13 +853,15 @@ async def stack(tmp_path: Path, idp: FakeIdP, stack_options: StackOptions):
 # With MTG_ONLY_EXPECTED_SKIPS=1 (CI's test job) the run fails when any test skips for a reason not
 # listed here, so a missing Chromium, OCR assets, font or tool can never turn the suite green by
 # skipping what needs it. The listed ones are by design: a live service only on request, the card
-# screenshots only on request, and parametrized cases that have nothing to test.
+# screenshots only on request, the click sweep only on request (tests/test_ui_clicks_browser.py), and
+# parametrized cases that have nothing to test.
 EXPECTED_SKIPS = (
     "set SCAN_LIVE=1 to query api.scryfall.com",
     "screenshots only on request",
     "the guard stands aside when going online",
     "the text size is the same in both themes",
     "no change",
+    "the click sweep runs on a change's pages (MTG_CHECK_PAGES) or before a release (MTG_FULL_SWEEP=1)",
 )
 _SKIPPED: list[tuple[str, str]] = []
 

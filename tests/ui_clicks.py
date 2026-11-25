@@ -87,9 +87,29 @@ WATCH = r"""
     window.addEventListener(t, () => { w.ev++; w.what.push('event:' + t); }, true);
   w.sx = scrollX; w.sy = scrollY;
   w.focus = document.activeElement;
+  // the choice already made in a one-of-several group (a checked radio, or the one pressed chip of
+  // its row): pressing it again keeps it, on purpose
+  w.chosen = false;
+  if (el && el.matches('input[type=radio]')) w.chosen = el.checked;
+  else if (el && el.parentElement) {
+    for (const a of ['aria-pressed', 'aria-checked', 'aria-selected']) {
+      if (el.getAttribute(a) !== 'true') continue;
+      const sibs = [...el.parentElement.children].filter(x => x.hasAttribute(a));
+      if (sibs.length >= 2 && sibs.filter(x => x.getAttribute(a) === 'true').length === 1) w.chosen = true;
+    }
+  }
   w.url = location.href;
 }
 """
+
+# Requests the sweep's own data answers with an error, each for a reason that is not a fault: a
+# press that meets only these is "seed-gap", listed but not a problem.
+SEED_GAPS = {
+    "404 GET /decks/43": "the seed's proposals are on deck 43, which the Archidekt fake keeps private to "
+    "another member; the gateway answers with its own can't-open-this-deck page",
+    "404 GET /cards/api/text": "the Scryfall fake has no text for this card; the card view opens without it",
+    "404 GET /cards/api/rulings": "the Scryfall fake has no rulings for this card; the card view says so",
+}
 
 # A layer the press opened: the first open menu, sheet, box or dialog that was not open before.
 LAYER = r"""
@@ -193,6 +213,8 @@ class Fresh:
                 c.execute("PRAGMA foreign_keys=ON")
         for k, v in self.ark.items():
             setattr(self.s.ark, k, copy.deepcopy(v))
+        # the gateway's cached Archidekt reads were of the deck before the seed came back
+        self.s.app.state.gateway.decks.client.forget_deck_reads()
 
 
 def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) -> list[dict]:  # noqa: ANN001, C901
@@ -220,7 +242,16 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                 lambda r: r.fulfill(status=200, content_type="image/png", body=PNG),
             )
             ctx.route(re.compile(r"/decks/[^/]+/check(\?|$)"), lambda r: r.abort())
-            state: dict = {"req": [], "bad": [], "err": [], "nav": [], "popup": 0, "download": 0, "dialog": 0}
+            state: dict = {
+                "req": [],
+                "sent": [],
+                "bad": [],
+                "err": [],
+                "nav": [],
+                "popup": 0,
+                "download": 0,
+                "dialog": 0,
+            }
 
             def on_req(r, state=state):  # noqa: ANN001
                 u = urlparse(r.url)
@@ -230,6 +261,8 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                     and r.resource_type in ("fetch", "xhr", "document", "eventsource")
                 ):
                     state["req"].append(r.method + " " + u.path)
+                    if r.method != "GET":
+                        state["sent"].append(r)
 
             def on_resp(r, state=state):  # noqa: ANN001
                 u = urlparse(r.url)
@@ -255,13 +288,44 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
             )
 
             def load(path: str) -> bool:
+                # the last press's page can still be leaving (a menu item navigates once its menu
+                # has closed): an empty page first ends it, and a load it still cuts short is asked
+                # for again
+                # a save the last press sent may still be running on the server: its answer comes
+                # first, so the seed put back next is not changed after it
+                for sent in state["sent"]:
+                    if sent.existing_response is None and sent.failure is None:
+                        try:
+                            sent.response()
+                        except Exception:  # noqa: BLE001  (the page is gone)
+                            pass
+                state["sent"] = []
+                for _ in range(3):
+                    try:
+                        page.goto("about:blank", timeout=5000)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if page.url == "about:blank":
+                        break
+                    try:
+                        page.wait_for_load_state("load", timeout=10_000)
+                    except Exception:  # noqa: BLE001
+                        pass
                 fresh.restore()
                 server.db.delete_prefs("user-1", prefixes=("view.",))
-                try:
-                    r = page.goto(f"{base}{path}", wait_until="load", timeout=30_000)
-                except Exception as exc:  # noqa: BLE001
-                    log(f"  load failed {path}: {exc}")
-                    return False
+                for attempt in range(3):
+                    try:
+                        r = page.goto(f"{base}{path}", wait_until="load", timeout=30_000)
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        cut = "interrupted by another navigation" in str(exc) or "ERR_ABORTED" in str(exc)
+                        if not cut or attempt == 2:
+                            log(f"  load failed {path}: {exc}")
+                            return False
+                        try:
+                            page.wait_for_load_state("load", timeout=10_000)
+                        except Exception:  # noqa: BLE001
+                            pass
                 if r is None or r.status != 200:
                     log(f"  load failed {path}: status {r and r.status}")
                     return False
@@ -325,7 +389,7 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         pass
                     try:
                         ck = page.evaluate(
-                            "() => window.__ck ? {mut: window.__ck.mut, ev: window.__ck.ev, what: window.__ck.what, scrolled: scrollX !== window.__ck.sx || scrollY !== window.__ck.sy, focus: document.activeElement !== window.__ck.focus && document.activeElement !== window.__ckEl && document.activeElement !== document.body, url: location.href} : null"
+                            "() => window.__ck ? {mut: window.__ck.mut, ev: window.__ck.ev, what: window.__ck.what, scrolled: scrollX !== window.__ck.sx || scrollY !== window.__ck.sy, focus: document.activeElement !== window.__ck.focus && document.activeElement !== window.__ckEl && document.activeElement !== document.body, chosen: window.__ck.chosen, url: location.href} : null"
                         )
                     except Exception:  # noqa: BLE001
                         ck = None
@@ -358,6 +422,8 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         effect = "scrolled"
                     elif ck and ck["focus"]:
                         effect = "moved focus"
+                    if not effect and ck and ck.get("chosen"):
+                        effect = "already chosen: pressing it again keeps it"
                     res = {"verdict": "ok" if effect else "dead", "effect": effect}
                     if state["err"]:
                         res["verdict"] = "js-error"
@@ -367,6 +433,11 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                         if bad:
                             res["verdict"] = "failed-request"
                             res["detail"] = "; ".join(bad[:3])
+                            if all(b in SEED_GAPS for b in bad):
+                                res["verdict"] = "seed-gap"
+                                res["detail"] += (
+                                    " (" + "; ".join(SEED_GAPS[b] for b in dict.fromkeys(bad)) + ")"
+                                )
                     if res["verdict"] == "ok" and not navigated:
                         try:
                             res["layer"] = page.evaluate(LAYER)
@@ -445,7 +516,7 @@ def sweep(server, sid: str, paths: list[str], displays, out: Path, log=print) ->
                     for r in rows
                     if r["page"] == path
                     and r["display"] == d.key
-                    and r.get("verdict") not in ("ok", "external")
+                    and r.get("verdict") not in ("ok", "external", "seed-gap")
                 ]
                 log(f"  -> {len(bad)} not ok")
                 (out / "clicks.json").write_text(json.dumps(rows, indent=1))
@@ -463,7 +534,7 @@ def press_layer(press, path: str, first: dict, sub: dict) -> dict:  # noqa: ANN0
 
 def write_md(rows: list[dict], out: Path) -> None:
     lines = ["# Click sweep", ""]
-    bad = [r for r in rows if r.get("verdict") not in ("ok", "external")]
+    bad = [r for r in rows if r.get("verdict") not in ("ok", "external", "seed-gap")]
     lines.append(f"{len(rows)} presses, {len(bad)} not ok.")
     for verdict in (
         "dead",
@@ -494,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("out", type=Path)
     ap.add_argument("--pages", default="")
     ap.add_argument("--displays", default="app,laptop")
+    ap.add_argument("--slice", default="", help="I/N: only every Nth page from the Ith (parallel jobs)")
     a = ap.parse_args(argv)
 
     from . import conftest  # noqa: F401
@@ -508,6 +580,9 @@ def main(argv: list[str] | None = None) -> int:
         sid, pending = OS._seed(s)
         s.app.state.gateway.decks.archidekt_budget.per_window = 100_000
         paths = a.pages.split(",") if a.pages else [p for p in pages(pending) if "#" not in p]
+        if a.slice:
+            i, n = (int(x) for x in a.slice.split("/"))
+            paths = paths[i::n]
         disp = [d for d in DISPLAYS if d.key in a.displays.split(",")]
         rows = sweep(s, sid, paths, disp, a.out)
         (a.out / "clicks.json").write_text(json.dumps(rows, indent=1))

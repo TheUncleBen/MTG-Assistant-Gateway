@@ -1,0 +1,68 @@
+name: Full click sweep
+
+# Presses every control on every page (tests/ui_clicks.py) on the phone-sized app and a laptop, split
+# across parallel jobs so the whole sweep finishes in a fraction of its time on one machine. It runs
+# only when started: by adding the label "full-sweep" to a pull request (remove and add it again to
+# run it again), or by hand from the Actions tab once this file is on main. Ordinary pushes never start
+# it, and a push does not cancel a sweep already running.
+#
+# Cost: standard GitHub-hosted runners only (free for a public repository). Nothing is cached and no
+# file is stored: each part writes its findings to its log and the run's summary page.
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: full-sweep-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'full-sweep'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install -c constraints.txt -e ".[dev]"
+      - run: python3 scripts/fetch_ocr_assets.py
+      - run: playwright install --with-deps chromium
+      - name: Press every control on this part's pages
+        env:
+          PART: ${{ matrix.part }}
+        run: python -m tests.ui_clicks "$RUNNER_TEMP/clicks" --slice "$PART/16" --displays app,laptop
+      - name: This part's findings, on the run's summary page (nothing is stored)
+        if: always()
+        run: |
+          python3 - <<'EOF2'
+          import json, os
+          from pathlib import Path
+          bad_kinds = {"dead", "js-error", "failed-request", "unclickable", "unreachable", "unloadable"}
+          f = Path(os.environ["RUNNER_TEMP"]) / "clicks" / "clicks.json"
+          rows = json.loads(f.read_text()) if f.exists() else []
+          bad = [r for r in rows if r.get("verdict") in bad_kinds]
+          out = [f"# Part {os.environ['PART']} of 16: {len(rows)} presses, {len(bad)} problems", ""]
+          for r in bad:
+              out.append(
+                  f"- FINDING {r['verdict']} | {r.get('display')} | {r['page']} | {r.get('kind', '')} | "
+                  f"{str(r.get('text', ''))[:80]} | {str(r.get('detail') or '')[:160]}"
+              )
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
+              s.write("\n".join(out) + "\n")
+          print("\n".join(out))
+          raise SystemExit(1 if bad or not rows else 0)
+          EOF2
+        env:
+          PART: ${{ matrix.part }}
