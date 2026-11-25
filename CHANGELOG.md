@@ -23,10 +23,16 @@ odd input gets a plain answer instead of an error page, and a connected app read
   answers with the member's name, account and how it signed in, and `/api/v1/activity` lists
   only that app's own entries. A member signed in with the browser sees what they saw before.
   [docs/API.md](docs/API.md) has both.
+- **Forge 2.0.16.** The stack file and the Compose file name the new Forge image `2.0.16-mag1`;
+  the update pulls it by itself. The same seed plays a different game than on 2.0.15, so compare
+  reports run on the same version.
 - **The deck editor page is gone.** Everything it did is on the deck page now. Its old address
   (`/decks/{id}/edit`) opens the deck page, so bookmarks and the Scan page's Add to deck still work.
 
 ### Changed
+- **Forge games run on Forge 2.0.16** (was 2.0.15). Forge now plays the Star Trek cards, most
+  Unfinity cards and newer Alchemy cards: 99.99% of the cards legal in Commander (2.0.15 now
+  reaches 98.62%, as it lacks the Star Trek set) and 99.93% of the cards legal in any format.
 - **Edit your deck right on its page.** Add a card now shows a preview before anything is saved:
   the card's picture and rules text, how many copies are already in the deck, and a choice of
   copies, category (Auto by type, any of the deck's, the maybeboard, or a new one), printing and

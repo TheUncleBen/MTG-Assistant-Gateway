@@ -607,6 +607,9 @@ class Run(unittest.TestCase):
             def acquire(self, *a, **k):
                 return self.lock.acquire(*a, **k)
 
+            def locked(self):  # Python 3.14's threading asks a lock whether it is held
+                return self.lock.locked()
+
             def release(self):
                 self.lock.release()
                 if getattr(asked, "yes", False):

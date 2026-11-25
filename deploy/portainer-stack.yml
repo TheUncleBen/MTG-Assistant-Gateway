@@ -235,7 +235,7 @@ services:
   # Forge: the rules engine for simulations (GPL-3.0). FORGE_REPLICAS=0 turns it off.
   # No internet; Java runs only during a simulation, inside the limits below.
   mtg-assistant-forge:
-    image: ghcr.io/theuncleben/mtg-assistant-forge:2.0.15-mag6
+    image: ghcr.io/theuncleben/mtg-assistant-forge:2.0.16-mag1
     logging: *logging
     environment:
       # Sizes games at once where Docker can't cap memory (Raspberry Pi OS).

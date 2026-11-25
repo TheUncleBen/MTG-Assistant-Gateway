@@ -682,7 +682,7 @@ have the solo test's estimate and no Forge games.
   A game stopped before turn 10 or a win is left out of the numbers, and the report says how
   many. One per member runs at a time (two for reports that share opponents), and none starts
   while other members' games against precons wait their turn in the gateway's queue.
-- **The image tag:** the stack files name the Forge image with its tag (`2.0.15-mag6`).
+- **The image tag:** the stack files name the Forge image with its tag (`2.0.16-mag1`).
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
   workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
   run has finished. After an update whose stack file names a new tag, wait for the run, then

@@ -228,6 +228,10 @@ reach past the stack, so if your old version is older than the one named, also:
   serves that file. Not wanted? Turn off **Keep a local copy of card printings** on the Settings
   page (General): the copy is deleted at once and nothing more is downloaded
   ([SCANNING.md](SCANNING.md#operator-notes)).
+- **0.7.47 or older:** Forge moves to version 2.0.16 (image `2.0.16-mag1`), which the new stack
+  file pulls by itself. It knows the Star Trek cards and most Unfinity cards. Its computer
+  players changed too, so the same seed plays a different game than before: a report from before
+  the update and one after can differ, and a same-seed repeat only matches within one version.
 - **0.7.45 or older:** a few steps for your members, which you may want to pass on:
   - **Update the Android app** from inside the app (it offers the update) after the gateway
     update. Auto opening the phone's camera already scanning, pull to refresh, push notifications

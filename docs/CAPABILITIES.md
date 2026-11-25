@@ -204,13 +204,14 @@ comparison so that this holds; 0.7.3 folded the separate own-deck reader into
 
 ## Cards Forge cannot play
 
-Forge, the game engine (on by default), plays 99.71% of the cards legal in Commander and 99.60% of the
-cards legal in at least one format (Forge 2.0.15, measured against Scryfall on 2026-10-21; every
+Forge, the game engine (on by default), plays 99.99% of the cards legal in Commander and 99.93% of the
+cards legal in at least one format (Forge 2.0.16, measured against Scryfall on 2026-11-23; every
 Forge image build measures it again and stops below 99.6% and 99.5%). What it lacks:
 
-- **Unfinity sticker and Attraction cards** (94 cards): Forge does not support stickers or Attractions.
-- **Arena-only Alchemy cards** (39 cards, none legal in Commander): Forge does not have the newest
-  Alchemy sets.
+- **Two Commander cards:** All Good Things... (Star Trek) and Wicker Picker (Unfinity).
+- **Arena-only Alchemy cards** (14 cards, none legal in Commander): Forge does not have every
+  Alchemy card yet.
+- **Cards from sets not out yet** (8 cards, previews, none legal in Commander yet).
 
 A report names every card of the deck that Forge could not play, and the games run without it.
 
