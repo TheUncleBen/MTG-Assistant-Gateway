@@ -744,13 +744,20 @@ def test_category_boxes_and_the_companion_switch_respond_at_once(server: Server)
 
 
 RELAYOUT_MS = 25  # a change inside one row of the text view: its stack alone, not every column
+# ...or, on a busy runner (where every time grows with the load), at most this share of what the
+# same change costs with the stacks laid out as before L13 (every column again), timed in turn
+# with it on the same page: about half at 390 px and a thirtieth at 1366 px when fixed, all of it
+# when the old layout is back, whatever the load
+RELAYOUT_SHARE = 0.75
 
 
 def test_a_change_in_one_deck_row_relays_out_its_stack_alone(server: Server) -> None:
     """The text view's stacks flow down columns; a change inside one row (the Companion word, a
     count) relaid out every row of every column, 45-145 ms at 4x, the whole of the Companion
     switch's cost (review 2, L13). Each stack is now one piece for the column layout, so the
-    change costs a few ms: measured as a forced layout right after a mark is added to a row."""
+    change costs a few ms: measured as a forced layout right after a mark is added to a row.
+    On a loaded CI runner the same work measured 30 ms once (0.7.48), so the budget also holds as
+    a share of the same change on the stacks without their clip, timed in turn with it."""
     from playwright.sync_api import sync_playwright
 
     sid, _pending = _seed(server)
@@ -760,27 +767,39 @@ def test_a_change_in_one_deck_row_relays_out_its_stack_alone(server: Server) -> 
         for d in _drivers(p, server, sid, exe):
             d.goto("/decks/42?view=text")
             assert d.page.locator(".deckview.text li.row").count() > 30
-            ms = d.page.evaluate(
+            row_ms, all_ms = d.page.evaluate(
                 """() => {
                   const rows = [...document.querySelectorAll('.deckview.text li.row')];
-                  let best = Infinity;
-                  for (let i = 0; i < 5; i++) {
-                    const row = rows[(i * 7) % rows.length];
+                  // the calibration: the stacks as one flow again (no clip), as before L13
+                  const before = document.createElement('style');
+                  before.textContent = '.deckview.text .stack{overflow:visible!important}';
+                  function change(r) {
                     const mark = document.createElement('span');
                     mark.className = 'mc';
                     mark.textContent = 'Companion';
                     document.body.offsetHeight;  // a clean layout first
                     const t0 = performance.now();
-                    row.appendChild(mark);
+                    r.appendChild(mark);
                     document.body.offsetHeight;  // the relayout the change forces
-                    best = Math.min(best, performance.now() - t0);
+                    const ms = performance.now() - t0;
                     mark.remove();
                     document.body.offsetHeight;
+                    return ms;
                   }
-                  return best;
+                  let row = Infinity, all = Infinity;
+                  for (let i = 0; i < 5; i++) {
+                    const r = rows[(i * 7) % rows.length];
+                    row = Math.min(row, change(r));
+                    document.head.appendChild(before);
+                    all = Math.min(all, change(r));
+                    before.remove();
+                  }
+                  document.body.offsetHeight;
+                  return [row, all];
                 }"""
             )
-            slow.append(("row relayout", d.width, round(ms), RELAYOUT_MS))
+            budget = max(RELAYOUT_MS, all_ms * RELAYOUT_SHARE)
+            slow.append(("row relayout", d.width, round(row_ms), round(budget), "unclipped", round(all_ms)))
             assert d.errors == [], d.errors
     print("row relayout (ms at 4x):", slow)
     over = [s for s in slow if s[2] > s[3]]
